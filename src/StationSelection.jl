@@ -54,6 +54,7 @@ export clustering_two_stage_l
 export clustering_two_stage_lambda
 export clustering_two_stage_l_routing_transportation
 export clustering_two_stage_l_od_pair
+export validate_request_flow_mapping
 
 # Re-export utility functions
 using .StationCosts

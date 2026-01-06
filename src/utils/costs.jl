@@ -6,6 +6,7 @@ using CSV
 using Graphs
 using SimpleWeightedGraphs
 
+export compute_station_pairwise_costs, read_routing_costs_from_segments
 
 """
 compute_station_pairwise_costs(candidate_stations::DataFrame) -> Dict::Tuple{Int, Int}, Float64}

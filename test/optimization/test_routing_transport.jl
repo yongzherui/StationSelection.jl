@@ -3,8 +3,7 @@ using Test
 using DataFrames, Dates, JuMP
 
 @testset "ClusteringTwoStageLRoutingTransportation" begin
-    using .ClusteringTwoStageLRoutingTransportation: clustering_two_stage_l_routing_transportation, validate_request_flow_mapping
-    using .ClusteringTwoStageL: clustering_two_stage_l
+    using StationSelection: clustering_two_stage_l_routing_transportation, clustering_two_stage_l, validate_request_flow_mapping
 
     # -----------------------
     # Simple test case with routing

@@ -1,6 +1,8 @@
 module GenerateScenarios
 using Dates
 
+export generate_scenarios
+
 """
 generate_scenarios(start_date::Date, end_date::Date;
                    segment_hours::Int=24,

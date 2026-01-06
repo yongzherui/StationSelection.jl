@@ -3,8 +3,7 @@ using Test
 using DataFrames, Dates, JuMP
 
 @testset "ClusteringTwoStageL" begin
-    using .ClusteringTwoStageL: clustering_two_stage_l
-    using .ClusteringBase: clustering_base
+    using StationSelection: clustering_two_stage_l, clustering_base
 
     # -----------------------
     # Simple test case

@@ -1,10 +1,9 @@
-using StationSelection
+using StationSelection: read_customer_requests
 # Tests the ReadCustomerRequests function
 
 using DataFrames, Dates
 @testset "ReadCustomerRequests" begin
     @testset "Full Schema" begin
-        using .ReadCustomerRequests: read_customer_requests
 
         # Create a temporary CSV file for testing
         test_csv = tempname() * ".csv"

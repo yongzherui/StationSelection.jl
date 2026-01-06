@@ -3,8 +3,7 @@ using Test
 using DataFrames, Dates, JuMP
 
 @testset "ClusteringTwoStageLambda" begin
-    using .ClusteringTwoStageLambda: clustering_two_stage_lambda
-    using .ClusteringBase: clustering_base
+    using StationSelection: clustering_two_stage_lambda, clustering_base
 
     @testset "No Scenario defined" begin
         candidate_stations = DataFrame(id=[1, 2], lat=[27.9, 27.91], lon=[113.1, 113.11])

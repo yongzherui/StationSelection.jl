@@ -3,7 +3,7 @@ using Test
 using DataFrames, Dates, JuMP
 
 @testset "ClusteringTwoStageLOriginDestPair" begin
-    using .ClusteringTwoStageLOriginDestPair: clustering_two_stage_l_od_pair
+    using StationSelection: clustering_two_stage_l_od_pair
 
     # -----------------------
     # Simple test case with OD pair routing
@@ -255,16 +255,16 @@ using DataFrames, Dates, JuMP
 
         # Destination costs: cheap to walk from station 2 or 3 to destination 3, expensive from station 1
         dest_costs = Dict{Tuple{Int, Int}, Float64}(
-            (1, 1) => 0.0, (1, 2) => 1.0, (1, 3) => 100.0,
-            (2, 1) => 1.0, (2, 2) => 0.0, (2, 3) => 1.0,
-            (3, 1) => 100.0, (3, 2) => 1.0, (3, 3) => 0.0
+            (1, 1) => 0.0, (1, 2) => 50.0, (1, 3) => 100.0,
+            (2, 1) => 50.0, (2, 2) => 0.0, (2, 3) => 50.0,
+            (3, 1) => 100.0, (3, 2) => 50.0, (3, 3) => 0.0
         )
 
         # Routing costs: cheap to route from 2 to 3, expensive otherwise
         routing_costs = Dict{Tuple{Int, Int}, Float64}(
             (1, 1) => 0.0, (1, 2) => 1000.0, (1, 3) => 1000.0,
             (2, 1) => 1000.0, (2, 2) => 0.0, (2, 3) => 0.1,
-            (3, 1) => 1000.0, (3, 2) => 1000.0, (3, 3) => 0.0
+            (3, 1) => 1000.0, (3, 2) => 0.1, (3, 3) => 0.0
         )
 
         k = 2
@@ -292,6 +292,9 @@ using DataFrames, Dates, JuMP
         @test value(z[1, 1]) < 0.5  # Station 1 not active
         @test value(z[2, 1]) > 0.5  # Station 2 active
         @test value(z[3, 1]) > 0.5  # Station 3 active
+
+        x = m[:x]
+        @test value(x[1][1][2, 3]) > 0.5  # Origin 1 to dest 3 via stations 2 and 3
 
         # Verify objective: should pick up at station 2, drop off at station 3
         # Walking origin: 1.0 (origin 1 to station 2)

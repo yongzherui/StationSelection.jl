@@ -133,6 +133,8 @@ function clustering_two_stage_l_od_pair(
         end
     end
 
+    m[:x] = x
+
     # z[j, s]: station j is active in scenario s
     @variable(m, z[1:n, 1:S], Bin)
     # y[j]: station j is built

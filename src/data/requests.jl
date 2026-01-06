@@ -4,6 +4,7 @@ using DataFrames
 using Dates
 using CSV
 
+export read_customer_requests
 
 """
 Read customer requests from a file and return a DataFrame.
