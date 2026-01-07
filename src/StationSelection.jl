@@ -4,6 +4,7 @@ module StationSelection
 using CSV
 using DataFrames
 using Dates
+using Distances
 using Gurobi
 using JSON
 using JuMP
@@ -17,6 +18,8 @@ include("utils/costs.jl")
 include("utils/scenarios.jl")
 include("utils/export.jl")
 include("utils/logging.jl")
+include("utils/transform_orders.jl")
+include("utils/transform_stations.jl")
 
 # Data loading
 include("data/stations.jl")
@@ -64,5 +67,15 @@ using .ExportResults
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export generate_scenarios
 export export_results
+
+# Re-export transform_orders functions
+export transform_orders
+export parse_station_list
+export precompute_distances
+export find_closest_selected_station
+export get_timeframe_column
+
+# Re-export transform_stations functions
+export prepare_station_data, prepare_vehicle_data
 
 end # module
