@@ -10,12 +10,15 @@ using JSON
 """
     export_results(results::VbsLocationResult.Result, output_dir::String)
 
+Depracated function. Please do not use. It is not good
 Exports the result to the specified directory.
 Creates two files:
 - stations.csv: DataFrame with station selection data
 - metadata.json: Metadata dictionary with optimization information
 """
 
+# Base.@deprecate export_results(result::Result, output_dir::String) nothing
+ 
 function export_results(result::Result, output_dir::String)
     # Create output directory
     mkpath(output_dir)
