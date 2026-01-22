@@ -25,6 +25,34 @@ include("utils/transform_stations.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
+# =============================================================================
+# NEW REFACTORED OPTIMIZATION FRAMEWORK
+# =============================================================================
+
+# Core data structures
+include("data/structs.jl")
+
+# Abstract model type hierarchy
+include("opt/abstract.jl")
+
+# Concrete model definitions
+include("opt/models/base.jl")
+include("opt/models/two_stage_lambda.jl")
+include("opt/models/two_stage_l.jl")
+include("opt/models/routing_transport.jl")
+
+# Shared optimization components
+include("opt/variables.jl")
+include("opt/constraints.jl")
+include("opt/objectives.jl")
+
+# Main optimization runner
+include("opt/optimize.jl")
+
+# =============================================================================
+# LEGACY OPTIMIZATION METHODS (for backward compatibility)
+# =============================================================================
+
 # Optimization methods
 include("optimization/base.jl")
 include("optimization/ideal.jl")
@@ -77,5 +105,50 @@ export get_timeframe_column
 
 # Re-export transform_stations functions
 export prepare_station_data, prepare_vehicle_data
+
+# =============================================================================
+# NEW FRAMEWORK EXPORTS
+# =============================================================================
+
+# Re-export data structures
+using .DataStructs
+export StationSelectionData, ScenarioData
+export create_station_selection_data, create_scenario_data
+export n_scenarios, get_station_id, get_station_idx
+export get_walking_cost, get_routing_cost, has_routing_costs
+
+# Re-export abstract model types
+using .AbstractModels
+export AbstractStationSelectionModel
+export AbstractSingleScenarioModel
+export AbstractMultiScenarioModel
+export AbstractTwoStageModel
+export AbstractRoutingModel
+
+# Re-export concrete model types
+using .BaseModelDef
+using .TwoStageLambdaModelDef
+using .TwoStageLModelDef
+using .RoutingTransportModelDef
+export BaseModel
+export TwoStageLambdaModel
+export TwoStageLModel
+export RoutingTransportModel
+
+# Re-export optimization components (for advanced users)
+using .Variables
+using .Constraints
+using .Objectives
+export add_station_selection_variables!, add_assignment_variables!
+export add_scenario_activation_variables!, add_flow_variables!
+export add_pickup_assignment_variables!, add_dropoff_assignment_variables!
+export add_station_limit_constraint!, add_scenario_activation_limit_constraints!
+export add_activation_linking_constraints!
+export create_walking_cost_expression!, create_routing_cost_expression!
+export set_minimize_objective!
+
+# Re-export main optimization function
+using .Optimize
+export optimize_model, OptimizationResult
 
 end # module

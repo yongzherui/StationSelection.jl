@@ -36,11 +36,15 @@ using Dates
         include("utils/test_costs.jl")
     end
 
-    @testset "Optimization Methods" begin
+    @testset "Optimization Methods (Legacy)" begin
         include("optimization/test_base.jl")
         include("optimization/test_two_stage_l.jl")
         include("optimization/test_two_stage_lambda.jl")
         include("optimization/test_routing_transport.jl")
         include("optimization/test_origin_dest_pair.jl")
+    end
+
+    @testset "New Optimization Framework" begin
+        include("opt/test_new_framework.jl")
     end
 end
