@@ -1,10 +1,6 @@
-module ReadCustomerRequests
-
 using DataFrames
 using Dates
 using CSV
-
-export read_customer_requests
 
 """
 Read customer requests from a file and return a DataFrame.
@@ -50,5 +46,3 @@ function read_customer_requests(file_path::String)
 
     return df
 end
-
-end # module
