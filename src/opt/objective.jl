@@ -77,6 +77,7 @@ function set_two_stage_single_detour_objective!(
     f = m[:f]
     u = m[:u]
     v = m[:v]
+    v_idx_map = m[:v_idx_map]
 
     # Precompute pooling savings for same-source triplets
     # r_{jl,kl} = c_{jl} - c_{kl}
@@ -137,16 +138,20 @@ function set_two_stage_single_detour_objective!(
             end
 
             # 3. Same-origin pooling savings: -γ · r_{jl,kl} · u[s][t][idx]
-            for (idx, r) in enumerate(r_same_source)
-                if r > 0  # Only add if there's actual savings
-                    add_to_expression!(obj_expr, -routing_weight * r, u[s][time_id][idx])
+            if length(od_vector) > 1
+                for (idx, r) in enumerate(r_same_source)
+                    if r > 0  # Only add if there's actual savings
+                        add_to_expression!(obj_expr, -routing_weight * r, u[s][time_id][idx])
+                    end
                 end
             end
 
             # 4. Same-dest pooling savings: -γ · r_{jl,jk} · v[s][t][idx]
-            for (idx, r) in enumerate(r_same_dest)
+            valid_indices = get(v_idx_map[s], time_id, Int[])
+            for (local_idx, global_idx) in enumerate(valid_indices)
+                r = r_same_dest[global_idx]
                 if r > 0  # Only add if there's actual savings
-                    add_to_expression!(obj_expr, -routing_weight * r, v[s][time_id][idx])
+                    add_to_expression!(obj_expr, -routing_weight * r, v[s][time_id][local_idx])
                 end
             end
         end

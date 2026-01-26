@@ -77,8 +77,8 @@ function run_opt(
 
     if term_status == MOI.OPTIMAL
         obj = JuMP.objective_value(m)
-        x_val = JuMP.value.(m[:x])
-        y_val = JuMP.value.(m[:y])
+        x_val = _value_recursive(m[:x])
+        y_val = _value_recursive(m[:y])
         solution = (x_val, y_val)
     end
 
@@ -97,6 +97,17 @@ function _print_counts(title::String, counts::Dict{String, Int})
     for key in sort(collect(keys(counts)))
         println("  - $key: $(counts[key])")
     end
+end
+
+function _value_recursive(value)
+    if value isa JuMP.VariableRef
+        return JuMP.value(value)
+    elseif value isa AbstractArray
+        return map(_value_recursive, value)
+    elseif value isa Dict
+        return Dict(k => _value_recursive(v) for (k, v) in value)
+    end
+    return value
 end
 
 function build_model(

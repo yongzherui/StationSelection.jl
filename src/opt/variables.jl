@@ -117,7 +117,7 @@ Variables:
 - u[s][t][idx] = 1 if same-source pooling for triplet Xi_same_source[idx] is used
   at time t in scenario s. Triplet (j,k,l) means pooling trips (j→l) and (k→l).
 
-- v[s][t][idx] = 1 if same-dest pooling for quadruplet Xi_same_dest[idx] is used
+- v[s][t][idx] = 1 if same-dest pooling for a valid quadruplet is used
   at time t in scenario s. Quadruplet (j,k,l,t') means pooling trips (j→l) and (j→k),
   where the second leg (k→l) occurs at time t+t'.
 
@@ -135,7 +135,6 @@ function add_detour_variables!(
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
     n_same_source = length(Xi_same_source)
-    n_same_dest = length(Xi_same_dest)
 
     # Same-source pooling variables: u[s][t][idx]
     # Indexed by scenario, time, and triplet index
@@ -143,19 +142,28 @@ function add_detour_variables!(
 
     # Same-dest pooling variables: v[s][t][idx]
     v = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+    v_idx_map = [Dict{Int, Vector{Int}}() for _ in 1:S]
 
     for s in 1:S
-        for time_id in keys(mapping.Omega_s_t[s])
+        for (time_id, od_vector) in mapping.Omega_s_t[s]
             # Create variables for each triplet in Xi_same_source
-            if n_same_source > 0
+            if length(od_vector) > 1 && n_same_source > 0
                 u[s][time_id] = @variable(m, [1:n_same_source], Bin)
             else
                 u[s][time_id] = VariableRef[]
             end
 
-            # Create variables for each quadruplet in Xi_same_dest
-            if n_same_dest > 0
-                v[s][time_id] = @variable(m, [1:n_same_dest], Bin)
+            valid_indices = Int[]
+            for (idx, (_, _, _, time_delta)) in enumerate(Xi_same_dest)
+                future_time_id = time_id + time_delta
+                if haskey(mapping.Omega_s_t[s], future_time_id)
+                    push!(valid_indices, idx)
+                end
+            end
+
+            v_idx_map[s][time_id] = valid_indices
+            if !isempty(valid_indices)
+                v[s][time_id] = @variable(m, [1:length(valid_indices)], Bin)
             else
                 v[s][time_id] = VariableRef[]
             end
@@ -164,6 +172,7 @@ function add_detour_variables!(
 
     m[:u] = u
     m[:v] = v
+    m[:v_idx_map] = v_idx_map
 
     return JuMP.num_variables(m) - before
 end

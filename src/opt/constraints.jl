@@ -281,16 +281,19 @@ function add_assignment_to_same_dest_detour_constraints!(
     before = _total_num_constraints(m)
     S = n_scenarios(data)
     v = m[:v]
+    v_idx_map = m[:v_idx_map]
     x = m[:x]
 
     for s in 1:S
         for (time_id, od_vector) in mapping.Omega_s_t[s]
-            if length(od_vector) <= 1
+            valid_indices = get(v_idx_map[s], time_id, Int[])
+            if isempty(valid_indices)
                 continue
             end
 
-            # For each quadruplet (j, k, l, time_delta) in Xi_same_dest
-            for (idx, (j, k, l, time_delta)) in enumerate(Xi_same_dest)
+            # For each valid quadruplet (j, k, l, time_delta)
+            for (local_idx, global_idx) in enumerate(valid_indices)
+                (j, k, l, time_delta) = Xi_same_dest[global_idx]
                 future_time_id = time_id + time_delta
 
                 # Only add constraints if future_time_id exists in the mapping
@@ -306,14 +309,14 @@ function add_assignment_to_same_dest_detour_constraints!(
                 # Constraint 1: x_{od,t,jl,s} >= v_{t,idx,s}
                 # If v=1, at least one OD must be assigned to (j,l) at time t
                 @constraint(m,
-                    sum(x[s][time_id][od][j, l] for od in od_vector) >= v[s][time_id][idx]
+                    sum(x[s][time_id][od][j, l] for od in od_vector) >= v[s][time_id][local_idx]
                 )
 
                 # Constraint 2: x_{od,t+t',kl,s} >= v_{t,idx,s}
                 # If v=1, at least one OD must be assigned to (k,l) at time t+t'
                 future_od_vector = mapping.Omega_s_t[s][future_time_id]
                 @constraint(m,
-                    sum(x[s][future_time_id][od][k, l] for od in future_od_vector) >= v[s][time_id][idx]
+                    sum(x[s][future_time_id][od][k, l] for od in future_od_vector) >= v[s][time_id][local_idx]
                 )
             end
         end
