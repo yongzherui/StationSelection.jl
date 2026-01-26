@@ -145,12 +145,14 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
             return_counts=true,
             do_optimize=!no_optimize
         )
-    println("  - Variables: $(num_variables(m))")
-    println("  - Constraints: $(total_num_constraints(m))")
-    solve_time_sec = try
-        MOI.get(m, MOI.SolveTimeSec())
-    catch
-        nothing
+    total_vars = isempty(variable_counts) ? num_variables(m) : sum(values(variable_counts))
+    total_constraints = isempty(constraint_counts) ? total_num_constraints(m) : sum(values(constraint_counts))
+    println("  - Variables: $total_vars")
+    println("  - Constraints: $total_constraints")
+
+    solve_time_sec = total_runtime_sec
+    if no_optimize
+        println("  - Optimization skipped (--no-optimize)")
     end
 
     # Report results
@@ -191,11 +193,11 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
             "total_runtime_sec" => total_runtime_sec
         ),
         "variables" => Dict(
-            "total" => num_variables(m),
+            "total" => total_vars,
             "by_type" => variable_counts
         ),
         "constraints" => Dict(
-            "total" => total_num_constraints(m),
+            "total" => total_constraints,
             "by_type" => constraint_counts
         ),
         "detour_combinations" => detour_combo_counts
