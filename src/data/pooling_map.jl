@@ -15,7 +15,7 @@ using Dates
 export PoolingScenarioOriginDestTimeMap
 export create_pooling_scenario_origin_dest_time_map
 export create_station_id_mappings, create_scenario_label_mappings
-export compute_time_to_od_mapping
+export compute_time_to_od_count_mapping
 
 
 """
@@ -31,6 +31,7 @@ Maps scenarios, time windows, and origin-destination pairs for pooling optimizat
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
 - `time_window::Int`: Time discretization window in seconds
 - `Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}`: Maps (scenario, time) → OD pairs
+- `Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}`: Demand count q_{od,s,t} - number of requests per OD pair per scenario per time
 """
 struct PoolingScenarioOriginDestTimeMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -44,6 +45,9 @@ struct PoolingScenarioOriginDestTimeMap
 
     # Omega[scenario_id][time_id] = [(o1, d1), (o2, d2), ...]
     Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
+
+    # Q[scenario_id][time_id][(o, d)] = count of requests for OD pair (o,d)
+    Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
 end
 
 
@@ -90,13 +94,13 @@ end
 
 
 """
-    compute_time_to_od_mapping(
+    compute_time_to_od_count_mapping(
         scenario_data::ScenarioData,
         time_window::Int;
         time_column::Symbol=:request_time
-    ) -> Dict{Int, Set{Tuple{Int, Int}}}
+    ) -> Dict{Int, Dict{Tuple{Int, Int}, Int}}
 
-Compute mapping from time IDs to origin-destination pairs for a single scenario.
+Compute mapping from time IDs to origin-destination pair counts for a single scenario.
 
 The time_id is computed as floor((request_time - scenario_start_time) / time_window).
 
@@ -106,15 +110,15 @@ The time_id is computed as floor((request_time - scenario_start_time) / time_win
 - `time_column::Symbol`: Column name for request time (default :request_time)
 
 # Returns
-- Dict mapping time_id → Set of (origin, destination) tuples
+- Dict mapping time_id → Dict mapping (origin, destination) → count
 """
-function compute_time_to_od_mapping(
+function compute_time_to_od_count_mapping(
     scenario_data::ScenarioData,
     time_window::Int;
     time_column::Symbol=:request_time
-)::Dict{Int, Set{Tuple{Int, Int}}}
+)::Dict{Int, Dict{Tuple{Int, Int}, Int}}
 
-    time_to_od_set = Dict{Int, Set{Tuple{Int, Int}}}()
+    time_to_od_count = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
 
     scenario_start_time = scenario_data.start_time
     if isnothing(scenario_start_time)
@@ -137,14 +141,15 @@ function compute_time_to_od_mapping(
         time_diff_seconds = (request_time - scenario_start_time) / Dates.Second(1)
         time_id = floor(Int, time_diff_seconds / time_window)
 
-        if !haskey(time_to_od_set, time_id)
-            time_to_od_set[time_id] = Set{Tuple{Int, Int}}()
+        if !haskey(time_to_od_count, time_id)
+            time_to_od_count[time_id] = Dict{Tuple{Int, Int}, Int}()
         end
 
-        push!(time_to_od_set[time_id], (o, d))
+        od_pair = (o, d)
+        time_to_od_count[time_id][od_pair] = get(time_to_od_count[time_id], od_pair, 0) + 1
     end
 
-    return time_to_od_set
+    return time_to_od_count
 end
 
 
@@ -174,17 +179,22 @@ function create_pooling_scenario_origin_dest_time_map(
 
     time_window = floor(Int, model.time_window)
 
-    # Compute Omega_s_t for all scenarios
+    # Compute Omega_s_t and Q_s_t for all scenarios
     Omega_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
+    Q_s_t = Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}()
 
     for (scenario_id, scenario_data) in enumerate(data.scenarios)
-        time_to_od_set = compute_time_to_od_mapping(scenario_data, time_window)
+        # Get OD pair counts (single pass through data)
+        time_to_od_count = compute_time_to_od_count_mapping(scenario_data, time_window)
 
-        # Convert Sets to Vectors for consistent interface
+        # Derive unique OD pairs from count dictionary keys
         Omega_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int}}}()
-        for (time_id, od_set) in time_to_od_set
-            Omega_s_t[scenario_id][time_id] = collect(od_set)
+        for (time_id, od_count_dict) in time_to_od_count
+            Omega_s_t[scenario_id][time_id] = collect(keys(od_count_dict))
         end
+
+        # Store the counts
+        Q_s_t[scenario_id] = time_to_od_count
     end
 
     return PoolingScenarioOriginDestTimeMap(
@@ -194,6 +204,7 @@ function create_pooling_scenario_origin_dest_time_map(
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
         time_window,
-        Omega_s_t
+        Omega_s_t,
+        Q_s_t
     )
 end

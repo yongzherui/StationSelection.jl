@@ -145,43 +145,43 @@
         @test idx_to_label[3] == "evening"
     end
 
-    @testset "Time to OD mapping" begin
+    @testset "Time to OD count mapping" begin
         start_time = DateTime(2024, 1, 1, 8, 0, 0)
         requests = DataFrame(
-            id = [1, 2, 3, 4, 5],
-            start_station_id = [1, 1, 2, 2, 1],
-            end_station_id = [2, 3, 3, 1, 2],
+            id = [1, 2, 3, 4, 5, 6],
+            start_station_id = [1, 1, 2, 2, 1, 1],
+            end_station_id = [2, 2, 3, 1, 2, 3],
             request_time = [
-                DateTime(2024, 1, 1, 8, 0, 0),   # time_id = 0 (0-59 seconds)
-                DateTime(2024, 1, 1, 8, 0, 30),  # time_id = 0
-                DateTime(2024, 1, 1, 8, 1, 0),   # time_id = 1 (60-119 seconds)
-                DateTime(2024, 1, 1, 8, 2, 0),   # time_id = 2 (120-179 seconds)
-                DateTime(2024, 1, 1, 8, 0, 0)    # time_id = 0, duplicate OD (1,2)
+                DateTime(2024, 1, 1, 8, 0, 0),   # time_id = 0, OD (1,2)
+                DateTime(2024, 1, 1, 8, 0, 30),  # time_id = 0, OD (1,2) - duplicate
+                DateTime(2024, 1, 1, 8, 1, 0),   # time_id = 1, OD (2,3)
+                DateTime(2024, 1, 1, 8, 2, 0),   # time_id = 2, OD (2,1)
+                DateTime(2024, 1, 1, 8, 0, 45),  # time_id = 0, OD (1,2) - third occurrence
+                DateTime(2024, 1, 1, 8, 0, 15)   # time_id = 0, OD (1,3)
             ]
         )
 
         scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)
         time_window = 60  # 60 seconds
 
-        time_to_od = StationSelection.compute_time_to_od_mapping(scenario, time_window)
+        time_to_od_count = StationSelection.compute_time_to_od_count_mapping(scenario, time_window)
 
-        # Check time_id 0
-        @test haskey(time_to_od, 0)
-        @test (1, 2) in time_to_od[0]
-        @test (1, 3) in time_to_od[0]
-        @test length(time_to_od[0]) == 2  # (1,2) should not be duplicated
+        # Check time_id 0: should have (1,2) with count 3 and (1,3) with count 1
+        @test haskey(time_to_od_count, 0)
+        @test time_to_od_count[0][(1, 2)] == 3
+        @test time_to_od_count[0][(1, 3)] == 1
+        @test length(time_to_od_count[0]) == 2  # Only 2 unique OD pairs
 
-        # Check time_id 1
-        @test haskey(time_to_od, 1)
-        @test (2, 3) in time_to_od[1]
-        @test length(time_to_od[1]) == 1
+        # Check time_id 1: should have (2,3) with count 1
+        @test haskey(time_to_od_count, 1)
+        @test time_to_od_count[1][(2, 3)] == 1
 
-        # Check time_id 2
-        @test haskey(time_to_od, 2)
-        @test (2, 1) in time_to_od[2]
+        # Check time_id 2: should have (2,1) with count 1
+        @test haskey(time_to_od_count, 2)
+        @test time_to_od_count[2][(2, 1)] == 1
     end
 
-    @testset "Time to OD mapping with string times" begin
+    @testset "Time to OD count mapping with string times" begin
         start_time = DateTime(2024, 1, 1, 8, 0, 0)
         requests = DataFrame(
             id = [1, 2],
@@ -193,12 +193,14 @@
         scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)
         time_window = 300  # 5 minutes
 
-        time_to_od = StationSelection.compute_time_to_od_mapping(scenario, time_window)
+        time_to_od_count = StationSelection.compute_time_to_od_count_mapping(scenario, time_window)
 
-        @test haskey(time_to_od, 0)
-        @test haskey(time_to_od, 1)
-        @test (1, 2) in time_to_od[0]
-        @test (2, 3) in time_to_od[1]
+        @test haskey(time_to_od_count, 0)
+        @test haskey(time_to_od_count, 1)
+        @test haskey(time_to_od_count[0], (1, 2))
+        @test haskey(time_to_od_count[1], (2, 3))
+        @test time_to_od_count[0][(1, 2)] == 1
+        @test time_to_od_count[1][(2, 3)] == 1
     end
 
     @testset "TwoStageSingleDetourModel construction" begin
@@ -269,5 +271,55 @@
         @test pooling_map.time_window == 300
         @test length(pooling_map.scenarios) == 1
         @test haskey(pooling_map.Omega_s_t, 1)  # scenario_id = 1
+        @test haskey(pooling_map.Q_s_t, 1)  # demand counts for scenario_id = 1
+    end
+
+    @testset "PoolingScenarioOriginDestTimeMap demand counts" begin
+        # Create test data with duplicate OD pairs
+        stations = DataFrame(id = [1, 2, 3], lon = [0.0, 0.1, 0.2], lat = [0.0, 0.1, 0.2])
+        start_time = DateTime(2024, 1, 1, 8, 0, 0)
+        end_time = DateTime(2024, 1, 1, 9, 0, 0)
+
+        # Multiple requests with same OD pair at same time
+        requests = DataFrame(
+            id = [1, 2, 3, 4],
+            start_station_id = [1, 1, 1, 2],
+            end_station_id = [2, 2, 3, 3],
+            request_time = [
+                DateTime(2024, 1, 1, 8, 0, 0),   # OD (1,2), time_id = 0
+                DateTime(2024, 1, 1, 8, 0, 30),  # OD (1,2), time_id = 0 - same as above
+                DateTime(2024, 1, 1, 8, 0, 45),  # OD (1,3), time_id = 0
+                DateTime(2024, 1, 1, 8, 5, 0)    # OD (2,3), time_id = 1
+            ]
+        )
+
+        walking_costs = Dict{Tuple{Int,Int}, Float64}()
+        routing_costs = Dict{Tuple{Int,Int}, Float64}()
+        for i in [1,2,3], j in [1,2,3]
+            walking_costs[(i, j)] = abs(i - j) * 100.0
+            routing_costs[(i, j)] = abs(i - j) * 10.0
+        end
+
+        scenarios = [
+            StationSelection.ScenarioData("test", start_time, end_time, requests)
+        ]
+
+        data = StationSelection.StationSelectionData(
+            stations, 3, walking_costs, routing_costs, scenarios
+        )
+
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 60.0, 30.0)  # time_window = 60s
+
+        pooling_map = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
+
+        # Check demand counts
+        @test pooling_map.Q_s_t[1][0][(1, 2)] == 2  # Two requests for (1,2) at time 0
+        @test pooling_map.Q_s_t[1][0][(1, 3)] == 1  # One request for (1,3) at time 0
+        @test pooling_map.Q_s_t[1][5][(2, 3)] == 1  # One request for (2,3) at time 5 (300s / 60s = 5)
+
+        # Check that Omega_s_t still has unique OD pairs
+        @test length(pooling_map.Omega_s_t[1][0]) == 2  # (1,2) and (1,3)
+        @test (1, 2) in pooling_map.Omega_s_t[1][0]
+        @test (1, 3) in pooling_map.Omega_s_t[1][0]
     end
 end

@@ -37,6 +37,12 @@ include("utils/detour_combinations.jl")
 # Pooling map (depends on TwoStageSingleDetourModel and find_detour_combinations)
 include("data/pooling_map.jl")
 
+# Optimization components
+include("opt/variables.jl")
+include("opt/constraints.jl")
+include("opt/objective.jl")
+include("opt/optimize.jl")
+
 # Re-export key types and functions
 using .CoordTransform
 using .Results
@@ -54,7 +60,7 @@ export get_walking_cost, get_routing_cost, has_routing_costs
 
 # Re-export helper functions for testing
 export create_station_id_mappings, create_scenario_label_mappings
-export compute_time_to_od_mapping
+export compute_time_to_od_count_mapping
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -66,6 +72,16 @@ export TwoStageSingleDetourModel
 export find_detour_combinations
 export find_same_source_detour_combinations
 export find_same_dest_detour_combinations
+
+# Re-export optimization functions
+export run_opt, build_model
+export add_station_selection_variables!, add_scenario_activation_variables!
+export add_assignment_variables!, add_flow_variables!, add_detour_variables!
+export add_assignment_constraints!, add_station_limit_constraint!
+export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
+export add_assignment_to_active_constraints!, add_assignment_to_flow_constraints!
+export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
+export set_two_stage_single_detour_objective!
 
 # Re-export utility functions
 using .StationCosts
