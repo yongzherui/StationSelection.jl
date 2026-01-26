@@ -74,6 +74,7 @@ function run_opt(
     term_status = do_optimize ? JuMP.termination_status(m) : MOI.OPTIMIZE_NOT_CALLED
     obj = nothing
     solution = nothing
+
     if term_status == MOI.OPTIMAL
         obj = JuMP.objective_value(m)
         x_val = JuMP.value.(m[:x])
@@ -86,6 +87,7 @@ function run_opt(
     if return_model || return_counts
         return term_status, obj, solution, runtime_sec, m, variable_counts, constraint_counts, detour_combo_counts
     end
+
     return term_status, obj, solution, runtime_sec
 end
 

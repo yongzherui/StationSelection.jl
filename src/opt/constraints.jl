@@ -223,6 +223,10 @@ function add_assignment_to_same_source_detour_constraints!(
 
     for s in 1:S
         for (time_id, od_vector) in mapping.Omega_s_t[s]
+            if length(od_vector) <= 1
+                continue
+            end
+
             # For each triplet (j, k, l) in Xi_same_source
             for (idx, (j, k, l)) in enumerate(Xi_same_source)
                 # Constraint 1: x_{od,t,jk,s} >= u_{t,idx,s}
@@ -281,6 +285,10 @@ function add_assignment_to_same_dest_detour_constraints!(
 
     for s in 1:S
         for (time_id, od_vector) in mapping.Omega_s_t[s]
+            if length(od_vector) <= 1
+                continue
+            end
+
             # For each quadruplet (j, k, l, time_delta) in Xi_same_dest
             for (idx, (j, k, l, time_delta)) in enumerate(Xi_same_dest)
                 future_time_id = time_id + time_delta
