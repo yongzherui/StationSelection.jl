@@ -2,6 +2,7 @@ module StationSelection
 
 # Core dependencies
 using CSV
+using Combinatorics
 using DataFrames
 using Dates
 using Distances
@@ -21,43 +22,48 @@ include("utils/logging.jl")
 include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
 
-# Data loading
+# Data loading - core data structures
+include("data/struct.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
-# Optimization methods
-include("optimization/base.jl")
-include("optimization/ideal.jl")
-include("optimization/two_stage_l.jl")
-include("optimization/two_stage_lambda.jl")
-include("optimization/routing_transport.jl")
-include("optimization/origin_dest_pair.jl")
+# Optimization framework - abstract types first
+include("opt/abstract.jl")
+include("opt/models/two_stage_single_detour.jl")
+
+# Utility functions that depend on model types
+include("utils/detour_combinations.jl")
+
+# Pooling map (depends on TwoStageSingleDetourModel and find_detour_combinations)
+include("data/pooling_map.jl")
 
 # Re-export key types and functions
 using .CoordTransform
 using .Results
-using .Stations
-using .ReadCustomerRequests
 
 export Result
-export read_candidate_stations, read_customer_requests
 export bd09_to_wgs84
+export read_candidate_stations, read_customer_requests
 
-# Re-export optimization functions
-using .ClusteringBase
-using .ClusteringIdeal
-using .ClusteringTwoStageL
-using .ClusteringTwoStageLambda
-using .ClusteringTwoStageLRoutingTransportation
-using .ClusteringTwoStageLOriginDestPair
+# Re-export data structures
+export StationSelectionData, ScenarioData, PoolingScenarioOriginDestTimeMap
+export create_station_selection_data, create_scenario_data
+export create_pooling_scenario_origin_dest_time_map
+export n_scenarios, get_station_id, get_station_idx
+export get_walking_cost, get_routing_cost, has_routing_costs
 
-export clustering_base
-export clustering_ideal
-export clustering_two_stage_l
-export clustering_two_stage_lambda
-export clustering_two_stage_l_routing_transportation
-export clustering_two_stage_l_od_pair
-export validate_request_flow_mapping
+# Re-export helper functions for testing
+export create_station_id_mappings, create_scenario_label_mappings
+export compute_time_to_od_mapping, compute_detour_sets
+
+# Re-export optimization framework types
+export AbstractStationSelectionModel
+export AbstractSingleScenarioModel, AbstractMultiScenarioModel
+export AbstractTwoStageModel, AbstractPoolingModel
+export TwoStageSingleDetourModel
+
+# Re-export detour combinations
+export find_detour_combinations
 
 # Re-export utility functions
 using .StationCosts

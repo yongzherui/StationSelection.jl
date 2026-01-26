@@ -71,4 +71,6 @@ We have two stage model for clustering
 
 But in the pooling model, we start concerning ourselves with basic pooling mechanisms of the vehicles
 """
-abstract type AbstractPoolingModel <: AbstractTwoStageModel end
+abstract type AbstractODModel <: AbstractTwoStageModel end
+
+abstract type AbstractPoolingModel <: AbstractODModel end

@@ -56,6 +56,7 @@ function add_flow_variables!(
         mapping::PoolingScenarioOriginDestTimeMap
     )
 
+    n = data.n_stations
     S = n_scenarios(data)
     f = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
 
@@ -64,7 +65,7 @@ function add_flow_variables!(
             # we want the length of the Omega_s_t[s][time_id]
             od_count = length(Omega_s_t[s][time_id])
 
-            f[s][time_id] = @variable(m, [1:length(od_count)], Bin)
+            f[s][time_id] = @variable(m, [1:n, 1:n], Bin)
         end
     end
 

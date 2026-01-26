@@ -11,6 +11,11 @@ using Dates
         @test isdefined(StationSelection, :bd09_to_wgs84)
         @test isdefined(StationSelection, :compute_station_pairwise_costs)
         @test isdefined(StationSelection, :generate_scenarios)
+        # New exports for TwoStageSingleDetourModel
+        @test isdefined(StationSelection, :TwoStageSingleDetourModel)
+        @test isdefined(StationSelection, :StationSelectionData)
+        @test isdefined(StationSelection, :ScenarioData)
+        @test isdefined(StationSelection, :find_detour_combinations)
     end
 
     @testset "CoordTransform" begin
@@ -36,11 +41,11 @@ using Dates
         include("utils/test_costs.jl")
     end
 
-    @testset "Optimization Methods" begin
-        include("optimization/test_base.jl")
-        include("optimization/test_two_stage_l.jl")
-        include("optimization/test_two_stage_lambda.jl")
-        include("optimization/test_routing_transport.jl")
-        include("optimization/test_origin_dest_pair.jl")
+    @testset "Data Structures" begin
+        include("data/test_struct.jl")
+    end
+
+    @testset "Detour Combinations" begin
+        include("utils/test_detour_combinations.jl")
     end
 end

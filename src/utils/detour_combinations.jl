@@ -18,7 +18,7 @@ function find_detour_combinations(
     # Going over permutations is probably less efficient than combinations
     # But i am lazy to retrieve the longest edge
     # Can probably be refactored
-    for (a, b, c) in collect(permutations(stations_id, 3))
+    for (a, b, c) in collect(permutations(station_ids, 3))
         # we want to check if we already included this combination
         # we sort the tuple to ensure no repetition
         if Tuple(sort([a, b, c])) in j_k_l_sets

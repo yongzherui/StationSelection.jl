@@ -50,7 +50,8 @@ function build_model(
 
     add_detour_variables!(m, data, mapping)
 
-
     # now we add the constraints
+    add_station_limit_constraint!(m, data, model.l, equality=true)
+    add_scenario_activation_limit_constraints!(m, data, model.k)
 end
 
