@@ -10,10 +10,21 @@ If no config file is specified, defaults to example/config.toml
 
 using ArgParse
 using StationSelection
-using DataFrames: nrow
+using DataFrames: nrow, combine, groupby, select
+using JSON
+using JuMP
+using Gurobi
 using TOML
 
 const PROJECT_ROOT = dirname(dirname(@__FILE__))
+
+function total_num_constraints(m::Model)
+    total = 0
+    for (F, S) in list_of_constraint_types(m)
+        total += num_constraints(m, F, S)
+    end
+    return total
+end
 
 function parse_commandline()
     s = ArgParseSettings(
@@ -26,12 +37,17 @@ function parse_commandline()
             help = "Path to configuration TOML file"
             arg_type = String
             default = joinpath(PROJECT_ROOT, "example/config.toml")
+        "--station-limit", "-n"
+            help = "Limit number of stations for a small test run (0 = no limit)"
+            arg_type = Int
+            default = 0
+            dest_name = "station_limit"
     end
 
     return parse_args(s)
 end
 
-function main(config_path::String)
+function main(config_path::String, station_limit::Int)
     println("=" ^ 60)
     println("StationSelection Optimization")
     println("=" ^ 60)
@@ -55,6 +71,28 @@ function main(config_path::String)
         start_time=config["scenario"]["start_time"],
         end_time=config["scenario"]["end_time"]
     )
+    if station_limit > 0
+        station_counts = combine(
+            groupby(
+                vcat(
+                    select(requests, :start_station_id => :station_id),
+                    select(requests, :end_station_id => :station_id)
+                ),
+                :station_id
+            ),
+            nrow => :request_count
+        )
+        station_counts = sort(station_counts, :request_count, rev=true)
+        top_station_ids = Set(first(station_counts.station_id, min(station_limit, nrow(station_counts))))
+        stations = stations[in.(stations.id, Ref(top_station_ids)), :]
+        station_ids = Set(stations.id)
+        requests = requests[
+            in.(requests.start_station_id, Ref(station_ids)) .&
+            in.(requests.end_station_id, Ref(station_ids)),
+            :
+        ]
+    end
+    println("  - Filtered to $(nrow(stations)) stations")
     println("  - Loaded $(nrow(requests)) requests")
 
     # Compute costs
@@ -91,10 +129,27 @@ function main(config_path::String)
 
     # Run optimization
     println("\n[6] Running optimization...")
-    term_status, obj_value, solution = run_opt(
-        model, data;
-        silent=get(config["solver"], "silent", true)
-    )
+    optimizer_env = Gurobi.Env()
+    silent = get(config["solver"], "silent", true)
+    total_runtime_sec = @elapsed begin
+        term_status, obj_value, solution, m, variable_counts, constraint_counts =
+            run_opt(
+                model,
+                data;
+                optimizer_env=optimizer_env,
+                silent=silent,
+                show_counts=true,
+                return_model=true,
+                return_counts=true
+            )
+    end
+    println("  - Variables: $(num_variables(m))")
+    println("  - Constraints: $(total_num_constraints(m))")
+    solve_time_sec = try
+        MOI.get(m, MOI.SolveTimeSec())
+    catch
+        nothing
+    end
 
     # Report results
     println("\n" * "=" ^ 60)
@@ -111,10 +166,48 @@ function main(config_path::String)
         end
     end
 
+    metadata = Dict(
+        "model" => Dict(
+            "name" => "TwoStageSingleDetourModel",
+            "k" => model.k,
+            "l" => model.l,
+            "routing_weight" => model.routing_weight,
+            "time_window" => model.time_window,
+            "routing_delay" => model.routing_delay
+        ),
+        "data" => Dict(
+            "n_stations" => data.n_stations,
+            "n_requests" => nrow(requests),
+            "n_scenarios" => n_scenarios(data),
+            "n_walking_costs" => length(walking_costs),
+            "n_routing_costs" => length(routing_costs)
+        ),
+        "solve" => Dict(
+            "termination_status" => string(term_status),
+            "objective_value" => obj_value,
+            "solve_time_sec" => solve_time_sec,
+            "total_runtime_sec" => total_runtime_sec
+        ),
+        "variables" => Dict(
+            "total" => num_variables(m),
+            "by_type" => variable_counts
+        ),
+        "constraints" => Dict(
+            "total" => total_num_constraints(m),
+            "by_type" => constraint_counts
+        )
+    )
+
+    metadata_path = joinpath(dirname(abspath(config_path)), "metadata.json")
+    open(metadata_path, "w") do io
+        JSON.print(io, metadata, 4)
+    end
+    println("  ✓ Exported metadata: $metadata_path")
+
     return term_status, obj_value, solution
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     args = parse_commandline()
-    main(args["config"])
+    main(args["config"], args["station_limit"])
 end

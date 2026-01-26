@@ -16,6 +16,14 @@ export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!
 export add_assignment_to_same_dest_detour_constraints!
 
+function _total_num_constraints(m::Model)
+    total = 0
+    for (F, S) in JuMP.list_of_constraint_types(m)
+        total += JuMP.num_constraints(m, F, S)
+    end
+    return total
+end
+
 # ============================================================================
 # Assignment Constraints
 # ============================================================================
@@ -31,6 +39,7 @@ function add_assignment_constraints!(
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
+    before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     x = m[:x]
@@ -43,7 +52,7 @@ function add_assignment_constraints!(
         end
     end
 
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 
@@ -65,13 +74,14 @@ function add_station_limit_constraint!(
     limit::Int;
     equality::Bool=true
 )
+    before = _total_num_constraints(m)
     y = m[:y]
     if equality
         @constraint(m, station_limit, sum(y) == limit)
     else
         @constraint(m, station_limit, sum(y) <= limit)
     end
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 """
@@ -85,11 +95,12 @@ function add_scenario_activation_limit_constraints!(
     data::StationSelectionData,
     k::Int
 )
+    before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     z = m[:z]
     @constraint(m, activation_limit[s=1:S], sum(z[j,s] for j in 1:n) == k)
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 # ============================================================================
@@ -103,12 +114,13 @@ Active stations must be built.
     z[j,s] ≤ y[j]  ∀j,s
 """
 function add_activation_linking_constraints!(m::Model, data::StationSelectionData)
+    before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     y = m[:y]
     z = m[:z]
     @constraint(m, link_zy[j=1:n, s=1:S], z[j,s] <= y[j])
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 """
@@ -122,6 +134,7 @@ function add_assignment_to_active_constraints!(
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
+    before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     z = m[:z]
@@ -137,7 +150,7 @@ function add_assignment_to_active_constraints!(
         end
     end
 
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 # ============================================================================
@@ -155,6 +168,7 @@ function add_assignment_to_flow_constraints!(
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
+    before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     f = m[:f]
@@ -168,7 +182,7 @@ function add_assignment_to_flow_constraints!(
         end
     end
 
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 # ============================================================================
@@ -202,6 +216,7 @@ function add_assignment_to_same_source_detour_constraints!(
         mapping::PoolingScenarioOriginDestTimeMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}}
     )
+    before = _total_num_constraints(m)
     S = n_scenarios(data)
     u = m[:u]
     x = m[:x]
@@ -231,7 +246,7 @@ function add_assignment_to_same_source_detour_constraints!(
         end
     end
 
-    return nothing
+    return _total_num_constraints(m) - before
 end
 
 """
@@ -259,6 +274,7 @@ function add_assignment_to_same_dest_detour_constraints!(
         mapping::PoolingScenarioOriginDestTimeMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
+    before = _total_num_constraints(m)
     S = n_scenarios(data)
     v = m[:v]
     x = m[:x]
@@ -295,5 +311,5 @@ function add_assignment_to_same_dest_detour_constraints!(
         end
     end
 
-    return nothing
+    return _total_num_constraints(m) - before
 end

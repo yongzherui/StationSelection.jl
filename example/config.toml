@@ -8,8 +8,8 @@ segment_file = "data/segment.csv"
 
 [model]
 # TwoStageSingleDetourModel parameters
-k = 20                   # Number of active stations per scenario
-l = 40                   # Total number of stations to build
+k = 5                    # Number of active stations per scenario
+l = 10                   # Total number of stations to build
 routing_weight = 1.0     # Weight γ for routing/pooling terms in objective
 time_window = 300.0      # Time discretization window in seconds
 routing_delay = 1200.0     # Maximum allowed detour delay in seconds

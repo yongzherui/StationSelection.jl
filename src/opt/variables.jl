@@ -21,9 +21,10 @@ Add binary station selection (build) variables y[j] for j ∈ 1:n.
 y[j] = 1 if station j is selected/built (permanent decision).
 """
 function add_station_selection_variables!(m::Model, data::StationSelectionData)
+    before = JuMP.num_variables(m)
     n = data.n_stations
     @variable(m, y[1:n], Bin)
-    return nothing
+    return JuMP.num_variables(m) - before
 end
 
 """
@@ -35,10 +36,11 @@ z[j,s] = 1 if station j is activated in scenario s.
 Allows different subsets of built stations to be active in each scenario.
 """
 function add_scenario_activation_variables!(m::Model, data::StationSelectionData)
+    before = JuMP.num_variables(m)
     n = data.n_stations
     S = n_scenarios(data)
     @variable(m, z[1:n, 1:S], Bin)
-    return nothing
+    return JuMP.num_variables(m) - before
 end
 
 """
@@ -54,6 +56,7 @@ function add_assignment_variables!(
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
+    before = JuMP.num_variables(m)
     n = data.n_stations
     S = n_scenarios(data)
     x = [Dict{Int, Dict{Tuple{Int, Int}, Matrix{VariableRef}}}() for _ in 1:S]
@@ -69,7 +72,7 @@ function add_assignment_variables!(
     end
 
     m[:x] = x
-    return nothing
+    return JuMP.num_variables(m) - before
 end
 
 """
@@ -84,6 +87,7 @@ function add_flow_variables!(
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
+    before = JuMP.num_variables(m)
     n = data.n_stations
     S = n_scenarios(data)
     f = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
@@ -95,7 +99,7 @@ function add_flow_variables!(
     end
 
     m[:f] = f
-    return nothing
+    return JuMP.num_variables(m) - before
 end
 
 """
@@ -128,6 +132,7 @@ function add_detour_variables!(
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
+    before = JuMP.num_variables(m)
     S = n_scenarios(data)
     n_same_source = length(Xi_same_source)
     n_same_dest = length(Xi_same_dest)
@@ -160,5 +165,5 @@ function add_detour_variables!(
     m[:u] = u
     m[:v] = v
 
-    return nothing
+    return JuMP.num_variables(m) - before
 end
