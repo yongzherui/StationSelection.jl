@@ -10,25 +10,58 @@
 #SBATCH -e slurm_logs/selection-%A_%a.err
 #SBATCH --time=04:00:00                # 4 hour time limit per selection
 
-# NOTE: Update --array=1-N with actual job count from 01_setup_pipeline.jl output
+# =============================================================================
+# StationSelection Scalability Test - Selection Stage
+# =============================================================================
+# Usage:
+#   sbatch experiments/scalability_test/scripts/02_submit_selection.sh
+# =============================================================================
 
-STUDY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROJECT_ROOT="$(cd "$STUDY_DIR/../.." && pwd)"
+# Set project root (use SLURM_SUBMIT_DIR if on cluster, otherwise current dir)
+if [ -n "$SLURM_SUBMIT_DIR" ]; then
+	PROJECT_ROOT="$SLURM_SUBMIT_DIR"
+else
+	PROJECT_ROOT="$(pwd)"
+fi
 
-echo "===== Station Selection Job ====="
-echo "Study: $STUDY_DIR"
-echo "Project: $PROJECT_ROOT"
-echo "Job Array Task ID: $SLURM_ARRAY_TASK_ID"
-echo "Job ID: $SLURM_JOB_ID"
-echo "Start time: $(date)"
+STUDY_DIR="$PROJECT_ROOT/experiments/scalability_test"
+
+echo "============================================================"
+echo "StationSelection Scalability Test - Selection"
+echo "============================================================"
+echo "Project root: $PROJECT_ROOT"
+echo "Study dir:    $STUDY_DIR"
+echo "Start time:   $(date)"
 echo ""
 
-module load julia/1.10.4
-module load gurobi
-
-cd "$PROJECT_ROOT" || exit 1
-
+# Create logs directory if it doesn't exist
 mkdir -p "$STUDY_DIR/slurm_logs"
+
+# Detect environment and load modules if on cluster
+if command -v module &>/dev/null; then
+	echo "===== Loading modules ====="
+	module load julia 2>/dev/null || module load julia/1.10.4 2>/dev/null || true
+	module load gurobi 2>/dev/null || true
+	echo ""
+fi
+
+# Check Julia is available
+if ! command -v julia &>/dev/null; then
+	echo "ERROR: Julia not found. Please ensure Julia is installed and in PATH."
+	exit 1
+fi
+
+echo "===== Environment ====="
+echo "Julia version: $(julia --version)"
+echo "Working directory: $PROJECT_ROOT"
+if [ -n "$SLURM_JOB_ID" ]; then
+	echo "SLURM Job ID: $SLURM_JOB_ID"
+	echo "Node: $SLURM_NODELIST"
+fi
+echo ""
+
+# Navigate to project root
+cd "$PROJECT_ROOT" || exit 1
 
 SELECTION_JOB_FILE="$STUDY_DIR/config/selection_jobs.txt"
 if [ ! -f "$SELECTION_JOB_FILE" ]; then
@@ -43,21 +76,19 @@ if [ -z "$JOB_ID" ]; then
 	exit 1
 fi
 
-echo "Job ID: $JOB_ID"
-echo "Config: $STUDY_DIR/config/selection/job_${JOB_ID}.toml"
+echo "===== Station Selection ====="
+echo "Job ID:  $JOB_ID"
+echo "Config:  $STUDY_DIR/config/selection/job_${JOB_ID}.toml"
 echo ""
 
 julia --project="$PROJECT_ROOT" "$STUDY_DIR/scripts/03_run_selection.jl" "$JOB_ID"
 EXIT_CODE=$?
 
-if [ $EXIT_CODE -ne 0 ]; then
-	echo "ERROR: Selection failed with exit code $EXIT_CODE"
-	exit $EXIT_CODE
-fi
-
 echo ""
-echo "===== Selection Complete ====="
-echo "Exit code: 0"
-echo "End time: $(date)"
+echo "============================================================"
+echo "Completed"
+echo "============================================================"
+echo "Exit code: $EXIT_CODE"
+echo "End time:  $(date)"
 
-exit 0
+exit $EXIT_CODE
