@@ -1,6 +1,8 @@
+using Dates
+
 """
     run_opt(model, data; optimizer_env=nothing, silent=true, show_counts=false,
-            return_model=false, return_counts=false)
+            return_model=false, return_counts=false, do_optimize=true)
 
 Construct and solve a station selection optimization model.
 
@@ -14,9 +16,13 @@ Construct and solve a station selection optimization model.
 - `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
 - `return_model::Bool`: Whether to return the JuMP model (default: false)
 - `return_counts::Bool`: Whether to return variable/constraint counts (default: false)
+- `do_optimize::Bool`: Whether to run `optimize!` (default: true)
 
 # Returns
-- Tuple of (termination_status, objective_value, solution_values)
+- Tuple of (termination_status, objective_value, solution_values, runtime_sec)
+- If `return_model` or `return_counts` is true, returns
+  (termination_status, objective_value, solution_values, runtime_sec, model,
+   variable_counts, constraint_counts, detour_combo_counts)
 """
 function run_opt(
         model::AbstractStationSelectionModel,
@@ -25,8 +31,11 @@ function run_opt(
         silent::Bool=true,
         show_counts::Bool=false,
         return_model::Bool=false,
-        return_counts::Bool=false
+        return_counts::Bool=false,
+        do_optimize::Bool=true
     )
+
+    start_time = now()
 
     if isnothing(optimizer_env)
         optimizer_env = Gurobi.Env()
@@ -35,8 +44,10 @@ function run_opt(
     # Build model (with counts when available)
     variable_counts = Dict{String, Int}()
     constraint_counts = Dict{String, Int}()
+    detour_combo_counts = Dict{String, Int}()
     if hasmethod(build_model_with_counts, Tuple{typeof(model), StationSelectionData, typeof(optimizer_env)})
-        m, variable_counts, constraint_counts = build_model_with_counts(model, data, optimizer_env)
+        m, variable_counts, constraint_counts, detour_combo_counts =
+            build_model_with_counts(model, data, optimizer_env)
     else
         m = build_model(model, data, optimizer_env)
     end
@@ -44,6 +55,9 @@ function run_opt(
     if show_counts && (!isempty(variable_counts) || !isempty(constraint_counts))
         _print_counts("Variables", variable_counts)
         _print_counts("Constraints", constraint_counts)
+        if !isempty(detour_combo_counts)
+            _print_counts("Detour combinations", detour_combo_counts)
+        end
     elseif show_counts
         println("Counts unavailable for model type: $(typeof(model))")
     end
@@ -53,9 +67,11 @@ function run_opt(
     end
 
     # Solve the model
-    optimize!(m)
+    if do_optimize
+        optimize!(m)
+    end
 
-    term_status = JuMP.termination_status(m)
+    term_status = do_optimize ? JuMP.termination_status(m) : MOI.OPTIMIZE_NOT_CALLED
     obj = nothing
     solution = nothing
     if term_status == MOI.OPTIMAL
@@ -65,10 +81,12 @@ function run_opt(
         solution = (x_val, y_val)
     end
 
+    runtime_sec = Dates.value(now() - start_time) / 1000
+
     if return_model || return_counts
-        return term_status, obj, solution, m, variable_counts, constraint_counts
+        return term_status, obj, solution, runtime_sec, m, variable_counts, constraint_counts, detour_combo_counts
     end
-    return term_status, obj, solution
+    return term_status, obj, solution, runtime_sec
 end
 
 function _print_counts(title::String, counts::Dict{String, Int})
@@ -84,7 +102,7 @@ function build_model(
         data::StationSelectionData,
         optimizer_env
     )::Model
-    m, _, _ = build_model_with_counts(model, data, optimizer_env)
+    m, _, _, _ = build_model_with_counts(model, data, optimizer_env)
     return m
 end
 
@@ -92,7 +110,7 @@ function build_model_with_counts(
         model::TwoStageSingleDetourModel,
         data::StationSelectionData,
         optimizer_env
-    )::Tuple{Model, Dict{String, Int}, Dict{String, Int}}
+    )::Tuple{Model, Dict{String, Int}, Dict{String, Int}, Dict{String, Int}}
 
     # Create the pooling scenario map
     mapping = create_pooling_scenario_origin_dest_time_map(model, data)
@@ -105,6 +123,9 @@ function build_model_with_counts(
 
     variable_counts = Dict{String, Int}()
     constraint_counts = Dict{String, Int}()
+    detour_combo_counts = Dict{String, Int}()
+    detour_combo_counts["same_source"] = length(Xi_same_source)
+    detour_combo_counts["same_dest"] = length(Xi_same_dest)
 
     # Add variables
     variable_counts["station_selection"] = add_station_selection_variables!(m, data)
@@ -127,5 +148,5 @@ function build_model_with_counts(
     set_two_stage_single_detour_objective!(m, data, mapping, Xi_same_source, Xi_same_dest;
                                             routing_weight=model.routing_weight)
 
-    return m, variable_counts, constraint_counts
+    return m, variable_counts, constraint_counts, detour_combo_counts
 end

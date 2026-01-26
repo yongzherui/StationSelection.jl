@@ -42,12 +42,15 @@ function parse_commandline()
             arg_type = Int
             default = 0
             dest_name = "station_limit"
+        "--no-optimize"
+            help = "Build model and print counts without running optimize!"
+            action = :store_true
     end
 
     return parse_args(s)
 end
 
-function main(config_path::String, station_limit::Int)
+function main(config_path::String, station_limit::Int, no_optimize::Bool)
     println("=" ^ 60)
     println("StationSelection Optimization")
     println("=" ^ 60)
@@ -131,18 +134,17 @@ function main(config_path::String, station_limit::Int)
     println("\n[6] Running optimization...")
     optimizer_env = Gurobi.Env()
     silent = get(config["solver"], "silent", true)
-    total_runtime_sec = @elapsed begin
-        term_status, obj_value, solution, m, variable_counts, constraint_counts =
-            run_opt(
-                model,
-                data;
-                optimizer_env=optimizer_env,
-                silent=silent,
-                show_counts=true,
-                return_model=true,
-                return_counts=true
-            )
-    end
+    term_status, obj_value, solution, total_runtime_sec, m, variable_counts, constraint_counts, detour_combo_counts =
+        run_opt(
+            model,
+            data;
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=true,
+            return_model=true,
+            return_counts=true,
+            do_optimize=!no_optimize
+        )
     println("  - Variables: $(num_variables(m))")
     println("  - Constraints: $(total_num_constraints(m))")
     solve_time_sec = try
@@ -195,7 +197,8 @@ function main(config_path::String, station_limit::Int)
         "constraints" => Dict(
             "total" => total_num_constraints(m),
             "by_type" => constraint_counts
-        )
+        ),
+        "detour_combinations" => detour_combo_counts
     )
 
     metadata_path = joinpath(dirname(abspath(config_path)), "metadata.json")
@@ -209,5 +212,5 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     args = parse_commandline()
-    main(args["config"], args["station_limit"])
+    main(args["config"], args["station_limit"], get(args, "no_optimize", false))
 end
