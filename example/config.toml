@@ -7,12 +7,17 @@ order_file = "data/order.csv"
 segment_file = "data/segment.csv"
 
 [model]
-# TwoStageSingleDetourModel parameters
+# Model type: "TwoStageSingleDetourModel" or "ClusteringTwoStageODModel"
+type = "ClusteringTwoStageODModel"
+
+# Common parameters
 k = 5                    # Number of active stations per scenario
 l = 10                   # Total number of stations to build
-routing_weight = 1.0     # Weight γ for routing/pooling terms in objective
+routing_weight = 1.0     # Weight γ/λ for routing/pooling terms in objective
+
+# TwoStageSingleDetourModel specific parameters (ignored for ClusteringTwoStageODModel)
 time_window = 120.0      # Time discretization window in seconds
-routing_delay = 900.0     # Maximum allowed detour delay in seconds
+routing_delay = 900.0    # Maximum allowed detour delay in seconds
 
 [scenario]
 # Scenario time windows (start_time, end_time)

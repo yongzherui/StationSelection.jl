@@ -120,15 +120,30 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     println("  - Number of stations: $(data.n_stations)")
     println("  - Number of scenarios: $(n_scenarios(data))")
 
-    # Create model
-    println("\n[5] Creating TwoStageSingleDetourModel...")
+    # Create model based on type specified in config
     mc = config["model"]
-    model = TwoStageSingleDetourModel(
-        mc["k"], mc["l"], mc["routing_weight"],
-        mc["time_window"], mc["routing_delay"]
-    )
-    println("  - k=$(model.k), l=$(model.l), γ=$(model.routing_weight)")
-    println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
+    model_type = get(mc, "type", "TwoStageSingleDetourModel")
+
+    println("\n[5] Creating $model_type...")
+
+    if model_type == "TwoStageSingleDetourModel"
+        model = TwoStageSingleDetourModel(
+            mc["k"], mc["l"], mc["routing_weight"],
+            mc["time_window"], mc["routing_delay"]
+        )
+        println("  - k=$(model.k), l=$(model.l), γ=$(model.routing_weight)")
+        println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
+    elseif model_type == "ClusteringTwoStageODModel"
+        model = ClusteringTwoStageODModel(
+            mc["k"], mc["l"], mc["routing_weight"]
+        )
+        println("  - k=$(model.k), l=$(model.l), λ=$(model.routing_weight)")
+    elseif model_type == "ClusteringBaseModel"
+        model = ClusteringBaseModel(mc["k"])
+        println("  - k=$(model.k) (stations to select)")
+    else
+        error("Unknown model type: $model_type. Supported: TwoStageSingleDetourModel, ClusteringTwoStageODModel, ClusteringBaseModel")
+    end
 
     # Run optimization
     println("\n[6] Running optimization...")
@@ -170,15 +185,24 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         end
     end
 
+    # Build model metadata based on type
+    model_metadata = Dict{String, Any}(
+        "name" => model_type,
+        "k" => model.k
+    )
+    if model_type == "TwoStageSingleDetourModel"
+        model_metadata["l"] = model.l
+        model_metadata["routing_weight"] = model.routing_weight
+        model_metadata["time_window"] = model.time_window
+        model_metadata["routing_delay"] = model.routing_delay
+    elseif model_type == "ClusteringTwoStageODModel"
+        model_metadata["l"] = model.l
+        model_metadata["routing_weight"] = model.routing_weight
+    end
+    # ClusteringBaseModel only has k, which is already added
+
     metadata = Dict(
-        "model" => Dict(
-            "name" => "TwoStageSingleDetourModel",
-            "k" => model.k,
-            "l" => model.l,
-            "routing_weight" => model.routing_weight,
-            "time_window" => model.time_window,
-            "routing_delay" => model.routing_delay
-        ),
+        "model" => model_metadata,
         "data" => Dict(
             "n_stations" => data.n_stations,
             "n_requests" => nrow(requests),
@@ -200,7 +224,7 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
             "total" => total_constraints,
             "by_type" => constraint_counts
         ),
-        "detour_combinations" => detour_combo_counts
+        "extra_counts" => detour_combo_counts
     )
 
     metadata_path = joinpath(dirname(abspath(config_path)), "metadata.json")
