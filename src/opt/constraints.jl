@@ -213,6 +213,11 @@ function add_assignment_to_same_source_detour_constraints!(
                 # Constraint 1: x_{od,t,jk,s} >= u_{t,idx,s}
                 # Sum over all OD pairs that could use edge (j,k)
                 # If u=1, at least one OD must be assigned to (j,k)
+
+                j = mapping.station_id_to_array_idx[j]
+                k = mapping.station_id_to_array_idx[k]
+                l = mapping.station_id_to_array_idx[l]
+
                 @constraint(m,
                     sum(x[s][time_id][od][j, k] for od in od_vector) >= u[s][time_id][idx]
                 )
@@ -269,6 +274,10 @@ function add_assignment_to_same_dest_detour_constraints!(
                 if !haskey(mapping.Omega_s_t[s], future_time_id)
                     continue
                 end
+
+                j = mapping.station_id_to_array_idx[j]
+                k = mapping.station_id_to_array_idx[k]
+                l = mapping.station_id_to_array_idx[l]
 
                 # Constraint 1: x_{od,t,jl,s} >= v_{t,idx,s}
                 # If v=1, at least one OD must be assigned to (j,l) at time t
