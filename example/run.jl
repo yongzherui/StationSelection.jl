@@ -2,16 +2,34 @@
 Example script to run StationSelection optimization.
 
 Usage:
-    julia --project=. example/run.jl [config_file]
+    julia --project=. example/run.jl --config <config_file>
+    julia --project=. example/run.jl -c <config_file>
 
 If no config file is specified, defaults to example/config.toml
 """
 
+using ArgParse
 using StationSelection
 using DataFrames: nrow
 using TOML
 
 const PROJECT_ROOT = dirname(dirname(@__FILE__))
+
+function parse_commandline()
+    s = ArgParseSettings(
+        description = "Run StationSelection optimization",
+        prog = "run.jl"
+    )
+
+    @add_arg_table! s begin
+        "--config", "-c"
+            help = "Path to configuration TOML file"
+            arg_type = String
+            default = joinpath(PROJECT_ROOT, "example/config.toml")
+    end
+
+    return parse_args(s)
+end
 
 function main(config_path::String)
     println("=" ^ 60)
@@ -97,6 +115,6 @@ function main(config_path::String)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    config_file = length(ARGS) > 0 ? ARGS[1] : joinpath(PROJECT_ROOT, "example/config.toml")
-    main(config_file)
+    args = parse_commandline()
+    main(args["config"])
 end
