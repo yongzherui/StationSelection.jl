@@ -144,9 +144,13 @@ try
         error("This pipeline expects model.type = TwoStageSingleDetourModel (got $model_type)")
     end
 
+    # Set k and l as proportions of station count
+    k = max(1, floor(Int, data.n_stations / 4))
+    l = max(1, floor(Int, data.n_stations / 2))
+
     model = TwoStageSingleDetourModel(
-        model_cfg["k"],
-        model_cfg["l"],
+        k,
+        l,
         model_cfg["routing_weight"],
         model_cfg["time_window"],
         model_cfg["routing_delay"]
@@ -184,6 +188,8 @@ try
         "objective_value" => obj_value,
         "solve_time_sec" => runtime_sec,
         "total_runtime_sec" => elapsed,
+        "k" => k,
+        "l" => l,
         "variables" => Dict("by_type" => var_counts),
         "constraints" => Dict("by_type" => con_counts),
         "detour_combinations" => detour_counts,

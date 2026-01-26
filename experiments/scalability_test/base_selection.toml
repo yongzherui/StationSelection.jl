@@ -10,12 +10,12 @@ segment_file = "data/segment.csv"
 [model]
 type = "TwoStageSingleDetourModel"
 
-k = 5
-l = 10
+k = 5 # this is not important. it is dynamically determined
+l = 10 # this is not important. it is dynamically determined
 routing_weight = 1.0
 
 time_window = 120.0
-routing_delay = 900.0
+routing_delay = 600.0
 
 [scenario]
 start_time = "2025-05-12 08:00:00"
