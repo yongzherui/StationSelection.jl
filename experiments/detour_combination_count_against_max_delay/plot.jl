@@ -49,20 +49,14 @@ function main()
     plt = plot(
         df.max_delay,
         df.same_source_proportion;
-        label="same_source",
+        label="detour combinations",
         lw=2,
+        marker=:circle,
+        markersize=4,
         xlabel="Max delay (s)",
         ylabel="Proportion of total triplets",
         title=args["title"],
-        legend=:topleft
-    )
-
-    plot!(
-        plt,
-        df.max_delay,
-        df.same_dest_proportion;
-        label="same_dest",
-        lw=2
+        legend=:bottomright
     )
 
     savefig(plt, args["output"])
