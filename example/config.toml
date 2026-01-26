@@ -18,8 +18,8 @@ routing_delay = 1200.0     # Maximum allowed detour delay in seconds
 # Scenario time windows (start_time, end_time)
 # If empty, all requests are treated as a single scenario
 # Format: "YYYY-MM-DD HH:MM:SS"
-start_time = "2025-05-05 08:00:00"
-end_time = "2025-05-05 18:00:00"
+start_time = "2025-05-12 08:00:00"
+end_time = "2025-05-12 10:00:00"
 
 [solver]
 silent = true            # Suppress solver output
