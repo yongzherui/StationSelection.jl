@@ -12,7 +12,7 @@ export compute_station_pairwise_costs, read_routing_costs_from_segments
 compute_station_pairwise_costs(candidate_stations::DataFrame) -> Dict::Tuple{Int, Int}, Float64}
 matrix between candidate stations based on Haversine distance.
 """
-function compute_station_pairwise_costs(candidate_stations::DataFrame)::Dict{Tuple{Int, Int}, Float64}
+function compute_station_pairwise_costs(candidate_stations::DataFrame, walking_speed::Float=1.4)::Dict{Tuple{Int, Int}, Float64}
     n = nrow(candidate_stations)
     costs = Dict{Tuple{Int, Int}, Float64}()
 
@@ -24,7 +24,7 @@ function compute_station_pairwise_costs(candidate_stations::DataFrame)::Dict{Tup
             if i != j
                 p1 = [candidate_stations[i, :lat], candidate_stations[i, :lon]]
                 p2 = [candidate_stations[j, :lat], candidate_stations[j, :lon]]
-                costs[(i_id, j_id)] = evaluate(dist_func, p1, p2)
+                costs[(i_id, j_id)] = evaluate(dist_func, p1, p2) / walking_speed
             elseif i == j
                 costs[(i_id, j_id)] = 0.0
             end
@@ -43,7 +43,7 @@ Read routing costs from a segment CSV file and compute all-pairs shortest paths 
 The segment file should have columns:
 - from_station: origin station ID
 - to_station: destination station ID
-- seg_dist: segment distance (used as routing cost)
+- seg_time: segment travel time (used as routing cost)
 
 For station pairs not directly connected, computes shortest paths through the network.
 """
@@ -70,7 +70,7 @@ function read_routing_costs_from_segments(segment_file::String, candidate_statio
         if haskey(id_to_idx, from_id) && haskey(id_to_idx, to_id)
             i = id_to_idx[from_id]
             j = id_to_idx[to_id]
-            add_edge!(g, i, j, row.seg_dist)
+            add_edge!(g, i, j, row.seg_time)
         end
     end
 
