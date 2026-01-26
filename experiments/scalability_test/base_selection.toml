@@ -1,0 +1,25 @@
+# Base configuration for scalability test (TwoStageSingleDetourModel)
+
+name = "scalability_test"
+
+[paths]
+station_file = "data/station.csv"
+order_file = "data/order.csv"
+segment_file = "data/segment.csv"
+
+[model]
+type = "TwoStageSingleDetourModel"
+
+k = 5
+l = 10
+routing_weight = 1.0
+
+time_window = 120.0
+routing_delay = 900.0
+
+[scenario]
+start_time = "2025-05-12 08:00:00"
+end_time = "2025-05-12 12:00:00"
+
+[solver]
+silent = true
