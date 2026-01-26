@@ -81,7 +81,7 @@ echo "Job ID:  $JOB_ID"
 echo "Config:  $STUDY_DIR/config/selection/job_${JOB_ID}.toml"
 echo ""
 
-julia --project="$PROJECT_ROOT" "$STUDY_DIR/scripts/03_run_selection.jl" "$JOB_ID"
+julia --project=. "$STUDY_DIR/scripts/03_run_selection.jl" "$JOB_ID"
 EXIT_CODE=$?
 
 echo ""

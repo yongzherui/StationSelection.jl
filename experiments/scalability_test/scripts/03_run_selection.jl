@@ -10,7 +10,7 @@ using TOML, Dates, JSON, SHA, Logging
 using Pkg
 
 STUDY_DIR = abspath(joinpath(@__DIR__, ".."))
-PROJECT_ROOT = abspath(joinpath(STUDY_DIR, "../../.."))
+PROJECT_ROOT = abspath(joinpath(STUDY_DIR, "../.."))
 
 println("="^80)
 println("Pipeline Stage: Station Selection")
