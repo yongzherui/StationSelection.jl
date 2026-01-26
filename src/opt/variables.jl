@@ -1,4 +1,19 @@
 """
+Variable creation functions for station selection optimization models.
+
+These functions add decision variables to JuMP models. They are designed
+to be composable - models can pick and choose which variable sets they need.
+"""
+
+using JuMP
+
+export add_station_selection_variables!
+export add_scenario_activation_variables!
+export add_assignment_variables!
+export add_flow_variables!
+export add_detour_variables!
+
+"""
     add_station_selection_variables!(m::Model, data::StationSelectionData)
 
 Add binary station selection (build) variables y[j] for j ∈ 1:n.
@@ -26,12 +41,20 @@ function add_scenario_activation_variables!(m::Model, data::StationSelectionData
     return nothing
 end
 
+"""
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+
+Add assignment variables x[s][t][od][j,k] for each scenario, time, OD pair, and station pair.
+
+x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned to use
+stations j (pickup) and k (dropoff).
+"""
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
-
+    n = data.n_stations
     S = n_scenarios(data)
     x = [Dict{Int, Dict{Tuple{Int, Int}, Matrix{VariableRef}}}() for _ in 1:S]
 
@@ -45,26 +68,28 @@ function add_assignment_variables!(
         end
     end
 
-
     m[:x] = x
     return nothing
 end
 
+"""
+    add_flow_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+
+Add flow variables f[s][t][j,k] for each scenario, time, and station pair.
+
+f[s][t][j,k] = 1 if there is vehicle flow from station j to k at time t in scenario s.
+"""
 function add_flow_variables!(
         m::Model,
         data::StationSelectionData,
         mapping::PoolingScenarioOriginDestTimeMap
     )
-
     n = data.n_stations
     S = n_scenarios(data)
     f = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
 
     for s in 1:S
         for time_id in keys(mapping.Omega_s_t[s])
-            # we want the length of the Omega_s_t[s][time_id]
-            od_count = length(Omega_s_t[s][time_id])
-
             f[s][time_id] = @variable(m, [1:n, 1:n], Bin)
         end
     end
@@ -73,36 +98,67 @@ function add_flow_variables!(
     return nothing
 end
 
+"""
+    add_detour_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::PoolingScenarioOriginDestTimeMap,
+        Xi_same_source::Vector{Tuple{Int, Int, Int}},
+        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
+    )
+
+Add detour pooling variables for same-source and same-destination pooling.
+
+Variables:
+- u[s][t][idx] = 1 if same-source pooling for triplet Xi_same_source[idx] is used
+  at time t in scenario s. Triplet (j,k,l) means pooling trips (j→l) and (k→l).
+
+- v[s][t][idx] = 1 if same-dest pooling for quadruplet Xi_same_dest[idx] is used
+  at time t in scenario s. Quadruplet (j,k,l,t') means pooling trips (j→l) and (j→k),
+  where the second leg (k→l) occurs at time t+t'.
+
+Note: Xi_same_source and Xi_same_dest are computed externally via:
+- find_same_source_detour_combinations(model, data)
+- find_same_dest_detour_combinations(model, data)
+"""
 function add_detour_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::PoolingScenarioOriginDestTimeMap,
+        Xi_same_source::Vector{Tuple{Int, Int, Int}},
+        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
-    # we need to do calculations to know the potential route combinations
-    
     S = n_scenarios(data)
+    n_same_source = length(Xi_same_source)
+    n_same_dest = length(Xi_same_dest)
 
+    # Same-source pooling variables: u[s][t][idx]
+    # Indexed by scenario, time, and triplet index
+    u = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
 
-    # for the single source detour
-    # we run through each time id and check if the combination exists
-    u = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
-    v = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
+    # Same-dest pooling variables: v[s][t][idx]
+    v = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
 
     for s in 1:S
         for time_id in keys(mapping.Omega_s_t[s])
-            # we want to identify if there are combinations we can form here
-            same_source_combinations = mapping.Xi_same_source[s][time_id]
-            # add the same source variables
-            u[s][time_id] = @variable(m, [1:length(same_source_combinations)], Bin)
+            # Create variables for each triplet in Xi_same_source
+            if n_same_source > 0
+                u[s][time_id] = @variable(m, [1:n_same_source], Bin)
+            else
+                u[s][time_id] = VariableRef[]
+            end
 
-            same_dest_combinations = mapping.Xi_same_dest[s][time_id]
-            # add the ame dest variables
-            v[s][time_id] = @variable(m, [1:length(same_dest_combinations)], Bin)
+            # Create variables for each quadruplet in Xi_same_dest
+            if n_same_dest > 0
+                v[s][time_id] = @variable(m, [1:n_same_dest], Bin)
+            else
+                v[s][time_id] = VariableRef[]
+            end
         end
     end
 
-
-
+    m[:u] = u
     m[:v] = v
+
     return nothing
 end

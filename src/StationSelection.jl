@@ -54,7 +54,7 @@ export get_walking_cost, get_routing_cost, has_routing_costs
 
 # Re-export helper functions for testing
 export create_station_id_mappings, create_scenario_label_mappings
-export compute_time_to_od_mapping, compute_detour_sets
+export compute_time_to_od_mapping
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -64,6 +64,8 @@ export TwoStageSingleDetourModel
 
 # Re-export detour combinations
 export find_detour_combinations
+export find_same_source_detour_combinations
+export find_same_dest_detour_combinations
 
 # Re-export utility functions
 using .StationCosts

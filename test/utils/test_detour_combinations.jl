@@ -188,4 +188,57 @@
         unique_sorted = unique(sorted_combinations)
         @test length(sorted_combinations) == length(unique_sorted)
     end
+
+    @testset "Same source detour combinations" begin
+        station_ids = [1, 2, 3]
+
+        # Same setup as basic test
+        routing_costs = Dict{Tuple{Int,Int}, Float64}(
+            (1, 2) => 10.0, (2, 1) => 10.0,
+            (2, 3) => 12.0, (3, 2) => 12.0,
+            (1, 3) => 18.0, (3, 1) => 18.0,
+            (1, 1) => 0.0, (2, 2) => 0.0, (3, 3) => 0.0
+        )
+
+        data = create_test_data_with_routing(station_ids, routing_costs)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 5.0)
+
+        # Same source returns triplets (j, k, l)
+        same_source = find_same_source_detour_combinations(model, data)
+
+        @test length(same_source) >= 1
+        @test all(length(t) == 3 for t in same_source)
+        @test (1, 2, 3) in same_source
+    end
+
+    @testset "Same dest detour combinations with time delta" begin
+        station_ids = [1, 2, 3]
+
+        # Costs: j->k = 600 seconds, so with time_window=300, t' = 2
+        routing_costs = Dict{Tuple{Int,Int}, Float64}(
+            (1, 2) => 600.0, (2, 1) => 600.0,  # j->k takes 600s
+            (2, 3) => 300.0, (3, 2) => 300.0,  # k->l takes 300s
+            (1, 3) => 800.0, (3, 1) => 800.0,  # j->l takes 800s (longest)
+            (1, 1) => 0.0, (2, 2) => 0.0, (3, 3) => 0.0
+        )
+        # Triangle: 600 + 300 = 900 >= 800 (satisfied)
+        # Longest: 800 > 600 and 800 > 300 (satisfied)
+        # Delay: 900 <= 800 + 150 = 950 (satisfied with delay=150)
+
+        data = create_test_data_with_routing(station_ids, routing_costs)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 150.0)  # time_window=300
+
+        # Same dest returns quadruplets (j, k, l, t')
+        same_dest = find_same_dest_detour_combinations(model, data)
+
+        @test length(same_dest) >= 1
+        @test all(length(t) == 4 for t in same_dest)
+
+        # Find the (1, 2, 3, t') tuple
+        matching = filter(t -> t[1:3] == (1, 2, 3), same_dest)
+        @test length(matching) == 1
+
+        # t' = floor(600 / 300) = 2
+        @test matching[1][4] == 2
+    end
 end

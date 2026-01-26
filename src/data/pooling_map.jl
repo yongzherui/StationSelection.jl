@@ -1,18 +1,21 @@
 """
 Pooling scenario origin-destination time mapping for TwoStageSingleDetourModel.
 
-This module provides data structures and functions for mapping scenarios,
-time windows, and origin-destination pairs for vehicle pooling optimization.
+This module provides data structures for mapping scenarios and time windows
+to origin-destination pairs for pooling optimization.
+
+Note: Detour combinations (Xi) are computed separately via find_detour_combinations,
+find_same_source_detour_combinations, and find_same_dest_detour_combinations
+in detour_combinations.jl.
 """
 
 using DataFrames
 using Dates
-using Combinatorics
 
 export PoolingScenarioOriginDestTimeMap
 export create_pooling_scenario_origin_dest_time_map
 export create_station_id_mappings, create_scenario_label_mappings
-export compute_time_to_od_mapping, compute_detour_sets
+export compute_time_to_od_mapping
 
 
 """
@@ -28,8 +31,6 @@ Maps scenarios, time windows, and origin-destination pairs for pooling optimizat
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
 - `time_window::Int`: Time discretization window in seconds
 - `Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}`: Maps (scenario, time) → OD pairs
-- `Xi_same_source_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int}}}}`: Same-source detour triplets
-- `Xi_same_dest_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int}}}}`: Same-dest detour triplets
 """
 struct PoolingScenarioOriginDestTimeMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -43,10 +44,6 @@ struct PoolingScenarioOriginDestTimeMap
 
     # Omega[scenario_id][time_id] = [(o1, d1), (o2, d2), ...]
     Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
-
-    # Feasible detour triplets by scenario and time
-    Xi_same_source_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int}}}}
-    Xi_same_dest_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int, Int}}}}
 end
 
 
@@ -152,99 +149,16 @@ end
 
 
 """
-    compute_detour_sets(
-        Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}},
-        detour_combinations::Vector{Tuple{Int, Int, Int}},
-        data::StationSelectionData,
-        time_window::Int
-    ) -> (Dict{Int, Dict{Int, Vector{...}}}, Dict{Int, Dict{Int, Vector{...}}})
-
-Compute feasible same-source and same-destination detour triplets.
-
-# Arguments
-- `Omega_s_t`: OD pair mappings by scenario and time
-- `detour_combinations`: Valid (j, k, l) detour triplets
-- `data`: Station selection data with routing costs
-- `time_window`: Time discretization window
-
-# Returns
-- Tuple of (Xi_same_source_s_t, Xi_same_dest_s_t)
-"""
-function compute_detour_sets(
-    Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}},
-    detour_combinations::Vector{Tuple{Int, Int, Int}},
-    data::StationSelectionData,
-    time_window::Int
-)
-    Xi_same_source_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int}}}}()
-    Xi_same_dest_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int, Int, Int}}}}()
-
-    # Convert detour_combinations to Set for O(1) lookup
-    detour_set = Set(detour_combinations)
-
-    for (scenario_id, time_dict) in Omega_s_t
-        Xi_same_source_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int, Int}}}()
-        Xi_same_dest_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int, Int, Int}}}()
-
-        for (time_id, od_pairs) in time_dict
-            same_source_triplets = Vector{Tuple{Int, Int, Int}}()
-            same_dest_triplets = Vector{Tuple{Int, Int, Int, Int}}()
-
-            # Find same-source detours within the same time period
-            for (od1, od2) in permutations(od_pairs, 2)
-                # Same source check: od1[1] == od2[1]
-                if od1[1] != od2[1]
-                    continue
-                end
-
-                # Construct triplet (source, dest1, dest2)
-                jkl = (od1[1], od1[2], od2[2])
-
-                if jkl in detour_set
-                    push!(same_source_triplets, jkl)
-                end
-            end
-
-            # Find same-destination detours (may be in future time periods)
-            for od in od_pairs
-                # Find detour combinations where od matches (source, dest)
-                for (j, k, l) in detour_combinations
-                    if j != od[1] || l != od[2]
-                        continue
-                    end
-
-                    # Compute future time_id based on travel time j->k
-                    travel_time_jk = get_routing_cost(data, j, k)
-                    future_time_id = time_id + floor(Int, travel_time_jk / time_window)
-
-                    # Check if future time exists and has matching OD pair (k, l)
-                    if haskey(time_dict, future_time_id)
-                        if (k, l) in time_dict[future_time_id]
-                            push!(same_dest_triplets, (j, k, l, future_time_id))
-                        end
-                    end
-                end
-            end
-
-            Xi_same_source_s_t[scenario_id][time_id] = same_source_triplets
-            Xi_same_dest_s_t[scenario_id][time_id] = same_dest_triplets
-        end
-    end
-
-    return Xi_same_source_s_t, Xi_same_dest_s_t
-end
-
-
-"""
     create_pooling_scenario_origin_dest_time_map(
         model::TwoStageSingleDetourModel,
         data::StationSelectionData
     ) -> PoolingScenarioOriginDestTimeMap
 
-Create a complete pooling scenario map with OD pairs and detour feasibility sets.
+Create a pooling scenario map with OD pairs organized by scenario and time.
 
-This is the main factory function that orchestrates all the helper functions
-to build the complete PoolingScenarioOriginDestTimeMap.
+Note: Detour combinations (Xi) should be computed separately using:
+- find_same_source_detour_combinations(model, data) -> Vector{Tuple{Int,Int,Int}}
+- find_same_dest_detour_combinations(model, data) -> Vector{Tuple{Int,Int,Int,Int}}
 """
 function create_pooling_scenario_origin_dest_time_map(
     model::TwoStageSingleDetourModel,
@@ -273,14 +187,6 @@ function create_pooling_scenario_origin_dest_time_map(
         end
     end
 
-    # Find detour combinations
-    detour_combinations = find_detour_combinations(model, data)
-
-    # Compute detour feasibility sets
-    Xi_same_source_s_t, Xi_same_dest_s_t = compute_detour_sets(
-        Omega_s_t, detour_combinations, data, time_window
-    )
-
     return PoolingScenarioOriginDestTimeMap(
         station_id_to_array_idx,
         array_idx_to_station_id,
@@ -288,8 +194,6 @@ function create_pooling_scenario_origin_dest_time_map(
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
         time_window,
-        Omega_s_t,
-        Xi_same_source_s_t,
-        Xi_same_dest_s_t
+        Omega_s_t
     )
 end
