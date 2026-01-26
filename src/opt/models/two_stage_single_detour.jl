@@ -16,9 +16,9 @@ struct TwoStageSingleDetourModel <: AbstractTwoStageModel
        )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
-        routing_weight > 0 || throw(ArgumentError("routing_weight must be positive"))
+        routing_weight >= 0 || throw(ArgumentError("routing_weight must be non-negative"))
         time_window > 0 || throw(ArgumentError("time_window must be positive"))
-        routing_delay > 0 || throw(ArgumentError("routing_delay must be positive"))
+        routing_delay >= 0 || throw(ArgumentError("routing_delay must be non-negative"))
 
         new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay))
     end

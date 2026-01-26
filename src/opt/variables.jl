@@ -3,6 +3,17 @@ Variable creation functions for station selection optimization models.
 
 These functions add decision variables to JuMP models. They are designed
 to be composable - models can pick and choose which variable sets they need.
+
+Uses multiple dispatch to provide specialized implementations for different
+mapping types (PoolingScenarioOriginDestTimeMap, ClusteringScenarioODMap,
+ClusteringBaseMap).
+
+Organization:
+1. Station Selection Variables (y)
+2. Scenario Activation Variables (z)
+3. Assignment Variables (x) - with dispatch by mapping type
+4. Flow Variables (f)
+5. Detour Variables (u, v)
 """
 
 using JuMP
@@ -13,12 +24,19 @@ export add_assignment_variables!
 export add_flow_variables!
 export add_detour_variables!
 
+
+# ============================================================================
+# 1. Station Selection Variables (y)
+# ============================================================================
+
 """
     add_station_selection_variables!(m::Model, data::StationSelectionData)
 
 Add binary station selection (build) variables y[j] for j ∈ 1:n.
 
 y[j] = 1 if station j is selected/built (permanent decision).
+
+Used by: All models
 """
 function add_station_selection_variables!(m::Model, data::StationSelectionData)
     before = JuMP.num_variables(m)
@@ -27,6 +45,11 @@ function add_station_selection_variables!(m::Model, data::StationSelectionData)
     return JuMP.num_variables(m) - before
 end
 
+
+# ============================================================================
+# 2. Scenario Activation Variables (z)
+# ============================================================================
+
 """
     add_scenario_activation_variables!(m::Model, data::StationSelectionData)
 
@@ -34,6 +57,8 @@ Add binary scenario activation variables z[j,s] for stations and scenarios.
 
 z[j,s] = 1 if station j is activated in scenario s.
 Allows different subsets of built stations to be active in each scenario.
+
+Used by: TwoStageSingleDetourModel, ClusteringTwoStageODModel
 """
 function add_scenario_activation_variables!(m::Model, data::StationSelectionData)
     before = JuMP.num_variables(m)
@@ -43,13 +68,20 @@ function add_scenario_activation_variables!(m::Model, data::StationSelectionData
     return JuMP.num_variables(m) - before
 end
 
+
+# ============================================================================
+# 3. Assignment Variables (x) - Multiple Dispatch by Mapping Type
+# ============================================================================
+
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
 
-Add assignment variables x[s][t][od][j,k] for each scenario, time, OD pair, and station pair.
+Add assignment variables x[s][t][od][j,k] for TwoStageSingleDetourModel.
 
-x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned to use
-stations j (pickup) and k (dropoff).
+x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned
+to use stations j (pickup) and k (dropoff).
+
+Structure: scenario → time → OD pair → (pickup, dropoff) matrix
 """
 function add_assignment_variables!(
         m::Model,
@@ -76,11 +108,72 @@ function add_assignment_variables!(
 end
 
 """
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
+
+Add assignment variables x[s][od_idx][j,k] for ClusteringTwoStageODModel.
+
+x[s][od_idx][j,k] = 1 if OD pair od_idx in scenario s is assigned to use
+stations j (pickup) and k (dropoff).
+
+Structure: scenario → OD index → (pickup, dropoff) matrix
+No time dimension - OD pairs are aggregated across time within each scenario.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap
+    )
+    before = JuMP.num_variables(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
+
+    for s in 1:S
+        num_od_pairs = length(mapping.Omega_s[s])
+        for od_idx in 1:num_od_pairs
+            x[s][od_idx] = @variable(m, [1:n, 1:n], Bin)
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+"""
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseMap)
+
+Add assignment variables x[i,j] for ClusteringBaseModel.
+
+x[i,j] = 1 if station location i is assigned to medoid station j.
+
+Structure: Simple n×n matrix (station-to-station assignment)
+No scenario, time, or OD dimensions - all aggregated.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringBaseMap
+    )
+    before = JuMP.num_variables(m)
+    n = mapping.n_stations
+    @variable(m, x[1:n, 1:n], Bin)
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+
+# ============================================================================
+# 4. Flow Variables (f)
+# ============================================================================
+
+"""
     add_flow_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
 
 Add flow variables f[s][t][j,k] for each scenario, time, and station pair.
 
 f[s][t][j,k] = 1 if there is vehicle flow from station j to k at time t in scenario s.
+
+Used by: TwoStageSingleDetourModel
 """
 function add_flow_variables!(
         m::Model,
@@ -101,6 +194,11 @@ function add_flow_variables!(
     m[:f] = f
     return JuMP.num_variables(m) - before
 end
+
+
+# ============================================================================
+# 5. Detour Variables (u, v)
+# ============================================================================
 
 """
     add_detour_variables!(
@@ -124,6 +222,8 @@ Variables:
 Note: Xi_same_source and Xi_same_dest are computed externally via:
 - find_same_source_detour_combinations(model, data)
 - find_same_dest_detour_combinations(model, data)
+
+Used by: TwoStageSingleDetourModel
 """
 function add_detour_variables!(
         m::Model,
@@ -170,7 +270,7 @@ function add_detour_variables!(
         end
     end
 
-    m[:u] = u
+    m[:u] = u  # Store even if empty (no valid detours)
     m[:v] = v
     m[:v_idx_map] = v_idx_map
 

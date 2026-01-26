@@ -1,26 +1,19 @@
 """
-Objective function for TwoStageSingleDetourModel.
+Objective functions for station selection optimization models.
 
-The objective minimizes:
-- Assignment costs: walking distances + routing costs for each OD assignment, weighted by demand
-- Routing costs via flow variables
-- Minus pooling savings from same-origin and same-destination detours
+Contains objective functions for:
+- TwoStageSingleDetourModel: walking + routing costs with pooling savings
+- ClusteringTwoStageODModel: walking + routing costs (no pooling)
+- ClusteringBaseModel: simple walking cost minimization (k-medoids style)
 
-Objective:
-    min Σ_s [ Σ_{(o,d,t)∈Ω} Σ_{j,k} q_{od,s,t} (d^origin_{oj} + d^dest_{dk} + c_{jk}) x_{od,t,jk,s}
-            + γ (Σ_{j,k,t} c_{jk} f_{t,jk,s}
-                 - Σ_{(j,k,l)∈Ξ,t} r_{jl,kl} · u_{t,idx,s}
-                 - Σ_{(j,k,l,t')∈Ξ,t} r_{jl,jk} · v_{t,idx,s}) ]
-
-Where:
-- q_{od,s,t} = demand count (number of requests) for OD pair (o,d) in scenario s at time t
-- r_{jl,kl} = c_{jl} - c_{kl} (savings from same-origin pooling)
-- r_{jl,jk} = c_{jl} - c_{jk} (savings from same-dest pooling)
+Uses multiple dispatch for different model/mapping types.
 """
 
 using JuMP
 
 export set_two_stage_single_detour_objective!
+export set_clustering_od_objective!
+export set_clustering_base_objective!
 
 
 """
@@ -158,6 +151,117 @@ function set_two_stage_single_detour_objective!(
     end
 
     @objective(m, Min, obj_expr)
+
+    return nothing
+end
+
+
+# ============================================================================
+# ClusteringTwoStageODModel Objective
+# ============================================================================
+
+"""
+    set_clustering_od_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap;
+        routing_weight::Float64=1.0
+    )
+
+Set the minimization objective for ClusteringTwoStageODModel.
+
+Objective:
+    min Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} q_{od,s} · (d^origin_{oj} + d^dest_{dk} + λ·c_{jk}) · x[s][od_idx][j,k]
+
+Where:
+- q_{od,s} = demand count for OD pair (o,d) in scenario s (aggregated across time)
+- d^origin_{oj} = walking cost from origin o to pickup station j
+- d^dest_{dk} = walking cost from dropoff station k to destination d
+- c_{jk} = routing cost from station j to k
+- λ (routing_weight) = weight for routing costs
+
+# Arguments
+- `m::Model`: JuMP model with variables x, y, z already added
+- `data::StationSelectionData`: Problem data with walking_costs and routing_costs
+- `mapping::ClusteringScenarioODMap`: Scenario to OD mapping
+- `routing_weight::Float64`: Weight λ for routing costs (default 1.0)
+"""
+function set_clustering_od_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap;
+        routing_weight::Float64=1.0
+    )
+
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = m[:x]
+
+    @objective(m, Min,
+        sum(
+            mapping.Q_s[s][(o, d)] * (
+                get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
+                get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
+                routing_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
+            ) * x[s][od_idx][j, k]
+            for s in 1:S
+            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            for j in 1:n
+            for k in 1:n
+        )
+    )
+
+    return nothing
+end
+
+
+# ============================================================================
+# ClusteringBaseModel Objective
+# ============================================================================
+
+"""
+    set_clustering_base_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringBaseMap
+    )
+
+Set the minimization objective for ClusteringBaseModel.
+
+Objective:
+    min Σᵢⱼ qᵢ · d(i,j) · x[i,j]
+
+Where:
+- qᵢ = request_counts[i] = total pickup + dropoff requests at station location i
+- d(i,j) = walking cost from station i to station j
+- x[i,j] = 1 if station location i is assigned to medoid station j
+
+This is the classic k-medoids/p-median objective - minimizing total weighted
+distance from demand points to their assigned facilities.
+
+# Arguments
+- `m::Model`: JuMP model with variables x, y already added
+- `data::StationSelectionData`: Problem data with walking_costs
+- `mapping::ClusteringBaseMap`: Mapping with request counts
+"""
+function set_clustering_base_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringBaseMap
+    )
+
+    n = mapping.n_stations
+    x = m[:x]
+
+    @objective(m, Min,
+        sum(
+            mapping.request_counts[mapping.array_idx_to_station_id[i]] *
+            get_walking_cost(data, mapping.array_idx_to_station_id[i], mapping.array_idx_to_station_id[j]) *
+            x[i, j]
+            for i in 1:n
+            for j in 1:n
+        )
+    )
 
     return nothing
 end
