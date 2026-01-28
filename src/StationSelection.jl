@@ -72,6 +72,7 @@ export get_walking_cost, get_routing_cost, has_routing_costs
 # Re-export helper functions for testing
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
+export has_walking_distance_limit, get_valid_jk_pairs
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -89,7 +90,8 @@ export find_same_dest_detour_combinations
 # Re-export optimization functions
 export run_opt, build_model, build_model_with_counts
 export add_station_selection_variables!, add_scenario_activation_variables!
-export add_assignment_variables!, add_flow_variables!, add_detour_variables!
+export add_assignment_variables!, add_assignment_variables_with_walking_distance_limit!
+export add_flow_variables!, add_detour_variables!
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!

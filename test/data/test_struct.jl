@@ -219,15 +219,20 @@
         # Test validation: l must be >= k
         @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 0.5, 300.0, 60.0)
 
-        # Test validation: routing_weight must be positive
-        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.0, 300.0, 60.0)
+        # Test validation: routing_weight must be non-negative
         @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -0.5, 300.0, 60.0)
+        # 0.0 is valid for routing_weight
+        model_zero_rw = TwoStageSingleDetourModel(3, 5, 0.0, 300.0, 60.0)
+        @test model_zero_rw.routing_weight == 0.0
 
         # Test validation: time_window must be positive
         @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 0.0, 60.0)
 
-        # Test validation: routing_delay must be positive
-        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 0.0)
+        # Test validation: routing_delay must be non-negative
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, -1.0)
+        # 0.0 is valid for routing_delay
+        model_zero_rd = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 0.0)
+        @test model_zero_rd.routing_delay == 0.0
     end
 
     @testset "PoolingScenarioOriginDestTimeMap structure" begin

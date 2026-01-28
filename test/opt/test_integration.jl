@@ -1,6 +1,19 @@
-@testset "Model Integration" begin
+# Check if Gurobi is available
+gurobi_available = try
     using Gurobi
+    true
+catch
+    false
+end
+
+@testset "Model Integration" begin
     using JuMP
+
+    if !gurobi_available
+        @warn "Gurobi not available, skipping integration tests"
+        @test true  # Placeholder to avoid empty testset
+        return
+    end
 
     # Create test data that works for all models
     stations = DataFrame(
@@ -265,9 +278,9 @@
         @testset "TwoStageSingleDetourModel" begin
             @test_throws ArgumentError TwoStageSingleDetourModel(0, 5, 1.0, 120.0, 60.0)  # k must be positive
             @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 1.0, 120.0, 60.0)  # l must be >= k
-            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.0, 120.0, 60.0)  # routing_weight must be positive
+            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -1.0, 120.0, 60.0) # routing_weight must be non-negative
             @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 1.0, 0.0, 60.0)   # time_window must be positive
-            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 1.0, 120.0, 0.0)  # routing_delay must be positive
+            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 1.0, 120.0, -1.0) # routing_delay must be non-negative
         end
 
         @testset "ClusteringTwoStageODModel" begin

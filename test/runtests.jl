@@ -2,6 +2,8 @@ using Test
 using StationSelection
 using DataFrames
 using Dates
+using JuMP
+const MOI = JuMP.MOI
 
 @testset "StationSelection.jl" begin
     @testset "Module loads" begin
@@ -47,5 +49,9 @@ using Dates
 
     @testset "Detour Combinations" begin
         include("utils/test_detour_combinations.jl")
+    end
+
+    @testset "Model Integration" begin
+        include("opt/test_integration.jl")
     end
 end

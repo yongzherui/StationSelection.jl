@@ -16,6 +16,7 @@ export PoolingScenarioOriginDestTimeMap
 export create_pooling_scenario_origin_dest_time_map
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
+export has_walking_distance_limit, get_valid_jk_pairs
 
 
 """
@@ -32,6 +33,10 @@ Maps scenarios, time windows, and origin-destination pairs for pooling optimizat
 - `time_window::Int`: Time discretization window in seconds
 - `Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}`: Maps (scenario, time) → OD pairs
 - `Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}`: Demand count q_{od,s,t} - number of requests per OD pair per scenario per time
+- `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
+- `valid_jk_pairs::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs (array indices).
+  Only populated when max_walking_distance is set. j is valid if walking_cost(o,j) ≤ max_walking_distance,
+  k is valid if walking_cost(k,d) ≤ max_walking_distance.
 """
 struct PoolingScenarioOriginDestTimeMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -48,6 +53,13 @@ struct PoolingScenarioOriginDestTimeMap
 
     # Q[scenario_id][time_id][(o, d)] = count of requests for OD pair (o,d)
     Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
+
+    # Walking distance constraint
+    max_walking_distance::Union{Float64, Nothing}
+
+    # valid_jk_pairs[(o, d)] = [(j1, k1), (j2, k2), ...] as array indices
+    # Only populated when max_walking_distance is set
+    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 end
 
 
@@ -154,12 +166,78 @@ end
 
 
 """
+    compute_valid_jk_pairs(
+        od_pairs::Set{Tuple{Int, Int}},
+        data::StationSelectionData,
+        station_id_to_array_idx::Dict{Int, Int},
+        array_idx_to_station_id::Vector{Int},
+        max_walking_distance::Float64
+    ) -> Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+
+Compute valid (j, k) pickup/dropoff station pairs for each OD pair based on walking distance.
+
+For an OD pair (o, d):
+- j is a valid pickup station if walking_cost(o, j) ≤ max_walking_distance
+- k is a valid dropoff station if walking_cost(k, d) ≤ max_walking_distance
+- The pair (j, k) is valid if both j and k are valid
+
+Returns a dictionary mapping (o, d) → [(j1, k1), (j2, k2), ...] where j, k are array indices.
+"""
+function compute_valid_jk_pairs(
+    od_pairs::Set{Tuple{Int, Int}},
+    data::StationSelectionData,
+    station_id_to_array_idx::Dict{Int, Int},
+    array_idx_to_station_id::Vector{Int},
+    max_walking_distance::Float64
+)::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+
+    n = length(array_idx_to_station_id)
+    valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+
+    for (o, d) in od_pairs
+        # Find valid pickup stations j for origin o
+        valid_j = Int[]
+        for j in 1:n
+            j_id = array_idx_to_station_id[j]
+            if get_walking_cost(data, o, j_id) <= max_walking_distance
+                push!(valid_j, j)
+            end
+        end
+
+        # Find valid dropoff stations k for destination d
+        valid_k = Int[]
+        for k in 1:n
+            k_id = array_idx_to_station_id[k]
+            if get_walking_cost(data, k_id, d) <= max_walking_distance
+                push!(valid_k, k)
+            end
+        end
+
+        # Generate all valid (j, k) pairs
+        pairs = Tuple{Int, Int}[]
+        for j in valid_j
+            for k in valid_k
+                push!(pairs, (j, k))
+            end
+        end
+
+        valid_jk_pairs[(o, d)] = pairs
+    end
+
+    return valid_jk_pairs
+end
+
+
+"""
     create_pooling_scenario_origin_dest_time_map(
         model::TwoStageSingleDetourModel,
         data::StationSelectionData
     ) -> PoolingScenarioOriginDestTimeMap
 
 Create a pooling scenario map with OD pairs organized by scenario and time.
+
+If model.max_walking_distance is set, also computes valid (j, k) station pairs
+for each OD pair based on walking distance constraints.
 
 Note: Detour combinations (Xi) should be computed separately using:
 - find_same_source_detour_combinations(model, data) -> Vector{Tuple{Int,Int,Int}}
@@ -183,6 +261,9 @@ function create_pooling_scenario_origin_dest_time_map(
     Omega_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
     Q_s_t = Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}()
 
+    # Collect all unique OD pairs across all scenarios for valid_jk_pairs computation
+    all_od_pairs = Set{Tuple{Int, Int}}()
+
     for (scenario_id, scenario_data) in enumerate(data.scenarios)
         # Get OD pair counts (single pass through data)
         time_to_od_count = compute_time_to_od_count_mapping(scenario_data, time_window)
@@ -190,11 +271,23 @@ function create_pooling_scenario_origin_dest_time_map(
         # Derive unique OD pairs from count dictionary keys
         Omega_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int}}}()
         for (time_id, od_count_dict) in time_to_od_count
-            Omega_s_t[scenario_id][time_id] = collect(keys(od_count_dict))
+            od_pairs = collect(keys(od_count_dict))
+            Omega_s_t[scenario_id][time_id] = od_pairs
+            union!(all_od_pairs, od_pairs)
         end
 
         # Store the counts
         Q_s_t[scenario_id] = time_to_od_count
+    end
+
+    # Compute valid (j, k) pairs if max_walking_distance is set
+    max_walking_distance = model.max_walking_distance
+    if !isnothing(max_walking_distance)
+        valid_jk_pairs = compute_valid_jk_pairs(
+            all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
+        )
+    else
+        valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
     end
 
     return PoolingScenarioOriginDestTimeMap(
@@ -205,6 +298,32 @@ function create_pooling_scenario_origin_dest_time_map(
         array_idx_to_scenario_label,
         time_window,
         Omega_s_t,
-        Q_s_t
+        Q_s_t,
+        max_walking_distance,
+        valid_jk_pairs
     )
+end
+
+
+"""
+    has_walking_distance_limit(mapping::PoolingScenarioOriginDestTimeMap) -> Bool
+
+Check if the mapping has valid (j, k) pairs computed based on walking distance limits.
+"""
+has_walking_distance_limit(mapping::PoolingScenarioOriginDestTimeMap) = !isnothing(mapping.max_walking_distance)
+
+
+"""
+    get_valid_jk_pairs(mapping::PoolingScenarioOriginDestTimeMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
+
+Get the valid (j, k) station pairs for an OD pair. Returns all pairs if no walking limit is set.
+"""
+function get_valid_jk_pairs(mapping::PoolingScenarioOriginDestTimeMap, o::Int, d::Int)
+    if has_walking_distance_limit(mapping)
+        return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
+    else
+        # No limit - return all pairs
+        n = length(mapping.array_idx_to_station_id)
+        return [(j, k) for j in 1:n for k in 1:n]
+    end
 end
