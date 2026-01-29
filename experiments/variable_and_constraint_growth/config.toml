@@ -1,0 +1,30 @@
+# Configuration for StationSelection optimization run
+
+[paths]
+# Data file paths (relative to project root)
+station_file = "data/station.csv"
+order_file = "data/order.csv"
+segment_file = "data/segment.csv"
+
+[model]
+# Model type: "TwoStageSingleDetourModel" or "ClusteringTwoStageODModel"
+type = "TwoStageSingleDetourModel"
+
+# Common parameters
+k = 5                    # Number of active stations per scenario
+l = 10                   # Total number of stations to build
+routing_weight = 1.0     # Weight γ/λ for routing/pooling terms in objective
+
+# TwoStageSingleDetourModel specific parameters (ignored for ClusteringTwoStageODModel)
+time_window = 120.0      # Time discretization window in seconds
+routing_delay = 900.0    # Maximum allowed detour delay in seconds
+
+[scenario]
+# Scenario time windows (start_time, end_time)
+# If empty, all requests are treated as a single scenario
+# Format: "YYYY-MM-DD HH:MM:SS"
+start_time = "2025-05-12 08:00:00"
+end_time = "2025-05-12 12:00:00"
+
+[solver]
+silent = true            # Suppress solver output

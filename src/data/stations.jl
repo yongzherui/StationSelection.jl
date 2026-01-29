@@ -1,10 +1,6 @@
-module Stations
-
 using CSV
 using DataFrames
 using ..CoordTransform: bd09_to_wgs84
-
-export read_candidate_stations
 
 """
     read_candidate_stations(file_path::String) -> DataFrame
@@ -35,5 +31,3 @@ function read_candidate_stations(file_path::String)::DataFrame
     rename!(df, Dict(:station_id => :id, :station_lon => :lon, :station_lat => :lat))
     return df
 end
-
-end # module

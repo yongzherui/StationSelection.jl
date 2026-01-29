@@ -1,0 +1,297 @@
+# Check if Gurobi is available
+gurobi_available = try
+    using Gurobi
+    true
+catch
+    false
+end
+
+@testset "Model Integration" begin
+    using JuMP
+
+    if !gurobi_available
+        @warn "Gurobi not available, skipping integration tests"
+        @test true  # Placeholder to avoid empty testset
+        return
+    end
+
+    # Create test data that works for all models
+    stations = DataFrame(
+        id = [1, 2, 3, 4, 5],
+        lon = [113.0, 113.1, 113.2, 113.3, 113.4],
+        lat = [28.0, 28.1, 28.2, 28.3, 28.4]
+    )
+
+    requests = DataFrame(
+        id = [1, 2, 3, 4, 5, 6],
+        start_station_id = [1, 1, 2, 3, 4, 2],
+        end_station_id = [2, 3, 3, 4, 5, 5],
+        request_time = [
+            DateTime(2024, 1, 1, 8, 0, 0),
+            DateTime(2024, 1, 1, 8, 1, 0),
+            DateTime(2024, 1, 1, 8, 2, 0),
+            DateTime(2024, 1, 1, 8, 3, 0),
+            DateTime(2024, 1, 1, 8, 4, 0),
+            DateTime(2024, 1, 1, 8, 5, 0)
+        ]
+    )
+
+    # Create costs
+    walking_costs = Dict{Tuple{Int,Int}, Float64}()
+    routing_costs = Dict{Tuple{Int,Int}, Float64}()
+    for i in 1:5, j in 1:5
+        walking_costs[(i, j)] = abs(i - j) * 100.0
+        routing_costs[(i, j)] = abs(i - j) * 50.0
+    end
+
+    # Create scenario
+    scenarios = [("2024-01-01 08:00:00", "2024-01-01 09:00:00")]
+
+    data = StationSelection.create_station_selection_data(
+        stations, requests, walking_costs;
+        routing_costs=routing_costs,
+        scenarios=scenarios
+    )
+
+    # Create Gurobi environment once
+    env = Gurobi.Env()
+
+    @testset "TwoStageSingleDetourModel build" begin
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0)
+
+        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
+            model, data, env
+        )
+
+        # Check that model was created
+        @test m isa JuMP.Model
+
+        # Check variables exist
+        @test haskey(var_counts, "station_selection")
+        @test haskey(var_counts, "scenario_activation")
+        @test haskey(var_counts, "assignment")
+        @test haskey(var_counts, "flow")
+        @test haskey(var_counts, "detour")
+
+        @test var_counts["station_selection"] == 5  # n stations
+        @test var_counts["scenario_activation"] == 5  # n * S = 5 * 1
+
+        # Check constraints exist
+        @test haskey(con_counts, "station_limit")
+        @test haskey(con_counts, "scenario_activation_limit")
+        @test haskey(con_counts, "activation_linking")
+        @test haskey(con_counts, "assignment")
+        @test haskey(con_counts, "assignment_to_active")
+        @test haskey(con_counts, "assignment_to_flow")
+
+        @test con_counts["station_limit"] == 1
+        @test con_counts["scenario_activation_limit"] == 1  # S scenarios
+        @test con_counts["activation_linking"] == 5  # n * S
+
+        # Check extra counts
+        @test haskey(extra_counts, "same_source")
+        @test haskey(extra_counts, "same_dest")
+
+        # Check model variables are accessible
+        @test haskey(object_dictionary(m), :y)
+        @test haskey(object_dictionary(m), :z)
+        @test haskey(object_dictionary(m), :x)
+        @test haskey(object_dictionary(m), :f)
+    end
+
+    @testset "ClusteringTwoStageODModel build" begin
+        model = ClusteringTwoStageODModel(2, 3, 1.0)
+
+        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
+            model, data, env
+        )
+
+        # Check that model was created
+        @test m isa JuMP.Model
+
+        # Check variables exist
+        @test haskey(var_counts, "station_selection")
+        @test haskey(var_counts, "scenario_activation")
+        @test haskey(var_counts, "assignment")
+
+        @test var_counts["station_selection"] == 5  # n stations
+        @test var_counts["scenario_activation"] == 5  # n * S = 5 * 1
+
+        # Check constraints exist
+        @test haskey(con_counts, "station_limit")
+        @test haskey(con_counts, "scenario_activation_limit")
+        @test haskey(con_counts, "activation_linking")
+        @test haskey(con_counts, "assignment")
+        @test haskey(con_counts, "assignment_to_active")
+
+        @test con_counts["station_limit"] == 1
+        @test con_counts["scenario_activation_limit"] == 1
+        @test con_counts["activation_linking"] == 5
+
+        # Check extra counts
+        @test haskey(extra_counts, "total_od_pairs")
+        @test extra_counts["total_od_pairs"] > 0
+
+        # Check model variables are accessible
+        @test haskey(object_dictionary(m), :y)
+        @test haskey(object_dictionary(m), :z)
+        @test haskey(object_dictionary(m), :x)
+    end
+
+    @testset "ClusteringBaseModel build" begin
+        model = ClusteringBaseModel(3)
+
+        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
+            model, data, env
+        )
+
+        # Check that model was created
+        @test m isa JuMP.Model
+
+        # Check variables exist
+        @test haskey(var_counts, "station_selection")
+        @test haskey(var_counts, "assignment")
+
+        @test var_counts["station_selection"] == 5  # n stations
+        @test var_counts["assignment"] == 25  # n * n = 5 * 5
+
+        # Check constraints exist
+        @test haskey(con_counts, "station_limit")
+        @test haskey(con_counts, "assignment")
+        @test haskey(con_counts, "assignment_to_selected")
+
+        @test con_counts["station_limit"] == 1
+        @test con_counts["assignment"] == 5  # n stations
+        @test con_counts["assignment_to_selected"] == 25  # n * n
+
+        # Check extra counts
+        @test haskey(extra_counts, "total_requests")
+        @test extra_counts["total_requests"] > 0
+
+        # Check model variables are accessible
+        @test haskey(object_dictionary(m), :y)
+        @test haskey(object_dictionary(m), :x)
+    end
+
+    @testset "run_opt without optimization" begin
+        # Test run_opt with do_optimize=false for all three models
+
+        @testset "TwoStageSingleDetourModel" begin
+            model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0)
+            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+                model, data;
+                optimizer_env=env,
+                silent=true,
+                return_model=true,
+                return_counts=true,
+                do_optimize=false
+            )
+
+            @test term_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(obj)
+            @test isnothing(solution)
+            @test m isa JuMP.Model
+            @test !isempty(vc)
+            @test !isempty(cc)
+        end
+
+        @testset "ClusteringTwoStageODModel" begin
+            model = ClusteringTwoStageODModel(2, 3, 1.0)
+            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+                model, data;
+                optimizer_env=env,
+                silent=true,
+                return_model=true,
+                return_counts=true,
+                do_optimize=false
+            )
+
+            @test term_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(obj)
+            @test isnothing(solution)
+            @test m isa JuMP.Model
+            @test !isempty(vc)
+            @test !isempty(cc)
+        end
+
+        @testset "ClusteringBaseModel" begin
+            model = ClusteringBaseModel(3)
+            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+                model, data;
+                optimizer_env=env,
+                silent=true,
+                return_model=true,
+                return_counts=true,
+                do_optimize=false
+            )
+
+            @test term_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(obj)
+            @test isnothing(solution)
+            @test m isa JuMP.Model
+            @test !isempty(vc)
+            @test !isempty(cc)
+        end
+    end
+
+    @testset "Mapping creation" begin
+        @testset "PoolingScenarioOriginDestTimeMap" begin
+            model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0)
+            mapping = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
+
+            @test length(mapping.station_id_to_array_idx) == 5
+            @test length(mapping.array_idx_to_station_id) == 5
+            @test mapping.time_window == 120
+            @test length(mapping.scenarios) == 1
+            @test haskey(mapping.Omega_s_t, 1)
+            @test haskey(mapping.Q_s_t, 1)
+        end
+
+        @testset "ClusteringScenarioODMap" begin
+            model = ClusteringTwoStageODModel(2, 3, 1.0)
+            mapping = StationSelection.create_clustering_scenario_od_map(model, data)
+
+            @test length(mapping.station_id_to_array_idx) == 5
+            @test length(mapping.array_idx_to_station_id) == 5
+            @test length(mapping.scenarios) == 1
+            @test haskey(mapping.Omega_s, 1)
+            @test haskey(mapping.Q_s, 1)
+            @test length(mapping.Omega_s[1]) > 0  # Has OD pairs
+        end
+
+        @testset "ClusteringBaseMap" begin
+            model = ClusteringBaseModel(3)
+            mapping = StationSelection.create_clustering_base_map(model, data)
+
+            @test length(mapping.station_id_to_array_idx) == 5
+            @test length(mapping.array_idx_to_station_id) == 5
+            @test mapping.n_stations == 5
+            @test !isempty(mapping.request_counts)
+
+            # Check request counts include both pickups and dropoffs
+            total_requests = sum(values(mapping.request_counts))
+            @test total_requests == 12  # 6 requests × 2 (pickup + dropoff)
+        end
+    end
+
+    @testset "Model construction validation" begin
+        @testset "TwoStageSingleDetourModel" begin
+            @test_throws ArgumentError TwoStageSingleDetourModel(0, 5, 1.0, 120.0, 60.0)  # k must be positive
+            @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 1.0, 120.0, 60.0)  # l must be >= k
+            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -1.0, 120.0, 60.0) # routing_weight must be non-negative
+            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 1.0, 0.0, 60.0)   # time_window must be positive
+            @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 1.0, 120.0, -1.0) # routing_delay must be non-negative
+        end
+
+        @testset "ClusteringTwoStageODModel" begin
+            @test_throws ArgumentError ClusteringTwoStageODModel(0, 5, 1.0)   # k must be positive
+            @test_throws ArgumentError ClusteringTwoStageODModel(5, 3, 1.0)   # l must be >= k
+            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5, 0.0)   # routing_weight must be positive
+        end
+
+        @testset "ClusteringBaseModel" begin
+            @test_throws ArgumentError ClusteringBaseModel(0)   # k must be positive
+            @test_throws ArgumentError ClusteringBaseModel(-1)  # k must be positive
+        end
+    end
+end
