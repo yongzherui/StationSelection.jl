@@ -1,5 +1,3 @@
-module StationCosts
-
 using Distances
 using DataFrames
 using CSV
@@ -89,5 +87,3 @@ function read_routing_costs_from_segments(segment_file::String, candidate_statio
 
     return routing_costs
 end
-
-end # module

@@ -1,5 +1,3 @@
-module CoordTransform
-
 # Constants
 const x_pi = π * 3000.0 / 180.0
 const a = 6378245.0
@@ -65,5 +63,3 @@ function bd09_to_wgs84(bd_lon::Float64, bd_lat::Float64)
 end
 
 export bd09_to_wgs84, bd09_to_gcj02, gcj02_to_wgs84
-
-end # module

@@ -1,6 +1,5 @@
 using CSV
 using DataFrames
-using ..CoordTransform: bd09_to_wgs84
 
 """
     read_candidate_stations(file_path::String) -> DataFrame

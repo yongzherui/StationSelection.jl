@@ -52,8 +52,6 @@ include("opt/objective.jl")
 include("opt/optimize.jl")
 
 # Re-export key types and functions
-using .CoordTransform
-using .Results
 
 export Result
 export bd09_to_wgs84
@@ -98,11 +96,6 @@ export add_assignment_to_active_constraints!, add_assignment_to_selected_constra
 export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
 export set_two_stage_single_detour_objective!, set_clustering_od_objective!, set_clustering_base_objective!
-
-# Re-export utility functions
-using .StationCosts
-using .GenerateScenarios
-using .ExportResults
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export generate_scenarios

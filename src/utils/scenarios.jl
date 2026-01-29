@@ -1,4 +1,3 @@
-module GenerateScenarios
 using Dates
 
 export generate_scenarios
@@ -42,5 +41,3 @@ function generate_scenarios(start_date::Date, end_date::Date;
 
     return scenarios
 end
-
-end # module

@@ -1,8 +1,3 @@
-
-module ExportResults
-
-using ..Results: Result
-
 using CSV
 using JSON
 
@@ -40,5 +35,3 @@ function export_results(result::Result, output_dir::String)
 end
 
 export export_results
-
-end # module

@@ -1,5 +1,3 @@
-module Results
-
 using DataFrames
 using JuMP
 
@@ -38,5 +36,3 @@ function Result(
 )
     return Result(method, status, value, stations, station_df, model, Dict{String, Any}())
 end
-
-end # module
