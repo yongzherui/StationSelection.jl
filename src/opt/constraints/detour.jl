@@ -4,7 +4,7 @@ Detour constraint creation functions for station selection optimization models.
 These functions add constraints for same-source and same-destination pooling,
 linking detour pooling variables to assignment variables.
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel
+Used by: TwoStageSingleDetourModel (with or without walking limits)
 """
 
 using JuMP
@@ -156,7 +156,7 @@ end
         Xi_same_source::Vector{Tuple{Int, Int, Int}}
     )
 
-Same-source pooling constraints for TwoStageSingleDetourNoWalkingLimitModel.
+Same-source pooling constraints for TwoStageSingleDetourModel without walking limits.
 """
 function add_assignment_to_same_source_detour_constraints!(
         m::Model,
@@ -318,7 +318,7 @@ end
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
 
-Same-destination pooling constraints for TwoStageSingleDetourNoWalkingLimitModel.
+Same-destination pooling constraints for TwoStageSingleDetourModel without walking limits.
 """
 function add_assignment_to_same_dest_detour_constraints!(
         m::Model,

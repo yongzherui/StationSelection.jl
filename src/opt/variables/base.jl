@@ -40,7 +40,7 @@ Add binary scenario activation variables z[j,s] for stations and scenarios.
 z[j,s] = 1 if station j is activated in scenario s.
 Allows different subsets of built stations to be active in each scenario.
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel, ClusteringTwoStageODModel
+Used by: TwoStageSingleDetourModel (with or without walking limits), ClusteringTwoStageODModel
 """
 function add_scenario_activation_variables!(m::Model, data::StationSelectionData)
     before = JuMP.num_variables(m)

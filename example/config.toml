@@ -18,6 +18,11 @@ routing_weight = 1.0     # Weight γ/λ for routing/pooling terms in objective
 # TwoStageSingleDetourModel specific parameters (ignored for ClusteringTwoStageODModel)
 time_window = 120.0      # Time discretization window in seconds
 routing_delay = 900.0    # Maximum allowed detour delay in seconds
+use_walking_distance_limit = false  # Enable walking limit for TwoStageSingleDetourModel
+max_walking_distance = 800.0         # Only used when walking limit is enabled
+
+# ClusteringTwoStageODModel specific parameters
+variable_reduction = true  # Use sparse assignment variables when walking limit is enabled
 
 [scenario]
 # Scenario time windows (start_time, end_time)

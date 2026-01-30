@@ -20,8 +20,8 @@ A triplet is valid if:
 2. Triangle inequality holds: t(j→k) + t(k→l) >= t(j→l)
 3. Detour constraint: t(j→k) + t(k→l) <= t(j→l) + max_delay
 
-This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel
-since they share the same routing_delay parameter.
+This method works for TwoStageSingleDetourModel regardless of walking limit settings,
+since routing_delay is independent of walking constraints.
 """
 function find_detour_combinations(
         model::AbstractSingleDetourModel,
@@ -104,7 +104,7 @@ Used in constraints:
 - x_{od,t,jk,s} >= y_{t,jl,kl,s}  (need assignment on j→k edge)
 - x_{od,t,jl,s} >= y_{t,jl,kl,s}  (need assignment on j→l edge)
 
-This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel.
+This method works for TwoStageSingleDetourModel regardless of walking limit settings.
 """
 function find_same_source_detour_combinations(
         model::AbstractSingleDetourModel,
@@ -136,7 +136,7 @@ Used in constraints:
 - x_{od,t,jl,s} >= y_{t,jl,jk,s}     (need assignment on j→l edge at time t)
 - x_{od,t+t',kl,s} >= y_{t,jl,jk,s}  (need assignment on k→l edge at time t+t')
 
-This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel.
+This method works for TwoStageSingleDetourModel regardless of walking limit settings.
 """
 function find_same_dest_detour_combinations(
         model::AbstractSingleDetourModel,

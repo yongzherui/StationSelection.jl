@@ -13,6 +13,7 @@ using JuMP
 export add_assignment_constraints!
 export add_assignment_to_active_constraints!
 export add_assignment_to_selected_constraints!
+export add_assignment_walking_limit_constraints!
 
 
 # ============================================================================
@@ -52,7 +53,7 @@ end
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
 
-Each OD request must be assigned to exactly one station pair (TwoStageSingleDetourNoWalkingLimitModel).
+Each OD request must be assigned to exactly one station pair (TwoStageSingleDetourModel without walking limits).
 """
 function add_assignment_constraints!(
         m::Model,
@@ -77,23 +78,30 @@ end
 
 
 """
-    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
+    add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
+    )
 
 Each OD pair must be assigned to exactly one station pair (ClusteringTwoStageODModel).
     Σⱼₖ x[s][od_idx][j,k] = 1  ∀od_idx ∈ Ω_s, s
 
 Used by: ClusteringTwoStageODModel
+When `variable_reduction=true` and walking limit is enabled, constraints use sparse x.
 """
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     x = m[:x]
-    use_sparse = has_walking_distance_limit(mapping)
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
 
     for s in 1:S
         for od_idx in 1:length(mapping.Omega_s[s])
@@ -185,7 +193,7 @@ end
 """
     add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
 
-Assignment requires both stations to be active (TwoStageSingleDetourNoWalkingLimitModel).
+Assignment requires both stations to be active (TwoStageSingleDetourModel without walking limits).
 """
 function add_assignment_to_active_constraints!(
         m::Model,
@@ -213,24 +221,31 @@ end
 
 
 """
-    add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
+    add_assignment_to_active_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
+    )
 
 Assignment requires both stations to be active (ClusteringTwoStageODModel).
     2 * x[s][od_idx][j,k] ≤ z[j,s] + z[k,s]  ∀od_idx ∈ Ω_s, j, k, s
 
 Used by: ClusteringTwoStageODModel
+When `variable_reduction=true` and walking limit is enabled, constraints use sparse x.
 """
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     z = m[:z]
     x = m[:x]
-    use_sparse = has_walking_distance_limit(mapping)
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -243,6 +258,51 @@ function add_assignment_to_active_constraints!(
                 for j in 1:n, k in 1:n
                     @constraint(m, 2 * x[s][od_idx][j, k] <= z[j, s] + z[k, s])
                 end
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
+# ============================================================================
+# Assignment Walking Limit Constraints - For dense x with walking limit
+# ============================================================================
+
+"""
+    add_assignment_walking_limit_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap,
+        max_walking_distance::Float64
+    )
+
+Enforce walking distance limits when dense x variables are used.
+For each OD pair (o,d) and station pair (j,k):
+    d^origin_{o,j} * x <= max_walking_distance
+    d^dest_{k,d} * x <= max_walking_distance
+
+Used by: ClusteringTwoStageODModel when walking limits are enabled and variable reduction is disabled.
+"""
+function add_assignment_walking_limit_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap,
+        max_walking_distance::Float64
+    )
+    before = _total_num_constraints(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = m[:x]
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            for j in 1:n, k in 1:n
+                j_id = mapping.array_idx_to_station_id[j]
+                k_id = mapping.array_idx_to_station_id[k]
+                @constraint(m, get_walking_cost(data, o, j_id) * x[s][od_idx][j, k] <= max_walking_distance)
+                @constraint(m, get_walking_cost(data, k_id, d) * x[s][od_idx][j, k] <= max_walking_distance)
             end
         end
     end

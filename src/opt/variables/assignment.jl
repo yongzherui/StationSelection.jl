@@ -108,13 +108,13 @@ end
 
 
 # ============================================================================
-# PoolingScenarioOriginDestTimeMapNoWalkingLimit (TwoStageSingleDetourNoWalkingLimitModel)
+# PoolingScenarioOriginDestTimeMapNoWalkingLimit (TwoStageSingleDetourModel without walking limits)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
 
-Add assignment variables x[s][t][od][j,k] for TwoStageSingleDetourNoWalkingLimitModel.
+Add assignment variables x[s][t][od][j,k] for TwoStageSingleDetourModel without walking limits.
 
 x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned
 to use stations j (pickup) and k (dropoff).
@@ -152,27 +152,34 @@ end
 # ============================================================================
 
 """
-    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
+    add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
+    )
 
 Add assignment variables x[s][od_idx][j,k] for ClusteringTwoStageODModel.
 
 x[s][od_idx][j,k] = 1 if OD pair od_idx in scenario s is assigned to use
 stations j (pickup) and k (dropoff).
 
-Structure: scenario → OD index → (pickup, dropoff) matrix
+Structure: scenario → OD index → (pickup, dropoff) matrix (dense) or vector (sparse)
 No time dimension - OD pairs are aggregated across time within each scenario.
+When `variable_reduction=true` and a walking limit is enabled, sparse variables are used.
 """
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap
+        mapping::ClusteringScenarioODMap;
+        variable_reduction::Bool=true
     )
     before = JuMP.num_variables(m)
     n = data.n_stations
     S = n_scenarios(data)
     x = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
 
-    use_sparse = has_walking_distance_limit(mapping)
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
     if use_sparse
         x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
         for s in 1:S

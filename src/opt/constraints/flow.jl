@@ -4,7 +4,7 @@ Flow constraint creation functions for station selection optimization models.
 These functions add constraints that link assignments to flow variables,
 ensuring that flow is tracked on edges where assignments are made.
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel
+Used by: TwoStageSingleDetourModel (with or without walking limits)
 """
 
 using JuMP
@@ -59,7 +59,7 @@ end
 """
     add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
 
-Assignment implies flow on that edge (TwoStageSingleDetourNoWalkingLimitModel).
+Assignment implies flow on that edge (TwoStageSingleDetourModel without walking limits).
 """
 function add_assignment_to_flow_constraints!(
         m::Model,

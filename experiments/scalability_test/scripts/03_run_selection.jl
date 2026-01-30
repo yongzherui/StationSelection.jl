@@ -162,19 +162,20 @@ try
     println("\nRunning optimization...")
     start_time = now()
 
-    term_status, obj_value, solution, runtime_sec, m, var_counts, con_counts, detour_counts = run_opt(
+    result = run_opt(
         model,
         data;
         optimizer_env=gurobi_env,
         silent=silent,
         show_counts=true,
-        return_model=true,
-        return_counts=true,
         do_optimize=true
     )
 
     elapsed = Dates.value(now() - start_time) / 1000
 
+    var_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables
+    con_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints
+    detour_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.extras
     total_vars = isempty(var_counts) ? 0 : sum(values(var_counts))
     total_constraints = isempty(con_counts) ? 0 : sum(values(con_counts))
 
@@ -184,9 +185,9 @@ try
         "n_stations" => data.n_stations,
         "n_requests" => nrow(requests),
         "n_scenarios" => n_scenarios(data),
-        "termination_status" => string(term_status),
-        "objective_value" => obj_value,
-        "solve_time_sec" => runtime_sec,
+        "termination_status" => string(result.termination_status),
+        "objective_value" => result.objective_value,
+        "solve_time_sec" => result.runtime_sec,
         "total_runtime_sec" => elapsed,
         "k" => k,
         "l" => l,

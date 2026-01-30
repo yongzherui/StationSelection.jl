@@ -24,7 +24,7 @@ at each station location, aggregated across all scenarios.
 - `request_counts::Dict{Int, Int}`: Station ID → total request count (pickups + dropoffs)
 - `n_stations::Int`: Number of candidate stations
 """
-struct ClusteringBaseMap
+struct ClusteringBaseMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 

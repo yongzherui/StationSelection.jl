@@ -94,7 +94,7 @@ end
         mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
     ) -> AffExpr
 
-Compute the assignment cost expression for TwoStageSingleDetourNoWalkingLimitModel.
+Compute the assignment cost expression for TwoStageSingleDetourModel without walking limits.
 Same logic as PoolingScenarioOriginDestTimeMap version.
 """
 function assignment_cost_expr(

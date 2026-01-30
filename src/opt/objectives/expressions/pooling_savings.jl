@@ -104,7 +104,7 @@ end
         routing_weight::Float64=1.0
     ) -> AffExpr
 
-Same-source pooling savings for TwoStageSingleDetourNoWalkingLimitModel.
+Same-source pooling savings for TwoStageSingleDetourModel without walking limits.
 """
 function same_source_pooling_savings_expr(
         m::Model,
@@ -242,7 +242,7 @@ end
         routing_weight::Float64=1.0
     ) -> AffExpr
 
-Same-destination pooling savings for TwoStageSingleDetourNoWalkingLimitModel.
+Same-destination pooling savings for TwoStageSingleDetourModel without walking limits.
 """
 function same_dest_pooling_savings_expr(
         m::Model,

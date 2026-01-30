@@ -4,7 +4,7 @@ Detour pooling variable creation functions for station selection optimization mo
 These functions add detour pooling decision variables for same-source and
 same-destination pooling.
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel
+Used by: TwoStageSingleDetourModel (with or without walking limits)
 """
 
 using JuMP
@@ -115,7 +115,7 @@ end
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
 
-Add detour pooling variables for TwoStageSingleDetourNoWalkingLimitModel.
+Add detour pooling variables for TwoStageSingleDetourModel without walking limits.
 
 Without walking limits, all (j,k) pairs are valid, so all detour combinations
 based on routing geometry are feasible.

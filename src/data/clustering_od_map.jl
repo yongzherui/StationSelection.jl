@@ -26,7 +26,7 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
-struct ClusteringScenarioODMap
+struct ClusteringScenarioODMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 

@@ -8,7 +8,7 @@ Composes expressions from:
 
 Contains objectives for:
 - TwoStageSingleDetourModel
-- TwoStageSingleDetourNoWalkingLimitModel
+- TwoStageSingleDetourModel (no-walking mapping)
 """
 
 using JuMP
@@ -76,7 +76,7 @@ end
         routing_weight::Float64=1.0
     )
 
-Set the minimization objective for TwoStageSingleDetourNoWalkingLimitModel.
+Set the minimization objective for TwoStageSingleDetourModel without walking limits.
 Same structure as TwoStageSingleDetourModel but uses the no-walking-limit mapping.
 """
 function set_two_stage_single_detour_objective_no_walking_limit!(

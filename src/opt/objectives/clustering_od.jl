@@ -15,7 +15,8 @@ export set_clustering_od_objective!
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringScenarioODMap;
-        routing_weight::Float64=1.0
+        routing_weight::Float64=1.0,
+        variable_reduction::Bool=true
     )
 
 Set the minimization objective for ClusteringTwoStageODModel.
@@ -35,18 +36,20 @@ Where:
 - `data::StationSelectionData`: Problem data with walking_costs and routing_costs
 - `mapping::ClusteringScenarioODMap`: Scenario to OD mapping
 - `routing_weight::Float64`: Weight λ for routing costs (default 1.0)
+- `variable_reduction::Bool`: Whether sparse x is used when walking limits are enabled
 """
 function set_clustering_od_objective!(
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringScenarioODMap;
-        routing_weight::Float64=1.0
+        routing_weight::Float64=1.0,
+        variable_reduction::Bool=true
     )
 
     n = data.n_stations
     S = n_scenarios(data)
     x = m[:x]
-    use_sparse = has_walking_distance_limit(mapping)
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
 
     if use_sparse
         @objective(m, Min,

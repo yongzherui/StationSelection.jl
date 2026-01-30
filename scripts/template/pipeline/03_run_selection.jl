@@ -149,7 +149,9 @@ try
         model_cfg["l"],
         model_cfg["routing_weight"],
         model_cfg["time_window"],
-        model_cfg["routing_delay"]
+        model_cfg["routing_delay"];
+        use_walking_distance_limit=get(model_cfg, "use_walking_distance_limit", false),
+        max_walking_distance=get(model_cfg, "max_walking_distance", nothing)
     )
 
     silent = get(solver_cfg, "silent", true)
@@ -158,14 +160,12 @@ try
     println("\nRunning optimization...")
     start_time = now()
 
-    term_status, obj_value, solution, runtime_sec, m, var_counts, con_counts, detour_counts = run_opt(
+    result = run_opt(
         model,
         data;
         optimizer_env=gurobi_env,
         silent=silent,
         show_counts=true,
-        return_model=true,
-        return_counts=true,
         do_optimize=true
     )
 
@@ -177,13 +177,13 @@ try
         "n_stations" => data.n_stations,
         "n_requests" => nrow(requests),
         "n_scenarios" => n_scenarios(data),
-        "termination_status" => string(term_status),
-        "objective_value" => obj_value,
-        "solve_time_sec" => runtime_sec,
+        "termination_status" => string(result.termination_status),
+        "objective_value" => result.objective_value,
+        "solve_time_sec" => result.runtime_sec,
         "total_runtime_sec" => elapsed,
-        "variables" => Dict("by_type" => var_counts),
-        "constraints" => Dict("by_type" => con_counts),
-        "detour_combinations" => detour_counts,
+        "variables" => Dict("by_type" => (isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables)),
+        "constraints" => Dict("by_type" => (isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints)),
+        "detour_combinations" => (isnothing(result.counts) ? Dict{String, Int}() : result.counts.extras),
         "model" => model_type,
         "timestamp" => string(timestamp)
     )

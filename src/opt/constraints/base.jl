@@ -64,7 +64,7 @@ end
 Limit active stations per scenario.
     Σⱼ z[j,s] = k  ∀s
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel, ClusteringTwoStageODModel
+Used by: TwoStageSingleDetourModel (with or without walking limits), ClusteringTwoStageODModel
 """
 function add_scenario_activation_limit_constraints!(
     m::Model,
@@ -90,7 +90,7 @@ end
 Active stations must be built.
     z[j,s] ≤ y[j]  ∀j,s
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel, ClusteringTwoStageODModel
+Used by: TwoStageSingleDetourModel (with or without walking limits), ClusteringTwoStageODModel
 """
 function add_activation_linking_constraints!(m::Model, data::StationSelectionData)
     before = _total_num_constraints(m)

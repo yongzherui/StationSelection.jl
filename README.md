@@ -4,7 +4,7 @@ A Julia package for optimizing virtual bus stop (VBS) locations for microtransit
 
 ## Overview
 
-This package implements various optimization methods for selecting optimal station locations based on customer demand, walking costs, and routing constraints.
+This package implements optimization models for selecting station locations based on customer demand, walking costs, and routing constraints.
 
 ## Installation
 
@@ -20,13 +20,10 @@ using StationSelection
 
 - **Data Loading**: Read and preprocess candidate stations and customer requests
 - **Coordinate Transformation**: Convert between BD-09, GCJ-02, and WGS84 coordinate systems
-- **Multiple Optimization Methods**:
+- **Optimization Models**:
+  - Two-stage single detour model (optional walking limit)
+  - Two-stage clustering model with OD assignments (optional walking limit + variable reduction)
   - Base clustering (k-medoids)
-  - Ideal clustering
-  - Two-stage with L pre-selection
-  - Two-stage with lambda routing weight
-  - Routing-transportation formulation
-  - Origin-destination pair formulation
 
 ## Usage
 
@@ -39,49 +36,50 @@ requests = read_customer_requests("data/orders.csv")
 
 # Compute costs
 walking_costs = compute_station_pairwise_costs(stations)
+routing_costs = read_routing_costs_from_segments("data/segment.csv", stations)
 
-# Generate scenarios
-scenarios = generate_scenarios(Date("2025-05-12"), Date("2025-05-12"); segment_hours=4)
-
-# Run optimization
-result = clustering_two_stage_l_od_pair(
-    stations,
-    30,  # k stations per scenario
-    requests,
-    walking_costs,
-    walking_costs,
-    routing_costs,
-    scenarios;
-    l=50,  # total stations
-    lambda=0.0
+# Build problem data
+scenarios = [("2025-05-12 08:00:00", "2025-05-12 12:00:00")]
+data = create_station_selection_data(
+    stations, requests, walking_costs;
+    routing_costs=routing_costs,
+    scenarios=scenarios
 )
 
-# Export results
-export_results(result, "output_dir")
+# Choose a model
+model = TwoStageSingleDetourModel(
+    5, 10, 1.0, 120.0, 900.0;
+    use_walking_distance_limit=true,
+    max_walking_distance=800.0
+)
+
+# Run optimization
+result = run_opt(model, data; silent=true, show_counts=true)
+
+# Access results (OptResult)
+println(result.termination_status)
+println(result.objective_value)
+
+# Export results (metadata + optional station_df)
+export_results(result, "output_dir"; station_df=nothing)
 ```
+
+### Key return types
+
+- `build_model(model, data; ...) -> BuildResult`
+- `run_opt(model, data; ...) -> OptResult`
+
+See `src/opt/README.md` for details on models and flags.
 
 ## Package Structure
 
 ```
 src/
-├── StationSelection.jl      # Main module
-├── data/                    # Data loading
-│   ├── stations.jl
-│   └── requests.jl
-├── optimization/            # Optimization methods
-│   ├── base.jl
-│   ├── ideal.jl
-│   ├── two_stage_l.jl
-│   ├── two_stage_lambda.jl
-│   ├── routing_transport.jl
-│   └── origin_dest_pair.jl
-└── utils/                   # Utilities
-    ├── coords.jl
-    ├── results.jl
-    ├── costs.jl
-    ├── scenarios.jl
-    ├── export.jl
-    └── logging.jl
+├── StationSelection.jl      # Main module and exports
+├── data/                    # Data loading + mappings
+├── opt/                     # Model definitions, build/run, variables, constraints, objectives
+├── utils/                   # Utilities + result/export helpers
+└── README.md                # Code-level overview (this file)
 ```
 
 ## Dependencies

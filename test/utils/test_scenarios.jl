@@ -1,6 +1,6 @@
 using StationSelection
 using Test
-using StationSelection: generate_scenarios
+using StationSelection: generate_scenarios, generate_scenarios_from_ranges, generate_scenarios_by_profile, generate_scenarios_by_datetimes
 using Dates
 
 @testset "GenerateScenarios Tests" begin
@@ -43,6 +43,35 @@ using Dates
         # Only segments starting on same weekday as June 1 (Sunday)
         @test all(dayofweek(Date(DateTime(s[1], "yyyy-mm-dd HH:MM:SS"))) == dayofweek(Date(2025,6,1)) for s in scenarios)
         @test !isempty(scenarios)
+    end
+
+    @testset "explicit ranges" begin
+        ranges = [
+            (DateTime(2025, 6, 1, 8, 0, 0), DateTime(2025, 6, 1, 10, 0, 0)),
+            ("2025-06-02 12:00:00", "2025-06-02 13:30:00")
+        ]
+        scenarios = generate_scenarios_from_ranges(ranges)
+        @test length(scenarios) == 2
+        @test scenarios[1] == ("2025-06-01 08:00:00", "2025-06-01 10:00:00")
+        @test scenarios[2] == ("2025-06-02 12:00:00", "2025-06-02 13:30:00")
+    end
+
+    @testset "profile scenarios" begin
+        scenarios = generate_scenarios_by_profile(Date(2025,6,1), Date(2025,6,2); profile=:commute)
+        @test length(scenarios) == 4  # 2 windows per day * 2 days
+        @test scenarios[1] == ("2025-06-01 07:00:00", "2025-06-01 10:00:00")
+        @test scenarios[2] == ("2025-06-01 16:00:00", "2025-06-01 19:00:00")
+    end
+
+    @testset "scenario_count extension" begin
+        scenarios = generate_scenarios(Date(2025,6,1), Date(2025,6,1); segment_hours=24, weekly_cycle=true, scenario_count=3)
+        @test length(scenarios) == 3
+    end
+
+    @testset "datetime range" begin
+        scenarios = generate_scenarios_by_datetimes(DateTime(2025,6,1,6,0,0), DateTime(2025,6,1,12,0,0); segment_hours=3)
+        @test scenarios[1] == ("2025-06-01 06:00:00", "2025-06-01 08:59:59")
+        @test scenarios[end] == ("2025-06-01 09:00:00", "2025-06-01 11:59:59")
     end
 
 end

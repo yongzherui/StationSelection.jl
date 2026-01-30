@@ -2,8 +2,8 @@
 Objective functions for station selection optimization models.
 
 Contains objective functions for:
-- TwoStageSingleDetourModel: walking + routing costs with pooling savings
-- TwoStageSingleDetourNoWalkingLimitModel: same objective, different mapping
+- TwoStageSingleDetourModel: walking + routing costs with pooling savings (walking limit optional)
+- TwoStageSingleDetourModel (no-walking mapping): same objective, different mapping
 - ClusteringTwoStageODModel: walking + routing costs (no pooling)
 - ClusteringBaseModel: simple walking cost minimization (k-medoids style)
 

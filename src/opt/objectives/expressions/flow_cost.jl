@@ -66,7 +66,7 @@ end
         routing_weight::Float64=1.0
     ) -> AffExpr
 
-Compute the flow routing cost expression for TwoStageSingleDetourNoWalkingLimitModel.
+Compute the flow routing cost expression for TwoStageSingleDetourModel without walking limits.
 Same logic as PoolingScenarioOriginDestTimeMap version.
 """
 function flow_cost_expr(

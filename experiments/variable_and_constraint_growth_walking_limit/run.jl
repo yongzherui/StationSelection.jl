@@ -149,18 +149,20 @@ function main()
         )
 
         start_time = time()
-        term_status, obj_value, solution, runtime_sec, m, var_counts, con_counts, detour_counts = run_opt(
+        result = run_opt(
             model,
             data;
             optimizer_env=env,
             silent=true,
             show_counts=false,
-            return_model=true,
-            return_counts=true,
+            count=true,
             do_optimize=false
         )
         elapsed = time() - start_time
 
+        var_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables
+        con_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints
+        detour_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.extras
         total_vars = isempty(var_counts) ? 0 : sum(values(var_counts))
         total_constraints = isempty(con_counts) ? 0 : sum(values(con_counts))
 

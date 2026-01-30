@@ -12,6 +12,9 @@ using JuMP
 using Logging
 using Statistics
 
+# Data loading - core data structures
+include("data/struct.jl")
+
 # Utils
 include("utils/coords.jl")
 include("utils/results.jl")
@@ -21,16 +24,12 @@ include("utils/export.jl")
 include("utils/logging.jl")
 include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
-
-# Data loading - core data structures
-include("data/struct.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/two_stage_single_detour.jl")
-include("opt/models/two_stage_single_detour_no_walking_limit.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_base.jl")
 
@@ -39,7 +38,6 @@ include("utils/detour_combinations.jl")
 
 # Pooling map (depends on TwoStageSingleDetourModel and find_detour_combinations)
 include("data/pooling_map.jl")
-include("data/pooling_map_no_walking_limit.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
@@ -55,12 +53,13 @@ include("opt/optimize.jl")
 
 # Re-export key types and functions
 
-export Result
+export ModelCounts, DetourComboData, BuildResult, OptResult
 export bd09_to_wgs84
 export read_candidate_stations, read_customer_requests
 
 # Re-export data structures
 export StationSelectionData, ScenarioData
+export AbstractStationSelectionMap, AbstractClusteringMap, AbstractPoolingMap
 export PoolingScenarioOriginDestTimeMap, PoolingScenarioOriginDestTimeMapNoWalkingLimit
 export ClusteringScenarioODMap, ClusteringBaseMap
 export create_station_selection_data, create_scenario_data
@@ -82,7 +81,6 @@ export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel, AbstractPoolingModel
 export AbstractSingleDetourModel
 export TwoStageSingleDetourModel
-export TwoStageSingleDetourNoWalkingLimitModel
 export ClusteringTwoStageODModel
 export ClusteringBaseModel
 
@@ -95,7 +93,7 @@ export find_same_dest_detour_combinations
 export get_feasible_same_source_indices, get_feasible_same_dest_indices
 
 # Re-export optimization functions
-export run_opt, build_model, build_model_with_counts
+export run_opt, build_model
 export warm_start, get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!, add_assignment_variables_with_walking_distance_limit!
@@ -114,6 +112,9 @@ export same_source_pooling_savings_expr, same_dest_pooling_savings_expr
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export generate_scenarios
+export generate_scenarios_from_ranges
+export generate_scenarios_by_datetimes
+export generate_scenarios_by_profile
 export export_results
 
 # Re-export transform_orders functions

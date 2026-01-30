@@ -127,17 +127,30 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     println("\n[5] Creating $model_type...")
 
     if model_type == "TwoStageSingleDetourModel"
+        use_walking_distance_limit = get(mc, "use_walking_distance_limit", false)
+        max_walking_distance = get(mc, "max_walking_distance", nothing)
         model = TwoStageSingleDetourModel(
             mc["k"], mc["l"], mc["routing_weight"],
-            mc["time_window"], mc["routing_delay"]
+            mc["time_window"], mc["routing_delay"];
+            use_walking_distance_limit=use_walking_distance_limit,
+            max_walking_distance=max_walking_distance
         )
         println("  - k=$(model.k), l=$(model.l), γ=$(model.routing_weight)")
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
+        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
     elseif model_type == "ClusteringTwoStageODModel"
+        use_walking_distance_limit = get(mc, "use_walking_distance_limit", false)
+        max_walking_distance = get(mc, "max_walking_distance", nothing)
+        variable_reduction = get(mc, "variable_reduction", true)
         model = ClusteringTwoStageODModel(
-            mc["k"], mc["l"], mc["routing_weight"]
+            mc["k"], mc["l"], mc["routing_weight"];
+            use_walking_distance_limit=use_walking_distance_limit,
+            max_walking_distance=max_walking_distance,
+            variable_reduction=variable_reduction
         )
         println("  - k=$(model.k), l=$(model.l), λ=$(model.routing_weight)")
+        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
+        println("  - variable_reduction=$(model.variable_reduction)")
     elseif model_type == "ClusteringBaseModel"
         model = ClusteringBaseModel(mc["k"])
         println("  - k=$(model.k) (stations to select)")
@@ -149,23 +162,22 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     println("\n[6] Running optimization...")
     optimizer_env = Gurobi.Env()
     silent = get(config["solver"], "silent", true)
-    term_status, obj_value, solution, total_runtime_sec, m, variable_counts, constraint_counts, detour_combo_counts =
-        run_opt(
-            model,
-            data;
-            optimizer_env=optimizer_env,
-            silent=silent,
-            show_counts=true,
-            return_model=true,
-            return_counts=true,
-            do_optimize=!no_optimize
-        )
-    total_vars = isempty(variable_counts) ? num_variables(m) : sum(values(variable_counts))
-    total_constraints = isempty(constraint_counts) ? total_num_constraints(m) : sum(values(constraint_counts))
+    result = run_opt(
+        model,
+        data;
+        optimizer_env=optimizer_env,
+        silent=silent,
+        show_counts=true,
+        do_optimize=!no_optimize
+    )
+    variable_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables
+    constraint_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints
+    total_vars = isempty(variable_counts) ? num_variables(result.model) : sum(values(variable_counts))
+    total_constraints = isempty(constraint_counts) ? total_num_constraints(result.model) : sum(values(constraint_counts))
     println("  - Variables: $total_vars")
     println("  - Constraints: $total_constraints")
 
-    solve_time_sec = total_runtime_sec
+    solve_time_sec = result.runtime_sec
     if no_optimize
         println("  - Optimization skipped (--no-optimize)")
     end
@@ -174,12 +186,12 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     println("\n" * "=" ^ 60)
     println("RESULTS")
     println("=" ^ 60)
-    println("Termination status: $term_status")
+    println("Termination status: $(result.termination_status)")
 
-    if !isnothing(obj_value)
-        println("Objective value: $obj_value")
-        if !isnothing(solution)
-            x_val, y_val = solution
+    if !isnothing(result.objective_value)
+        println("Objective value: $(result.objective_value)")
+        if !isnothing(result.solution)
+            x_val, y_val = result.solution
             selected = findall(y_val .> 0.5)
             println("Selected stations ($(length(selected))): $selected")
         end
@@ -195,9 +207,14 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         model_metadata["routing_weight"] = model.routing_weight
         model_metadata["time_window"] = model.time_window
         model_metadata["routing_delay"] = model.routing_delay
+        model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
+        model_metadata["max_walking_distance"] = model.max_walking_distance
     elseif model_type == "ClusteringTwoStageODModel"
         model_metadata["l"] = model.l
         model_metadata["routing_weight"] = model.routing_weight
+        model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
+        model_metadata["max_walking_distance"] = model.max_walking_distance
+        model_metadata["variable_reduction"] = model.variable_reduction
     end
     # ClusteringBaseModel only has k, which is already added
 

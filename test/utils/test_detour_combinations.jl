@@ -47,8 +47,8 @@
         )
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        # Use NoWalkingLimit model for detour combination tests
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 5.0)
+        # No walking limit for detour combination tests
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 5.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -71,7 +71,7 @@
         )
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 2.0)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 2.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -93,7 +93,7 @@
         )
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 100.0)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 100.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -126,7 +126,7 @@
         routing_costs[(4, 2)] = 18.0
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 4, 1.0, 300.0, 5.0)
+        model = TwoStageSingleDetourModel(2, 4, 1.0, 300.0, 5.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -156,7 +156,7 @@
         end
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 5.0)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 5.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -180,7 +180,7 @@
         routing_costs[(4, 1)] = 18.0
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 4, 1.0, 300.0, 5.0)
+        model = TwoStageSingleDetourModel(2, 4, 1.0, 300.0, 5.0)
 
         combinations = find_detour_combinations(model, data)
 
@@ -202,7 +202,7 @@
         )
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 5.0)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 5.0)
 
         # Same source returns triplets (j, k, l)
         same_source = find_same_source_detour_combinations(model, data)
@@ -227,7 +227,7 @@
         # Delay: 900 <= 800 + 150 = 950 (satisfied with delay=150)
 
         data = create_test_data_with_routing(station_ids, routing_costs)
-        model = TwoStageSingleDetourNoWalkingLimitModel(2, 3, 1.0, 300.0, 150.0)  # time_window=300
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 150.0)  # time_window=300
 
         # Same dest returns quadruplets (j, k, l, t')
         same_dest = find_same_dest_detour_combinations(model, data)

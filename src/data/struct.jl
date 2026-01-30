@@ -12,6 +12,30 @@ export ScenarioData, StationSelectionData
 export create_station_selection_data, create_scenario_data
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, has_routing_costs
+export AbstractStationSelectionMap
+export AbstractClusteringMap
+export AbstractPoolingMap
+
+"""
+    AbstractStationSelectionMap
+
+Base abstract type for all station selection mapping structs.
+"""
+abstract type AbstractStationSelectionMap end
+
+"""
+    AbstractClusteringMap <: AbstractStationSelectionMap
+
+Base abstract type for clustering mapping structs.
+"""
+abstract type AbstractClusteringMap <: AbstractStationSelectionMap end
+
+"""
+    AbstractPoolingMap <: AbstractStationSelectionMap
+
+Base abstract type for pooling mapping structs.
+"""
+abstract type AbstractPoolingMap <: AbstractStationSelectionMap end
 
 
 """

@@ -4,7 +4,7 @@ Flow variable creation functions for station selection optimization models.
 These functions add flow decision variables that track vehicle movements
 between station pairs.
 
-Used by: TwoStageSingleDetourModel, TwoStageSingleDetourNoWalkingLimitModel
+Used by: TwoStageSingleDetourModel (with or without walking limits)
 """
 
 using JuMP
@@ -45,7 +45,7 @@ end
 """
     add_flow_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
 
-Add flow variables f[s][t][j,k] for TwoStageSingleDetourNoWalkingLimitModel.
+Add flow variables f[s][t][j,k] for TwoStageSingleDetourModel without walking limits.
 """
 function add_flow_variables!(
         m::Model,

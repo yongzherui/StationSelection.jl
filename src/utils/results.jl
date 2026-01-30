@@ -1,38 +1,60 @@
-using DataFrames
 using JuMP
 
-export Result
+const MOI = JuMP.MOI
+
+export ModelCounts
+export DetourComboData
+export BuildResult
+export OptResult
 
 """
-Result struct that describes the output of station selection optimization methods.
+    ModelCounts
 
-# Fields
-- `method::String`: Name of the optimization method used
-- `status::Bool`: Whether optimization was successful
-- `value::Union{Vector{Int}, Nothing}`: Vector of selected station IDs (if successful)
-- `stations::Union{Dict{Int, Bool}, Nothing}`: Dictionary mapping station ID to selection status
-- `station_df::DataFrame`: DataFrame containing station information
-- `model::Union{JuMP.Model, Nothing}`: The JuMP optimization model
-- `metadata::Dict{String, Any}`: Additional metadata about the optimization run
+Holds variable/constraint counts and extra counters from model building.
 """
-struct Result
-    method::String
-    status::Bool
-    value::Union{Vector{Int}, Nothing}
-    stations::Union{Dict{Int, Bool}, Nothing}
-    station_df::DataFrame
-    model::Union{JuMP.Model, Nothing}
+struct ModelCounts
+    variables::Dict{String, Int}
+    constraints::Dict{String, Int}
+    extras::Dict{String, Int}
+end
+
+"""
+    DetourComboData
+
+Detour combination data for single-detour models.
+"""
+struct DetourComboData
+    same_source::Vector{Tuple{Int, Int, Int}}
+    same_dest::Vector{Tuple{Int, Int, Int, Int}}
+end
+
+"""
+    BuildResult
+
+Return type for model construction.
+"""
+struct BuildResult
+    model::JuMP.Model
+    mapping::AbstractStationSelectionMap
+    detour_combos::Union{DetourComboData, Nothing}
+    counts::Union{ModelCounts, Nothing}
     metadata::Dict{String, Any}
 end
 
-# Convenience constructor without metadata (defaults to empty Dict)
-function Result(
-    method::String,
-    status::Bool,
-    value::Union{Vector{Int}, Nothing},
-    stations::Union{Dict{Int, Bool}, Nothing},
-    station_df::DataFrame,
-    model::Union{JuMP.Model, Nothing}
-)
-    return Result(method, status, value, stations, station_df, model, Dict{String, Any}())
+"""
+    OptResult
+
+Return type for optimization runs.
+"""
+struct OptResult
+    termination_status::MOI.TerminationStatusCode
+    objective_value::Union{Nothing, Float64}
+    solution::Union{Nothing, Tuple}
+    runtime_sec::Float64
+    model::JuMP.Model
+    mapping::AbstractStationSelectionMap
+    detour_combos::Union{DetourComboData, Nothing}
+    counts::Union{ModelCounts, Nothing}
+    warm_start_solution::Union{Nothing, Dict{Symbol, Any}}
+    metadata::Dict{String, Any}
 end

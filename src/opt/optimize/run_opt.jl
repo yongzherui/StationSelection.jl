@@ -1,9 +1,9 @@
 using Dates
+using Logging
 
 """
     run_opt(model, data; optimizer_env=nothing, silent=true, show_counts=false,
-            return_model=false, return_counts=false, do_optimize=true,
-            warm_start=false)
+            count=false, do_optimize=true, warm_start=false)
 
 Construct and solve a station selection optimization model.
 
@@ -15,16 +15,12 @@ Construct and solve a station selection optimization model.
 - `optimizer_env`: Gurobi environment (created if not provided)
 - `silent::Bool`: Whether to suppress solver output (default: true)
 - `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
-- `return_model::Bool`: Whether to return the JuMP model (default: false)
-- `return_counts::Bool`: Whether to return variable/constraint counts (default: false)
+- `count::Bool`: Whether to collect variable/constraint counts (default: false)
 - `do_optimize::Bool`: Whether to run `optimize!` (default: true)
 - `warm_start::Bool`: Whether to compute a warm-start solution (TwoStageSingleDetourModel only)
 
 # Returns
-- Tuple of (termination_status, objective_value, solution_values, runtime_sec)
-- If `return_model` or `return_counts` is true, returns
-  (termination_status, objective_value, solution_values, runtime_sec, model,
-   variable_counts, constraint_counts, detour_combo_counts)
+- `OptResult`
 """
 function run_opt(
         model::AbstractStationSelectionModel,
@@ -32,55 +28,72 @@ function run_opt(
         optimizer_env=nothing,
         silent::Bool=true,
         show_counts::Bool=false,
-        return_model::Bool=false,
-        return_counts::Bool=false,
+        count::Bool=false,
         do_optimize::Bool=true,
         warm_start::Bool=false
     )
 
     start_time = now()
+    @info "run_opt: start" model_type=string(typeof(model)) do_optimize=do_optimize warm_start=warm_start count=count show_counts=show_counts
 
     if isnothing(optimizer_env)
         optimizer_env = Gurobi.Env()
     end
 
-    # Build model (with counts when available)
-    variable_counts = Dict{String, Int}()
-    constraint_counts = Dict{String, Int}()
-    detour_combo_counts = Dict{String, Int}()
-    if hasmethod(build_model_with_counts, Tuple{typeof(model), StationSelectionData, typeof(optimizer_env)})
-        m, variable_counts, constraint_counts, detour_combo_counts =
-            build_model_with_counts(model, data, optimizer_env)
-    else
-        m = build_model(model, data, optimizer_env)
+    if show_counts
+        count = true
     end
 
-    if show_counts && (!isempty(variable_counts) || !isempty(constraint_counts))
-        _print_counts("Variables", variable_counts)
-        _print_counts("Constraints", constraint_counts)
-        if !isempty(detour_combo_counts)
-            _print_counts("Detour combinations", detour_combo_counts)
+    # Build model
+    build_start = now()
+    build_result = build_model(model, data; optimizer_env=optimizer_env, count=count)
+    m = build_result.model
+    build_time_sec = Dates.value(now() - build_start) / 1000
+    @info "run_opt: model built" build_time_sec=build_time_sec
+
+    if show_counts
+        if !isnothing(build_result.counts)
+            if !isempty(build_result.counts.variables)
+                _print_counts("Variables", build_result.counts.variables)
+            end
+            if !isempty(build_result.counts.constraints)
+                _print_counts("Constraints", build_result.counts.constraints)
+            end
+            if !isempty(build_result.counts.extras)
+                _print_counts("Extras", build_result.counts.extras)
+            end
+        else
+            println("Counts unavailable for model type: $(typeof(model))")
         end
-    elseif show_counts
-        println("Counts unavailable for model type: $(typeof(model))")
     end
 
     if silent
         set_silent(m)
     end
 
+    warm_start_solution = nothing
+    warm_start_time_sec = nothing
     if warm_start && model isa TwoStageSingleDetourModel
+        warm_start_start = now()
         warm_start_solution = StationSelection.warm_start(model, data;
             optimizer_env=optimizer_env,
             silent=silent,
-            show_counts=show_counts
+            show_counts=show_counts,
+            pooling_map=build_result.mapping,
+            detour_combos=build_result.detour_combos
         )
         apply_warm_start!(m, warm_start_solution)
+        warm_start_time_sec = Dates.value(now() - warm_start_start) / 1000
+        @info "run_opt: warm start applied" warm_start_time_sec=warm_start_time_sec
     end
 
     # Solve the model
+    solve_time_sec = nothing
     if do_optimize
+        solve_start = now()
         optimize!(m)
+        solve_time_sec = Dates.value(now() - solve_start) / 1000
+        @info "run_opt: optimize! finished" solve_time_sec=solve_time_sec
     end
 
     term_status = do_optimize ? JuMP.termination_status(m) : MOI.OPTIMIZE_NOT_CALLED
@@ -95,12 +108,24 @@ function run_opt(
     end
 
     runtime_sec = Dates.value(now() - start_time) / 1000
+    @info "run_opt: completed" termination_status=string(term_status) runtime_sec=runtime_sec
 
-    if return_model || return_counts
-        return term_status, obj, solution, runtime_sec, m, variable_counts, constraint_counts, detour_combo_counts
-    end
-
-    return term_status, obj, solution, runtime_sec
+    return OptResult(
+        term_status,
+        obj,
+        solution,
+        runtime_sec,
+        m,
+        build_result.mapping,
+        build_result.detour_combos,
+        build_result.counts,
+        warm_start_solution,
+        Dict{String, Any}(
+            "build_time_sec" => build_time_sec,
+            "warm_start_time_sec" => warm_start_time_sec,
+            "solve_time_sec" => solve_time_sec
+        )
+    )
 end
 
 function warm_start(
@@ -108,14 +133,18 @@ function warm_start(
         data::StationSelectionData;
         optimizer_env=nothing,
         silent::Bool=true,
-        show_counts::Bool=false
+        show_counts::Bool=false,
+        pooling_map::Union{AbstractPoolingMap, Nothing}=nothing,
+        detour_combos::Union{DetourComboData, Nothing}=nothing
     )
     return get_warm_start_solution(
         model,
         data;
         optimizer_env=optimizer_env,
         silent=silent,
-        show_counts=show_counts
+        show_counts=show_counts,
+        pooling_map=pooling_map,
+        detour_combos=detour_combos
     )
 end
 
@@ -125,48 +154,57 @@ function get_warm_start_solution(
         optimizer_env=nothing,
         silent::Bool=true,
         show_counts::Bool=false,
-        use_walking_distance_limit::Bool=true
+        pooling_map::Union{AbstractPoolingMap, Nothing}=nothing,
+        detour_combos::Union{DetourComboData, Nothing}=nothing
     )
     # Build pooling map and detour combos to align warm-start values with the target model structure.
-    Xi_same_source = find_same_source_detour_combinations(model, data)
-    Xi_same_dest = find_same_dest_detour_combinations(model, data)
-    pooling_map = create_pooling_scenario_origin_dest_time_map(
-        model,
-        data;
-        Xi_same_source=Xi_same_source,
-        Xi_same_dest=Xi_same_dest
-    )
+    Xi_same_source = detour_combos === nothing ? find_same_source_detour_combinations(model, data) : detour_combos.same_source
+    Xi_same_dest = detour_combos === nothing ? find_same_dest_detour_combinations(model, data) : detour_combos.same_dest
+    if pooling_map === nothing
+        pooling_map = model.use_walking_distance_limit ?
+            create_pooling_scenario_origin_dest_time_map(
+                model,
+                data;
+                Xi_same_source=Xi_same_source,
+                Xi_same_dest=Xi_same_dest
+            ) :
+            create_pooling_scenario_origin_dest_time_map_no_walking_limit(model, data)
+    end
+
+    use_walking_distance_limit = has_walking_distance_limit(pooling_map)
+    max_walking_distance = get_max_walking_distance(pooling_map)
 
     clustering_model = ClusteringTwoStageODModel(
         model.k,
         model.l,
         model.routing_weight;
         use_walking_distance_limit=use_walking_distance_limit,
-        max_walking_distance=model.max_walking_distance
+        max_walking_distance=max_walking_distance
     )
 
-    term_status, obj, _, runtime_sec, clustering_m = run_opt(
+    clustering_result = run_opt(
         clustering_model,
         data;
         optimizer_env=optimizer_env,
         silent=silent,
         show_counts=show_counts,
         do_optimize=true,
-        return_model=true,
         warm_start=false
     )
 
     # TODO: Map clustering solution variables into TwoStageSingleDetourModel warm-start values.
     return adapt_clustering_solution_to_two_stage_single_detour(
-        term_status,
-        obj,
-        clustering_m,
-        runtime_sec,
+        clustering_result.termination_status,
+        clustering_result.objective_value,
+        clustering_result.model,
+        clustering_result.runtime_sec,
         model,
         data,
         pooling_map,
         Xi_same_source,
-        Xi_same_dest
+        Xi_same_dest,
+        clustering_result.mapping,
+        clustering_model.variable_reduction
     )
 end
 
@@ -177,21 +215,12 @@ function adapt_clustering_solution_to_two_stage_single_detour(
         runtime_sec,
         model::TwoStageSingleDetourModel,
         data::StationSelectionData,
-        pooling_map::PoolingScenarioOriginDestTimeMap,
+        pooling_map::AbstractPoolingMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
+        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}},
+        clustering_map::ClusteringScenarioODMap,
+        clustering_variable_reduction::Bool
     )
-    clustering_map = create_clustering_scenario_od_map(
-        ClusteringTwoStageODModel(
-            model.k,
-            model.l,
-            model.routing_weight;
-            use_walking_distance_limit=!isnothing(pooling_map.max_walking_distance),
-            max_walking_distance=pooling_map.max_walking_distance
-        ),
-        data
-    )
-
     x_cluster = _value_recursive(clustering_m[:x])
     y_cluster = _value_recursive(clustering_m[:y])
     z_cluster = _value_recursive(clustering_m[:z])
@@ -209,6 +238,7 @@ function adapt_clustering_solution_to_two_stage_single_detour(
 
     # Build warm-start x aligned with pooling map.
     use_sparse = has_walking_distance_limit(pooling_map)
+    use_sparse_cluster = clustering_variable_reduction && has_walking_distance_limit(clustering_map)
     x_ws = [Dict{Int, Dict{Tuple{Int, Int}, Any}}() for _ in 1:S]
     for s in 1:S
         for (time_id, od_vector) in pooling_map.Omega_s_t[s]
@@ -220,7 +250,7 @@ function adapt_clustering_solution_to_two_stage_single_detour(
                     valid_pairs_pool = get_valid_jk_pairs(pooling_map, od[1], od[2])
                     x_vals = zeros(Float64, length(valid_pairs_pool))
 
-                    if has_walking_distance_limit(clustering_map)
+                    if use_sparse_cluster
                         valid_pairs_cluster = get_valid_jk_pairs(clustering_map, od[1], od[2])
                         chosen_idx = findfirst(v -> v > 0.5, x_cluster[s][od_idx])
                         if !isnothing(chosen_idx)
@@ -249,7 +279,7 @@ function adapt_clustering_solution_to_two_stage_single_detour(
                     x_ws[s][time_id][od] = x_vals
                 else
                     x_vals = zeros(Float64, n, n)
-                    if has_walking_distance_limit(clustering_map)
+                    if use_sparse_cluster
                         valid_pairs_cluster = get_valid_jk_pairs(clustering_map, od[1], od[2])
                         chosen_idx = findfirst(v -> v > 0.5, x_cluster[s][od_idx])
                         if !isnothing(chosen_idx)

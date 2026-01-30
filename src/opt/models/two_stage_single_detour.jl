@@ -8,7 +8,8 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
     routing_delay::Float64     # this decides the maximum delay allowable by each single detour
 
     # walking distance constraint
-    max_walking_distance::Float64  # maximum walking distance from origin to pickup / dropoff to destination
+    use_walking_distance_limit::Bool
+    max_walking_distance::Union{Float64, Nothing}  # maximum walking distance from origin to pickup / dropoff to destination
 
     function TwoStageSingleDetourModel(
             k::Int,
@@ -16,16 +17,27 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
             routing_weight::Number,
             time_window::Number,
             routing_delay::Number;
-            max_walking_distance::Number
+            use_walking_distance_limit::Bool=false,
+            max_walking_distance::Union{Number, Nothing}=nothing
        )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         routing_weight >= 0 || throw(ArgumentError("routing_weight must be non-negative"))
         time_window > 0 || throw(ArgumentError("time_window must be positive"))
         routing_delay >= 0 || throw(ArgumentError("routing_delay must be non-negative"))
-        max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
 
-        new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
-            Float64(max_walking_distance))
+        if !isnothing(max_walking_distance)
+            use_walking_distance_limit = true
+        end
+
+        if use_walking_distance_limit
+            isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
+            max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+            new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
+                true, Float64(max_walking_distance))
+        else
+            new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
+                false, nothing)
+        end
     end
 end

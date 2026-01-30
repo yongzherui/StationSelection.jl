@@ -59,9 +59,13 @@ end
     @testset "TwoStageSingleDetourModel build" begin
         model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)
 
-        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
-            model, data, env
+        build_result = StationSelection.build_model(
+            model, data; optimizer_env=env, count=true
         )
+        m = build_result.model
+        var_counts = build_result.counts.variables
+        con_counts = build_result.counts.constraints
+        extra_counts = build_result.counts.extras
 
         # Check that model was created
         @test m isa JuMP.Model
@@ -102,9 +106,13 @@ end
     @testset "ClusteringTwoStageODModel build" begin
         model = ClusteringTwoStageODModel(2, 3, 1.0)
 
-        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
-            model, data, env
+        build_result = StationSelection.build_model(
+            model, data; optimizer_env=env, count=true
         )
+        m = build_result.model
+        var_counts = build_result.counts.variables
+        con_counts = build_result.counts.constraints
+        extra_counts = build_result.counts.extras
 
         # Check that model was created
         @test m isa JuMP.Model
@@ -141,9 +149,13 @@ end
     @testset "ClusteringBaseModel build" begin
         model = ClusteringBaseModel(3)
 
-        m, var_counts, con_counts, extra_counts = StationSelection.build_model_with_counts(
-            model, data, env
+        build_result = StationSelection.build_model(
+            model, data; optimizer_env=env, count=true
         )
+        m = build_result.model
+        var_counts = build_result.counts.variables
+        con_counts = build_result.counts.constraints
+        extra_counts = build_result.counts.extras
 
         # Check that model was created
         @test m isa JuMP.Model
@@ -178,59 +190,56 @@ end
 
         @testset "TwoStageSingleDetourModel" begin
             model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)
-            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+            result = run_opt(
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                return_model=true,
-                return_counts=true,
+                count=true,
                 do_optimize=false
             )
 
-            @test term_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(obj)
-            @test isnothing(solution)
-            @test m isa JuMP.Model
-            @test !isempty(vc)
-            @test !isempty(cc)
+            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(result.objective_value)
+            @test isnothing(result.solution)
+            @test result.model isa JuMP.Model
+            @test !isempty(result.counts.variables)
+            @test !isempty(result.counts.constraints)
         end
 
         @testset "ClusteringTwoStageODModel" begin
             model = ClusteringTwoStageODModel(2, 3, 1.0)
-            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+            result = run_opt(
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                return_model=true,
-                return_counts=true,
+                count=true,
                 do_optimize=false
             )
 
-            @test term_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(obj)
-            @test isnothing(solution)
-            @test m isa JuMP.Model
-            @test !isempty(vc)
-            @test !isempty(cc)
+            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(result.objective_value)
+            @test isnothing(result.solution)
+            @test result.model isa JuMP.Model
+            @test !isempty(result.counts.variables)
+            @test !isempty(result.counts.constraints)
         end
 
         @testset "ClusteringBaseModel" begin
             model = ClusteringBaseModel(3)
-            term_status, obj, solution, runtime, m, vc, cc, ec = run_opt(
+            result = run_opt(
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                return_model=true,
-                return_counts=true,
+                count=true,
                 do_optimize=false
             )
 
-            @test term_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(obj)
-            @test isnothing(solution)
-            @test m isa JuMP.Model
-            @test !isempty(vc)
-            @test !isempty(cc)
+            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(result.objective_value)
+            @test isnothing(result.solution)
+            @test result.model isa JuMP.Model
+            @test !isempty(result.counts.variables)
+            @test !isempty(result.counts.constraints)
         end
     end
 
@@ -253,24 +262,26 @@ end
         @test haskey(warm_start_solution, :v)
         @test haskey(warm_start_solution, :mapping)
 
-        m, _, _, _ = StationSelection.build_model_with_counts(model, data, env)
-        StationSelection.apply_warm_start!(m, warm_start_solution)
+        build_result = StationSelection.build_model(model, data; optimizer_env=env, count=false)
+        StationSelection.apply_warm_start!(build_result.model, warm_start_solution)
 
         # Check a couple of start values to ensure they were applied.
-        @test JuMP.start_value(m[:y][1]) == warm_start_solution[:y][1]
-        @test JuMP.start_value(m[:z][1, 1]) == warm_start_solution[:z][1, 1]
+        @test JuMP.start_value(build_result.model[:y][1]) == warm_start_solution[:y][1]
+        @test JuMP.start_value(build_result.model[:z][1, 1]) == warm_start_solution[:z][1, 1]
 
-        first_time = first(keys(m[:x][1]))
-        first_od = first(keys(m[:x][1][first_time]))
-        x_vars = m[:x][1][first_time][first_od]
+        first_time = first(keys(build_result.model[:x][1]))
+        first_od = first(keys(build_result.model[:x][1][first_time]))
+        x_vars = build_result.model[:x][1][first_time][first_od]
         x_vals = warm_start_solution[:x][1][first_time][first_od]
         @test JuMP.start_value(x_vars[1]) == x_vals[1]
 
-        if !isempty(m[:u][1][first_time])
-            @test JuMP.start_value(m[:u][1][first_time][1]) == warm_start_solution[:u][1][first_time][1]
+        if !isempty(build_result.model[:u][1][first_time])
+            @test JuMP.start_value(build_result.model[:u][1][first_time][1]) ==
+                warm_start_solution[:u][1][first_time][1]
         end
-        if !isempty(m[:v][1][first_time])
-            @test JuMP.start_value(m[:v][1][first_time][1]) == warm_start_solution[:v][1][first_time][1]
+        if !isempty(build_result.model[:v][1][first_time])
+            @test JuMP.start_value(build_result.model[:v][1][first_time][1]) ==
+                warm_start_solution[:v][1][first_time][1]
         end
     end
 

@@ -7,7 +7,8 @@ const MOI = JuMP.MOI
 
 @testset "StationSelection.jl" begin
     @testset "Module loads" begin
-        @test isdefined(StationSelection, :Result)
+        @test isdefined(StationSelection, :BuildResult)
+        @test isdefined(StationSelection, :OptResult)
         @test isdefined(StationSelection, :read_candidate_stations)
         @test isdefined(StationSelection, :read_customer_requests)
         @test isdefined(StationSelection, :bd09_to_wgs84)
