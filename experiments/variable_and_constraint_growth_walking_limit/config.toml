@@ -1,0 +1,34 @@
+# Configuration for Walking Distance Limit Growth Experiment
+
+[paths]
+# Data file paths (relative to project root)
+station_file = "data/station.csv"
+order_file = "data/order.csv"
+segment_file = "data/segment.csv"
+
+[model]
+# Model type
+type = "TwoStageSingleDetourModel"
+
+# Common parameters
+k = 5                    # Number of active stations per scenario
+l = 10                   # Total number of stations to build
+routing_weight = 1.0     # Weight for routing terms in objective
+
+# TwoStageSingleDetourModel specific parameters
+time_window = 120.0      # Time discretization window in seconds
+routing_delay = 900.0    # Maximum allowed detour delay in seconds
+
+[scenario]
+# Scenario time windows
+start_time = "2025-05-12 08:00:00"
+end_time = "2025-05-12 12:00:00"
+
+[experiment]
+# Walking distance parameters
+walking_distance_start = 50      # Start at 50m
+walking_distance_step = 50       # Increment by 50m
+n_stations_limit = 0             # 0 means use all stations (no limit)
+
+[solver]
+silent = true

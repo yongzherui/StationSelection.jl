@@ -204,35 +204,42 @@
     end
 
     @testset "TwoStageSingleDetourModel construction" begin
-        # Valid construction
-        model = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0)
+        # Valid construction with max_walking_distance
+        model = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0; max_walking_distance=500.0)
         @test model.k == 3
         @test model.l == 5
         @test model.routing_weight == 0.5
         @test model.time_window == 300.0
         @test model.routing_delay == 60.0
+        @test model.max_walking_distance == 500.0
 
         # Test validation: k must be positive
-        @test_throws ArgumentError TwoStageSingleDetourModel(0, 5, 0.5, 300.0, 60.0)
-        @test_throws ArgumentError TwoStageSingleDetourModel(-1, 5, 0.5, 300.0, 60.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(0, 5, 0.5, 300.0, 60.0; max_walking_distance=500.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(-1, 5, 0.5, 300.0, 60.0; max_walking_distance=500.0)
 
         # Test validation: l must be >= k
-        @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 0.5, 300.0, 60.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 0.5, 300.0, 60.0; max_walking_distance=500.0)
 
         # Test validation: routing_weight must be non-negative
-        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -0.5, 300.0, 60.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -0.5, 300.0, 60.0; max_walking_distance=500.0)
         # 0.0 is valid for routing_weight
-        model_zero_rw = TwoStageSingleDetourModel(3, 5, 0.0, 300.0, 60.0)
+        model_zero_rw = TwoStageSingleDetourModel(3, 5, 0.0, 300.0, 60.0; max_walking_distance=500.0)
         @test model_zero_rw.routing_weight == 0.0
 
         # Test validation: time_window must be positive
-        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 0.0, 60.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 0.0, 60.0; max_walking_distance=500.0)
 
         # Test validation: routing_delay must be non-negative
-        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, -1.0)
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, -1.0; max_walking_distance=500.0)
         # 0.0 is valid for routing_delay
-        model_zero_rd = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 0.0)
+        model_zero_rd = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 0.0; max_walking_distance=500.0)
         @test model_zero_rd.routing_delay == 0.0
+
+        # Test validation: max_walking_distance must be non-negative
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0; max_walking_distance=-1.0)
+        # 0.0 is valid for max_walking_distance (though not practical)
+        model_zero_wd = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0; max_walking_distance=0.0)
+        @test model_zero_wd.max_walking_distance == 0.0
     end
 
     @testset "PoolingScenarioOriginDestTimeMap structure" begin
@@ -266,7 +273,7 @@
             stations, 3, walking_costs, routing_costs, scenarios
         )
 
-        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 60.0)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 60.0; max_walking_distance=500.0)
 
         pooling_map = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
 
@@ -313,7 +320,7 @@
             stations, 3, walking_costs, routing_costs, scenarios
         )
 
-        model = TwoStageSingleDetourModel(2, 3, 1.0, 60.0, 30.0)  # time_window = 60s
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 60.0, 30.0; max_walking_distance=500.0)  # time_window = 60s
 
         pooling_map = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
 

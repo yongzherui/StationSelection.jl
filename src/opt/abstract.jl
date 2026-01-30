@@ -66,11 +66,30 @@ Examples: Two-stage with λ penalty, two-stage with L permanent stations.
 abstract type AbstractTwoStageModel <: AbstractMultiScenarioModel end
 
 """
-    AbstractPoolingModel <: AbstractTwoStageModel
-We have two stage model for clustering
+    AbstractODModel <: AbstractTwoStageModel
 
-But in the pooling model, we start concerning ourselves with basic pooling mechanisms of the vehicles
+Two-stage models with OD (origin-destination) pair assignment.
 """
 abstract type AbstractODModel <: AbstractTwoStageModel end
 
+"""
+    AbstractSingleDetourModel <: AbstractODModel
+
+Models with single-detour pooling mechanism.
+Both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel inherit from this.
+
+Common properties:
+- k: number of active stations per scenario
+- l: number of stations to build
+- routing_weight: weight for routing costs
+- time_window: time discretization window
+- routing_delay: maximum detour delay
+"""
+abstract type AbstractSingleDetourModel <: AbstractODModel end
+
+"""
+    AbstractPoolingModel <: AbstractODModel
+
+Models with more complex pooling mechanisms.
+"""
 abstract type AbstractPoolingModel <: AbstractODModel end

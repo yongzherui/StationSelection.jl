@@ -30,6 +30,7 @@ include("data/requests.jl")
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/two_stage_single_detour.jl")
+include("opt/models/two_stage_single_detour_no_walking_limit.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_base.jl")
 
@@ -38,6 +39,7 @@ include("utils/detour_combinations.jl")
 
 # Pooling map (depends on TwoStageSingleDetourModel and find_detour_combinations)
 include("data/pooling_map.jl")
+include("data/pooling_map_no_walking_limit.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
@@ -58,10 +60,12 @@ export bd09_to_wgs84
 export read_candidate_stations, read_customer_requests
 
 # Re-export data structures
-export StationSelectionData, ScenarioData, PoolingScenarioOriginDestTimeMap
+export StationSelectionData, ScenarioData
+export PoolingScenarioOriginDestTimeMap, PoolingScenarioOriginDestTimeMapNoWalkingLimit
 export ClusteringScenarioODMap, ClusteringBaseMap
 export create_station_selection_data, create_scenario_data
 export create_pooling_scenario_origin_dest_time_map
+export create_pooling_scenario_origin_dest_time_map_no_walking_limit
 export create_clustering_scenario_od_map
 export create_clustering_base_map
 export n_scenarios, get_station_id, get_station_idx
@@ -76,7 +80,9 @@ export has_walking_distance_limit, get_valid_jk_pairs
 export AbstractStationSelectionModel
 export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel, AbstractPoolingModel
+export AbstractSingleDetourModel
 export TwoStageSingleDetourModel
+export TwoStageSingleDetourNoWalkingLimitModel
 export ClusteringTwoStageODModel
 export ClusteringBaseModel
 
@@ -84,6 +90,9 @@ export ClusteringBaseModel
 export find_detour_combinations
 export find_same_source_detour_combinations
 export find_same_dest_detour_combinations
+
+# Re-export feasible detour helper functions
+export get_feasible_same_source_indices, get_feasible_same_dest_indices
 
 # Re-export optimization functions
 export run_opt, build_model, build_model_with_counts
@@ -95,7 +104,12 @@ export add_scenario_activation_limit_constraints!, add_activation_linking_constr
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
-export set_two_stage_single_detour_objective!, set_clustering_od_objective!, set_clustering_base_objective!
+export set_two_stage_single_detour_objective!, set_two_stage_single_detour_objective_no_walking_limit!
+export set_clustering_od_objective!, set_clustering_base_objective!
+
+# Re-export objective expression functions (for debugging/customization)
+export assignment_cost_expr, flow_cost_expr
+export same_source_pooling_savings_expr, same_dest_pooling_savings_expr
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export generate_scenarios

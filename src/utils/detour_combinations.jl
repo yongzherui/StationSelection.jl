@@ -2,7 +2,7 @@ using Combinatorics
 
 """
     find_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     ) -> Vector{Tuple{Int, Int, Int}}
 
@@ -19,9 +19,12 @@ A triplet is valid if:
 1. t(j→l) is the longest edge (t(j→l) > t(j→k) and t(j→l) > t(k→l))
 2. Triangle inequality holds: t(j→k) + t(k→l) >= t(j→l)
 3. Detour constraint: t(j→k) + t(k→l) <= t(j→l) + max_delay
+
+This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel
+since they share the same routing_delay parameter.
 """
 function find_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     )::Vector{Tuple{Int, Int, Int}}
 
@@ -85,7 +88,7 @@ end
 
 """
     find_same_source_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     ) -> Vector{Tuple{Int, Int, Int}}
 
@@ -100,9 +103,11 @@ Returns triplets (j, k, l) where the detour j→k→l is feasible.
 Used in constraints:
 - x_{od,t,jk,s} >= y_{t,jl,kl,s}  (need assignment on j→k edge)
 - x_{od,t,jl,s} >= y_{t,jl,kl,s}  (need assignment on j→l edge)
+
+This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel.
 """
 function find_same_source_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     )::Vector{Tuple{Int, Int, Int}}
 
@@ -113,7 +118,7 @@ end
 
 """
     find_same_dest_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     ) -> Vector{Tuple{Int, Int, Int, Int}}
 
@@ -130,9 +135,11 @@ Returns quadruplets (j, k, l, t') where:
 Used in constraints:
 - x_{od,t,jl,s} >= y_{t,jl,jk,s}     (need assignment on j→l edge at time t)
 - x_{od,t+t',kl,s} >= y_{t,jl,jk,s}  (need assignment on k→l edge at time t+t')
+
+This method works for both TwoStageSingleDetourModel and TwoStageSingleDetourNoWalkingLimitModel.
 """
 function find_same_dest_detour_combinations(
-        model::TwoStageSingleDetourModel,
+        model::AbstractSingleDetourModel,
         data::StationSelectionData
     )::Vector{Tuple{Int, Int, Int, Int}}
 
