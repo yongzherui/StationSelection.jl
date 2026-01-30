@@ -234,6 +234,46 @@ end
         end
     end
 
+    @testset "Warm start" begin
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)
+
+        warm_start_solution = StationSelection.get_warm_start_solution(
+            model,
+            data;
+            optimizer_env=env,
+            silent=true,
+            show_counts=false
+        )
+
+        @test haskey(warm_start_solution, :x)
+        @test haskey(warm_start_solution, :y)
+        @test haskey(warm_start_solution, :z)
+        @test haskey(warm_start_solution, :f)
+        @test haskey(warm_start_solution, :u)
+        @test haskey(warm_start_solution, :v)
+        @test haskey(warm_start_solution, :mapping)
+
+        m, _, _, _ = StationSelection.build_model_with_counts(model, data, env)
+        StationSelection.apply_warm_start!(m, warm_start_solution)
+
+        # Check a couple of start values to ensure they were applied.
+        @test JuMP.start_value(m[:y][1]) == warm_start_solution[:y][1]
+        @test JuMP.start_value(m[:z][1, 1]) == warm_start_solution[:z][1, 1]
+
+        first_time = first(keys(m[:x][1]))
+        first_od = first(keys(m[:x][1][first_time]))
+        x_vars = m[:x][1][first_time][first_od]
+        x_vals = warm_start_solution[:x][1][first_time][first_od]
+        @test JuMP.start_value(x_vars[1]) == x_vals[1]
+
+        if !isempty(m[:u][1][first_time])
+            @test JuMP.start_value(m[:u][1][first_time][1]) == warm_start_solution[:u][1][first_time][1]
+        end
+        if !isempty(m[:v][1][first_time])
+            @test JuMP.start_value(m[:v][1][first_time][1]) == warm_start_solution[:v][1][first_time][1]
+        end
+    end
+
     @testset "Mapping creation" begin
         @testset "PoolingScenarioOriginDestTimeMap" begin
             model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)

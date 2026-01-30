@@ -23,6 +23,8 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
 - `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD pairs with positive demand
 - `Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}`: Demand count q_{od,s} per OD pair per scenario
+- `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
+- `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
 struct ClusteringScenarioODMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -37,6 +39,10 @@ struct ClusteringScenarioODMap
 
     # Q[scenario_id][(o, d)] = count of requests for OD pair (o,d)
     Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}
+
+    # Walking distance constraint
+    max_walking_distance::Union{Float64, Nothing}
+    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 end
 
 
@@ -88,6 +94,7 @@ function create_clustering_scenario_od_map(
     # Compute Omega_s and Q_s for all scenarios
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
     Q_s = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
+    all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (scenario_id, scenario_data) in enumerate(data.scenarios)
         # Get OD pair counts (aggregated across all times)
@@ -96,6 +103,19 @@ function create_clustering_scenario_od_map(
         # Store unique OD pairs and counts
         Omega_s[scenario_id] = collect(keys(od_count))
         Q_s[scenario_id] = od_count
+        union!(all_od_pairs, Omega_s[scenario_id])
+    end
+
+    max_walking_distance = model.use_walking_distance_limit ? model.max_walking_distance : nothing
+    valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+    if model.use_walking_distance_limit
+        valid_jk_pairs = compute_valid_jk_pairs(
+            all_od_pairs,
+            data,
+            station_id_to_array_idx,
+            array_idx_to_station_id,
+            model.max_walking_distance
+        )
     end
 
     return ClusteringScenarioODMap(
@@ -105,6 +125,29 @@ function create_clustering_scenario_od_map(
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
         Omega_s,
-        Q_s
+        Q_s,
+        max_walking_distance,
+        valid_jk_pairs
     )
+end
+
+"""
+    has_walking_distance_limit(mapping::ClusteringScenarioODMap) -> Bool
+
+Check if the mapping has valid (j, k) pairs computed based on walking distance limits.
+"""
+has_walking_distance_limit(mapping::ClusteringScenarioODMap) = !isnothing(mapping.max_walking_distance)
+
+"""
+    get_valid_jk_pairs(mapping::ClusteringScenarioODMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
+
+Get the valid (j, k) station pairs for an OD pair. Returns all pairs if no walking limit is set.
+"""
+function get_valid_jk_pairs(mapping::ClusteringScenarioODMap, o::Int, d::Int)
+    if has_walking_distance_limit(mapping)
+        return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
+    else
+        n = length(mapping.array_idx_to_station_id)
+        return [(j, k) for j in 1:n for k in 1:n]
+    end
 end

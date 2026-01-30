@@ -172,10 +172,60 @@ function add_assignment_variables!(
     S = n_scenarios(data)
     x = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
 
+    use_sparse = has_walking_distance_limit(mapping)
+    if use_sparse
+        x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+        for s in 1:S
+            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                n_pairs = length(valid_pairs)
+                if n_pairs > 0
+                    x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
+                else
+                    x[s][od_idx] = VariableRef[]
+                end
+            end
+        end
+    else
+        for s in 1:S
+            num_od_pairs = length(mapping.Omega_s[s])
+            for od_idx in 1:num_od_pairs
+                x[s][od_idx] = @variable(m, [1:n, 1:n], Bin)
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+
+"""
+    add_assignment_variables_with_walking_distance_limit!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
+
+Add assignment variables x[s][od_idx] only for valid (j,k) pairs based on walking distance.
+
+x[s][od_idx] is a Vector{VariableRef} of length |valid_jk_pairs|.
+Use mapping.valid_jk_pairs[(o,d)] to get the index mapping: idx → (j, k).
+"""
+function add_assignment_variables_with_walking_distance_limit!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringScenarioODMap
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+
     for s in 1:S
-        num_od_pairs = length(mapping.Omega_s[s])
-        for od_idx in 1:num_od_pairs
-            x[s][od_idx] = @variable(m, [1:n, 1:n], Bin)
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            n_pairs = length(valid_pairs)
+            if n_pairs > 0
+                x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
+            else
+                x[s][od_idx] = VariableRef[]
+            end
         end
     end
 

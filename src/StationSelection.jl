@@ -96,6 +96,7 @@ export get_feasible_same_source_indices, get_feasible_same_dest_indices
 
 # Re-export optimization functions
 export run_opt, build_model, build_model_with_counts
+export warm_start, get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!, add_assignment_variables_with_walking_distance_limit!
 export add_flow_variables!, add_detour_variables!

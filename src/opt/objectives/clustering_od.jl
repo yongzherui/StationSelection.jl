@@ -46,20 +46,36 @@ function set_clustering_od_objective!(
     n = data.n_stations
     S = n_scenarios(data)
     x = m[:x]
+    use_sparse = has_walking_distance_limit(mapping)
 
-    @objective(m, Min,
-        sum(
-            mapping.Q_s[s][(o, d)] * (
-                get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
-                get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
-                routing_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
-            ) * x[s][od_idx][j, k]
-            for s in 1:S
-            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            for j in 1:n
-            for k in 1:n
+    if use_sparse
+        @objective(m, Min,
+            sum(
+                mapping.Q_s[s][(o, d)] * (
+                    get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
+                    get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
+                    routing_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
+                ) * x[s][od_idx][idx]
+                for s in 1:S
+                for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+                for (idx, (j, k)) in enumerate(get_valid_jk_pairs(mapping, o, d))
+            )
         )
-    )
+    else
+        @objective(m, Min,
+            sum(
+                mapping.Q_s[s][(o, d)] * (
+                    get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
+                    get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
+                    routing_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
+                ) * x[s][od_idx][j, k]
+                for s in 1:S
+                for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+                for j in 1:n
+                for k in 1:n
+            )
+        )
+    end
 
     return nothing
 end

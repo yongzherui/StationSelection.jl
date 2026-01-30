@@ -16,6 +16,8 @@ Two-stage stochastic station selection model with OD pair assignments.
 - `k::Int`: Number of stations to activate per scenario (second stage)
 - `l::Int`: Number of stations to build (first stage)
 - `routing_weight::Float64`: Weight λ for routing costs in objective
+- `use_walking_distance_limit::Bool`: Whether to enforce a walking distance limit
+- `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance (only used when limit is enabled)
 
 # Mathematical Formulation
 First stage: Select l stations to build (y[j] ∈ {0,1})
@@ -36,11 +38,25 @@ struct ClusteringTwoStageODModel <: AbstractODModel
     k::Int              # Number of active stations per scenario
     l::Int              # Number of stations to build
     routing_weight::Float64  # Weight for routing costs (λ)
+    use_walking_distance_limit::Bool
+    max_walking_distance::Union{Float64, Nothing}
 
-    function ClusteringTwoStageODModel(k::Int, l::Int, routing_weight::Float64=1.0)
+    function ClusteringTwoStageODModel(
+            k::Int,
+            l::Int,
+            routing_weight::Float64=1.0;
+            use_walking_distance_limit::Bool=false,
+            max_walking_distance::Union{Number, Nothing}=nothing
+        )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         routing_weight > 0 || throw(ArgumentError("routing_weight must be positive"))
-        new(k, l, routing_weight)
+        if use_walking_distance_limit
+            isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
+            max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+            new(k, l, routing_weight, true, Float64(max_walking_distance))
+        else
+            new(k, l, routing_weight, false, nothing)
+        end
     end
 end
