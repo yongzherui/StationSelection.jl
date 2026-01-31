@@ -14,7 +14,7 @@ export assignment_cost_expr
     assignment_cost_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     ) -> AffExpr
 
 Compute the assignment cost expression for TwoStageSingleDetourModel.
@@ -35,7 +35,7 @@ Returns an AffExpr that can be combined with other objective components.
 function assignment_cost_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )::AffExpr
 
     n = data.n_stations
@@ -86,48 +86,3 @@ function assignment_cost_expr(
     return expr
 end
 
-
-"""
-    assignment_cost_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    ) -> AffExpr
-
-Compute the assignment cost expression for TwoStageSingleDetourModel without walking limits.
-Same logic as PoolingScenarioOriginDestTimeMap version.
-"""
-function assignment_cost_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )::AffExpr
-
-    n = data.n_stations
-    S = n_scenarios(data)
-    x = m[:x]
-
-    expr = AffExpr(0.0)
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            for (o, d) in od_vector
-                q_od_s_t = mapping.Q_s_t[s][time_id][(o, d)]
-
-                for j in 1:n, k in 1:n
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-
-                    d_origin_oj = get_walking_cost(data, o, j_id)
-                    d_dest_dk = get_walking_cost(data, k_id, d)
-                    c_jk = get_routing_cost(data, j_id, k_id)
-
-                    cost = q_od_s_t * (d_origin_oj + d_dest_dk + c_jk)
-                    add_to_expression!(expr, cost, x[s][time_id][(o, d)][j, k])
-                end
-            end
-        end
-    end
-
-    return expr
-end

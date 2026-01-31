@@ -14,7 +14,7 @@ export set_clustering_base_objective!
     set_clustering_base_objective!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringBaseMap
+        mapping::ClusteringBaseModelMap
     )
 
 Set the minimization objective for ClusteringBaseModel.
@@ -33,12 +33,12 @@ distance from demand points to their assigned facilities.
 # Arguments
 - `m::Model`: JuMP model with variables x, y already added
 - `data::StationSelectionData`: Problem data with walking_costs
-- `mapping::ClusteringBaseMap`: Mapping with request counts
+- `mapping::ClusteringBaseModelMap`: Mapping with request counts
 """
 function set_clustering_base_objective!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringBaseMap
+        mapping::ClusteringBaseModelMap
     )
 
     n = mapping.n_stations

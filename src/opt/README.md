@@ -19,8 +19,7 @@ TwoStageSingleDetourModel(
 ```
 
 Behavior:
-- If `use_walking_distance_limit=false`, the model uses the no-walking-limit mapping
-  and creates dense assignment variables.
+- If `use_walking_distance_limit=false`, dense assignment variables are created.
 - If `use_walking_distance_limit=true`, a walking limit is enforced and sparse
   assignment variables are used based on valid (j,k) pairs.
 
@@ -53,20 +52,20 @@ Single-scenario clustering baseline (k-medoids).
 ### build_model
 
 ```julia
-build_result = build_model(model, data; optimizer_env=nothing, count=false)
+build_result = build_model(model, data; optimizer_env=nothing)
 ```
 
 `BuildResult` fields:
 - `model`: JuMP.Model
 - `mapping`: AbstractStationSelectionMap
 - `detour_combos`: DetourComboData or `nothing`
-- `counts`: ModelCounts or `nothing` (when `count=false`)
+- `counts`: ModelCounts (always populated)
 - `metadata`: Dict
 
 ### run_opt
 
 ```julia
-opt_result = run_opt(model, data; silent=true, show_counts=false, count=false)
+opt_result = run_opt(model, data; silent=true, show_counts=false)
 ```
 
 `OptResult` fields:

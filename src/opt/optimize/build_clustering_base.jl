@@ -5,8 +5,7 @@
 function build_model(
         model::ClusteringBaseModel,
         data::StationSelectionData;
-        optimizer_env=nothing,
-        count::Bool=false
+        optimizer_env=nothing
     )::BuildResult
 
     if isnothing(optimizer_env)
@@ -14,7 +13,7 @@ function build_model(
     end
 
     # Create the clustering base map
-    mapping = create_clustering_base_map(model, data)
+    mapping = create_map(model, data)
 
     m = Model(() -> Gurobi.Optimizer(optimizer_env))
 
@@ -22,22 +21,15 @@ function build_model(
     constraint_counts = Dict{String, Int}()
     extra_counts = Dict{String, Int}()
 
-    if count
-        total_requests = sum(values(mapping.request_counts))
-        extra_counts["total_requests"] = total_requests
-    end
+    total_requests = sum(values(mapping.request_counts))
+    extra_counts["total_requests"] = total_requests
 
     # ==========================================================================
     # Variables
     # ==========================================================================
 
-    if count
-        variable_counts["station_selection"] = add_station_selection_variables!(m, data)
-        variable_counts["assignment"] = add_assignment_variables!(m, data, mapping)
-    else
-        add_station_selection_variables!(m, data)
-        add_assignment_variables!(m, data, mapping)
-    end
+    variable_counts["station_selection"] = add_station_selection_variables!(m, data)
+    variable_counts["assignment"] = add_assignment_variables!(m, data, mapping)
 
     # ==========================================================================
     # Objective
@@ -49,16 +41,10 @@ function build_model(
     # Constraints
     # ==========================================================================
 
-    if count
-        constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, model.k; equality=true)
-        constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
-        constraint_counts["assignment_to_selected"] = add_assignment_to_selected_constraints!(m, data, mapping)
-    else
-        add_station_limit_constraint!(m, data, model.k; equality=true)
-        add_assignment_constraints!(m, data, mapping)
-        add_assignment_to_selected_constraints!(m, data, mapping)
-    end
+    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, model.k; equality=true)
+    constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_selected"] = add_assignment_to_selected_constraints!(m, data, mapping)
 
-    counts = count ? ModelCounts(variable_counts, constraint_counts, extra_counts) : nothing
+    counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
 end

@@ -155,7 +155,6 @@ function main()
             optimizer_env=env,
             silent=true,
             show_counts=false,
-            count=true,
             do_optimize=false
         )
         elapsed = time() - start_time

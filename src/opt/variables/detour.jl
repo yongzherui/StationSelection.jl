@@ -16,7 +16,7 @@ export add_detour_variables!
     add_detour_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
@@ -40,7 +40,7 @@ Used by: TwoStageSingleDetourModel
 function add_detour_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
@@ -105,61 +105,3 @@ function add_detour_variables!(
     return JuMP.num_variables(m) - before
 end
 
-
-"""
-    add_detour_variables!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}},
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
-    )
-
-Add detour pooling variables for TwoStageSingleDetourModel without walking limits.
-
-Without walking limits, all (j,k) pairs are valid, so all detour combinations
-based on routing geometry are feasible.
-"""
-function add_detour_variables!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}},
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
-    )
-    before = JuMP.num_variables(m)
-    S = n_scenarios(data)
-    n_same_source = length(Xi_same_source)
-
-    u = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
-    v = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            if length(od_vector) > 1 && n_same_source > 0
-                u[s][time_id] = @variable(m, [1:n_same_source], Bin)
-            else
-                u[s][time_id] = VariableRef[]
-            end
-
-            valid_indices = Int[]
-            for (idx, (_, _, _, time_delta)) in enumerate(Xi_same_dest)
-                future_time_id = time_id + time_delta
-                if haskey(mapping.Omega_s_t[s], future_time_id)
-                    push!(valid_indices, idx)
-                end
-            end
-
-            if !isempty(valid_indices)
-                v[s][time_id] = @variable(m, [1:length(valid_indices)], Bin)
-            else
-                v[s][time_id] = VariableRef[]
-            end
-        end
-    end
-
-    m[:u] = u
-    m[:v] = v
-
-    return JuMP.num_variables(m) - before
-end

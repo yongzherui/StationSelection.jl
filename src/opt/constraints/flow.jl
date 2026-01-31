@@ -13,7 +13,7 @@ export add_assignment_to_flow_constraints!
 
 
 """
-    add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+    add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
 Assignment implies flow on that edge.
     x[s][t][od][j,k] ≤ f[s][t][j,k]  ∀(o,d,t) ∈ Ω, j, k, s
@@ -25,7 +25,7 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_to_flow_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -55,30 +55,3 @@ function add_assignment_to_flow_constraints!(
     return _total_num_constraints(m) - before
 end
 
-
-"""
-    add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
-
-Assignment implies flow on that edge (TwoStageSingleDetourModel without walking limits).
-"""
-function add_assignment_to_flow_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )
-    before = _total_num_constraints(m)
-    n = data.n_stations
-    S = n_scenarios(data)
-    f = m[:f]
-    x = m[:x]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            for od in od_vector
-                @constraint(m, [j in 1:n, k in 1:n], x[s][time_id][od][j, k] <= f[s][time_id][j, k])
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end

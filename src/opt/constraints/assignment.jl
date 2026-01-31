@@ -21,7 +21,7 @@ export add_assignment_walking_limit_constraints!
 # ============================================================================
 
 """
-    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
 Each OD request must be assigned to exactly one station pair (TwoStageSingleDetourModel).
     Σⱼₖ x[s][t][od][j,k] = 1  ∀(o,d,t) ∈ Ω, s
@@ -31,7 +31,7 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -50,38 +50,13 @@ function add_assignment_constraints!(
 end
 
 
-"""
-    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
-
-Each OD request must be assigned to exactly one station pair (TwoStageSingleDetourModel without walking limits).
-"""
-function add_assignment_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )
-    before = _total_num_constraints(m)
-    n = data.n_stations
-    S = n_scenarios(data)
-    x = m[:x]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            for od in od_vector
-                @constraint(m, sum(x[s][time_id][od]) == 1)
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
 
 
 """
     add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
 
@@ -94,7 +69,7 @@ When `variable_reduction=true` and walking limit is enabled, constraints use spa
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
     before = _total_num_constraints(m)
@@ -118,7 +93,7 @@ end
 
 
 """
-    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseMap)
+    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Each station location must be assigned to exactly one medoid (ClusteringBaseModel).
     Σⱼ x[i,j] = 1  ∀i
@@ -128,7 +103,7 @@ Used by: ClusteringBaseModel
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringBaseMap
+        mapping::ClusteringBaseModelMap
     )
     before = _total_num_constraints(m)
     n = mapping.n_stations
@@ -145,7 +120,7 @@ end
 # ============================================================================
 
 """
-    add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+    add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
 Assignment requires both stations to be active (TwoStageSingleDetourModel).
     2 * x[s][t][od][j,k] ≤ z[j,s] + z[k,s]  ∀(o,d,t) ∈ Ω, j, k, s
@@ -157,7 +132,7 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -190,41 +165,13 @@ function add_assignment_to_active_constraints!(
 end
 
 
-"""
-    add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
-
-Assignment requires both stations to be active (TwoStageSingleDetourModel without walking limits).
-"""
-function add_assignment_to_active_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )
-    before = _total_num_constraints(m)
-    n = data.n_stations
-    S = n_scenarios(data)
-    z = m[:z]
-    x = m[:x]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            for od in od_vector
-                for j in 1:n, k in 1:n
-                    @constraint(m, 2 * x[s][time_id][od][j, k] <= z[j, s] + z[k, s])
-                end
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
 
 
 """
     add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
 
@@ -237,7 +184,7 @@ When `variable_reduction=true` and walking limit is enabled, constraints use spa
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
     before = _total_num_constraints(m)
@@ -274,7 +221,7 @@ end
     add_assignment_walking_limit_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap,
+        mapping::ClusteringTwoStageODMap,
         max_walking_distance::Float64
     )
 
@@ -288,7 +235,7 @@ Used by: ClusteringTwoStageODModel when walking limits are enabled and variable 
 function add_assignment_walking_limit_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap,
+        mapping::ClusteringTwoStageODMap,
         max_walking_distance::Float64
     )
     before = _total_num_constraints(m)
@@ -316,7 +263,7 @@ end
 # ============================================================================
 
 """
-    add_assignment_to_selected_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseMap)
+    add_assignment_to_selected_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Assignment can only be made to selected stations (ClusteringBaseModel).
     x[i,j] ≤ y[j]  ∀i, j
@@ -326,7 +273,7 @@ Used by: ClusteringBaseModel
 function add_assignment_to_selected_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringBaseMap
+        mapping::ClusteringBaseModelMap
     )
     before = _total_num_constraints(m)
     n = mapping.n_stations

@@ -3,7 +3,7 @@ using Logging
 
 """
     run_opt(model, data; optimizer_env=nothing, silent=true, show_counts=false,
-            count=false, do_optimize=true, warm_start=false)
+            do_optimize=true, warm_start=false)
 
 Construct and solve a station selection optimization model.
 
@@ -15,7 +15,6 @@ Construct and solve a station selection optimization model.
 - `optimizer_env`: Gurobi environment (created if not provided)
 - `silent::Bool`: Whether to suppress solver output (default: true)
 - `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
-- `count::Bool`: Whether to collect variable/constraint counts (default: false)
 - `do_optimize::Bool`: Whether to run `optimize!` (default: true)
 - `warm_start::Bool`: Whether to compute a warm-start solution (TwoStageSingleDetourModel only)
 
@@ -28,42 +27,33 @@ function run_opt(
         optimizer_env=nothing,
         silent::Bool=true,
         show_counts::Bool=false,
-        count::Bool=false,
         do_optimize::Bool=true,
         warm_start::Bool=false
     )
 
     start_time = now()
-    @info "run_opt: start" model_type=string(typeof(model)) do_optimize=do_optimize warm_start=warm_start count=count show_counts=show_counts
+    @info "run_opt: start" model_type=string(typeof(model)) do_optimize=do_optimize warm_start=warm_start show_counts=show_counts
 
     if isnothing(optimizer_env)
         optimizer_env = Gurobi.Env()
     end
 
-    if show_counts
-        count = true
-    end
-
     # Build model
     build_start = now()
-    build_result = build_model(model, data; optimizer_env=optimizer_env, count=count)
+    build_result = build_model(model, data; optimizer_env=optimizer_env)
     m = build_result.model
     build_time_sec = Dates.value(now() - build_start) / 1000
     @info "run_opt: model built" build_time_sec=build_time_sec
 
     if show_counts
-        if !isnothing(build_result.counts)
-            if !isempty(build_result.counts.variables)
-                _print_counts("Variables", build_result.counts.variables)
-            end
-            if !isempty(build_result.counts.constraints)
-                _print_counts("Constraints", build_result.counts.constraints)
-            end
-            if !isempty(build_result.counts.extras)
-                _print_counts("Extras", build_result.counts.extras)
-            end
-        else
-            println("Counts unavailable for model type: $(typeof(model))")
+        if !isempty(build_result.counts.variables)
+            _print_counts("Variables", build_result.counts.variables)
+        end
+        if !isempty(build_result.counts.constraints)
+            _print_counts("Constraints", build_result.counts.constraints)
+        end
+        if !isempty(build_result.counts.extras)
+            _print_counts("Extras", build_result.counts.extras)
         end
     end
 
@@ -161,14 +151,12 @@ function get_warm_start_solution(
     Xi_same_source = detour_combos === nothing ? find_same_source_detour_combinations(model, data) : detour_combos.same_source
     Xi_same_dest = detour_combos === nothing ? find_same_dest_detour_combinations(model, data) : detour_combos.same_dest
     if pooling_map === nothing
-        pooling_map = model.use_walking_distance_limit ?
-            create_pooling_scenario_origin_dest_time_map(
-                model,
-                data;
-                Xi_same_source=Xi_same_source,
-                Xi_same_dest=Xi_same_dest
-            ) :
-            create_pooling_scenario_origin_dest_time_map_no_walking_limit(model, data)
+        pooling_map = create_map(
+            model,
+            data;
+            Xi_same_source=Xi_same_source,
+            Xi_same_dest=Xi_same_dest
+        )
     end
 
     use_walking_distance_limit = has_walking_distance_limit(pooling_map)
@@ -218,7 +206,7 @@ function adapt_clustering_solution_to_two_stage_single_detour(
         pooling_map::AbstractPoolingMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}},
-        clustering_map::ClusteringScenarioODMap,
+        clustering_map::ClusteringTwoStageODMap,
         clustering_variable_reduction::Bool
     )
     x_cluster = _value_recursive(clustering_m[:x])

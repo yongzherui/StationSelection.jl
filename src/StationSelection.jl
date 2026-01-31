@@ -45,6 +45,9 @@ include("data/clustering_od_map.jl")
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/clustering_base_map.jl")
 
+# Model-to-map dispatch
+include("data/create_map.jl")
+
 # Optimization components
 include("opt/variables.jl")
 include("opt/constraints.jl")
@@ -60,13 +63,13 @@ export read_candidate_stations, read_customer_requests
 # Re-export data structures
 export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap, AbstractPoolingMap
-export PoolingScenarioOriginDestTimeMap, PoolingScenarioOriginDestTimeMapNoWalkingLimit
-export ClusteringScenarioODMap, ClusteringBaseMap
+export TwoStageSingleDetourMap
+export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export create_station_selection_data, create_scenario_data
-export create_pooling_scenario_origin_dest_time_map
-export create_pooling_scenario_origin_dest_time_map_no_walking_limit
-export create_clustering_scenario_od_map
-export create_clustering_base_map
+export create_two_stage_single_detour_map
+export create_clustering_two_stage_od_map
+export create_clustering_base_model_map
+export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, has_routing_costs
 
@@ -96,14 +99,14 @@ export get_feasible_same_source_indices, get_feasible_same_dest_indices
 export run_opt, build_model
 export warm_start, get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
-export add_assignment_variables!, add_assignment_variables_with_walking_distance_limit!
+export add_assignment_variables!
 export add_flow_variables!, add_detour_variables!
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
-export set_two_stage_single_detour_objective!, set_two_stage_single_detour_objective_no_walking_limit!
+export set_two_stage_single_detour_objective!
 export set_clustering_od_objective!, set_clustering_base_objective!
 
 # Re-export objective expression functions (for debugging/customization)

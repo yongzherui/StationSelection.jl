@@ -5,8 +5,8 @@ These functions add decision variables to JuMP models. They are designed
 to be composable - models can pick and choose which variable sets they need.
 
 Uses multiple dispatch to provide specialized implementations for different
-mapping types (PoolingScenarioOriginDestTimeMap, ClusteringScenarioODMap,
-ClusteringBaseMap).
+mapping types (TwoStageSingleDetourMap, ClusteringTwoStageODMap,
+ClusteringBaseModelMap).
 
 This file includes:
 1. Base variables (y, z) - from variables/base.jl

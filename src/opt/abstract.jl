@@ -31,7 +31,7 @@ Base abstract type for all station selection optimization models.
 
 All concrete model types should inherit from this or one of its subtypes.
 Each concrete type must implement:
-- `build_model(model, data; optimizer_env=nothing, count=false)` - construct the JuMP model
+- `build_model(model, data; optimizer_env=nothing)` - construct the JuMP model
 - `extract_result(model, m, data)` - extract results after optimization
 """
 abstract type AbstractStationSelectionModel end

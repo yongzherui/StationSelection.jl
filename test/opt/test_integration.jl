@@ -60,7 +60,7 @@ end
         model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)
 
         build_result = StationSelection.build_model(
-            model, data; optimizer_env=env, count=true
+            model, data; optimizer_env=env
         )
         m = build_result.model
         var_counts = build_result.counts.variables
@@ -107,7 +107,7 @@ end
         model = ClusteringTwoStageODModel(2, 3, 1.0)
 
         build_result = StationSelection.build_model(
-            model, data; optimizer_env=env, count=true
+            model, data; optimizer_env=env
         )
         m = build_result.model
         var_counts = build_result.counts.variables
@@ -150,7 +150,7 @@ end
         model = ClusteringBaseModel(3)
 
         build_result = StationSelection.build_model(
-            model, data; optimizer_env=env, count=true
+            model, data; optimizer_env=env
         )
         m = build_result.model
         var_counts = build_result.counts.variables
@@ -194,7 +194,6 @@ end
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                count=true,
                 do_optimize=false
             )
 
@@ -212,7 +211,6 @@ end
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                count=true,
                 do_optimize=false
             )
 
@@ -230,7 +228,6 @@ end
                 model, data;
                 optimizer_env=env,
                 silent=true,
-                count=true,
                 do_optimize=false
             )
 
@@ -262,7 +259,7 @@ end
         @test haskey(warm_start_solution, :v)
         @test haskey(warm_start_solution, :mapping)
 
-        build_result = StationSelection.build_model(model, data; optimizer_env=env, count=false)
+        build_result = StationSelection.build_model(model, data; optimizer_env=env)
         StationSelection.apply_warm_start!(build_result.model, warm_start_solution)
 
         # Check a couple of start values to ensure they were applied.
@@ -286,9 +283,9 @@ end
     end
 
     @testset "Mapping creation" begin
-        @testset "PoolingScenarioOriginDestTimeMap" begin
+        @testset "TwoStageSingleDetourMap" begin
             model = TwoStageSingleDetourModel(2, 3, 1.0, 120.0, 60.0; max_walking_distance=500.0)
-            mapping = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
+            mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5
@@ -298,9 +295,9 @@ end
             @test haskey(mapping.Q_s_t, 1)
         end
 
-        @testset "ClusteringScenarioODMap" begin
+        @testset "ClusteringTwoStageODMap" begin
             model = ClusteringTwoStageODModel(2, 3, 1.0)
-            mapping = StationSelection.create_clustering_scenario_od_map(model, data)
+            mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5
@@ -310,9 +307,9 @@ end
             @test length(mapping.Omega_s[1]) > 0  # Has OD pairs
         end
 
-        @testset "ClusteringBaseMap" begin
+        @testset "ClusteringBaseModelMap" begin
             model = ClusteringBaseModel(3)
-            mapping = StationSelection.create_clustering_base_map(model, data)
+            mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5

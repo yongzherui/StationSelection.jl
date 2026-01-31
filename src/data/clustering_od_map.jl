@@ -7,11 +7,11 @@ for the clustering two-stage optimization (without time dimension).
 
 using DataFrames
 
-export ClusteringScenarioODMap
-export create_clustering_scenario_od_map
+export ClusteringTwoStageODMap
+export create_clustering_two_stage_od_map
 
 """
-    ClusteringScenarioODMap
+    ClusteringTwoStageODMap
 
 Maps scenarios to origin-destination pairs for clustering optimization.
 
@@ -26,7 +26,7 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
-struct ClusteringScenarioODMap <: AbstractClusteringMap
+struct ClusteringTwoStageODMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 
@@ -72,17 +72,17 @@ end
 
 
 """
-    create_clustering_scenario_od_map(
+    create_clustering_two_stage_od_map(
         model::ClusteringTwoStageODModel,
         data::StationSelectionData
-    ) -> ClusteringScenarioODMap
+    ) -> ClusteringTwoStageODMap
 
 Create a clustering scenario OD map with OD pairs organized by scenario.
 """
-function create_clustering_scenario_od_map(
+function create_clustering_two_stage_od_map(
     model::ClusteringTwoStageODModel,
     data::StationSelectionData
-)::ClusteringScenarioODMap
+)::ClusteringTwoStageODMap
 
     # Create station ID mappings
     station_ids = Vector{Int}(data.stations.id)
@@ -118,7 +118,7 @@ function create_clustering_scenario_od_map(
         )
     end
 
-    return ClusteringScenarioODMap(
+    return ClusteringTwoStageODMap(
         station_id_to_array_idx,
         array_idx_to_station_id,
         data.scenarios,
@@ -132,18 +132,18 @@ function create_clustering_scenario_od_map(
 end
 
 """
-    has_walking_distance_limit(mapping::ClusteringScenarioODMap) -> Bool
+    has_walking_distance_limit(mapping::ClusteringTwoStageODMap) -> Bool
 
 Check if the mapping has valid (j, k) pairs computed based on walking distance limits.
 """
-has_walking_distance_limit(mapping::ClusteringScenarioODMap) = !isnothing(mapping.max_walking_distance)
+has_walking_distance_limit(mapping::ClusteringTwoStageODMap) = !isnothing(mapping.max_walking_distance)
 
 """
-    get_valid_jk_pairs(mapping::ClusteringScenarioODMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
+    get_valid_jk_pairs(mapping::ClusteringTwoStageODMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
 
 Get the valid (j, k) station pairs for an OD pair. Returns all pairs if no walking limit is set.
 """
-function get_valid_jk_pairs(mapping::ClusteringScenarioODMap, o::Int, d::Int)
+function get_valid_jk_pairs(mapping::ClusteringTwoStageODMap, o::Int, d::Int)
     if has_walking_distance_limit(mapping)
         return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
     else

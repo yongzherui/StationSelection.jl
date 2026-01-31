@@ -18,7 +18,7 @@ export same_dest_pooling_savings_expr
     same_source_pooling_savings_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
         routing_weight::Float64=1.0
     ) -> AffExpr
@@ -42,7 +42,7 @@ Only includes terms where r > 0 (actual savings exist).
 function same_source_pooling_savings_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
         routing_weight::Float64=1.0
     )::AffExpr
@@ -95,67 +95,13 @@ function same_source_pooling_savings_expr(
 end
 
 
-"""
-    same_source_pooling_savings_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        routing_weight::Float64=1.0
-    ) -> AffExpr
-
-Same-source pooling savings for TwoStageSingleDetourModel without walking limits.
-"""
-function same_source_pooling_savings_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        routing_weight::Float64=1.0
-    )::AffExpr
-
-    S = n_scenarios(data)
-    u = m[:u]
-    u_idx_map = m[:u_idx_map]
-
-    r_same_source = Float64[]
-    for (j, k, l) in Xi_same_source
-        c_jl = get_routing_cost(data, j, l)
-        c_kl = get_routing_cost(data, k, l)
-        push!(r_same_source, c_jl - c_kl)
-    end
-
-    expr = AffExpr(0.0)
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            if length(od_vector) <= 1
-                continue
-            end
-
-            feasible_indices = get(u_idx_map[s], time_id, Int[])
-            if isempty(feasible_indices)
-                continue
-            end
-
-            for (local_idx, global_idx) in enumerate(feasible_indices)
-                r = r_same_source[global_idx]
-                if r > 0
-                    add_to_expression!(expr, routing_weight * r, u[s][time_id][local_idx])
-                end
-            end
-        end
-    end
-
-    return expr
-end
 
 
 """
     same_dest_pooling_savings_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
         routing_weight::Float64=1.0
     ) -> AffExpr
@@ -179,7 +125,7 @@ Only includes terms where r > 0 (actual savings exist).
 function same_dest_pooling_savings_expr(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
         routing_weight::Float64=1.0
     )::AffExpr
@@ -232,54 +178,3 @@ function same_dest_pooling_savings_expr(
     return expr
 end
 
-
-"""
-    same_dest_pooling_savings_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
-    ) -> AffExpr
-
-Same-destination pooling savings for TwoStageSingleDetourModel without walking limits.
-"""
-function same_dest_pooling_savings_expr(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
-    )::AffExpr
-
-    S = n_scenarios(data)
-    v = m[:v]
-    v_idx_map = m[:v_idx_map]
-
-    r_same_dest = Float64[]
-    for (j, k, l, _) in Xi_same_dest
-        c_jl = get_routing_cost(data, j, l)
-        c_jk = get_routing_cost(data, j, k)
-        push!(r_same_dest, c_jl - c_jk)
-    end
-
-    expr = AffExpr(0.0)
-
-    for s in 1:S
-        for (time_id, _) in mapping.Omega_s_t[s]
-            feasible_indices = get(v_idx_map[s], time_id, Int[])
-            if isempty(feasible_indices)
-                continue
-            end
-
-            for (local_idx, global_idx) in enumerate(feasible_indices)
-                r = r_same_dest[global_idx]
-                if r > 0
-                    add_to_expression!(expr, routing_weight * r, v[s][time_id][local_idx])
-                end
-            end
-        end
-    end
-
-    return expr
-end

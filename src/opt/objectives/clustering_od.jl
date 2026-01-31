@@ -14,7 +14,7 @@ export set_clustering_od_objective!
     set_clustering_od_objective!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         routing_weight::Float64=1.0,
         variable_reduction::Bool=true
     )
@@ -34,14 +34,14 @@ Where:
 # Arguments
 - `m::Model`: JuMP model with variables x, y, z already added
 - `data::StationSelectionData`: Problem data with walking_costs and routing_costs
-- `mapping::ClusteringScenarioODMap`: Scenario to OD mapping
+- `mapping::ClusteringTwoStageODMap`: Scenario to OD mapping
 - `routing_weight::Float64`: Weight λ for routing costs (default 1.0)
 - `variable_reduction::Bool`: Whether sparse x is used when walking limits are enabled
 """
 function set_clustering_od_objective!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         routing_weight::Float64=1.0,
         variable_reduction::Bool=true
     )

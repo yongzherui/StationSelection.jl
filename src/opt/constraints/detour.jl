@@ -51,7 +51,7 @@ end
     add_assignment_to_same_source_detour_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}}
     )
 
@@ -71,7 +71,7 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_to_same_source_detour_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}}
     )
     before = _total_num_constraints(m)
@@ -148,58 +148,6 @@ function add_assignment_to_same_source_detour_constraints!(
 end
 
 
-"""
-    add_assignment_to_same_source_detour_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}}
-    )
-
-Same-source pooling constraints for TwoStageSingleDetourModel without walking limits.
-"""
-function add_assignment_to_same_source_detour_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}}
-    )
-    before = _total_num_constraints(m)
-    S = n_scenarios(data)
-    u = m[:u]
-    u_idx_map = m[:u_idx_map]
-    x = m[:x]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            if length(od_vector) <= 1
-                continue
-            end
-
-            feasible_indices = get(u_idx_map[s], time_id, Int[])
-            if isempty(feasible_indices)
-                continue
-            end
-
-            for (local_idx, global_idx) in enumerate(feasible_indices)
-                (j_id, k_id, l_id) = Xi_same_source[global_idx]
-                j = mapping.station_id_to_array_idx[j_id]
-                k = mapping.station_id_to_array_idx[k_id]
-                l = mapping.station_id_to_array_idx[l_id]
-
-                @constraint(m,
-                    sum(x[s][time_id][od][j, k] for od in od_vector) >= u[s][time_id][local_idx]
-                )
-
-                @constraint(m,
-                    sum(x[s][time_id][od][j, l] for od in od_vector) >= u[s][time_id][local_idx]
-                )
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
 
 
 # ============================================================================
@@ -210,7 +158,7 @@ end
     add_assignment_to_same_dest_detour_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
 
@@ -228,7 +176,7 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_to_same_dest_detour_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap,
+        mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
     before = _total_num_constraints(m)
@@ -309,60 +257,3 @@ function add_assignment_to_same_dest_detour_constraints!(
     return _total_num_constraints(m) - before
 end
 
-
-"""
-    add_assignment_to_same_dest_detour_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
-    )
-
-Same-destination pooling constraints for TwoStageSingleDetourModel without walking limits.
-"""
-function add_assignment_to_same_dest_detour_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
-    )
-    before = _total_num_constraints(m)
-    S = n_scenarios(data)
-    v = m[:v]
-    v_idx_map = m[:v_idx_map]
-    x = m[:x]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            feasible_indices = get(v_idx_map[s], time_id, Int[])
-            if isempty(feasible_indices)
-                continue
-            end
-
-            for (local_idx, global_idx) in enumerate(feasible_indices)
-                (j_id, k_id, l_id, time_delta) = Xi_same_dest[global_idx]
-                future_time_id = time_id + time_delta
-
-                if !haskey(mapping.Omega_s_t[s], future_time_id)
-                    continue
-                end
-
-                j = mapping.station_id_to_array_idx[j_id]
-                k = mapping.station_id_to_array_idx[k_id]
-                l = mapping.station_id_to_array_idx[l_id]
-
-                future_od_vector = mapping.Omega_s_t[s][future_time_id]
-
-                @constraint(m,
-                    sum(x[s][time_id][od][j, l] for od in od_vector) >= v[s][time_id][local_idx]
-                )
-
-                @constraint(m,
-                    sum(x[s][future_time_id][od][k, l] for od in future_od_vector) >= v[s][time_id][local_idx]
-                )
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end

@@ -7,11 +7,11 @@ model that aggregates all scenarios and counts request origins/destinations.
 
 using DataFrames
 
-export ClusteringBaseMap
-export create_clustering_base_map
+export ClusteringBaseModelMap
+export create_clustering_base_model_map
 
 """
-    ClusteringBaseMap
+    ClusteringBaseModelMap
 
 Maps station locations to aggregated request counts for basic clustering.
 
@@ -24,7 +24,7 @@ at each station location, aggregated across all scenarios.
 - `request_counts::Dict{Int, Int}`: Station ID → total request count (pickups + dropoffs)
 - `n_stations::Int`: Number of candidate stations
 """
-struct ClusteringBaseMap <: AbstractClusteringMap
+struct ClusteringBaseModelMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 
@@ -75,10 +75,10 @@ end
 
 
 """
-    create_clustering_base_map(
+    create_clustering_base_model_map(
         model::ClusteringBaseModel,
         data::StationSelectionData
-    ) -> ClusteringBaseMap
+    ) -> ClusteringBaseModelMap
 
 Create a clustering base map with aggregated request counts.
 
@@ -87,12 +87,12 @@ Create a clustering base map with aggregated request counts.
 - `data::StationSelectionData`: Problem data with stations and scenarios
 
 # Returns
-- `ClusteringBaseMap` with station mappings and request counts
+- `ClusteringBaseModelMap` with station mappings and request counts
 """
-function create_clustering_base_map(
+function create_clustering_base_model_map(
     model::ClusteringBaseModel,
     data::StationSelectionData
-)::ClusteringBaseMap
+)::ClusteringBaseModelMap
 
     # Create station ID mappings
     station_ids = Vector{Int}(data.stations.id)
@@ -101,7 +101,7 @@ function create_clustering_base_map(
     # Compute request counts (pickups + dropoffs aggregated)
     request_counts = compute_request_counts(data)
 
-    return ClusteringBaseMap(
+    return ClusteringBaseModelMap(
         station_id_to_array_idx,
         array_idx_to_station_id,
         request_counts,

@@ -11,127 +11,53 @@ mapping types.
 using JuMP
 
 export add_assignment_variables!
-export add_assignment_variables_with_walking_distance_limit!
 
 
 # ============================================================================
-# PoolingScenarioOriginDestTimeMap (TwoStageSingleDetourModel with walking limit)
+# TwoStageSingleDetourMap (TwoStageSingleDetourModel)
 # ============================================================================
 
 """
-    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
-Add assignment variables x[s][t][od][j,k] for TwoStageSingleDetourModel.
+Add assignment variables for TwoStageSingleDetourModel.
 
-x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned
-to use stations j (pickup) and k (dropoff).
-
-Structure: scenario → time → OD pair → (pickup, dropoff) matrix
+When a walking limit is enabled, uses a sparse vector x[s][t][od] over valid (j,k) pairs.
+Without a walking limit, uses a dense matrix x[s][t][od][j,k].
 """
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )
     before = JuMP.num_variables(m)
     n = data.n_stations
     S = n_scenarios(data)
-    x = [Dict{Int, Dict{Tuple{Int, Int}, Matrix{VariableRef}}}() for _ in 1:S]
 
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            x[s][time_id] = Dict{Tuple{Int, Int}, Matrix{VariableRef}}()
+    use_sparse = has_walking_distance_limit(mapping)
+    if use_sparse
+        x = [Dict{Int, Dict{Tuple{Int, Int}, Vector{VariableRef}}}() for _ in 1:S]
+        for s in 1:S
+            for (time_id, od_vector) in mapping.Omega_s_t[s]
+                x[s][time_id] = Dict{Tuple{Int, Int}, Vector{VariableRef}}()
 
-            for od in od_vector
-                x[s][time_id][od] = @variable(m, [1:n, 1:n], Bin)
-            end
-        end
-    end
+                for od in od_vector
+                    valid_pairs = get_valid_jk_pairs(mapping, od[1], od[2])
+                    n_pairs = length(valid_pairs)
 
-    m[:x] = x
-    return JuMP.num_variables(m) - before
-end
-
-
-"""
-    add_assignment_variables_with_walking_distance_limit!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
-    )
-
-Add assignment variables x[s][t][od] only for valid (j,k) pairs based on walking distance.
-
-This is a sparse version of add_assignment_variables! that only creates variables for
-station pairs where:
-- The walking distance from origin o to pickup station j ≤ max_walking_distance
-- The walking distance from dropoff station k to destination d ≤ max_walking_distance
-
-x[s][t][od] is a Vector{VariableRef} of length |valid_jk_pairs|.
-Use mapping.valid_jk_pairs[(o,d)] to get the index mapping: idx → (j, k).
-
-Requires that mapping.valid_jk_pairs is populated (i.e., max_walking_distance was set
-when creating the mapping).
-"""
-function add_assignment_variables_with_walking_distance_limit!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
-    )
-    before = JuMP.num_variables(m)
-    S = n_scenarios(data)
-
-    # x[s][t][od] = Vector{VariableRef} of length |valid_jk_pairs|
-    x = [Dict{Int, Dict{Tuple{Int, Int}, Vector{VariableRef}}}() for _ in 1:S]
-
-    for s in 1:S
-        for (time_id, od_vector) in mapping.Omega_s_t[s]
-            x[s][time_id] = Dict{Tuple{Int, Int}, Vector{VariableRef}}()
-
-            for od in od_vector
-                # Get valid (j, k) pairs for this OD from mapping
-                valid_pairs = get_valid_jk_pairs(mapping, od[1], od[2])
-                n_pairs = length(valid_pairs)
-
-                if n_pairs > 0
-                    x[s][time_id][od] = @variable(m, [1:n_pairs], Bin)
-                else
-                    x[s][time_id][od] = VariableRef[]
+                    if n_pairs > 0
+                        x[s][time_id][od] = @variable(m, [1:n_pairs], Bin)
+                    else
+                        x[s][time_id][od] = VariableRef[]
+                    end
                 end
             end
         end
+        m[:x] = x
+        return JuMP.num_variables(m) - before
     end
 
-    m[:x] = x
-    return JuMP.num_variables(m) - before
-end
-
-
-# ============================================================================
-# PoolingScenarioOriginDestTimeMapNoWalkingLimit (TwoStageSingleDetourModel without walking limits)
-# ============================================================================
-
-"""
-    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
-
-Add assignment variables x[s][t][od][j,k] for TwoStageSingleDetourModel without walking limits.
-
-x[s][t][od][j,k] = 1 if OD request (o,d) at time t in scenario s is assigned
-to use stations j (pickup) and k (dropoff).
-
-Structure: scenario → time → OD pair → (pickup, dropoff) matrix
-All (j,k) pairs are valid (no walking distance limit).
-"""
-function add_assignment_variables!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )
-    before = JuMP.num_variables(m)
-    n = data.n_stations
-    S = n_scenarios(data)
     x = [Dict{Int, Dict{Tuple{Int, Int}, Matrix{VariableRef}}}() for _ in 1:S]
-
     for s in 1:S
         for (time_id, od_vector) in mapping.Omega_s_t[s]
             x[s][time_id] = Dict{Tuple{Int, Int}, Matrix{VariableRef}}()
@@ -148,14 +74,14 @@ end
 
 
 # ============================================================================
-# ClusteringScenarioODMap (ClusteringTwoStageODModel)
+# ClusteringTwoStageODMap (ClusteringTwoStageODModel)
 # ============================================================================
 
 """
     add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
 
@@ -171,7 +97,7 @@ When `variable_reduction=true` and a walking limit is enabled, sparse variables 
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringScenarioODMap;
+        mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true
     )
     before = JuMP.num_variables(m)
@@ -207,46 +133,12 @@ function add_assignment_variables!(
 end
 
 
-"""
-    add_assignment_variables_with_walking_distance_limit!(m::Model, data::StationSelectionData, mapping::ClusteringScenarioODMap)
-
-Add assignment variables x[s][od_idx] only for valid (j,k) pairs based on walking distance.
-
-x[s][od_idx] is a Vector{VariableRef} of length |valid_jk_pairs|.
-Use mapping.valid_jk_pairs[(o,d)] to get the index mapping: idx → (j, k).
-"""
-function add_assignment_variables_with_walking_distance_limit!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::ClusteringScenarioODMap
-    )
-    before = JuMP.num_variables(m)
-    S = n_scenarios(data)
-    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
-
-    for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            n_pairs = length(valid_pairs)
-            if n_pairs > 0
-                x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
-            else
-                x[s][od_idx] = VariableRef[]
-            end
-        end
-    end
-
-    m[:x] = x
-    return JuMP.num_variables(m) - before
-end
-
-
 # ============================================================================
-# ClusteringBaseMap (ClusteringBaseModel)
+# ClusteringBaseModelMap (ClusteringBaseModel)
 # ============================================================================
 
 """
-    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseMap)
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Add assignment variables x[i,j] for ClusteringBaseModel.
 
@@ -258,7 +150,7 @@ No scenario, time, or OD dimensions - all aggregated.
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringBaseMap
+        mapping::ClusteringBaseModelMap
     )
     before = JuMP.num_variables(m)
     n = mapping.n_stations

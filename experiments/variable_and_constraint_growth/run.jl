@@ -160,7 +160,6 @@ function main()
             optimizer_env=Gurobi.Env(),
             silent=true,
             show_counts=false,
-            count=true,
             do_optimize=false
         )
         elapsed = time() - start_time

@@ -242,7 +242,7 @@
         @test model_zero_wd.max_walking_distance == 0.0
     end
 
-    @testset "PoolingScenarioOriginDestTimeMap structure" begin
+    @testset "TwoStageSingleDetourMap structure" begin
         # Create test data
         stations = DataFrame(id = [1, 2, 3], lon = [0.0, 0.1, 0.2], lat = [0.0, 0.1, 0.2])
         start_time = DateTime(2024, 1, 1, 8, 0, 0)
@@ -275,7 +275,7 @@
 
         model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 60.0; max_walking_distance=500.0)
 
-        pooling_map = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
+        pooling_map = StationSelection.create_map(model, data)
 
         # Check structure
         @test length(pooling_map.station_id_to_array_idx) == 3
@@ -286,7 +286,7 @@
         @test haskey(pooling_map.Q_s_t, 1)  # demand counts for scenario_id = 1
     end
 
-    @testset "PoolingScenarioOriginDestTimeMap demand counts" begin
+    @testset "TwoStageSingleDetourMap demand counts" begin
         # Create test data with duplicate OD pairs
         stations = DataFrame(id = [1, 2, 3], lon = [0.0, 0.1, 0.2], lat = [0.0, 0.1, 0.2])
         start_time = DateTime(2024, 1, 1, 8, 0, 0)
@@ -322,7 +322,7 @@
 
         model = TwoStageSingleDetourModel(2, 3, 1.0, 60.0, 30.0; max_walking_distance=500.0)  # time_window = 60s
 
-        pooling_map = StationSelection.create_pooling_scenario_origin_dest_time_map(model, data)
+        pooling_map = StationSelection.create_map(model, data)
 
         # Check demand counts
         @test pooling_map.Q_s_t[1][0][(1, 2)] == 2  # Two requests for (1,2) at time 0

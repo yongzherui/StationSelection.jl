@@ -12,10 +12,8 @@ in detour_combinations.jl.
 using DataFrames
 using Dates
 
-export PoolingScenarioOriginDestTimeMap
-export PoolingScenarioOriginDestTimeMapNoWalkingLimit
-export create_pooling_scenario_origin_dest_time_map
-export create_pooling_scenario_origin_dest_time_map_no_walking_limit
+export TwoStageSingleDetourMap
+export create_two_stage_single_detour_map
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
 export has_walking_distance_limit, get_valid_jk_pairs
@@ -24,7 +22,7 @@ export get_feasible_same_source_indices, get_feasible_same_dest_indices
 
 
 """
-    PoolingScenarioOriginDestTimeMap
+    TwoStageSingleDetourMap
 
 Maps scenarios, time windows, and origin-destination pairs for pooling optimization.
 
@@ -46,7 +44,7 @@ Maps scenarios, time windows, and origin-destination pairs for pooling optimizat
 - `feasible_same_dest::Dict{Int, Dict{Int, Vector{Int}}}`: Maps (scenario, time) → feasible same-dest detour indices.
   Only populated when max_walking_distance is set.
 """
-struct PoolingScenarioOriginDestTimeMap <: AbstractPoolingMap
+struct TwoStageSingleDetourMap <: AbstractPoolingMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 
@@ -74,40 +72,6 @@ struct PoolingScenarioOriginDestTimeMap <: AbstractPoolingMap
     feasible_same_source::Dict{Int, Dict{Int, Vector{Int}}}
     feasible_same_dest::Dict{Int, Dict{Int, Vector{Int}}}
 end
-
-"""
-    PoolingScenarioOriginDestTimeMapNoWalkingLimit
-
-Maps scenarios, time windows, and origin-destination pairs for pooling optimization.
-This version does not have walking distance constraints.
-
-# Fields
-- `station_id_to_array_idx::Dict{Int, Int}`: Station ID → array index mapping
-- `array_idx_to_station_id::Vector{Int}`: Array index → station ID mapping
-- `scenarios::Vector{ScenarioData}`: Reference to scenario data
-- `scenario_label_to_array_idx::Dict{String, Int}`: Scenario label → array index
-- `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
-- `time_window::Int`: Time discretization window in seconds
-- `Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}`: Maps (scenario, time) → OD pairs
-- `Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}`: Demand count q_{od,s,t}
-"""
-struct PoolingScenarioOriginDestTimeMapNoWalkingLimit <: AbstractPoolingMap
-    station_id_to_array_idx::Dict{Int, Int}
-    array_idx_to_station_id::Vector{Int}
-
-    scenarios::Vector{ScenarioData}
-    scenario_label_to_array_idx::Dict{String, Int}
-    array_idx_to_scenario_label::Vector{String}
-
-    time_window::Int
-
-    # Omega[scenario_id][time_id] = [(o1, d1), (o2, d2), ...]
-    Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
-
-    # Q[scenario_id][time_id][(o, d)] = count of requests for OD pair (o,d)
-    Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
-end
-
 
 """
     create_station_id_mappings(station_ids::Vector{Int}) -> (Dict{Int, Int}, Vector{Int})
@@ -217,10 +181,11 @@ end
         data::StationSelectionData,
         station_id_to_array_idx::Dict{Int, Int},
         array_idx_to_station_id::Vector{Int},
-        max_walking_distance::Float64
+        max_walking_distance::Union{Float64, Nothing}
     ) -> Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 
 Compute valid (j, k) pickup/dropoff station pairs for each OD pair based on walking distance.
+If max_walking_distance is nothing, all (j, k) pairs are returned for each OD pair.
 
 For an OD pair (o, d):
 - j is a valid pickup station if walking_cost(o, j) ≤ max_walking_distance
@@ -234,11 +199,19 @@ function compute_valid_jk_pairs(
     data::StationSelectionData,
     station_id_to_array_idx::Dict{Int, Int},
     array_idx_to_station_id::Vector{Int},
-    max_walking_distance::Float64
+    max_walking_distance::Union{Float64, Nothing}
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 
     n = length(array_idx_to_station_id)
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+
+    if isnothing(max_walking_distance)
+        all_pairs = [(j, k) for j in 1:n for k in 1:n]
+        for od in od_pairs
+            valid_jk_pairs[od] = all_pairs
+        end
+        return valid_jk_pairs
+    end
 
     for (o, d) in od_pairs
         # Find valid pickup stations j for origin o
@@ -275,12 +248,12 @@ end
 
 
 """
-    create_pooling_scenario_origin_dest_time_map(
+    create_two_stage_single_detour_map(
         model::TwoStageSingleDetourModel,
         data::StationSelectionData;
         Xi_same_source::Vector{Tuple{Int, Int, Int}}=Tuple{Int, Int, Int}[],
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}=Tuple{Int, Int, Int, Int}[]
-    ) -> PoolingScenarioOriginDestTimeMap
+    ) -> TwoStageSingleDetourMap
 
 Create a pooling scenario map with OD pairs organized by scenario and time.
 
@@ -294,12 +267,12 @@ If model.max_walking_distance is set, also computes:
 - `Xi_same_source`: Same-source detour triplets (optional, needed for feasible detour computation)
 - `Xi_same_dest`: Same-dest detour quadruplets (optional, needed for feasible detour computation)
 """
-function create_pooling_scenario_origin_dest_time_map(
+function create_two_stage_single_detour_map(
     model::TwoStageSingleDetourModel,
     data::StationSelectionData;
     Xi_same_source::Vector{Tuple{Int, Int, Int}}=Tuple{Int, Int, Int}[],
     Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}=Tuple{Int, Int, Int, Int}[]
-)::PoolingScenarioOriginDestTimeMap
+)::TwoStageSingleDetourMap
 
     # Create station ID mappings
     station_ids = Vector{Int}(data.stations.id)
@@ -333,25 +306,26 @@ function create_pooling_scenario_origin_dest_time_map(
         Q_s_t[scenario_id] = time_to_od_count
     end
 
-    # Compute valid (j, k) pairs if max_walking_distance is set
     max_walking_distance = model.max_walking_distance
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
     feasible_same_source = Dict{Int, Dict{Int, Vector{Int}}}()
     feasible_same_dest = Dict{Int, Dict{Int, Vector{Int}}}()
 
-    valid_jk_pairs = compute_valid_jk_pairs(
-        all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
-    )
-
-    # Compute feasible detours if Xi is provided
-    if !isempty(Xi_same_source) || !isempty(Xi_same_dest)
-        feasible_same_source, feasible_same_dest = compute_feasible_detours(
-            Omega_s_t, valid_jk_pairs, station_id_to_array_idx,
-            Xi_same_source, Xi_same_dest
+    if !isnothing(max_walking_distance)
+        valid_jk_pairs = compute_valid_jk_pairs(
+            all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
         )
+
+        # Compute feasible detours if Xi is provided
+        if !isempty(Xi_same_source) || !isempty(Xi_same_dest)
+            feasible_same_source, feasible_same_dest = compute_feasible_detours(
+                Omega_s_t, valid_jk_pairs, station_id_to_array_idx,
+                Xi_same_source, Xi_same_dest
+            )
+        end
     end
 
-    return PoolingScenarioOriginDestTimeMap(
+    return TwoStageSingleDetourMap(
         station_id_to_array_idx,
         array_idx_to_station_id,
         data.scenarios,
@@ -365,60 +339,6 @@ function create_pooling_scenario_origin_dest_time_map(
         feasible_same_source,
         feasible_same_dest
     )
-end
-
-"""
-    create_pooling_scenario_origin_dest_time_map_no_walking_limit(
-        model::TwoStageSingleDetourModel,
-        data::StationSelectionData
-    ) -> PoolingScenarioOriginDestTimeMapNoWalkingLimit
-
-Create a pooling scenario map with OD pairs organized by scenario and time.
-No walking distance constraints are applied.
-"""
-function create_pooling_scenario_origin_dest_time_map_no_walking_limit(
-    model::TwoStageSingleDetourModel,
-    data::StationSelectionData
-)::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-
-    # Create station ID mappings
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
-
-    # Create scenario label mappings
-    scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)
-
-    time_window = floor(Int, model.time_window)
-
-    # Compute Omega_s_t and Q_s_t for all scenarios
-    Omega_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
-    Q_s_t = Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}()
-
-    for (scenario_id, scenario_data) in enumerate(data.scenarios)
-        # Get OD pair counts (single pass through data)
-        time_to_od_count = compute_time_to_od_count_mapping(scenario_data, time_window)
-
-        # Derive unique OD pairs from count dictionary keys
-        Omega_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int}}}()
-        for (time_id, od_count_dict) in time_to_od_count
-            Omega_s_t[scenario_id][time_id] = collect(keys(od_count_dict))
-        end
-
-        # Store the counts
-        Q_s_t[scenario_id] = time_to_od_count
-    end
-
-    return PoolingScenarioOriginDestTimeMapNoWalkingLimit(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
-        data.scenarios,
-        scenario_label_to_array_idx,
-        array_idx_to_scenario_label,
-        time_window,
-        Omega_s_t,
-        Q_s_t
-    )
-end
 
 
 """
@@ -503,40 +423,26 @@ end
 
 
 """
-    has_walking_distance_limit(mapping::PoolingScenarioOriginDestTimeMap) -> Bool
+    has_walking_distance_limit(mapping::TwoStageSingleDetourMap) -> Bool
 
 Check if the mapping has valid (j, k) pairs computed based on walking distance limits.
 """
-has_walking_distance_limit(mapping::PoolingScenarioOriginDestTimeMap) = !isnothing(mapping.max_walking_distance)
+has_walking_distance_limit(mapping::TwoStageSingleDetourMap) = !isnothing(mapping.max_walking_distance)
 
 """
-    get_max_walking_distance(mapping::PoolingScenarioOriginDestTimeMap) -> Union{Float64, Nothing}
+    get_max_walking_distance(mapping::TwoStageSingleDetourMap) -> Union{Float64, Nothing}
 
 Return the walking distance limit (if any) for this mapping.
 """
-get_max_walking_distance(mapping::PoolingScenarioOriginDestTimeMap) = mapping.max_walking_distance
-
-"""
-    has_walking_distance_limit(mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit) -> Bool
-
-No walking distance constraint is used in this mapping.
-"""
-has_walking_distance_limit(::PoolingScenarioOriginDestTimeMapNoWalkingLimit) = false
-
-"""
-    get_max_walking_distance(mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit) -> Nothing
-
-Return nothing because walking distance limits are not used for this mapping.
-"""
-get_max_walking_distance(::PoolingScenarioOriginDestTimeMapNoWalkingLimit) = nothing
+get_max_walking_distance(mapping::TwoStageSingleDetourMap) = mapping.max_walking_distance
 
 
 """
-    get_valid_jk_pairs(mapping::PoolingScenarioOriginDestTimeMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
+    get_valid_jk_pairs(mapping::TwoStageSingleDetourMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
 
 Get the valid (j, k) station pairs for an OD pair. Returns all pairs if no walking limit is set.
 """
-function get_valid_jk_pairs(mapping::PoolingScenarioOriginDestTimeMap, o::Int, d::Int)
+function get_valid_jk_pairs(mapping::TwoStageSingleDetourMap, o::Int, d::Int)
     if has_walking_distance_limit(mapping)
         return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
     else
@@ -548,12 +454,12 @@ end
 
 
 """
-    get_feasible_same_source_indices(mapping::PoolingScenarioOriginDestTimeMap, s::Int, time_id::Int, n_same_source::Int) -> Vector{Int}
+    get_feasible_same_source_indices(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int, n_same_source::Int) -> Vector{Int}
 
 Get feasible same-source detour indices for a (scenario, time) pair.
 Returns all indices 1:n_same_source if no walking limit is set.
 """
-function get_feasible_same_source_indices(mapping::PoolingScenarioOriginDestTimeMap, s::Int, time_id::Int, n_same_source::Int)
+function get_feasible_same_source_indices(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int, n_same_source::Int)
     if has_walking_distance_limit(mapping)
         return get(get(mapping.feasible_same_source, s, Dict{Int,Vector{Int}}()), time_id, Int[])
     else
@@ -563,12 +469,12 @@ end
 
 
 """
-    get_feasible_same_dest_indices(mapping::PoolingScenarioOriginDestTimeMap, s::Int, time_id::Int, n_same_dest::Int) -> Vector{Int}
+    get_feasible_same_dest_indices(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int, n_same_dest::Int) -> Vector{Int}
 
 Get feasible same-dest detour indices for a (scenario, time) pair.
 Returns indices based on time validity if no walking limit is set.
 """
-function get_feasible_same_dest_indices(mapping::PoolingScenarioOriginDestTimeMap, s::Int, time_id::Int, n_same_dest::Int)
+function get_feasible_same_dest_indices(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int, n_same_dest::Int)
     if has_walking_distance_limit(mapping)
         return get(get(mapping.feasible_same_dest, s, Dict{Int,Vector{Int}}()), time_id, Int[])
     else

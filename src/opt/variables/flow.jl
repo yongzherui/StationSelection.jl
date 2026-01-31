@@ -13,7 +13,7 @@ export add_flow_variables!
 
 
 """
-    add_flow_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMap)
+    add_flow_variables!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
 Add flow variables f[s][t][j,k] for each scenario, time, and station pair.
 
@@ -24,7 +24,7 @@ Used by: TwoStageSingleDetourModel
 function add_flow_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMap
+        mapping::TwoStageSingleDetourMap
     )
     before = JuMP.num_variables(m)
     n = data.n_stations
@@ -41,28 +41,3 @@ function add_flow_variables!(
     return JuMP.num_variables(m) - before
 end
 
-
-"""
-    add_flow_variables!(m::Model, data::StationSelectionData, mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit)
-
-Add flow variables f[s][t][j,k] for TwoStageSingleDetourModel without walking limits.
-"""
-function add_flow_variables!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::PoolingScenarioOriginDestTimeMapNoWalkingLimit
-    )
-    before = JuMP.num_variables(m)
-    n = data.n_stations
-    S = n_scenarios(data)
-    f = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
-
-    for s in 1:S
-        for time_id in keys(mapping.Omega_s_t[s])
-            f[s][time_id] = @variable(m, [1:n, 1:n], Bin)
-        end
-    end
-
-    m[:f] = f
-    return JuMP.num_variables(m) - before
-end
