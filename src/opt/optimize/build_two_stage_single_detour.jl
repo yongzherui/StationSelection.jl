@@ -43,12 +43,18 @@ function build_model(
     constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, model.k)
     constraint_counts["activation_linking"] = add_activation_linking_constraints!(m, data)
     constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
-    constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(
+        m, data, mapping; tight=model.tight_constraints
+    )
     constraint_counts["assignment_to_flow"] = add_assignment_to_flow_constraints!(m, data, mapping)
     constraint_counts["assignment_to_same_source_detour"] =
-        add_assignment_to_same_source_detour_constraints!(m, data, mapping, Xi_same_source)
+        add_assignment_to_same_source_detour_constraints!(
+            m, data, mapping, Xi_same_source; tight=model.tight_constraints
+        )
     constraint_counts["assignment_to_same_dest_detour"] =
-        add_assignment_to_same_dest_detour_constraints!(m, data, mapping, Xi_same_dest)
+        add_assignment_to_same_dest_detour_constraints!(
+            m, data, mapping, Xi_same_dest; tight=model.tight_constraints
+        )
 
     # Set objective
     set_two_stage_single_detour_objective!(m, data, mapping, Xi_same_source, Xi_same_dest;

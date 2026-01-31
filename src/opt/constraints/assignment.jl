@@ -80,11 +80,7 @@ function add_assignment_constraints!(
 
     for s in 1:S
         for od_idx in 1:length(mapping.Omega_s[s])
-            if use_sparse
-                @constraint(m, sum(x[s][od_idx]) == 1)
-            else
-                @constraint(m, sum(x[s][od_idx][j, k] for j in 1:n, k in 1:n) == 1)
-            end
+            @constraint(m, sum(x[s][od_idx]) == 1)
         end
     end
 
@@ -132,7 +128,8 @@ Used by: TwoStageSingleDetourModel
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::TwoStageSingleDetourMap
+        mapping::TwoStageSingleDetourMap;
+        tight::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -149,12 +146,22 @@ function add_assignment_to_active_constraints!(
                     # Sparse x: iterate over valid (j,k) pairs from mapping
                     valid_pairs = get_valid_jk_pairs(mapping, od[1], od[2])
                     for (idx, (j, k)) in enumerate(valid_pairs)
-                        @constraint(m, 2 * x[s][time_id][od][idx] <= z[j, s] + z[k, s])
+                        if tight
+                            @constraint(m, x[s][time_id][od][idx] <= z[j, s])
+                            @constraint(m, x[s][time_id][od][idx] <= z[k, s])
+                        else
+                            @constraint(m, 2 * x[s][time_id][od][idx] <= z[j, s] + z[k, s])
+                        end
                     end
                 else
                     # Dense x: iterate over all (j,k) pairs
                     for j in 1:n, k in 1:n
-                        @constraint(m, 2 * x[s][time_id][od][j, k] <= z[j, s] + z[k, s])
+                        if tight
+                            @constraint(m, x[s][time_id][od][j, k] <= z[j, s])
+                            @constraint(m, x[s][time_id][od][j, k] <= z[k, s])
+                        else
+                            @constraint(m, 2 * x[s][time_id][od][j, k] <= z[j, s] + z[k, s])
+                        end
                     end
                 end
             end
@@ -185,7 +192,8 @@ function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringTwoStageODMap;
-        variable_reduction::Bool=true
+        variable_reduction::Bool=true,
+        tight::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -199,11 +207,21 @@ function add_assignment_to_active_constraints!(
             if use_sparse
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 for (idx, (j, k)) in enumerate(valid_pairs)
-                    @constraint(m, 2 * x[s][od_idx][idx] <= z[j, s] + z[k, s])
+                    if tight
+                        @constraint(m, x[s][od_idx][idx] <= z[j, s])
+                        @constraint(m, x[s][od_idx][idx] <= z[k, s])
+                    else
+                        @constraint(m, 2 * x[s][od_idx][idx] <= z[j, s] + z[k, s])
+                    end
                 end
             else
                 for j in 1:n, k in 1:n
-                    @constraint(m, 2 * x[s][od_idx][j, k] <= z[j, s] + z[k, s])
+                    if tight
+                        @constraint(m, x[s][od_idx][j, k] <= z[j, s])
+                        @constraint(m, x[s][od_idx][j, k] <= z[k, s])
+                    else
+                        @constraint(m, 2 * x[s][od_idx][j, k] <= z[j, s] + z[k, s])
+                    end
                 end
             end
         end

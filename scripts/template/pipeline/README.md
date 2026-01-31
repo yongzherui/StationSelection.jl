@@ -10,4 +10,4 @@ Files:
 
 Notes:
 - `03_run_selection.jl` uses `run_opt` which returns an `OptResult`.
-- Counts are available in `result.counts` when `show_counts=true` or `count=true`.
+- Counts are always available in `result.counts` (printing is controlled by `show_counts=true`).

@@ -14,7 +14,8 @@ Constructor:
 TwoStageSingleDetourModel(
     k, l, routing_weight, time_window, routing_delay;
     use_walking_distance_limit=false,
-    max_walking_distance=nothing
+    max_walking_distance=nothing,
+    tight_constraints=true
 )
 ```
 
@@ -33,7 +34,8 @@ ClusteringTwoStageODModel(
     k, l, routing_weight;
     use_walking_distance_limit=false,
     max_walking_distance=nothing,
-    variable_reduction=true
+    variable_reduction=true,
+    tight_constraints=true
 )
 ```
 

@@ -19,6 +19,7 @@ Two-stage stochastic station selection model with OD pair assignments.
 - `use_walking_distance_limit::Bool`: Whether to enforce a walking distance limit
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance (only used when limit is enabled)
 - `variable_reduction::Bool`: Whether to reduce assignment variables when walking limit is enabled
+- `tight_constraints::Bool`: Whether to use tighter assignment-to-active constraints
 
 # Mathematical Formulation
 First stage: Select l stations to build (y[j] ∈ {0,1})
@@ -42,6 +43,7 @@ struct ClusteringTwoStageODModel <: AbstractODModel
     use_walking_distance_limit::Bool
     max_walking_distance::Union{Float64, Nothing}
     variable_reduction::Bool
+    tight_constraints::Bool
 
     function ClusteringTwoStageODModel(
             k::Int,
@@ -49,7 +51,8 @@ struct ClusteringTwoStageODModel <: AbstractODModel
             routing_weight::Float64=1.0;
             use_walking_distance_limit::Bool=false,
             max_walking_distance::Union{Number, Nothing}=nothing,
-            variable_reduction::Bool=true
+            variable_reduction::Bool=true,
+            tight_constraints::Bool=true
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
@@ -57,9 +60,9 @@ struct ClusteringTwoStageODModel <: AbstractODModel
         if use_walking_distance_limit
             isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
-            new(k, l, routing_weight, true, Float64(max_walking_distance), variable_reduction)
+            new(k, l, routing_weight, true, Float64(max_walking_distance), variable_reduction, tight_constraints)
         else
-            new(k, l, routing_weight, false, nothing, variable_reduction)
+            new(k, l, routing_weight, false, nothing, variable_reduction, tight_constraints)
         end
     end
 end
