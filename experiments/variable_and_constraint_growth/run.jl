@@ -150,7 +150,8 @@ function main()
             model_cfg["l"],
             model_cfg["routing_weight"],
             model_cfg["time_window"],
-            model_cfg["routing_delay"]
+            model_cfg["routing_delay"];
+            tight_constraints=get(model_cfg, "tight_constraints", true)
         )
 
         start_time = time()

@@ -146,12 +146,16 @@ function main()
     routing_weight = mc["routing_weight"]
     time_window = get(mc, "time_window", nothing)
     routing_delay = get(mc, "routing_delay", nothing)
+    tight_constraints = get(mc, "tight_constraints", true)
     if isnothing(time_window) || isnothing(routing_delay)
         error("Config model section must include time_window and routing_delay for detour experiments.")
     end
 
     max_delay = args["max_delay"]
-    model = TwoStageSingleDetourModel(k, l, routing_weight, time_window, max_delay)
+    model = TwoStageSingleDetourModel(
+        k, l, routing_weight, time_window, max_delay;
+        tight_constraints=tight_constraints
+    )
 
     rng = MersenneTwister(args["seed"])
     sample_size = args["sample_size"]

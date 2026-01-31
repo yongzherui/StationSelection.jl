@@ -23,6 +23,8 @@ Behavior:
 - If `use_walking_distance_limit=false`, dense assignment variables are created.
 - If `use_walking_distance_limit=true`, a walking limit is enforced and sparse
   assignment variables are used based on valid (j,k) pairs.
+- If `tight_constraints=false`, detour constraints use a single combined inequality
+  instead of two tighter edge constraints.
 
 ### ClusteringTwoStageODModel
 
@@ -44,6 +46,8 @@ Behavior:
   assignment variables are used.
 - When `use_walking_distance_limit=true` and `variable_reduction=false`, dense
   assignment variables are used and walking limits are enforced via constraints.
+- If `tight_constraints=false`, assignment-to-active uses a single combined inequality
+  instead of two tighter station constraints.
 
 ### ClusteringBaseModel
 

@@ -20,6 +20,7 @@ time_window = 120.0      # Time discretization window in seconds
 routing_delay = 900.0    # Maximum allowed detour delay in seconds
 use_walking_distance_limit = false  # Enable walking limit for TwoStageSingleDetourModel
 max_walking_distance = 800.0         # Only used when walking limit is enabled
+tight_constraints = true             # Use tighter assignment/ detour constraints
 
 # ClusteringTwoStageODModel specific parameters
 variable_reduction = true  # Use sparse assignment variables when walking limit is enabled

@@ -127,7 +127,7 @@ end
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        tight::Bool=true
+        tight_constraints::Bool=true
     )
 
 Same-source pooling constraints for triplet (j, k, l):
@@ -141,9 +141,9 @@ For each feasible (j,k,l) ∈ Ξ, if pooling is enabled (u=1), we need assignmen
 When walking limits are enabled, the sums are over OD pairs that actually have
 the required edges available.
 
-If `tight=true`, adds two constraints:
+If `tight_constraints=true`, adds two constraints:
     sum(j,k) >= u and sum(j,l) >= u
-If `tight=false`, adds a single combined constraint:
+If `tight_constraints=false`, adds a single combined constraint:
     2u <= sum(j,k) + sum(j,l)
 
 Used by: TwoStageSingleDetourModel
@@ -194,7 +194,7 @@ function add_assignment_to_same_source_detour_constraints!(
                     mapping, x, s, time_id, od_vector, j, l; use_sparse=use_sparse
                 )
 
-                if tight
+                if tight_constraints
                     @constraint(m, jk_terms >= u[s][time_id][local_idx])
                     @constraint(m, jl_terms >= u[s][time_id][local_idx])
                 else
@@ -220,7 +220,7 @@ end
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        tight::Bool=true
+        tight_constraints::Bool=true
     )
 
 Same-destination pooling constraints for quadruplet (j, k, l, t'):
@@ -232,8 +232,8 @@ For each feasible (j,k,l,t') ∈ Ξ, if pooling is enabled (v=1), we need:
     Σ_{od with edge (j,l) at t} x_{od,t,jl,s} ≥ v_{t,idx,s}
     Σ_{od with edge (k,l) at t+t'} x_{od,t+t',kl,s} ≥ v_{t,idx,s}
 
-If `tight=true`, adds the two constraints above.
-If `tight=false`, adds a single combined constraint:
+If `tight_constraints=true`, adds the two constraints above.
+If `tight_constraints=false`, adds a single combined constraint:
     2v <= sum(j,l at t) + sum(k,l at t+t')
 
 Used by: TwoStageSingleDetourModel
@@ -283,7 +283,7 @@ function add_assignment_to_same_dest_detour_constraints!(
                     mapping, x, s, future_time_id, future_od_vector, k, l; use_sparse=use_sparse
                 )
 
-                if tight
+                if tight_constraints
                     @constraint(m, jl_terms >= v[s][time_id][local_idx])
                     @constraint(m, kl_terms >= v[s][time_id][local_idx])
                 else

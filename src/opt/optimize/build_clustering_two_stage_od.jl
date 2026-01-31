@@ -59,7 +59,7 @@ function build_model(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
     constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(
-        m, data, mapping; variable_reduction=model.variable_reduction, tight=model.tight_constraints
+        m, data, mapping; variable_reduction=model.variable_reduction, tight_constraints=model.tight_constraints
     )
 
     if model.use_walking_distance_limit && !model.variable_reduction

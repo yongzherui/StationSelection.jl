@@ -159,7 +159,8 @@ function main()
     for max_delay in max_delays
         model = TwoStageSingleDetourModel(
             k, l, routing_weight,
-            time_window, max_delay
+            time_window, max_delay;
+            tight_constraints=true
         )
 
         same_source = find_same_source_detour_combinations(model, data)

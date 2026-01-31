@@ -167,7 +167,8 @@ function get_warm_start_solution(
         model.l,
         model.routing_weight;
         use_walking_distance_limit=use_walking_distance_limit,
-        max_walking_distance=max_walking_distance
+        max_walking_distance=max_walking_distance,
+        tight_constraints=model.tight_constraints
     )
 
     clustering_result = run_opt(

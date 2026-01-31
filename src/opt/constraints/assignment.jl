@@ -129,7 +129,7 @@ function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap;
-        tight::Bool=true
+        tight_constraints::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -146,7 +146,7 @@ function add_assignment_to_active_constraints!(
                     # Sparse x: iterate over valid (j,k) pairs from mapping
                     valid_pairs = get_valid_jk_pairs(mapping, od[1], od[2])
                     for (idx, (j, k)) in enumerate(valid_pairs)
-                        if tight
+                        if tight_constraints
                             @constraint(m, x[s][time_id][od][idx] <= z[j, s])
                             @constraint(m, x[s][time_id][od][idx] <= z[k, s])
                         else
@@ -156,7 +156,7 @@ function add_assignment_to_active_constraints!(
                 else
                     # Dense x: iterate over all (j,k) pairs
                     for j in 1:n, k in 1:n
-                        if tight
+                        if tight_constraints
                             @constraint(m, x[s][time_id][od][j, k] <= z[j, s])
                             @constraint(m, x[s][time_id][od][j, k] <= z[k, s])
                         else
@@ -193,7 +193,7 @@ function add_assignment_to_active_constraints!(
         data::StationSelectionData,
         mapping::ClusteringTwoStageODMap;
         variable_reduction::Bool=true,
-        tight::Bool=true
+        tight_constraints::Bool=true
     )
     before = _total_num_constraints(m)
     n = data.n_stations
@@ -207,7 +207,7 @@ function add_assignment_to_active_constraints!(
             if use_sparse
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 for (idx, (j, k)) in enumerate(valid_pairs)
-                    if tight
+                    if tight_constraints
                         @constraint(m, x[s][od_idx][idx] <= z[j, s])
                         @constraint(m, x[s][od_idx][idx] <= z[k, s])
                     else
@@ -216,7 +216,7 @@ function add_assignment_to_active_constraints!(
                 end
             else
                 for j in 1:n, k in 1:n
-                    if tight
+                    if tight_constraints
                         @constraint(m, x[s][od_idx][j, k] <= z[j, s])
                         @constraint(m, x[s][od_idx][j, k] <= z[k, s])
                     else

@@ -153,7 +153,8 @@ try
         l,
         model_cfg["routing_weight"],
         model_cfg["time_window"],
-        model_cfg["routing_delay"]
+        model_cfg["routing_delay"];
+        tight_constraints=get(model_cfg, "tight_constraints", true)
     )
 
     silent = get(solver_cfg, "silent", true)

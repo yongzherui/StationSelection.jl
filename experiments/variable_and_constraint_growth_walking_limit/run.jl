@@ -145,7 +145,8 @@ function main()
             model_cfg["routing_weight"],
             model_cfg["time_window"],
             model_cfg["routing_delay"];
-            max_walking_distance=walking_dist
+            max_walking_distance=walking_dist,
+            tight_constraints=get(model_cfg, "tight_constraints", true)
         )
 
         start_time = time()
