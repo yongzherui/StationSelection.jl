@@ -54,7 +54,9 @@ function build_model(
 
     constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, model.l; equality=true)
     constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, model.k)
+
     constraint_counts["activation_linking"] = add_activation_linking_constraints!(m, data)
+
     constraint_counts["assignment"] = add_assignment_constraints!(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
@@ -69,5 +71,6 @@ function build_model(
     end
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
+
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
 end

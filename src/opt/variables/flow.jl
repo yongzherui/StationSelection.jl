@@ -27,17 +27,25 @@ function add_flow_variables!(
         mapping::TwoStageSingleDetourMap
     )
     before = JuMP.num_variables(m)
-    n = data.n_stations
     S = n_scenarios(data)
-    f = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
+    f = [Dict{Int, Any}() for _ in 1:S]
 
+    use_sparse = has_walking_distance_limit(mapping)
     for s in 1:S
         for time_id in keys(mapping.Omega_s_t[s])
-            f[s][time_id] = @variable(m, [1:n, 1:n], Bin)
+            if use_sparse
+                valid_f_pairs = get_valid_f_pairs(mapping, s, time_id)
+                f[s][time_id] = Dict{Tuple{Int, Int}, VariableRef}()
+                for (j, k) in valid_f_pairs
+                    f[s][time_id][(j, k)] = @variable(m, Bin)
+                end
+            else
+                n = data.n_stations
+                f[s][time_id] = @variable(m, [1:n, 1:n], Bin)
+            end
         end
     end
 
     m[:f] = f
     return JuMP.num_variables(m) - before
 end
-

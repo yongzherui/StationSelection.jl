@@ -130,17 +130,20 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         use_walking_distance_limit = get(mc, "use_walking_distance_limit", false)
         max_walking_distance = get(mc, "max_walking_distance", nothing)
         tight_constraints = get(mc, "tight_constraints", true)
+        detour_use_flow_bounds = get(mc, "detour_use_flow_bounds", false)
         model = TwoStageSingleDetourModel(
             mc["k"], mc["l"], mc["routing_weight"],
             mc["time_window"], mc["routing_delay"];
             use_walking_distance_limit=use_walking_distance_limit,
             max_walking_distance=max_walking_distance,
-            tight_constraints=tight_constraints
+            tight_constraints=tight_constraints,
+            detour_use_flow_bounds=detour_use_flow_bounds
         )
         println("  - k=$(model.k), l=$(model.l), γ=$(model.routing_weight)")
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
         println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
         println("  - tight_constraints=$(model.tight_constraints)")
+        println("  - detour_use_flow_bounds=$(model.detour_use_flow_bounds)")
     elseif model_type == "ClusteringTwoStageODModel"
         use_walking_distance_limit = get(mc, "use_walking_distance_limit", false)
         max_walking_distance = get(mc, "max_walking_distance", nothing)

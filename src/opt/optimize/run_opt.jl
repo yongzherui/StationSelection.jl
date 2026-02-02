@@ -293,20 +293,27 @@ function adapt_clustering_solution_to_two_stage_single_detour(
     z_ws = z_cluster
 
     # f warm-start: set f=1 wherever any x=1 on that edge.
-    f_ws = [Dict{Int, Matrix{Float64}}() for _ in 1:S]
+    f_ws = [Dict{Int, Any}() for _ in 1:S]
     for s in 1:S
         for (time_id, od_vector) in pooling_map.Omega_s_t[s]
-            f_vals = zeros(Float64, n, n)
-            for od in od_vector
-                if use_sparse
+            if use_sparse
+                f_vals = Dict{Tuple{Int, Int}, Float64}()
+                for (j, k) in get_valid_f_pairs(pooling_map, s, time_id)
+                    f_vals[(j, k)] = 0.0
+                end
+                for od in od_vector
                     valid_pairs = get_valid_jk_pairs(pooling_map, od[1], od[2])
                     x_vals = x_ws[s][time_id][od]
                     for (idx, (j, k)) in enumerate(valid_pairs)
                         if x_vals[idx] > 0.5
-                            f_vals[j, k] = 1.0
+                            f_vals[(j, k)] = 1.0
                         end
                     end
-                else
+                end
+                f_ws[s][time_id] = f_vals
+            else
+                f_vals = zeros(Float64, n, n)
+                for od in od_vector
                     x_vals = x_ws[s][time_id][od]
                     for j in 1:n, k in 1:n
                         if x_vals[j, k] > 0.5
@@ -314,8 +321,8 @@ function adapt_clustering_solution_to_two_stage_single_detour(
                         end
                     end
                 end
+                f_ws[s][time_id] = f_vals
             end
-            f_ws[s][time_id] = f_vals
         end
     end
 
@@ -503,8 +510,14 @@ function apply_warm_start!(
     for s in eachindex(m[:f])
         for (time_id, f_vars) in m[:f][s]
             f_vals = f_ws[s][time_id]
-            for j in 1:size(f_vars, 1), k in 1:size(f_vars, 2)
-                JuMP.set_start_value(f_vars[j, k], f_vals[j, k])
+            if f_vars isa Dict
+                for (jk, f_var) in f_vars
+                    JuMP.set_start_value(f_var, get(f_vals, jk, 0.0))
+                end
+            else
+                for j in 1:size(f_vars, 1), k in 1:size(f_vars, 2)
+                    JuMP.set_start_value(f_vars[j, k], f_vals[j, k])
+                end
             end
         end
     end

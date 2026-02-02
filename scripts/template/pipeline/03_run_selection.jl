@@ -152,7 +152,8 @@ try
         model_cfg["routing_delay"];
         use_walking_distance_limit=get(model_cfg, "use_walking_distance_limit", false),
         max_walking_distance=get(model_cfg, "max_walking_distance", nothing),
-        tight_constraints=get(model_cfg, "tight_constraints", true)
+        tight_constraints=get(model_cfg, "tight_constraints", true),
+        detour_use_flow_bounds=get(model_cfg, "detour_use_flow_bounds", false)
     )
 
     silent = get(solver_cfg, "silent", true)

@@ -51,14 +51,15 @@ function build_model(
         m, data, mapping; tight_constraints=model.tight_constraints
     )
 
-    constraint_counts["assignment_to_flow"] = add_assignment_to_flow_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_flow_lb"] = add_assignment_to_flow_lb_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_flow_ub"] = add_assignment_to_flow_ub_constraints!(m, data, mapping)
     constraint_counts["assignment_to_same_source_detour"] =
         add_assignment_to_same_source_detour_constraints!(
-            m, data, mapping, Xi_same_source; tight_constraints=model.tight_constraints
+            m, data, mapping, Xi_same_source; use_flow_bounds=model.detour_use_flow_bounds
         )
     constraint_counts["assignment_to_same_dest_detour"] =
         add_assignment_to_same_dest_detour_constraints!(
-            m, data, mapping, Xi_same_dest; tight_constraints=model.tight_constraints
+            m, data, mapping, Xi_same_dest; use_flow_bounds=model.detour_use_flow_bounds
         )
 
     # Set objective

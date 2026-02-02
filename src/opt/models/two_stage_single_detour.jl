@@ -11,6 +11,7 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
     use_walking_distance_limit::Bool
     max_walking_distance::Union{Float64, Nothing}  # maximum walking distance from origin to pickup / dropoff to destination
     tight_constraints::Bool
+    detour_use_flow_bounds::Bool
 
     function TwoStageSingleDetourModel(
             k::Int,
@@ -20,7 +21,8 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
             routing_delay::Number;
             use_walking_distance_limit::Bool=false,
             max_walking_distance::Union{Number, Nothing}=nothing,
-            tight_constraints::Bool=true
+            tight_constraints::Bool=true,
+            detour_use_flow_bounds::Bool=false
        )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
@@ -37,10 +39,10 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
 
             new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
-                true, Float64(max_walking_distance), tight_constraints)
+                true, Float64(max_walking_distance), tight_constraints, detour_use_flow_bounds)
         else
             new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
-                false, nothing, tight_constraints)
+                false, nothing, tight_constraints, detour_use_flow_bounds)
         end
     end
 end

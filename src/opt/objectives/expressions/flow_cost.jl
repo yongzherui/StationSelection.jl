@@ -36,24 +36,33 @@ function flow_cost_expr(
         routing_weight::Float64=1.0
     )::AffExpr
 
-    n = data.n_stations
     S = n_scenarios(data)
     f = m[:f]
+    use_sparse = has_walking_distance_limit(mapping)
 
     expr = AffExpr(0.0)
 
     for s in 1:S
         for (time_id, _) in mapping.Omega_s_t[s]
-            for j in 1:n, k in 1:n
-                j_id = mapping.array_idx_to_station_id[j]
-                k_id = mapping.array_idx_to_station_id[k]
-                c_jk = get_routing_cost(data, j_id, k_id)
+            if use_sparse
+                for (j, k) in get_valid_f_pairs(mapping, s, time_id)
+                    j_id = mapping.array_idx_to_station_id[j]
+                    k_id = mapping.array_idx_to_station_id[k]
+                    c_jk = get_routing_cost(data, j_id, k_id)
+                    add_to_expression!(expr, routing_weight * c_jk, f[s][time_id][(j, k)])
+                end
+            else
+                n = data.n_stations
+                for j in 1:n, k in 1:n
+                    j_id = mapping.array_idx_to_station_id[j]
+                    k_id = mapping.array_idx_to_station_id[k]
+                    c_jk = get_routing_cost(data, j_id, k_id)
 
-                add_to_expression!(expr, routing_weight * c_jk, f[s][time_id][j, k])
+                    add_to_expression!(expr, routing_weight * c_jk, f[s][time_id][j, k])
+                end
             end
         end
     end
 
     return expr
 end
-

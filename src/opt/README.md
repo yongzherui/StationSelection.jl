@@ -16,7 +16,8 @@ TwoStageSingleDetourModel(
     k, l, routing_weight, time_window, routing_delay;
     use_walking_distance_limit=false,
     max_walking_distance=nothing,
-    tight_constraints=true
+    tight_constraints=true,
+    detour_use_flow_bounds=false
 )
 ```
 
@@ -27,6 +28,8 @@ Behavior:
   assignment variables are used based on valid (j,k) pairs.
 - If `tight_constraints=false`, detour constraints use a single combined inequality
   instead of two tighter edge constraints.
+- If `detour_use_flow_bounds=true`, detour bounds use flow variables `f` instead of
+  summed assignment variables `x` (requires flow upper bounds).
 
 ### ClusteringTwoStageODModel
 

@@ -16,7 +16,7 @@ export TwoStageSingleDetourMap
 export create_two_stage_single_detour_map
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
-export has_walking_distance_limit, get_valid_jk_pairs
+export has_walking_distance_limit, get_valid_jk_pairs, get_valid_f_pairs
 export get_max_walking_distance
 export get_feasible_same_source_indices, get_feasible_same_dest_indices
 
@@ -39,6 +39,8 @@ Maps scenarios, time windows, and origin-destination pairs for pooling optimizat
 - `valid_jk_pairs::Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs (array indices).
   Only populated when max_walking_distance is set. j is valid if walking_cost(o,j) ≤ max_walking_distance,
   k is valid if walking_cost(k,d) ≤ max_walking_distance.
+- `valid_f_pairs_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}`: Maps (scenario, time) → valid (j,k) pairs.
+  Only populated when max_walking_distance is set.
 - `feasible_same_source::Dict{Int, Dict{Int, Vector{Int}}}`: Maps (scenario, time) → feasible same-source detour indices.
   Only populated when max_walking_distance is set.
 - `feasible_same_dest::Dict{Int, Dict{Int, Vector{Int}}}`: Maps (scenario, time) → feasible same-dest detour indices.
@@ -66,6 +68,10 @@ struct TwoStageSingleDetourMap <: AbstractPoolingMap
     # valid_jk_pairs[(o, d)] = [(j1, k1), (j2, k2), ...] as array indices
     # Only populated when max_walking_distance is set
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+
+    # Union of valid (j, k) pairs across ODs for each (scenario, time)
+    # Only populated when max_walking_distance is set
+    valid_f_pairs_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
 
     # Feasible detour indices for each (scenario, time)
     # Only populated when max_walking_distance is set
@@ -308,6 +314,7 @@ function create_two_stage_single_detour_map(
 
     max_walking_distance = model.max_walking_distance
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+    valid_f_pairs_s_t = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
     feasible_same_source = Dict{Int, Dict{Int, Vector{Int}}}()
     feasible_same_dest = Dict{Int, Dict{Int, Vector{Int}}}()
 
@@ -315,6 +322,19 @@ function create_two_stage_single_detour_map(
         valid_jk_pairs = compute_valid_jk_pairs(
             all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
         )
+        # Build per-(scenario,time) valid f pairs as union of OD valid pairs
+        for (scenario_id, time_dict) in Omega_s_t
+            valid_f_pairs_s_t[scenario_id] = Dict{Int, Vector{Tuple{Int, Int}}}()
+            for (time_id, od_vector) in time_dict
+                pair_set = Set{Tuple{Int, Int}}()
+                for od in od_vector
+                    for pair in get(valid_jk_pairs, od, Tuple{Int, Int}[])
+                        push!(pair_set, pair)
+                    end
+                end
+                valid_f_pairs_s_t[scenario_id][time_id] = collect(pair_set)
+            end
+        end
 
         # Compute feasible detours if Xi is provided
         if !isempty(Xi_same_source) || !isempty(Xi_same_dest)
@@ -336,6 +356,7 @@ function create_two_stage_single_detour_map(
         Q_s_t,
         max_walking_distance,
         valid_jk_pairs,
+        valid_f_pairs_s_t,
         feasible_same_source,
         feasible_same_dest
     )
@@ -447,6 +468,22 @@ function get_valid_jk_pairs(mapping::TwoStageSingleDetourMap, o::Int, d::Int)
         return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
     else
         # No limit - return all pairs
+        n = length(mapping.array_idx_to_station_id)
+        return [(j, k) for j in 1:n for k in 1:n]
+    end
+end
+
+
+"""
+    get_valid_f_pairs(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int) -> Vector{Tuple{Int, Int}}
+
+Get valid (j,k) pairs for a (scenario, time) based on OD walking limits.
+Returns all pairs if no walking limit is set.
+"""
+function get_valid_f_pairs(mapping::TwoStageSingleDetourMap, s::Int, time_id::Int)
+    if has_walking_distance_limit(mapping)
+        return get(get(mapping.valid_f_pairs_s_t, s, Dict{Int,Vector{Tuple{Int, Int}}}()), time_id, Tuple{Int, Int}[])
+    else
         n = length(mapping.array_idx_to_station_id)
         return [(j, k) for j in 1:n for k in 1:n]
     end

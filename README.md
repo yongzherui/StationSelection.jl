@@ -50,7 +50,8 @@ data = create_station_selection_data(
 model = TwoStageSingleDetourModel(
     5, 10, 1.0, 120.0, 900.0;
     use_walking_distance_limit=true,
-    max_walking_distance=800.0
+    max_walking_distance=800.0,
+    detour_use_flow_bounds=false
 )
 
 # Run optimization

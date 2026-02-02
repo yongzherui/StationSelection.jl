@@ -14,7 +14,7 @@ export add_assignment_to_same_dest_detour_constraints!
 
 
 # ============================================================================
-# Helper functions
+# Helper functions for sparse assignment variables
 # ============================================================================
 
 """
@@ -43,28 +43,77 @@ function get_x_var_for_edge(
 end
 
 """
-    edge_assignment_sum(
+    feasible_same_source_indices(
+        mapping::TwoStageSingleDetourMap,
+        s::Int,
+        time_id::Int,
+        n_same_source::Int,
+        use_sparse::Bool
+    ) -> Vector{Int}
+"""
+function feasible_same_source_indices(
+    mapping::TwoStageSingleDetourMap,
+    s::Int,
+    time_id::Int,
+    n_same_source::Int,
+    use_sparse::Bool
+)::Vector{Int}
+    if use_sparse
+        return get(mapping.feasible_same_source[s], time_id, Int[])
+    end
+    return collect(1:n_same_source)
+end
+
+"""
+    feasible_same_dest_indices(
+        mapping::TwoStageSingleDetourMap,
+        s::Int,
+        time_id::Int,
+        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}},
+        use_sparse::Bool
+    ) -> Vector{Int}
+"""
+function feasible_same_dest_indices(
+    mapping::TwoStageSingleDetourMap,
+    s::Int,
+    time_id::Int,
+    Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}},
+    use_sparse::Bool
+)::Vector{Int}
+    if use_sparse
+        return get(mapping.feasible_same_dest[s], time_id, Int[])
+    end
+
+    feasible_indices = Int[]
+    for (idx, (_, _, _, time_delta)) in enumerate(Xi_same_dest)
+        future_time_id = time_id + time_delta
+        if haskey(mapping.Omega_s_t[s], future_time_id)
+            push!(feasible_indices, idx)
+        end
+    end
+    return feasible_indices
+end
+
+"""
+    edge_sum_terms_x(
         mapping::TwoStageSingleDetourMap,
         x,
         s::Int,
         time_id::Int,
         od_vector::Vector{Tuple{Int, Int}},
         j::Int,
-        k::Int;
+        k::Int,
         use_sparse::Bool
     ) -> AffExpr
-
-Sum assignment variables for edge (j,k) over a set of OD pairs.
-Works for both sparse and dense x storage.
 """
-function edge_assignment_sum(
+function edge_sum_terms_x(
     mapping::TwoStageSingleDetourMap,
     x,
     s::Int,
     time_id::Int,
     od_vector::Vector{Tuple{Int, Int}},
     j::Int,
-    k::Int;
+    k::Int,
     use_sparse::Bool
 )::AffExpr
     expr = AffExpr(0.0)
@@ -85,35 +134,27 @@ function edge_assignment_sum(
 end
 
 """
-    same_dest_feasible_indices(
-        mapping::TwoStageSingleDetourMap,
+    get_flow_var(
+        f,
         s::Int,
         time_id::Int,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
+        j::Int,
+        k::Int,
         use_sparse::Bool
-    ) -> Vector{Int}
-
-Get feasible same-destination detour indices for a given (scenario, time).
+    ) -> Union{VariableRef, Nothing}
 """
-function same_dest_feasible_indices(
-    mapping::TwoStageSingleDetourMap,
+function get_flow_var(
+    f,
     s::Int,
     time_id::Int,
-    Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
+    j::Int,
+    k::Int,
     use_sparse::Bool
-)::Vector{Int}
+)::Union{VariableRef, Nothing}
     if use_sparse
-        return get(mapping.feasible_same_dest[s], time_id, Int[])
+        return get(f[s][time_id], (j, k), nothing)
     end
-
-    feasible_indices = Int[]
-    for (idx, (_, _, _, time_delta)) in enumerate(Xi_same_dest)
-        future_time_id = time_id + time_delta
-        if haskey(mapping.Omega_s_t[s], future_time_id)
-            push!(feasible_indices, idx)
-        end
-    end
-    return feasible_indices
+    return f[s][time_id][j, k]
 end
 
 
@@ -126,8 +167,7 @@ end
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
-        Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        tight_constraints::Bool=true
+        Xi_same_source::Vector{Tuple{Int, Int, Int}}
     )
 
 Same-source pooling constraints for triplet (j, k, l):
@@ -141,11 +181,6 @@ For each feasible (j,k,l) ∈ Ξ, if pooling is enabled (u=1), we need assignmen
 When walking limits are enabled, the sums are over OD pairs that actually have
 the required edges available.
 
-If `tight_constraints=true`, adds two constraints:
-    sum(j,k) >= u and sum(j,l) >= u
-If `tight_constraints=false`, adds a single combined constraint:
-    2u <= sum(j,k) + sum(j,l)
-
 Used by: TwoStageSingleDetourModel
 """
 function add_assignment_to_same_source_detour_constraints!(
@@ -153,12 +188,13 @@ function add_assignment_to_same_source_detour_constraints!(
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        tight::Bool=true
+        use_flow_bounds::Bool=false
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
     u = m[:u]
     x = m[:x]
+    f = m[:f]
     n_same_source = length(Xi_same_source)
 
     use_sparse = has_walking_distance_limit(mapping)
@@ -168,43 +204,39 @@ function add_assignment_to_same_source_detour_constraints!(
             if length(od_vector) <= 1
                 continue
             end
-            # Get the feasible detour indices for this (s, t)
-            feasible_indices = use_sparse ?
-                get(mapping.feasible_same_source[s], time_id, Int[]) :
-                collect(1:n_same_source)
+
+            feasible_indices = feasible_same_source_indices(
+                mapping, s, time_id, n_same_source, use_sparse
+            )
 
             if isempty(feasible_indices)
                 continue
             end
 
+            for (local_idx, global_idx) in enumerate(feasible_indices)
+                (j_id, k_id, l_id) = Xi_same_source[global_idx]
 
-            for (od_idx, (o, d)) in od_vector
-                valid_jk_pairs = get_valid_jk_pairs(mapping, od)
-                
-                # For each feasible triplet
-                for (local_idx, global_idx) in enumerate(feasible_indices)
-                    (j_id, k_id, l_id) = Xi_same_source[global_idx]
+                j = mapping.station_id_to_array_idx[j_id]
+                k = mapping.station_id_to_array_idx[k_id]
+                l = mapping.station_id_to_array_idx[l_id]
 
-                    # Convert station IDs to array indices
-                    j = mapping.station_id_to_array_idx[j_id]
-                    k = mapping.station_id_to_array_idx[k_id]
-                    l = mapping.station_id_to_array_idx[l_id]
-
-                    jk_terms = edge_assignment_sum(
-                        mapping, x, s, time_id, od_vector, j, k; use_sparse=use_sparse
-                    )
-                    jl_terms = edge_assignment_sum(
-                        mapping, x, s, time_id, od_vector, j, l; use_sparse=use_sparse
-                    )
-                    # we need to find the jk_idx and jl_idx
-                    jk_idx = findfirst(od -> od == (j, k), )
-
-                    if tight_constraints
-                        @constraint(m, x[s][time_id][od_idx][jk_idx] >= u[s][time_id][local_idx])
-                        @constraint(m, x[s][time_id][od_idx][jl_idx] >= u[s][time_id][local_idx])
-                    else
-                        @constraint(m, x[s][time_id][od_idx][jk_idx] + x[s][time_id][od_idx][jl_idx] >= 2 * u[s][time_id][local_idx])
+                if use_flow_bounds
+                    jk_var = get_flow_var(f, s, time_id, j, k, use_sparse)
+                    jl_var = get_flow_var(f, s, time_id, j, l, use_sparse)
+                    if isnothing(jk_var) || isnothing(jl_var)
+                        error("Missing flow variable for detour bound at scenario $(s), time $(time_id).")
                     end
+                    @constraint(m, jk_var >= u[s][time_id][local_idx])
+                    @constraint(m, jl_var >= u[s][time_id][local_idx])
+                else
+                    jk_terms = edge_sum_terms_x(
+                        mapping, x, s, time_id, od_vector, j, k, use_sparse
+                    )
+                    jl_terms = edge_sum_terms_x(
+                        mapping, x, s, time_id, od_vector, j, l, use_sparse
+                    )
+                    @constraint(m, jk_terms >= u[s][time_id][local_idx])
+                    @constraint(m, jl_terms >= u[s][time_id][local_idx])
                 end
             end
         end
@@ -225,8 +257,7 @@ end
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
-        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        tight_constraints::Bool=true
+        Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}}
     )
 
 Same-destination pooling constraints for quadruplet (j, k, l, t'):
@@ -238,10 +269,6 @@ For each feasible (j,k,l,t') ∈ Ξ, if pooling is enabled (v=1), we need:
     Σ_{od with edge (j,l) at t} x_{od,t,jl,s} ≥ v_{t,idx,s}
     Σ_{od with edge (k,l) at t+t'} x_{od,t+t',kl,s} ≥ v_{t,idx,s}
 
-If `tight_constraints=true`, adds the two constraints above.
-If `tight_constraints=false`, adds a single combined constraint:
-    2v <= sum(j,l at t) + sum(k,l at t+t')
-
 Used by: TwoStageSingleDetourModel
 """
 function add_assignment_to_same_dest_detour_constraints!(
@@ -249,19 +276,20 @@ function add_assignment_to_same_dest_detour_constraints!(
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        tight::Bool=true
+        use_flow_bounds::Bool=false
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
     v = m[:v]
     x = m[:x]
+    f = m[:f]
 
     use_sparse = has_walking_distance_limit(mapping)
 
     for s in 1:S
         for (time_id, od_vector) in mapping.Omega_s_t[s]
-            feasible_indices = same_dest_feasible_indices(
-                mapping, s, time_id, Xi_same_dest; use_sparse=use_sparse
+            feasible_indices = feasible_same_dest_indices(
+                mapping, s, time_id, Xi_same_dest, use_sparse
             )
 
             if isempty(feasible_indices)
@@ -282,18 +310,23 @@ function add_assignment_to_same_dest_detour_constraints!(
                 k = mapping.station_id_to_array_idx[k_id]
                 l = mapping.station_id_to_array_idx[l_id]
 
-                jl_terms = edge_assignment_sum(
-                    mapping, x, s, time_id, od_vector, j, l; use_sparse=use_sparse
-                )
-                kl_terms = edge_assignment_sum(
-                    mapping, x, s, future_time_id, future_od_vector, k, l; use_sparse=use_sparse
-                )
-
-                if tight_constraints
+                if use_flow_bounds
+                    jl_var = get_flow_var(f, s, time_id, j, l, use_sparse)
+                    kl_var = get_flow_var(f, s, future_time_id, k, l, use_sparse)
+                    if isnothing(jl_var) || isnothing(kl_var)
+                        error("Missing flow variable for detour bound at scenario $(s), time $(time_id).")
+                    end
+                    @constraint(m, jl_var >= v[s][time_id][local_idx])
+                    @constraint(m, kl_var >= v[s][time_id][local_idx])
+                else
+                    jl_terms = edge_sum_terms_x(
+                        mapping, x, s, time_id, od_vector, j, l, use_sparse
+                    )
+                    kl_terms = edge_sum_terms_x(
+                        mapping, x, s, future_time_id, future_od_vector, k, l, use_sparse
+                    )
                     @constraint(m, jl_terms >= v[s][time_id][local_idx])
                     @constraint(m, kl_terms >= v[s][time_id][local_idx])
-                else
-                    @constraint(m, 2 * v[s][time_id][local_idx] <= jl_terms + kl_terms)
                 end
             end
         end
