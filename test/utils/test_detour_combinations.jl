@@ -141,6 +141,25 @@
         @test (2, 3, 4) in combinations
     end
 
+    @testset "Approximate equality detour" begin
+        station_ids = [1, 2, 3]
+
+        # Make t(1->2) + t(2->3) ~= t(1->3) within tolerance
+        routing_costs = Dict{Tuple{Int,Int}, Float64}(
+            (1, 2) => 10.0, (2, 1) => 10.0,
+            (2, 3) => 15.0, (3, 2) => 15.0,
+            (1, 3) => 25.0000001, (3, 1) => 25.0000001,
+            (1, 1) => 0.0, (2, 2) => 0.0, (3, 3) => 0.0
+        )
+
+        data = create_test_data_with_routing(station_ids, routing_costs)
+        model = TwoStageSingleDetourModel(2, 3, 1.0, 300.0, 0.0)
+
+        combinations = find_detour_combinations(model, data)
+
+        @test (1, 2, 3) in combinations
+    end
+
     @testset "Empty result for equal distances" begin
         # When all edges are equal, no intermediate point saves time
         station_ids = [1, 2, 3]

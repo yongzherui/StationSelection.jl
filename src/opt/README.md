@@ -10,6 +10,7 @@ station selection optimization.
 Two-stage model with optional walking distance limits.
 
 Constructor:
+
 ```julia
 TwoStageSingleDetourModel(
     k, l, routing_weight, time_window, routing_delay;
@@ -20,6 +21,7 @@ TwoStageSingleDetourModel(
 ```
 
 Behavior:
+
 - If `use_walking_distance_limit=false`, dense assignment variables are created.
 - If `use_walking_distance_limit=true`, a walking limit is enforced and sparse
   assignment variables are used based on valid (j,k) pairs.
@@ -31,6 +33,7 @@ Behavior:
 Two-stage clustering model with optional walking limits and variable reduction.
 
 Constructor:
+
 ```julia
 ClusteringTwoStageODModel(
     k, l, routing_weight;
@@ -42,6 +45,7 @@ ClusteringTwoStageODModel(
 ```
 
 Behavior:
+
 - When `use_walking_distance_limit=true` and `variable_reduction=true`, sparse
   assignment variables are used.
 - When `use_walking_distance_limit=true` and `variable_reduction=false`, dense
@@ -62,6 +66,7 @@ build_result = build_model(model, data; optimizer_env=nothing)
 ```
 
 `BuildResult` fields:
+
 - `model`: JuMP.Model
 - `mapping`: AbstractStationSelectionMap
 - `detour_combos`: DetourComboData or `nothing`
@@ -75,6 +80,7 @@ opt_result = run_opt(model, data; silent=true, show_counts=false)
 ```
 
 `OptResult` fields:
+
 - `termination_status`
 - `objective_value`
 - `solution`

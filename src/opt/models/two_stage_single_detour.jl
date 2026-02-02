@@ -35,6 +35,7 @@ struct TwoStageSingleDetourModel <: AbstractSingleDetourModel
         if use_walking_distance_limit
             isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+
             new(k, l, Float64(routing_weight), Float64(time_window), Float64(routing_delay),
                 true, Float64(max_walking_distance), tight_constraints)
         else

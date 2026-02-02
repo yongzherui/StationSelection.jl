@@ -14,17 +14,19 @@ export prepare_station_data, prepare_vehicle_data
     prepare_station_data(base_station_file::String,
                         selection_result_file::String) -> DataFrame
 
-Prepare station data for simulation by merging base station data with selection results.
+Prepare station data for simulation by filtering to candidate stations and merging base data.
 
-Reads the base station CSV and the station selection results, joins them, and creates
-a combined DataFrame with all base station columns plus 'selected' and 'is_station' columns.
+Reads the base station CSV and the station selection results, filters to stations present
+in the selection results, joins them, and creates a combined DataFrame with base station
+columns plus 'selected' and 'is_station' columns.
 
 # Arguments
 - `base_station_file`: Path to base station CSV with all station attributes
 - `selection_result_file`: Path to selection results CSV with columns (id, lon, lat, selected, ...)
 
 # Returns
-- DataFrame with columns from base_station plus:
+- DataFrame containing only candidate stations (from selection results), with columns
+  from base_station plus:
   - `selected`: 1.0 if selected, 0.0 otherwise
   - `is_station`: Boolean, true if selected
 
@@ -53,9 +55,9 @@ function prepare_station_data(base_station_file::String,
     end
 
     # Join base_df with selection_df based on station_id and id
-    # Keep all columns from base_df and add selected column from selection_df
-    station_df = leftjoin(base_df, selection_df[:, [:id, :selected]],
-                         on = :station_id => :id)
+    # Keep only stations present in selection results (candidate set)
+    station_df = innerjoin(base_df, selection_df[:, [:id, :selected]],
+                           on = :station_id => :id)
 
     # Create is_station column from selected
     station_df.is_station = station_df.selected .== 1.0

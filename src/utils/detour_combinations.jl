@@ -16,8 +16,8 @@ For a triplet (j, k, l):
 - j→k→l is the detour path
 
 A triplet is valid if:
-1. t(j→l) is the longest edge (t(j→l) > t(j→k) and t(j→l) > t(k→l))
-2. Triangle inequality holds: t(j→k) + t(k→l) >= t(j→l)
+1. t(j→l) is the longest edge (definitively longer within tolerance)
+2. Triangle inequality holds within tolerance: t(j→k) + t(k→l) >= t(j→l)
 3. Detour constraint: t(j→k) + t(k→l) <= t(j→l) + max_delay
 
 This method works for TwoStageSingleDetourModel regardless of walking limit settings,
@@ -56,21 +56,25 @@ function find_detour_combinations(
         time_from_a_to_b = get_routing_cost(data, a, b)
         time_from_b_to_c = get_routing_cost(data, b, c)
 
-        # if it is not the longest edge
-        if !((time_from_a_to_c > time_from_b_to_c) && (time_from_a_to_c > time_from_a_to_b))
+        max_edge = max(time_from_a_to_c, time_from_a_to_b, time_from_b_to_c)
+        tol = 1e-6 * max(1.0, max_edge)
+
+        # if it is not definitively the longest edge (with tolerance)
+        if !((time_from_a_to_c > time_from_b_to_c + tol) && (time_from_a_to_c > time_from_a_to_b + tol))
             continue
         end
 
         # if it is, we should also have the other condition
         # of t(A -> B) + t(B -> C) > t(A -> C)
         # just in case
-        if (time_from_a_to_b + time_from_b_to_c) < time_from_a_to_c
-            @error "Travel time does not obey triangle inequality: stations $a $b $c"
+        detour_time = time_from_a_to_b + time_from_b_to_c
+        if detour_time < time_from_a_to_c - tol
+            @warn "Travel time does not obey triangle inequality within tolerance: stations $a $b $c"
             continue
         end
 
         # now we check if it fulfils the delay function
-        if (time_from_a_to_b + time_from_b_to_c) <= time_from_a_to_c + max_delay
+        if detour_time <= time_from_a_to_c + max_delay + tol
             # we add it to the combinations
             # if it fulfils
             push!(j_k_l_combinations, (a, b, c))

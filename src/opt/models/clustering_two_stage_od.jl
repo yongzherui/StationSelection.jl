@@ -56,10 +56,12 @@ struct ClusteringTwoStageODModel <: AbstractODModel
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
-        routing_weight > 0 || throw(ArgumentError("routing_weight must be positive"))
+        routing_weight >= 0 || throw(ArgumentError("routing_weight must be non-negative"))
+
         if use_walking_distance_limit
             isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+
             new(k, l, routing_weight, true, Float64(max_walking_distance), variable_reduction, tight_constraints)
         else
             new(k, l, routing_weight, false, nothing, variable_reduction, tight_constraints)

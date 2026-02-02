@@ -168,7 +168,6 @@ function add_assignment_to_same_source_detour_constraints!(
             if length(od_vector) <= 1
                 continue
             end
-
             # Get the feasible detour indices for this (s, t)
             feasible_indices = use_sparse ?
                 get(mapping.feasible_same_source[s], time_id, Int[]) :
@@ -178,27 +177,34 @@ function add_assignment_to_same_source_detour_constraints!(
                 continue
             end
 
-            # For each feasible triplet
-            for (local_idx, global_idx) in enumerate(feasible_indices)
-                (j_id, k_id, l_id) = Xi_same_source[global_idx]
 
-                # Convert station IDs to array indices
-                j = mapping.station_id_to_array_idx[j_id]
-                k = mapping.station_id_to_array_idx[k_id]
-                l = mapping.station_id_to_array_idx[l_id]
+            for (od_idx, (o, d)) in od_vector
+                valid_jk_pairs = get_valid_jk_pairs(mapping, od)
+                
+                # For each feasible triplet
+                for (local_idx, global_idx) in enumerate(feasible_indices)
+                    (j_id, k_id, l_id) = Xi_same_source[global_idx]
 
-                jk_terms = edge_assignment_sum(
-                    mapping, x, s, time_id, od_vector, j, k; use_sparse=use_sparse
-                )
-                jl_terms = edge_assignment_sum(
-                    mapping, x, s, time_id, od_vector, j, l; use_sparse=use_sparse
-                )
+                    # Convert station IDs to array indices
+                    j = mapping.station_id_to_array_idx[j_id]
+                    k = mapping.station_id_to_array_idx[k_id]
+                    l = mapping.station_id_to_array_idx[l_id]
 
-                if tight_constraints
-                    @constraint(m, jk_terms >= u[s][time_id][local_idx])
-                    @constraint(m, jl_terms >= u[s][time_id][local_idx])
-                else
-                    @constraint(m, 2 * u[s][time_id][local_idx] <= jk_terms + jl_terms)
+                    jk_terms = edge_assignment_sum(
+                        mapping, x, s, time_id, od_vector, j, k; use_sparse=use_sparse
+                    )
+                    jl_terms = edge_assignment_sum(
+                        mapping, x, s, time_id, od_vector, j, l; use_sparse=use_sparse
+                    )
+                    # we need to find the jk_idx and jl_idx
+                    jk_idx = findfirst(od -> od == (j, k), )
+
+                    if tight_constraints
+                        @constraint(m, x[s][time_id][od_idx][jk_idx] >= u[s][time_id][local_idx])
+                        @constraint(m, x[s][time_id][od_idx][jl_idx] >= u[s][time_id][local_idx])
+                    else
+                        @constraint(m, x[s][time_id][od_idx][jk_idx] + x[s][time_id][od_idx][jl_idx] >= 2 * u[s][time_id][local_idx])
+                    end
                 end
             end
         end
