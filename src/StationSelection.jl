@@ -22,6 +22,7 @@ include("utils/costs.jl")
 include("utils/scenarios.jl")
 include("utils/export.jl")
 include("utils/logging.jl")
+include("utils/candidate_stations.jl")
 include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
 include("data/stations.jl")
@@ -114,6 +115,7 @@ export assignment_cost_expr, flow_cost_expr
 export same_source_pooling_savings_expr, same_dest_pooling_savings_expr
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
+export select_top_used_candidate_stations
 export generate_scenarios
 export generate_scenarios_from_ranges
 export generate_scenarios_by_datetimes
