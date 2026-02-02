@@ -45,7 +45,13 @@ echo "Job ID: $JOB_ID"
 echo "Config: $STUDY_DIR/config/selection/job_${JOB_ID}.toml"
 echo ""
 
-julia "$STUDY_DIR/scripts/03_run_selection.jl" "$JOB_ID"
+if command -v stdbuf >/dev/null 2>&1; then
+    JULIA_CMD="stdbuf -oL -eL julia"
+else
+    JULIA_CMD="julia"
+fi
+
+$JULIA_CMD "$STUDY_DIR/scripts/03_run_selection.jl" "$JOB_ID"
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then

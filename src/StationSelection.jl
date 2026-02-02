@@ -78,6 +78,7 @@ export get_walking_cost, get_routing_cost, has_routing_costs
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
 export has_walking_distance_limit, get_valid_jk_pairs
+export setup_station_selection_logging!, close_station_selection_logging!
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
