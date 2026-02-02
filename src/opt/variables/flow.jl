@@ -37,7 +37,7 @@ function add_flow_variables!(
                 valid_f_pairs = get_valid_f_pairs(mapping, s, time_id)
                 f[s][time_id] = Dict{Tuple{Int, Int}, VariableRef}()
                 for (j, k) in valid_f_pairs
-                    f[s][time_id][(j, k)] = @variable(m, Bin)
+                    f[s][time_id][(j, k)] = @variable(m, binary=true)
                 end
             else
                 n = data.n_stations

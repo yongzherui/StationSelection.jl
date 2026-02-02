@@ -10,6 +10,8 @@ Used by: TwoStageSingleDetourModel (with or without walking limits)
 using JuMP
 
 export add_assignment_to_flow_constraints!
+export add_assignment_to_flow_lb_constraints!
+export add_assignment_to_flow_ub_constraints!
 
 """
     sum_edge_assignments(
@@ -54,7 +56,7 @@ end
 
 
 """
-    add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
+    add_assignment_to_flow_lb_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
 
 Assignment implies flow on that edge.
     x[s][t][od][j,k] ≤ f[s][t][j,k]  ∀(o,d,t) ∈ Ω, j, k, s
@@ -63,7 +65,7 @@ When walking limits are enabled, only iterates over valid (j,k) pairs from mappi
 
 Used by: TwoStageSingleDetourModel
 """
-function add_assignment_to_flow_constraints!(
+function add_assignment_to_flow_lb_constraints!(
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap
@@ -90,8 +92,36 @@ function add_assignment_to_flow_constraints!(
                     @constraint(m, [j in 1:n, k in 1:n], x[s][time_id][od][j, k] <= f[s][time_id][j, k])
                 end
             end
+        end
+    end
 
-            # Tighten flow: f <= sum of assignments on that edge
+    return _total_num_constraints(m) - before
+end
+
+"""
+    add_assignment_to_flow_ub_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
+
+Tighten flow: flow implies at least one assignment on that edge.
+    f[s][t][j,k] ≤ Σ_{od} x[s][t][od][j,k]  ∀(t,j,k,s)
+
+When walking limits are enabled, only iterates over valid (j,k) pairs from mapping.
+
+Used by: TwoStageSingleDetourModel
+"""
+function add_assignment_to_flow_ub_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::TwoStageSingleDetourMap
+    )
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    f = m[:f]
+    x = m[:x]
+
+    use_sparse = has_walking_distance_limit(mapping)
+
+    for s in 1:S
+        for (time_id, od_vector) in mapping.Omega_s_t[s]
             if use_sparse
                 for (j, k) in get_valid_f_pairs(mapping, s, time_id)
                     edge_sum = sum_edge_assignments(
@@ -112,4 +142,22 @@ function add_assignment_to_flow_constraints!(
     end
 
     return _total_num_constraints(m) - before
+end
+
+"""
+    add_assignment_to_flow_constraints!(m::Model, data::StationSelectionData, mapping::TwoStageSingleDetourMap)
+
+Adds both lower- and upper-bound assignment-to-flow constraints and returns
+the total number of constraints added.
+
+Used by: TwoStageSingleDetourModel
+"""
+function add_assignment_to_flow_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::TwoStageSingleDetourMap
+    )
+    added_lb = add_assignment_to_flow_lb_constraints!(m, data, mapping)
+    added_ub = add_assignment_to_flow_ub_constraints!(m, data, mapping)
+    return added_lb + added_ub
 end

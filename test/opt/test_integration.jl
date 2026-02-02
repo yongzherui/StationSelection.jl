@@ -335,7 +335,7 @@ end
         @testset "ClusteringTwoStageODModel" begin
             @test_throws ArgumentError ClusteringTwoStageODModel(0, 5, 1.0)   # k must be positive
             @test_throws ArgumentError ClusteringTwoStageODModel(5, 3, 1.0)   # l must be >= k
-            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5, 0.0)   # routing_weight must be positive
+            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5, -1.0)   # routing_weight must be non-negative
         end
 
         @testset "ClusteringBaseModel" begin
