@@ -80,7 +80,8 @@ Models with single-detour pooling mechanism.
 Common properties:
 - k: number of active stations per scenario
 - l: number of stations to build
-- routing_weight: weight for routing costs
+- vehicle_routing_weight: weight for vehicle routing costs
+- in_vehicle_time_weight: weight for in-vehicle travel time in assignment costs
 - time_window: time discretization window
 - routing_delay: maximum detour delay
 """

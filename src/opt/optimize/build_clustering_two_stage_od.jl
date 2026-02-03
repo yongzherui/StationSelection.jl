@@ -44,7 +44,7 @@ function build_model(
         m,
         data,
         mapping;
-        routing_weight=model.routing_weight,
+        in_vehicle_time_weight=model.in_vehicle_time_weight,
         variable_reduction=model.variable_reduction
     )
 

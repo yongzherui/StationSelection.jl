@@ -22,7 +22,8 @@ export set_two_stage_single_detour_objective!
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0,
+        in_vehicle_time_weight::Float64=1.0
     )
 
 Set the minimization objective for TwoStageSingleDetourModel.
@@ -34,6 +35,7 @@ Components:
 2. Flow costs: γ · Σ c_{jk} · f[s][t][j,k]
 3. Same-source pooling savings: γ · Σ r_{jl,kl} · u[s][t][idx]
 4. Same-dest pooling savings: γ · Σ r_{jl,jk} · v[s][t][idx]
+5. In-vehicle time costs in assignment: w_ivt · c_{jk} (in assignment_cost_expr)
 
 # Arguments
 - `m::Model`: JuMP model with variables x, f, u, v already added
@@ -41,7 +43,8 @@ Components:
 - `mapping::TwoStageSingleDetourMap`: Scenario/time to OD mapping
 - `Xi_same_source::Vector{Tuple{Int,Int,Int}}`: Same-source detour triplets (j,k,l)
 - `Xi_same_dest::Vector{Tuple{Int,Int,Int,Int}}`: Same-dest detour quadruplets (j,k,l,t')
-- `routing_weight::Float64`: Weight γ for routing/pooling terms (default 1.0)
+- `vehicle_routing_weight::Float64`: Weight γ for vehicle routing/pooling terms (default 1.0)
+- `in_vehicle_time_weight::Float64`: Weight w_ivt for in-vehicle time costs in assignment (default 1.0)
 """
 function set_two_stage_single_detour_objective!(
         m::Model,
@@ -49,17 +52,17 @@ function set_two_stage_single_detour_objective!(
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}},
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0,
+        in_vehicle_time_weight::Float64=1.0
     )
 
     # Build objective from component expressions
-    obj = assignment_cost_expr(m, data, mapping) +
-          flow_cost_expr(m, data, mapping; routing_weight=routing_weight) -
-          same_source_pooling_savings_expr(m, data, mapping, Xi_same_source; routing_weight=routing_weight) -
-          same_dest_pooling_savings_expr(m, data, mapping, Xi_same_dest; routing_weight=routing_weight)
+    obj = assignment_cost_expr(m, data, mapping; in_vehicle_time_weight=in_vehicle_time_weight) +
+          flow_cost_expr(m, data, mapping; vehicle_routing_weight=vehicle_routing_weight) -
+          same_source_pooling_savings_expr(m, data, mapping, Xi_same_source; vehicle_routing_weight=vehicle_routing_weight) -
+          same_dest_pooling_savings_expr(m, data, mapping, Xi_same_dest; vehicle_routing_weight=vehicle_routing_weight)
 
     @objective(m, Min, obj)
 
     return nothing
 end
-

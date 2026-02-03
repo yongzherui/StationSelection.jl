@@ -151,9 +151,10 @@ try
     model = TwoStageSingleDetourModel(
         k,
         l,
-        model_cfg["routing_weight"],
+        model_cfg["vehicle_routing_weight"],
         model_cfg["time_window"],
         model_cfg["routing_delay"];
+        in_vehicle_time_weight=get(model_cfg, "in_vehicle_time_weight", model_cfg["vehicle_routing_weight"]),
         tight_constraints=get(model_cfg, "tight_constraints", true)
     )
 

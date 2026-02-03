@@ -143,7 +143,7 @@ function main()
     mc = config["model"]
     k = mc["k"]
     l = mc["l"]
-    routing_weight = mc["routing_weight"]
+    vehicle_routing_weight = mc["vehicle_routing_weight"]
     time_window = get(mc, "time_window", nothing)
     routing_delay = get(mc, "routing_delay", nothing)
     tight_constraints = get(mc, "tight_constraints", true)
@@ -153,7 +153,8 @@ function main()
 
     max_delay = args["max_delay"]
     model = TwoStageSingleDetourModel(
-        k, l, routing_weight, time_window, max_delay;
+        k, l, vehicle_routing_weight, time_window, max_delay;
+        in_vehicle_time_weight=vehicle_routing_weight,
         tight_constraints=tight_constraints
     )
 

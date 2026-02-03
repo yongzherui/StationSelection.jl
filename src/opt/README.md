@@ -13,7 +13,8 @@ Constructor:
 
 ```julia
 TwoStageSingleDetourModel(
-    k, l, routing_weight, time_window, routing_delay;
+    k, l, vehicle_routing_weight, time_window, routing_delay;
+    in_vehicle_time_weight=vehicle_routing_weight,
     use_walking_distance_limit=false,
     max_walking_distance=nothing,
     tight_constraints=true,
@@ -39,7 +40,8 @@ Constructor:
 
 ```julia
 ClusteringTwoStageODModel(
-    k, l, routing_weight;
+    k, l, vehicle_routing_weight;
+    in_vehicle_time_weight=vehicle_routing_weight,
     use_walking_distance_limit=false,
     max_walking_distance=nothing,
     variable_reduction=true,

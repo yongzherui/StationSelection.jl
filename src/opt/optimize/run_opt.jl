@@ -165,7 +165,8 @@ function get_warm_start_solution(
     clustering_model = ClusteringTwoStageODModel(
         model.k,
         model.l,
-        model.routing_weight;
+        model.vehicle_routing_weight;
+        in_vehicle_time_weight=model.in_vehicle_time_weight,
         use_walking_distance_limit=use_walking_distance_limit,
         max_walking_distance=max_walking_distance,
         tight_constraints=model.tight_constraints

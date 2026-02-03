@@ -142,9 +142,10 @@ function main()
         model = TwoStageSingleDetourModel(
             model_cfg["k"],
             model_cfg["l"],
-            model_cfg["routing_weight"],
+            model_cfg["vehicle_routing_weight"],
             model_cfg["time_window"],
             model_cfg["routing_delay"];
+            in_vehicle_time_weight=get(model_cfg, "in_vehicle_time_weight", model_cfg["vehicle_routing_weight"]),
             max_walking_distance=walking_dist,
             tight_constraints=get(model_cfg, "tight_constraints", true)
         )

@@ -20,7 +20,7 @@ export same_dest_pooling_savings_expr
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     ) -> AffExpr
 
 Compute the same-source pooling savings expression.
@@ -29,7 +29,7 @@ For each same-source triplet (j, k, l), pooling trips (j→l) and (k→l) saves:
     γ · r_{jl,kl} · u[s][t][local_idx]
 
 Where:
-- γ (routing_weight) = weight for routing costs
+- γ (vehicle_routing_weight) = weight for vehicle routing costs
 - r_{jl,kl} = c_{jl} - c_{kl} = routing savings from pooling
 - u[s][t][local_idx] = 1 if pooling is used
 
@@ -44,7 +44,7 @@ function same_source_pooling_savings_expr(
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_source::Vector{Tuple{Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     )::AffExpr
 
     S = n_scenarios(data)
@@ -85,7 +85,7 @@ function same_source_pooling_savings_expr(
             for (local_idx, global_idx) in enumerate(feasible_indices)
                 r = r_same_source[global_idx]
                 if r > 0  # Only add if there's actual savings
-                    add_to_expression!(expr, routing_weight * r, u[s][time_id][local_idx])
+                    add_to_expression!(expr, vehicle_routing_weight * r, u[s][time_id][local_idx])
                 end
             end
         end
@@ -103,7 +103,7 @@ end
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     ) -> AffExpr
 
 Compute the same-destination pooling savings expression.
@@ -112,7 +112,7 @@ For each same-dest quadruplet (j, k, l, t'), pooling trips (j→l) and (j→k) s
     γ · r_{jl,jk} · v[s][t][local_idx]
 
 Where:
-- γ (routing_weight) = weight for routing costs
+- γ (vehicle_routing_weight) = weight for vehicle routing costs
 - r_{jl,jk} = c_{jl} - c_{jk} = routing savings from pooling
 - v[s][t][local_idx] = 1 if pooling is used
 
@@ -127,7 +127,7 @@ function same_dest_pooling_savings_expr(
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap,
         Xi_same_dest::Vector{Tuple{Int, Int, Int, Int}};
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     )::AffExpr
 
     S = n_scenarios(data)
@@ -169,7 +169,7 @@ function same_dest_pooling_savings_expr(
             for (local_idx, global_idx) in enumerate(feasible_indices)
                 r = r_same_dest[global_idx]
                 if r > 0  # Only add if there's actual savings
-                    add_to_expression!(expr, routing_weight * r, v[s][time_id][local_idx])
+                    add_to_expression!(expr, vehicle_routing_weight * r, v[s][time_id][local_idx])
                 end
             end
         end
@@ -177,4 +177,3 @@ function same_dest_pooling_savings_expr(
 
     return expr
 end
-

@@ -131,15 +131,17 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         max_walking_distance = get(mc, "max_walking_distance", nothing)
         tight_constraints = get(mc, "tight_constraints", true)
         detour_use_flow_bounds = get(mc, "detour_use_flow_bounds", false)
+        in_vehicle_time_weight = get(mc, "in_vehicle_time_weight", mc["vehicle_routing_weight"])
         model = TwoStageSingleDetourModel(
-            mc["k"], mc["l"], mc["routing_weight"],
+            mc["k"], mc["l"], mc["vehicle_routing_weight"],
             mc["time_window"], mc["routing_delay"];
+            in_vehicle_time_weight=in_vehicle_time_weight,
             use_walking_distance_limit=use_walking_distance_limit,
             max_walking_distance=max_walking_distance,
             tight_constraints=tight_constraints,
             detour_use_flow_bounds=detour_use_flow_bounds
         )
-        println("  - k=$(model.k), l=$(model.l), γ=$(model.routing_weight)")
+        println("  - k=$(model.k), l=$(model.l), γ=$(model.vehicle_routing_weight), w_ivt=$(model.in_vehicle_time_weight)")
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
         println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
         println("  - tight_constraints=$(model.tight_constraints)")
@@ -149,14 +151,16 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         max_walking_distance = get(mc, "max_walking_distance", nothing)
         variable_reduction = get(mc, "variable_reduction", true)
         tight_constraints = get(mc, "tight_constraints", true)
+        in_vehicle_time_weight = get(mc, "in_vehicle_time_weight", mc["vehicle_routing_weight"])
         model = ClusteringTwoStageODModel(
-            mc["k"], mc["l"], mc["routing_weight"];
+            mc["k"], mc["l"], mc["vehicle_routing_weight"];
+            in_vehicle_time_weight=in_vehicle_time_weight,
             use_walking_distance_limit=use_walking_distance_limit,
             max_walking_distance=max_walking_distance,
             variable_reduction=variable_reduction,
             tight_constraints=tight_constraints
         )
-        println("  - k=$(model.k), l=$(model.l), λ=$(model.routing_weight)")
+        println("  - k=$(model.k), l=$(model.l), λ=$(model.vehicle_routing_weight), w_ivt=$(model.in_vehicle_time_weight)")
         println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
         println("  - variable_reduction=$(model.variable_reduction)")
         println("  - tight_constraints=$(model.tight_constraints)")
@@ -213,14 +217,16 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     )
     if model_type == "TwoStageSingleDetourModel"
         model_metadata["l"] = model.l
-        model_metadata["routing_weight"] = model.routing_weight
+        model_metadata["vehicle_routing_weight"] = model.vehicle_routing_weight
+        model_metadata["in_vehicle_time_weight"] = model.in_vehicle_time_weight
         model_metadata["time_window"] = model.time_window
         model_metadata["routing_delay"] = model.routing_delay
         model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
         model_metadata["max_walking_distance"] = model.max_walking_distance
     elseif model_type == "ClusteringTwoStageODModel"
         model_metadata["l"] = model.l
-        model_metadata["routing_weight"] = model.routing_weight
+        model_metadata["vehicle_routing_weight"] = model.vehicle_routing_weight
+        model_metadata["in_vehicle_time_weight"] = model.in_vehicle_time_weight
         model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
         model_metadata["max_walking_distance"] = model.max_walking_distance
         model_metadata["variable_reduction"] = model.variable_reduction

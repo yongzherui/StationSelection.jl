@@ -63,7 +63,8 @@ function build_model(
 
     # Set objective
     set_two_stage_single_detour_objective!(m, data, mapping, Xi_same_source, Xi_same_dest;
-                                            routing_weight=model.routing_weight)
+                                            vehicle_routing_weight=model.vehicle_routing_weight,
+                                            in_vehicle_time_weight=model.in_vehicle_time_weight)
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, detour_combos, counts, Dict{String, Any}())

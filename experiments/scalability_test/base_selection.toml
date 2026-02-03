@@ -12,7 +12,8 @@ type = "TwoStageSingleDetourModel"
 
 k = 5 # this is not important. it is dynamically determined
 l = 10 # this is not important. it is dynamically determined
-routing_weight = 1.0
+vehicle_routing_weight = 1.0
+in_vehicle_time_weight = 1.0
 
 time_window = 120.0
 routing_delay = 600.0

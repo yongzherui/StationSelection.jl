@@ -15,7 +15,7 @@ export flow_cost_expr
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap;
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     ) -> AffExpr
 
 Compute the flow routing cost expression for TwoStageSingleDetourModel.
@@ -24,7 +24,7 @@ For each flow variable f[s][t][j,k], the cost is:
     γ · c_{jk} · f[s][t][j,k]
 
 Where:
-- γ (routing_weight) = weight for routing costs
+- γ (vehicle_routing_weight) = weight for vehicle routing costs
 - c_{jk} = routing cost from station j to k
 
 Returns an AffExpr that can be combined with other objective components.
@@ -33,7 +33,7 @@ function flow_cost_expr(
         m::Model,
         data::StationSelectionData,
         mapping::TwoStageSingleDetourMap;
-        routing_weight::Float64=1.0
+        vehicle_routing_weight::Float64=1.0
     )::AffExpr
 
     S = n_scenarios(data)
@@ -49,7 +49,7 @@ function flow_cost_expr(
                     j_id = mapping.array_idx_to_station_id[j]
                     k_id = mapping.array_idx_to_station_id[k]
                     c_jk = get_routing_cost(data, j_id, k_id)
-                    add_to_expression!(expr, routing_weight * c_jk, f[s][time_id][(j, k)])
+                    add_to_expression!(expr, vehicle_routing_weight * c_jk, f[s][time_id][(j, k)])
                 end
             else
                 n = data.n_stations
@@ -58,7 +58,7 @@ function flow_cost_expr(
                     k_id = mapping.array_idx_to_station_id[k]
                     c_jk = get_routing_cost(data, j_id, k_id)
 
-                    add_to_expression!(expr, routing_weight * c_jk, f[s][time_id][j, k])
+                    add_to_expression!(expr, vehicle_routing_weight * c_jk, f[s][time_id][j, k])
                 end
             end
         end

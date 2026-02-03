@@ -208,7 +208,8 @@
         model = TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0; max_walking_distance=500.0)
         @test model.k == 3
         @test model.l == 5
-        @test model.routing_weight == 0.5
+        @test model.vehicle_routing_weight == 0.5
+        @test model.in_vehicle_time_weight == 0.5
         @test model.time_window == 300.0
         @test model.routing_delay == 60.0
         @test model.max_walking_distance == 500.0
@@ -220,11 +221,25 @@
         # Test validation: l must be >= k
         @test_throws ArgumentError TwoStageSingleDetourModel(5, 3, 0.5, 300.0, 60.0; max_walking_distance=500.0)
 
-        # Test validation: routing_weight must be non-negative
+        # Test validation: vehicle_routing_weight must be non-negative
         @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, -0.5, 300.0, 60.0; max_walking_distance=500.0)
-        # 0.0 is valid for routing_weight
+        # 0.0 is valid for vehicle_routing_weight
         model_zero_rw = TwoStageSingleDetourModel(3, 5, 0.0, 300.0, 60.0; max_walking_distance=500.0)
-        @test model_zero_rw.routing_weight == 0.0
+        @test model_zero_rw.vehicle_routing_weight == 0.0
+
+        # Test validation: in_vehicle_time_weight must be non-negative
+        @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 300.0, 60.0;
+            in_vehicle_time_weight=-0.5, max_walking_distance=500.0)
+
+        # Backward-compatible alias: routing_weight keyword overrides vehicle_routing_weight
+        model_alias = TwoStageSingleDetourModel(3, 5, 0.7, 300.0, 60.0; routing_weight=0.2)
+        @test model_alias.vehicle_routing_weight == 0.2
+        @test model_alias.in_vehicle_time_weight == 0.2
+
+        model_alias_override = TwoStageSingleDetourModel(3, 5, 0.7, 300.0, 60.0;
+            routing_weight=0.2, in_vehicle_time_weight=0.9)
+        @test model_alias_override.vehicle_routing_weight == 0.2
+        @test model_alias_override.in_vehicle_time_weight == 0.9
 
         # Test validation: time_window must be positive
         @test_throws ArgumentError TwoStageSingleDetourModel(3, 5, 0.5, 0.0, 60.0; max_walking_distance=500.0)
