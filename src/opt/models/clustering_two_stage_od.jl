@@ -15,7 +15,6 @@ Two-stage stochastic station selection model with OD pair assignments.
 # Fields
 - `k::Int`: Number of stations to activate per scenario (second stage)
 - `l::Int`: Number of stations to build (first stage)
-- `vehicle_routing_weight::Float64`: Weight for vehicle routing costs (λ)
 - `in_vehicle_time_weight::Float64`: Weight for in-vehicle travel time costs (c_{jk})
 - `use_walking_distance_limit::Bool`: Whether to enforce a walking distance limit
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance (only used when limit is enabled)
@@ -40,7 +39,6 @@ Constraints:
 struct ClusteringTwoStageODModel <: AbstractODModel
     k::Int              # Number of active stations per scenario
     l::Int              # Number of stations to build
-    vehicle_routing_weight::Float64  # Weight for vehicle routing costs (λ)
     in_vehicle_time_weight::Float64  # Weight for in-vehicle travel time costs (w_ivt)
     use_walking_distance_limit::Bool
     max_walking_distance::Union{Float64, Nothing}
@@ -49,9 +47,8 @@ struct ClusteringTwoStageODModel <: AbstractODModel
 
     function ClusteringTwoStageODModel(
             k::Int,
-            l::Int,
-            vehicle_routing_weight::Float64=1.0;
-            in_vehicle_time_weight::Number=vehicle_routing_weight,
+            l::Int;
+            in_vehicle_time_weight::Number=1.0,
             use_walking_distance_limit::Bool=false,
             max_walking_distance::Union{Number, Nothing}=nothing,
             variable_reduction::Bool=true,
@@ -59,17 +56,16 @@ struct ClusteringTwoStageODModel <: AbstractODModel
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
-        vehicle_routing_weight >= 0 || throw(ArgumentError("vehicle_routing_weight must be non-negative"))
         in_vehicle_time_weight >= 0 || throw(ArgumentError("in_vehicle_time_weight must be non-negative"))
 
         if use_walking_distance_limit
             isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
 
-            new(k, l, vehicle_routing_weight, Float64(in_vehicle_time_weight), true,
+            new(k, l, Float64(in_vehicle_time_weight), true,
                 Float64(max_walking_distance), variable_reduction, tight_constraints)
         else
-            new(k, l, vehicle_routing_weight, Float64(in_vehicle_time_weight), false,
+            new(k, l, Float64(in_vehicle_time_weight), false,
                 nothing, variable_reduction, tight_constraints)
         end
     end

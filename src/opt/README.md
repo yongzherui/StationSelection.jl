@@ -40,8 +40,8 @@ Constructor:
 
 ```julia
 ClusteringTwoStageODModel(
-    k, l, vehicle_routing_weight;
-    in_vehicle_time_weight=vehicle_routing_weight,
+    k, l;
+    in_vehicle_time_weight=1.0,
     use_walking_distance_limit=false,
     max_walking_distance=nothing,
     variable_reduction=true,

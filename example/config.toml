@@ -13,10 +13,10 @@ type = "ClusteringTwoStageODModel"
 # Common parameters
 k = 5                    # Number of active stations per scenario
 l = 10                   # Total number of stations to build
-vehicle_routing_weight = 1.0     # Weight γ/λ for vehicle routing/pooling terms
 in_vehicle_time_weight = 1.0  # Weight for in-vehicle travel time (c_{jk})
 
 # TwoStageSingleDetourModel specific parameters (ignored for ClusteringTwoStageODModel)
+vehicle_routing_weight = 1.0     # Weight γ for vehicle routing/pooling terms
 time_window = 120.0      # Time discretization window in seconds
 routing_delay = 900.0    # Maximum allowed detour delay in seconds
 use_walking_distance_limit = false  # Enable walking limit for TwoStageSingleDetourModel

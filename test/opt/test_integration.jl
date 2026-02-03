@@ -104,7 +104,7 @@ end
     end
 
     @testset "ClusteringTwoStageODModel build" begin
-        model = ClusteringTwoStageODModel(2, 3, 1.0)
+        model = ClusteringTwoStageODModel(2, 3)
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -206,7 +206,7 @@ end
         end
 
         @testset "ClusteringTwoStageODModel" begin
-            model = ClusteringTwoStageODModel(2, 3, 1.0)
+            model = ClusteringTwoStageODModel(2, 3)
             result = run_opt(
                 model, data;
                 optimizer_env=env,
@@ -296,7 +296,7 @@ end
         end
 
         @testset "ClusteringTwoStageODMap" begin
-            model = ClusteringTwoStageODModel(2, 3, 1.0)
+            model = ClusteringTwoStageODModel(2, 3)
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -334,10 +334,9 @@ end
         end
 
         @testset "ClusteringTwoStageODModel" begin
-            @test_throws ArgumentError ClusteringTwoStageODModel(0, 5, 1.0)   # k must be positive
-            @test_throws ArgumentError ClusteringTwoStageODModel(5, 3, 1.0)   # l must be >= k
-            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5, -1.0)   # vehicle_routing_weight must be non-negative
-            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5, 1.0; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
+            @test_throws ArgumentError ClusteringTwoStageODModel(0, 5)   # k must be positive
+            @test_throws ArgumentError ClusteringTwoStageODModel(5, 3)   # l must be >= k
+            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
         end
 
         @testset "ClusteringBaseModel" begin
