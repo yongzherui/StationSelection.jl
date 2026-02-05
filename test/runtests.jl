@@ -55,4 +55,8 @@ const MOI = JuMP.MOI
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
     end
+
+    @testset "Solution Analysis" begin
+        include("utils/test_solution_analysis.jl")
+    end
 end

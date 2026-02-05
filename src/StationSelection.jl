@@ -55,6 +55,12 @@ include("opt/constraints.jl")
 include("opt/objective.jl")
 include("opt/optimize.jl")
 
+# Variable export (depends on OptResult and all mapping types)
+include("utils/export_variables.jl")
+
+# Solution analysis (depends on OptResult, mapping types, and StationSelectionData)
+include("utils/solution_analysis.jl")
+
 # Re-export key types and functions
 
 export ModelCounts, DetourComboData, BuildResult, OptResult
@@ -121,6 +127,13 @@ export generate_scenarios_from_ranges
 export generate_scenarios_by_datetimes
 export generate_scenarios_by_profile
 export export_results
+export export_variables
+
+# Re-export solution analysis functions
+export annotate_orders_with_solution
+export calculate_model_walking_distance
+export calculate_model_in_vehicle_time
+export calculate_model_vehicle_routing_distance
 
 # Re-export transform_orders functions
 export transform_orders
