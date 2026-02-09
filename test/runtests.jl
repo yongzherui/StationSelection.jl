@@ -59,4 +59,8 @@ const MOI = JuMP.MOI
     @testset "Solution Analysis" begin
         include("utils/test_solution_analysis.jl")
     end
+
+    @testset "Export Variables" begin
+        include("utils/temp_export_variables.jl")
+    end
 end

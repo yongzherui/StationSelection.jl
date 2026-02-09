@@ -404,31 +404,6 @@ function export_model_specific_variables(
     Xi_same_source = detour_combos.same_source
     Xi_same_dest = detour_combos.same_dest
 
-    # Export detour triplets
-    if !isempty(Xi_same_source)
-        df = DataFrame(
-            idx = 1:length(Xi_same_source),
-            j_id = [t[1] for t in Xi_same_source],
-            k_id = [t[2] for t in Xi_same_source],
-            l_id = [t[3] for t in Xi_same_source]
-        )
-        CSV.write(joinpath(export_dir, "detour_triplets_same_source.csv"), df)
-        println("    ✓ detour_triplets_same_source.csv ($(length(Xi_same_source)) triplets)")
-    end
-
-    # Export detour quadruplets
-    if !isempty(Xi_same_dest)
-        df = DataFrame(
-            idx = 1:length(Xi_same_dest),
-            j_id = [t[1] for t in Xi_same_dest],
-            k_id = [t[2] for t in Xi_same_dest],
-            l_id = [t[3] for t in Xi_same_dest],
-            time_delta = [t[4] for t in Xi_same_dest]
-        )
-        CSV.write(joinpath(export_dir, "detour_quadruplets_same_dest.csv"), df)
-        println("    ✓ detour_quadruplets_same_dest.csv ($(length(Xi_same_dest)) quadruplets)")
-    end
-
     # Export flow variables (f)
     n_flows = export_flow_variables(m, mapping, export_dir)
 

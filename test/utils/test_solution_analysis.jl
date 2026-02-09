@@ -38,6 +38,10 @@ end
     - Orders should be assigned to nearby stations
     - Walking distance = distance from origin to pickup + dropoff to destination
     - In-vehicle time = routing cost from pickup to dropoff
+
+    Note that there are two kinds of solutions here. we could have 1, 3, 4 or also 1, 2, 4 (solver chooses 1, 2, 4)
+
+    1, 3, 4 is also valid since only order 3 will have to walk. Likewise for 1, 2, 4 only order 1 will have to walk.
     """
 
     # Create test data - 4 stations in a line
@@ -314,6 +318,7 @@ end
             println("Order assigned: $(annotated.assigned_pickup_id[1])→$(annotated.assigned_dropoff_id[1])")
             println("Walking: $(annotated.walking_distance_total[1])")
             println("In-vehicle: $(annotated.in_vehicle_time_actual[1])")
+
         end
     end
 end
