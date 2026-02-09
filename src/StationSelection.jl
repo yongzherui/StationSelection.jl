@@ -137,6 +137,7 @@ export calculate_model_vehicle_routing_distance
 
 # Re-export transform_orders functions
 export transform_orders
+export transform_orders_from_assignments
 export parse_station_list
 export precompute_distances
 export find_closest_selected_station
