@@ -58,6 +58,9 @@ include("opt/optimize.jl")
 # Variable export (depends on OptResult and all mapping types)
 include("utils/export_variables.jl")
 
+# Analysis helpers for exported variables (does not depend on OptResult)
+include("utils/solution_analysis_from_exported_variables.jl")
+
 # Solution analysis (depends on OptResult, mapping types, and StationSelectionData)
 include("utils/solution_analysis.jl")
 
@@ -128,6 +131,14 @@ export generate_scenarios_by_datetimes
 export generate_scenarios_by_profile
 export export_results
 export export_variables
+export load_exported_assignment_variables
+export load_exported_flow_variables
+export load_exported_same_source_pooling
+export load_exported_same_dest_pooling
+export build_station_selection_data_from_config
+export build_od_counts_from_data
+export calculate_exported_walking_distance
+export calculate_exported_vehicle_routing_distance
 
 # Re-export solution analysis functions
 export annotate_orders_with_solution
