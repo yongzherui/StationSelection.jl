@@ -134,6 +134,60 @@ end
 
 
 # ============================================================================
+# CorridorTwoStageODMap (ZCorridorODModel, XCorridorODModel)
+# ============================================================================
+
+"""
+    add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true
+    )
+
+Add assignment variables x[s][od_idx][j,k] for corridor models (ZCorridorODModel, XCorridorODModel).
+Same structure as ClusteringTwoStageODMap variant.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true
+    )
+    before = JuMP.num_variables(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
+
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
+    if use_sparse
+        x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+        for s in 1:S
+            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                n_pairs = length(valid_pairs)
+                if n_pairs > 0
+                    x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
+                else
+                    x[s][od_idx] = VariableRef[]
+                end
+            end
+        end
+    else
+        for s in 1:S
+            num_od_pairs = length(mapping.Omega_s[s])
+            for od_idx in 1:num_od_pairs
+                x[s][od_idx] = @variable(m, [1:n, 1:n], Bin)
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+
+# ============================================================================
 # ClusteringBaseModelMap (ClusteringBaseModel)
 # ============================================================================
 

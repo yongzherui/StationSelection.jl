@@ -27,4 +27,5 @@ include("objectives/expressions/pooling_savings.jl")
 # Model-specific objectives
 include("objectives/single_detour.jl")
 include("objectives/clustering_od.jl")
+include("objectives/corridor_od.jl")
 include("objectives/clustering_base.jl")

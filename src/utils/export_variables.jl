@@ -214,6 +214,7 @@ function export_assignment_variables(m::JuMP.Model, mapping::TwoStageSingleDetou
 
     x = m[:x]
     array_idx_to_station_id = mapping.array_idx_to_station_id
+
     use_sparse = has_walking_distance_limit(mapping)
 
     rows = []
@@ -272,12 +273,13 @@ end
 
 
 """
-    export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String) -> Int
+    export_assignment_variables(m::JuMP.Model,
+        mapping::Union{ClusteringTwoStageODMap, CorridorTwoStageODMap}, export_dir::String) -> Int
 
-Export assignment variables for ClusteringTwoStageODModel.
+Export assignment variables for ClusteringTwoStageODModel and corridor models.
 Structure: x[s][od_idx] → Vector (sparse) or Matrix (dense)
 """
-function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String)
+function export_assignment_variables(m::JuMP.Model, mapping::Union{ClusteringTwoStageODMap, CorridorTwoStageODMap}, export_dir::String)
     if !haskey(m.obj_dict, :x)
         return 0
     end
@@ -444,6 +446,38 @@ end
 
 
 """
+    export_model_specific_variables(result::OptResult, mapping::CorridorTwoStageODMap, export_dir::String, metadata::Dict)
+
+Export corridor model specific variables (f_corridor, and α if present).
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::CorridorTwoStageODMap,
+    export_dir::String,
+    metadata::Dict
+)
+    m = result.model
+
+    # Distinguish Z vs X model by presence of α variables
+    if haskey(m.obj_dict, :α)
+        metadata["model_type"] = "ZCorridorODModel"
+    else
+        metadata["model_type"] = "XCorridorODModel"
+    end
+
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_clusters"] = mapping.n_clusters
+    metadata["n_corridors"] = length(mapping.corridor_indices)
+
+    n_cluster_activations = export_cluster_activation_variables(m, mapping, export_dir)
+    n_corridor_uses = export_corridor_usage_variables(m, mapping, export_dir)
+
+    metadata["n_cluster_activations"] = n_cluster_activations
+    metadata["n_corridor_uses"] = n_corridor_uses
+end
+
+
+"""
     export_model_specific_variables(result::OptResult, mapping::ClusteringBaseModelMap, export_dir::String, metadata::Dict)
 
 Export ClusteringBaseModel specific metadata.
@@ -516,6 +550,76 @@ function export_flow_variables(m::JuMP.Model, mapping::TwoStageSingleDetourMap, 
     df = DataFrame(rows)
     CSV.write(joinpath(export_dir, "flow_variables.csv"), df)
     println("    ✓ flow_variables.csv ($(nrow(df)) flows)")
+
+    return nrow(df)
+end
+
+
+# =============================================================================
+# Corridor Model Helper Functions
+# =============================================================================
+
+"""
+Export cluster activation variables (α) for corridor models.
+"""
+function export_cluster_activation_variables(m::JuMP.Model, mapping::CorridorTwoStageODMap, export_dir::String)
+    if !haskey(m.obj_dict, :α)
+        println("    ✓ cluster_activation.csv (0 activations)")
+        return 0
+    end
+
+    α = m[:α]
+    n_clusters, n_scenarios = size(α)
+    rows = []
+    for a in 1:n_clusters, s in 1:n_scenarios
+        val = JuMP.value(α[a, s])
+        if val > 0.5
+            push!(rows, (
+                cluster_idx = a,
+                scenario = s,
+                value = val
+            ))
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "cluster_activation.csv"), df)
+    println("    ✓ cluster_activation.csv ($(nrow(df)) activations)")
+
+    return nrow(df)
+end
+
+"""
+Export corridor usage variables (f_corridor) for corridor models.
+"""
+function export_corridor_usage_variables(m::JuMP.Model, mapping::CorridorTwoStageODMap, export_dir::String)
+    if !haskey(m.obj_dict, :f_corridor)
+        println("    ✓ corridor_usage.csv (0 corridors)")
+        return 0
+    end
+
+    f_corridor = m[:f_corridor]
+    n_corridors, n_scenarios = size(f_corridor)
+    corridor_indices = mapping.corridor_indices
+
+    rows = []
+    for g in 1:n_corridors, s in 1:n_scenarios
+        val = JuMP.value(f_corridor[g, s])
+        if val > 0.5
+            a, b = corridor_indices[g]
+            push!(rows, (
+                corridor_idx = g,
+                cluster_a = a,
+                cluster_b = b,
+                scenario = s,
+                value = val
+            ))
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "corridor_usage.csv"), df)
+    println("    ✓ corridor_usage.csv ($(nrow(df)) corridors)")
 
     return nrow(df)
 end

@@ -39,6 +39,19 @@ function create_map(
 end
 
 """
+    create_map(model::AbstractCorridorODModel, data::StationSelectionData; optimizer_env=nothing)
+
+Create a CorridorTwoStageODMap for any corridor model (ZCorridorODModel, XCorridorODModel).
+"""
+function create_map(
+        model::AbstractCorridorODModel,
+        data::StationSelectionData;
+        optimizer_env=nothing
+    )::CorridorTwoStageODMap
+    return create_corridor_two_stage_od_map(model, data; optimizer_env=optimizer_env)
+end
+
+"""
     create_map(model::ClusteringBaseModel, data::StationSelectionData)
 
 Create a ClusteringBaseModelMap for ClusteringBaseModel.

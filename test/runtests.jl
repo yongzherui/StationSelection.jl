@@ -52,8 +52,16 @@ const MOI = JuMP.MOI
         include("utils/test_detour_combinations.jl")
     end
 
+    @testset "Corridor Clustering" begin
+        include("utils/test_corridor_clustering.jl")
+    end
+
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
+    end
+
+    @testset "Corridor Integration" begin
+        include("opt/test_corridor_integration.jl")
     end
 
     @testset "Solution Analysis" begin

@@ -105,6 +105,16 @@ function prepare_vehicle_data(base_vehicle_file::String,
         error("No selected station IDs provided")
     end
 
+    # Choose a stable default starting station if missing or invalid.
+    sorted_selected = sort(selected_station_ids)
+    default_station_id = sorted_selected[1]
+
+    # If the base data lacks starting_station_id, create it with the default.
+    if !(:starting_station_id in names(vehicle_df))
+        vehicle_df.starting_station_id = fill(default_station_id, nrow(vehicle_df))
+        return vehicle_df
+    end
+
     # Function to find nearest selected station (simplified - just keeps if selected, else uses first)
     function assign_to_selected_station(original_station_id, selected_ids)
         # If the original station is selected, keep it
@@ -113,7 +123,7 @@ function prepare_vehicle_data(base_vehicle_file::String,
         end
         # Otherwise, use the first selected station (simple fallback)
         # In a more sophisticated version, this could use distance-based assignment
-        return selected_ids[1]
+        return default_station_id
     end
 
     # Update starting_station_id for each vehicle

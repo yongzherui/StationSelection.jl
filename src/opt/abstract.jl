@@ -22,6 +22,7 @@ export AbstractStationSelectionModel
 export AbstractSingleScenarioModel
 export AbstractMultiScenarioModel
 export AbstractTwoStageModel
+export AbstractCorridorODModel
 export AbstractRoutingModel
 
 """
@@ -71,6 +72,20 @@ abstract type AbstractTwoStageModel <: AbstractMultiScenarioModel end
 Two-stage models with OD (origin-destination) pair assignment.
 """
 abstract type AbstractODModel <: AbstractTwoStageModel end
+
+"""
+    AbstractCorridorODModel <: AbstractODModel
+
+Two-stage models with corridor penalties for cross-zone vehicle movements.
+
+Common properties:
+- k: number of active stations per scenario
+- l: number of stations to build
+- in_vehicle_time_weight: weight for in-vehicle travel time costs
+- corridor_weight: weight for corridor penalty
+- max_cluster_diameter: routing distance diameter for station clustering
+"""
+abstract type AbstractCorridorODModel <: AbstractODModel end
 
 """
     AbstractSingleDetourModel <: AbstractODModel

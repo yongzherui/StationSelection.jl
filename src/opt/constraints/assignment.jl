@@ -89,6 +89,38 @@ end
 
 
 """
+    add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true
+    )
+
+Each OD pair must be assigned to exactly one station pair (ZCorridorODModel, XCorridorODModel).
+Same structure as ClusteringTwoStageODMap variant.
+"""
+function add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true
+    )
+    before = _total_num_constraints(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = m[:x]
+
+    for s in 1:S
+        for od_idx in 1:length(mapping.Omega_s[s])
+            @constraint(m, sum(x[s][od_idx]) == 1)
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
+"""
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Each station location must be assigned to exactly one medoid (ClusteringBaseModel).
@@ -231,6 +263,61 @@ function add_assignment_to_active_constraints!(
 end
 
 
+"""
+    add_assignment_to_active_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true,
+        tight_constraints::Bool=true
+    )
+
+Assignment requires both stations to be active (ZCorridorODModel, XCorridorODModel).
+Same structure as ClusteringTwoStageODMap variant.
+"""
+function add_assignment_to_active_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true,
+        tight_constraints::Bool=true
+    )
+    before = _total_num_constraints(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    z = m[:z]
+    x = m[:x]
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            if use_sparse
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                for (idx, (j, k)) in enumerate(valid_pairs)
+                    if tight_constraints
+                        @constraint(m, x[s][od_idx][idx] <= z[j, s])
+                        @constraint(m, x[s][od_idx][idx] <= z[k, s])
+                    else
+                        @constraint(m, 2 * x[s][od_idx][idx] <= z[j, s] + z[k, s])
+                    end
+                end
+            else
+                for j in 1:n, k in 1:n
+                    if tight_constraints
+                        @constraint(m, x[s][od_idx][j, k] <= z[j, s])
+                        @constraint(m, x[s][od_idx][j, k] <= z[k, s])
+                    else
+                        @constraint(m, 2 * x[s][od_idx][j, k] <= z[j, s] + z[k, s])
+                    end
+                end
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
 # ============================================================================
 # Assignment Walking Limit Constraints - For dense x with walking limit
 # ============================================================================
@@ -254,6 +341,43 @@ function add_assignment_walking_limit_constraints!(
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringTwoStageODMap,
+        max_walking_distance::Float64
+    )
+    before = _total_num_constraints(m)
+    n = data.n_stations
+    S = n_scenarios(data)
+    x = m[:x]
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            for j in 1:n, k in 1:n
+                j_id = mapping.array_idx_to_station_id[j]
+                k_id = mapping.array_idx_to_station_id[k]
+                @constraint(m, get_walking_cost(data, o, j_id) * x[s][od_idx][j, k] <= max_walking_distance)
+                @constraint(m, get_walking_cost(data, k_id, d) * x[s][od_idx][j, k] <= max_walking_distance)
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
+"""
+    add_assignment_walking_limit_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap,
+        max_walking_distance::Float64
+    )
+
+Enforce walking distance limits when dense x variables are used (ZCorridorODModel, XCorridorODModel).
+Same structure as ClusteringTwoStageODMap variant.
+"""
+function add_assignment_walking_limit_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap,
         max_walking_distance::Float64
     )
     before = _total_num_constraints(m)

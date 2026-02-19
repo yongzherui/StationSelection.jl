@@ -20,6 +20,7 @@ include("utils/coords.jl")
 include("utils/results.jl")
 include("utils/costs.jl")
 include("utils/scenarios.jl")
+include("utils/corridor_clustering.jl")
 include("utils/export.jl")
 include("utils/logging.jl")
 include("utils/candidate_stations.jl")
@@ -32,6 +33,8 @@ include("data/requests.jl")
 include("opt/abstract.jl")
 include("opt/models/two_stage_single_detour.jl")
 include("opt/models/clustering_two_stage_od.jl")
+include("opt/models/two_stage_corridor_od.jl")
+include("opt/models/x_corridor_od.jl")
 include("opt/models/clustering_base.jl")
 
 # Utility functions that depend on model types
@@ -42,6 +45,9 @@ include("data/pooling_map.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
+
+# Corridor OD map (depends on AbstractCorridorODModel and corridor_clustering)
+include("data/corridor_od_map.jl")
 
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/clustering_base_map.jl")
@@ -75,9 +81,11 @@ export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap, AbstractPoolingMap
 export TwoStageSingleDetourMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
+export CorridorTwoStageODMap
 export create_station_selection_data, create_scenario_data
 export create_two_stage_single_detour_map
 export create_clustering_two_stage_od_map
+export create_corridor_two_stage_od_map
 export create_clustering_base_model_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
@@ -95,6 +103,9 @@ export AbstractTwoStageModel, AbstractODModel, AbstractPoolingModel
 export AbstractSingleDetourModel
 export TwoStageSingleDetourModel
 export ClusteringTwoStageODModel
+export AbstractCorridorODModel
+export ZCorridorODModel
+export XCorridorODModel
 export ClusteringBaseModel
 
 # Re-export detour combinations
@@ -111,19 +122,23 @@ export warm_start, get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!, add_detour_variables!
+export add_cluster_activation_variables!, add_corridor_variables!
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
+export add_cluster_activation_constraints!, add_corridor_activation_constraints!
+export add_corridor_x_activation_constraints!
 export set_two_stage_single_detour_objective!
-export set_clustering_od_objective!, set_clustering_base_objective!
+export set_clustering_od_objective!, set_corridor_od_objective!, set_clustering_base_objective!
 
 # Re-export objective expression functions (for debugging/customization)
 export assignment_cost_expr, flow_cost_expr
 export same_source_pooling_savings_expr, same_dest_pooling_savings_expr
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
+export cluster_stations_by_diameter, compute_cluster_diameter, compute_corridor_data
 export select_top_used_candidate_stations
 export generate_scenarios
 export generate_scenarios_from_ranges
