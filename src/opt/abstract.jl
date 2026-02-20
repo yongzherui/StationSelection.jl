@@ -23,6 +23,7 @@ export AbstractSingleScenarioModel
 export AbstractMultiScenarioModel
 export AbstractTwoStageModel
 export AbstractCorridorODModel
+export AbstractTransportationModel
 export AbstractRoutingModel
 
 """
@@ -101,6 +102,17 @@ Common properties:
 - routing_delay: maximum detour delay
 """
 abstract type AbstractSingleDetourModel <: AbstractODModel end
+
+"""
+    AbstractTransportationModel <: AbstractODModel
+
+Models with zone-pair anchor transportation flow.
+
+Separates pickup and dropoff assignments, uses ordered zone-pair anchors
+to capture movement directionality, and models per-passenger transportation
+flow on allowed station pairs within each anchor.
+"""
+abstract type AbstractTransportationModel <: AbstractODModel end
 
 """
     AbstractPoolingModel <: AbstractODModel

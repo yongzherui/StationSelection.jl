@@ -64,6 +64,10 @@ const MOI = JuMP.MOI
         include("opt/test_corridor_integration.jl")
     end
 
+    @testset "Transportation Integration" begin
+        include("opt/test_transportation_integration.jl")
+    end
+
     @testset "Solution Analysis" begin
         include("utils/test_solution_analysis.jl")
     end

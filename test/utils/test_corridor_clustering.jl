@@ -151,6 +151,76 @@ env = Gurobi.Env()
         end
     end
 
+    @testset "cluster_stations_by_count" begin
+        # n_clusters=1: all stations in one cluster
+        labels, medoids, nc = cluster_stations_by_count(
+            data, array_idx_to_station_id, 1; optimizer_env=env
+        )
+        @test nc == 1
+        @test length(labels) == 5
+        @test all(l -> l == 1, labels)
+        @test length(medoids) == 1
+
+        # n_clusters=5: each station its own cluster
+        labels, medoids, nc = cluster_stations_by_count(
+            data, array_idx_to_station_id, 5; optimizer_env=env
+        )
+        @test nc == 5
+        @test length(labels) == 5
+        @test length(medoids) == 5
+        @test length(unique(labels)) == 5
+
+        # Error: n_clusters=0
+        @test_throws ArgumentError cluster_stations_by_count(
+            data, array_idx_to_station_id, 0; optimizer_env=env
+        )
+
+        # Error: n_clusters > n_stations
+        @test_throws ArgumentError cluster_stations_by_count(
+            data, array_idx_to_station_id, 6; optimizer_env=env
+        )
+    end
+
+    @testset "cluster_stations_by_count with 2 natural clusters" begin
+        # Reuse the 4-station data with two natural clusters: {1,2} and {3,4}
+        stations_4 = DataFrame(
+            id = [1, 2, 3, 4],
+            lon = [113.0, 113.01, 113.1, 113.11],
+            lat = [28.0, 28.01, 28.1, 28.11]
+        )
+        requests_4 = DataFrame(
+            id = [1],
+            start_station_id = [1],
+            end_station_id = [3],
+            request_time = [DateTime(2024, 1, 1, 8, 0, 0)]
+        )
+        walking_4 = Dict{Tuple{Int,Int}, Float64}()
+        routing_4 = Dict{Tuple{Int,Int}, Float64}()
+        dists = [0.0 10.0 100.0 110.0; 10.0 0.0 90.0 100.0; 100.0 90.0 0.0 10.0; 110.0 100.0 10.0 0.0]
+        for i in 1:4, j in 1:4
+            walking_4[(i, j)] = 1000.0
+            routing_4[(i, j)] = dists[i, j]
+        end
+        data_4 = StationSelection.create_station_selection_data(
+            stations_4, requests_4, walking_4;
+            routing_costs=routing_4,
+            scenarios=[("2024-01-01 08:00:00", "2024-01-01 09:00:00")]
+        )
+        arr_4 = [1, 2, 3, 4]
+
+        labels, medoids, nc = cluster_stations_by_count(
+            data_4, arr_4, 2; optimizer_env=env
+        )
+        @test nc == 2
+        @test length(labels) == 4
+        @test length(medoids) == 2
+
+        # Stations 1,2 should be in the same cluster; stations 3,4 in the same cluster
+        @test labels[1] == labels[2]
+        @test labels[3] == labels[4]
+        @test labels[1] != labels[3]
+    end
+
     @testset "compute_corridor_data" begin
         labels = [1, 1, 2, 2, 2]
         medoids = [1, 3]  # station 1 is medoid of cluster 1, station 3 of cluster 2

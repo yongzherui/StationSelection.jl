@@ -96,10 +96,15 @@ function create_corridor_two_stage_od_map(
     end
 
     # Compute corridor clustering
-    cluster_labels, medoids, n_clusters = cluster_stations_by_diameter(
-        data, array_idx_to_station_id, model.max_cluster_diameter;
-        optimizer_env=optimizer_env
-    )
+    if !isnothing(model.n_clusters)
+        cluster_labels, medoids, n_clusters = cluster_stations_by_count(
+            data, array_idx_to_station_id, model.n_clusters;
+            optimizer_env=optimizer_env)
+    else
+        cluster_labels, medoids, n_clusters = cluster_stations_by_diameter(
+            data, array_idx_to_station_id, model.max_cluster_diameter;
+            optimizer_env=optimizer_env)
+    end
 
     corridor_indices, cluster_station_sets, corridor_costs = compute_corridor_data(
         cluster_labels, medoids, n_clusters, data, array_idx_to_station_id

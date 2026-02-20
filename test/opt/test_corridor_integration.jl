@@ -218,6 +218,74 @@
     end
 
     # =========================================================================
+    # n_clusters constructor validation
+    # =========================================================================
+
+    @testset "ZCorridorODModel n_clusters constructor" begin
+        # Both specified: error
+        @test_throws ArgumentError ZCorridorODModel(2, 3;
+            max_cluster_diameter=500.0, n_clusters=2)
+
+        # n_clusters only
+        model = ZCorridorODModel(2, 3; n_clusters=2)
+        @test model.n_clusters == 2
+        @test isnothing(model.max_cluster_diameter)
+
+        # Neither: defaults to max_cluster_diameter=1000.0
+        model = ZCorridorODModel(2, 3)
+        @test model.max_cluster_diameter == 1000.0
+        @test isnothing(model.n_clusters)
+
+        # n_clusters must be positive
+        @test_throws ArgumentError ZCorridorODModel(2, 3; n_clusters=0)
+    end
+
+    @testset "XCorridorODModel n_clusters constructor" begin
+        @test_throws ArgumentError XCorridorODModel(2, 3;
+            max_cluster_diameter=500.0, n_clusters=2)
+
+        model = XCorridorODModel(2, 3; n_clusters=2)
+        @test model.n_clusters == 2
+        @test isnothing(model.max_cluster_diameter)
+
+        model = XCorridorODModel(2, 3)
+        @test model.max_cluster_diameter == 1000.0
+        @test isnothing(model.n_clusters)
+    end
+
+    @testset "ZCorridorODModel with n_clusters mapping and build" begin
+        model = ZCorridorODModel(2, 3; n_clusters=2, corridor_weight=1.0)
+        mapping = StationSelection.create_map(model, data; optimizer_env=env)
+
+        @test mapping isa CorridorTwoStageODMap
+        @test mapping.n_clusters == 2
+        @test length(mapping.cluster_labels) == 5
+        @test length(mapping.cluster_medoids) == 2
+        @test length(mapping.corridor_indices) == 4  # 2^2
+
+        build_result = StationSelection.build_model(model, data; optimizer_env=env)
+        @test build_result.model isa JuMP.Model
+    end
+
+    @testset "XCorridorODModel with n_clusters mapping and build" begin
+        model = XCorridorODModel(2, 3; n_clusters=2, corridor_weight=1.0)
+        mapping = StationSelection.create_map(model, data; optimizer_env=env)
+
+        @test mapping isa CorridorTwoStageODMap
+        @test mapping.n_clusters == 2
+
+        build_result = StationSelection.build_model(model, data; optimizer_env=env)
+        @test build_result.model isa JuMP.Model
+    end
+
+    @testset "ZCorridorODModel with n_clusters run_opt" begin
+        model = ZCorridorODModel(2, 3; n_clusters=2, corridor_weight=1.0)
+        result = run_opt(model, data; optimizer_env=env, silent=true, do_optimize=true)
+        @test result.termination_status == MOI.OPTIMAL
+        @test !isnothing(result.objective_value)
+    end
+
+    # =========================================================================
     # Shared activation logic test data
     # =========================================================================
 

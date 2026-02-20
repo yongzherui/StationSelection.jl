@@ -493,6 +493,239 @@ function export_model_specific_variables(
 end
 
 
+"""
+    export_assignment_variables(m::JuMP.Model, mapping::TransportationMap, export_dir::String) -> Int
+
+Export assignment variables (x_pick, x_drop) for TransportationModel.
+"""
+function export_assignment_variables(m::JuMP.Model, mapping::TransportationMap, export_dir::String)
+    if !haskey(m.obj_dict, :x_pick) || !haskey(m.obj_dict, :x_drop)
+        return 0
+    end
+
+    x_pick = m[:x_pick]
+    x_drop = m[:x_drop]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    for (g_idx, anchor) in enumerate(mapping.active_anchors)
+        zone_a, zone_b = anchor
+        for s in mapping.anchor_scenarios[g_idx]
+            # Pickup assignments
+            for ((i, j), var) in x_pick[g_idx][s]
+                val = JuMP.value(var)
+                if val > 0.5
+                    push!(rows, (
+                        type = "pickup",
+                        anchor_idx = g_idx,
+                        zone_a = zone_a,
+                        zone_b = zone_b,
+                        scenario = s,
+                        origin_or_dest_id = i,
+                        station_idx = j,
+                        station_id = array_idx_to_station_id[j],
+                        value = val
+                    ))
+                end
+            end
+
+            # Dropoff assignments
+            for ((i, k), var) in x_drop[g_idx][s]
+                val = JuMP.value(var)
+                if val > 0.5
+                    push!(rows, (
+                        type = "dropoff",
+                        anchor_idx = g_idx,
+                        zone_a = zone_a,
+                        zone_b = zone_b,
+                        scenario = s,
+                        origin_or_dest_id = i,
+                        station_idx = k,
+                        station_id = array_idx_to_station_id[k],
+                        value = val
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+
+    return nrow(df)
+end
+
+
+"""
+    export_model_specific_variables(result::OptResult, mapping::TransportationMap, export_dir::String, metadata::Dict)
+
+Export TransportationModel specific variables (p, d, f_transport, u_anchor).
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::TransportationMap,
+    export_dir::String,
+    metadata::Dict
+)
+    m = result.model
+
+    metadata["model_type"] = "TransportationModel"
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_clusters"] = mapping.n_clusters
+    metadata["n_active_anchors"] = length(mapping.active_anchors)
+
+    # Export flow variables
+    n_flows = _export_transportation_flow(m, mapping, export_dir)
+    metadata["n_active_flows"] = n_flows
+
+    # Export anchor activation
+    n_activations = _export_transportation_activation(m, mapping, export_dir)
+    metadata["n_anchor_activations"] = n_activations
+
+    # Export aggregation (p, d)
+    n_aggregations = _export_transportation_aggregation(m, mapping, export_dir)
+    metadata["n_aggregation_entries"] = n_aggregations
+end
+
+
+"""
+Export transportation flow variables (f_transport).
+"""
+function _export_transportation_flow(m::JuMP.Model, mapping::TransportationMap, export_dir::String)
+    if !haskey(m.obj_dict, :f_transport)
+        println("    ✓ transportation_flow.csv (0 flows)")
+        return 0
+    end
+
+    f_transport = m[:f_transport]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    for (g_idx, anchor) in enumerate(mapping.active_anchors)
+        zone_a, zone_b = anchor
+        for s in mapping.anchor_scenarios[g_idx]
+            for ((j, k), var) in f_transport[g_idx][s]
+                val = JuMP.value(var)
+                if val > 1e-6
+                    push!(rows, (
+                        anchor_idx = g_idx,
+                        zone_a = zone_a,
+                        zone_b = zone_b,
+                        scenario = s,
+                        j_idx = j,
+                        k_idx = k,
+                        j_id = array_idx_to_station_id[j],
+                        k_id = array_idx_to_station_id[k],
+                        value = val
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "transportation_flow.csv"), df)
+    println("    ✓ transportation_flow.csv ($(nrow(df)) flows)")
+
+    return nrow(df)
+end
+
+
+"""
+Export transportation anchor activation variables (u_anchor).
+"""
+function _export_transportation_activation(m::JuMP.Model, mapping::TransportationMap, export_dir::String)
+    if !haskey(m.obj_dict, :u_anchor)
+        println("    ✓ anchor_activation.csv (0 activations)")
+        return 0
+    end
+
+    u_anchor = m[:u_anchor]
+
+    rows = []
+    for (g_idx, anchor) in enumerate(mapping.active_anchors)
+        zone_a, zone_b = anchor
+        for s in mapping.anchor_scenarios[g_idx]
+            val = JuMP.value(u_anchor[g_idx][s])
+            if val > 0.5
+                push!(rows, (
+                    anchor_idx = g_idx,
+                    zone_a = zone_a,
+                    zone_b = zone_b,
+                    scenario = s,
+                    value = val
+                ))
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "anchor_activation.csv"), df)
+    println("    ✓ anchor_activation.csv ($(nrow(df)) activations)")
+
+    return nrow(df)
+end
+
+
+"""
+Export transportation aggregation variables (p_agg, d_agg).
+"""
+function _export_transportation_aggregation(m::JuMP.Model, mapping::TransportationMap, export_dir::String)
+    if !haskey(m.obj_dict, :p_agg) || !haskey(m.obj_dict, :d_agg)
+        println("    ✓ transportation_aggregation.csv (0 entries)")
+        return 0
+    end
+
+    p_agg = m[:p_agg]
+    d_agg = m[:d_agg]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    for (g_idx, anchor) in enumerate(mapping.active_anchors)
+        zone_a, zone_b = anchor
+        for s in mapping.anchor_scenarios[g_idx]
+            for (j, var) in p_agg[g_idx][s]
+                val = JuMP.value(var)
+                if val > 1e-6
+                    push!(rows, (
+                        type = "pickup",
+                        anchor_idx = g_idx,
+                        zone_a = zone_a,
+                        zone_b = zone_b,
+                        scenario = s,
+                        station_idx = j,
+                        station_id = array_idx_to_station_id[j],
+                        value = val
+                    ))
+                end
+            end
+            for (k, var) in d_agg[g_idx][s]
+                val = JuMP.value(var)
+                if val > 1e-6
+                    push!(rows, (
+                        type = "dropoff",
+                        anchor_idx = g_idx,
+                        zone_a = zone_a,
+                        zone_b = zone_b,
+                        scenario = s,
+                        station_idx = k,
+                        station_id = array_idx_to_station_id[k],
+                        value = val
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "transportation_aggregation.csv"), df)
+    println("    ✓ transportation_aggregation.csv ($(nrow(df)) entries)")
+
+    return nrow(df)
+end
+
+
 # =============================================================================
 # TwoStageSingleDetourModel Helper Functions
 # =============================================================================
@@ -573,7 +806,7 @@ function export_cluster_activation_variables(m::JuMP.Model, mapping::CorridorTwo
     rows = []
     for a in 1:n_clusters, s in 1:n_scenarios
         val = JuMP.value(α[a, s])
-        if val > 0.5
+        if val > 1e-6
             push!(rows, (
                 cluster_idx = a,
                 scenario = s,

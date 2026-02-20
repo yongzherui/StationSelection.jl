@@ -52,6 +52,19 @@ function create_map(
 end
 
 """
+    create_map(model::TransportationModel, data::StationSelectionData; optimizer_env=nothing)
+
+Create a TransportationMap for TransportationModel.
+"""
+function create_map(
+        model::TransportationModel,
+        data::StationSelectionData;
+        optimizer_env=nothing
+    )::TransportationMap
+    return create_transportation_map(model, data; optimizer_env=optimizer_env)
+end
+
+"""
     create_map(model::ClusteringBaseModel, data::StationSelectionData)
 
 Create a ClusteringBaseModelMap for ClusteringBaseModel.

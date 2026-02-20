@@ -5,7 +5,7 @@ Clusters stations by routing distance with a diameter constraint, then computes
 corridor data (inter-cluster movement indices and costs).
 """
 
-export cluster_stations_by_diameter, compute_cluster_diameter, compute_corridor_data
+export cluster_stations_by_diameter, cluster_stations_by_count, compute_cluster_diameter, compute_corridor_data
 
 """
     compute_cluster_diameter(station_indices::Vector{Int}, data::StationSelectionData,
@@ -165,6 +165,132 @@ function cluster_stations_by_diameter(
     )
     n = data.n_stations
     return _kmedoids_milp(n, data, array_idx_to_station_id, max_diameter; optimizer_env=optimizer_env)
+end
+
+"""
+    _pmedian_milp(n_stations::Int, data::StationSelectionData,
+                  array_idx_to_station_id::Vector{Int},
+                  n_clusters::Int;
+                  optimizer_env=nothing) -> (cluster_labels, medoids, n_clusters)
+
+Solve a p-median MILP to partition stations into exactly `n_clusters` clusters,
+minimizing total assignment cost (sum of routing distances to medoids).
+
+# Formulation
+- `m[j]` ∈ {0,1}: whether station j is a medoid (cluster center)
+- `x[i,j]` ∈ {0,1}: whether station i is assigned to medoid j
+- Minimize Σ_{i,j} d[i,j] · x[i,j]
+- Subject to:
+  - Each station assigned to exactly one medoid
+  - Can only assign to a station that is a medoid
+  - A medoid must be assigned to itself
+  - Exactly n_clusters medoids
+"""
+function _pmedian_milp(
+        n_stations::Int,
+        data::StationSelectionData,
+        array_idx_to_station_id::Vector{Int},
+        n_clusters::Int;
+        optimizer_env=nothing
+    )
+    if isnothing(optimizer_env)
+        optimizer_env = Gurobi.Env()
+    end
+
+    model = Model(() -> Gurobi.Optimizer(optimizer_env))
+    set_silent(model)
+
+    # Precompute distance matrix
+    d = Matrix{Float64}(undef, n_stations, n_stations)
+    for i in 1:n_stations
+        id_i = array_idx_to_station_id[i]
+        for j in 1:n_stations
+            id_j = array_idx_to_station_id[j]
+            d[i, j] = get_routing_cost(data, id_i, id_j)
+        end
+    end
+
+    # Variables
+    @variable(model, m_var[1:n_stations], Bin)   # m[j] = 1 if j is a medoid
+    @variable(model, x[1:n_stations, 1:n_stations], Bin)  # x[i,j] = 1 if i assigned to j
+
+    # Objective: minimize total assignment cost
+    @objective(model, Min, sum(d[i, j] * x[i, j] for i in 1:n_stations, j in 1:n_stations))
+
+    # Each station assigned to exactly one medoid
+    for i in 1:n_stations
+        @constraint(model, sum(x[i, j] for j in 1:n_stations) == 1)
+    end
+
+    # Can only assign to a medoid
+    for i in 1:n_stations, j in 1:n_stations
+        @constraint(model, x[i, j] <= m_var[j])
+    end
+
+    # A medoid must be assigned to itself
+    for j in 1:n_stations
+        @constraint(model, x[j, j] >= m_var[j])
+    end
+
+    # Exactly n_clusters medoids
+    @constraint(model, sum(m_var[j] for j in 1:n_stations) == n_clusters)
+
+    optimize!(model)
+
+    # Extract solution
+    m_val = value.(m_var)
+    x_val = value.(x)
+
+    medoid_indices = [j for j in 1:n_stations if m_val[j] > 0.5]
+    nc = length(medoid_indices)
+
+    # Map medoid array indices to 1-based cluster labels
+    medoid_to_cluster = Dict(medoid_indices[c] => c for c in 1:nc)
+
+    cluster_labels = Vector{Int}(undef, n_stations)
+    for i in 1:n_stations
+        for j in medoid_indices
+            if x_val[i, j] > 0.5
+                cluster_labels[i] = medoid_to_cluster[j]
+                break
+            end
+        end
+    end
+
+    return cluster_labels, medoid_indices, nc
+end
+
+"""
+    cluster_stations_by_count(data::StationSelectionData,
+                               array_idx_to_station_id::Vector{Int},
+                               n_clusters::Int;
+                               optimizer_env=nothing)
+        -> (cluster_labels, medoids, n_clusters)
+
+Partition stations into exactly `n_clusters` clusters using a p-median MILP
+that minimizes total assignment cost (sum of routing distances to medoids).
+
+# Arguments
+- `data`: Problem data with routing costs
+- `array_idx_to_station_id`: Mapping from array index to station ID
+- `n_clusters`: Exact number of clusters to create
+- `optimizer_env`: Optional Gurobi environment (created if not provided)
+
+# Returns
+- `cluster_labels::Vector{Int}`: Station array index → cluster label (1-based)
+- `medoids::Vector{Int}`: Array indices of medoid stations
+- `n_clusters::Int`: Number of clusters (same as input)
+"""
+function cluster_stations_by_count(
+        data::StationSelectionData,
+        array_idx_to_station_id::Vector{Int},
+        n_clusters::Int;
+        optimizer_env=nothing
+    )
+    n = data.n_stations
+    n_clusters > 0 || throw(ArgumentError("n_clusters must be positive"))
+    n_clusters <= n || throw(ArgumentError("n_clusters must be <= number of stations ($n)"))
+    return _pmedian_milp(n, data, array_idx_to_station_id, n_clusters; optimizer_env=optimizer_env)
 end
 
 """
