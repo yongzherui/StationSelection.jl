@@ -19,10 +19,10 @@ export add_corridor_x_activation_constraints!
     add_cluster_activation_constraints!(m::Model, data::StationSelectionData,
                                         mapping::CorridorTwoStageODMap) -> Int
 
-Cluster activation: |C_a| · α[a,s] ≥ Σ_{i∈C_a} z[i,s]  ∀a, s
+Cluster activation: α[a,s] ≥ z[i,s]  ∀i∈C_a, ∀a, s
 
-This ensures α[a,s] ≥ 1/|C_a| whenever any station in cluster a is active,
-which due to z integrality means α[a,s] = 1 when any station is active.
+One constraint per cluster member per scenario. Forces α[a,s] = 1 as soon as
+any station in cluster a is active, ensuring corridors activate correctly.
 
 Used by: ZCorridorODModel
 """
@@ -38,11 +38,10 @@ function add_cluster_activation_constraints!(
 
     for a in 1:mapping.n_clusters
         members = mapping.cluster_station_sets[a]
-        cluster_size = length(members)
         for s in 1:S
-            @constraint(m,
-                cluster_size * α[a, s] >= sum(z[i, s] for i in members)
-            )
+            for i in members
+                @constraint(m, α[a, s] >= z[i, s])
+            end
         end
     end
 

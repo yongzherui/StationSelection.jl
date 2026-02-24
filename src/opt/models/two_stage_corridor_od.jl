@@ -35,7 +35,7 @@ regardless of whether any trip actually crosses from zone a to zone b.
 - f[g,s] ∈ {0,1}: corridor usage indicator
 
 # Additional constraints
-- |C_a|·α_{as} ≥ Σ_{i∈C_a} z_{is}       (cluster activation)
+- α_{as} ≥ z_{is}  ∀i∈C_a                (cluster activation)
 - f_{gs} ≥ α_{as} + α_{bs} - 1  for a≠b  (corridor activation)
 - f_{gs} ≥ α_{as}               for a==b  (self-corridor activation)
 """

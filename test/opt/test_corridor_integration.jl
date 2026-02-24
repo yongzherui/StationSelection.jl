@@ -122,7 +122,7 @@
         @test con_counts["station_limit"] == 1
         @test con_counts["scenario_activation_limit"] == 1
         @test con_counts["activation_linking"] == 5
-        @test con_counts["cluster_activation"] == mapping.n_clusters * 1
+        @test con_counts["cluster_activation"] == data.n_stations * 1  # one per member per scenario
         @test con_counts["corridor_activation"] == mapping.n_clusters^2 * 1
 
         @test haskey(extra_counts, "total_od_pairs")
