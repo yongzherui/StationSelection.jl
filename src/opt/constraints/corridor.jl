@@ -169,15 +169,9 @@ function add_zone_activation_limit_constraints!(
     S = n_scenarios(data)
     z = m[:z]
 
-    for a in 1:mapping.n_clusters
-        members = mapping.cluster_station_sets[a]
-        for s in 1:S
-            @constraint(m,
-                zone_activation_limit[a, s],
-                sum(z[j, s] for j in members) <= max_active
-            )
-        end
-    end
+    @constraint(m, zone_activation_limit[a in 1:mapping.n_clusters, s in 1:S],
+        sum(z[j, s] for j in mapping.cluster_station_sets[a]) <= max_active
+    )
 
     return _total_num_constraints(m) - before
 end
