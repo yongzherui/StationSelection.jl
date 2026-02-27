@@ -7,6 +7,7 @@ Assignment cost (same as clustering_od) + corridor penalty γ Σ_{g,s} r_g f_{gs
 using JuMP
 
 export set_corridor_od_objective!
+export set_x_corridor_flow_regularizer_objective!
 
 """
     set_corridor_od_objective!(m::Model, data::StationSelectionData,
@@ -77,5 +78,48 @@ function set_corridor_od_objective!(
 
     @objective(m, Min, assignment_cost + corridor_cost)
 
+    return nothing
+end
+
+"""
+    set_x_corridor_flow_regularizer_objective!(m, data, mapping; ...)
+
+Extends the corridor-OD objective with a route-activation regularization term:
+    + μ Σ_{j,k,s} w_route[j,k,s]
+
+Full objective:
+    min  Σ_s Σ_{(o,d)} Σ_{j,k} q_{od} (d_walk + λ·c_jk) x_{odjks}
+       + γ Σ_{g,s} r_g f_{corridor}[g,s]
+       + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+"""
+function set_x_corridor_flow_regularizer_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        in_vehicle_time_weight::Float64=1.0,
+        corridor_weight::Float64=1.0,
+        flow_regularization_weight::Float64=1.0,
+        variable_reduction::Bool=true
+    )
+    # Reuse existing base objective
+    set_corridor_od_objective!(
+        m, data, mapping;
+        in_vehicle_time_weight=in_vehicle_time_weight,
+        corridor_weight=corridor_weight,
+        variable_reduction=variable_reduction
+    )
+
+    S = n_scenarios(data)
+    w_route = m[:w_route]
+    route_penalty = @expression(m,
+        flow_regularization_weight * sum(
+            v
+            for s in 1:S
+            for v in values(w_route[s])
+        )
+    )
+
+    obj = objective_function(m)
+    @objective(m, Min, obj + route_penalty)
     return nothing
 end

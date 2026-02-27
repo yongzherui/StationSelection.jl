@@ -35,6 +35,7 @@ include("opt/models/two_stage_single_detour.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/two_stage_corridor_od.jl")
 include("opt/models/x_corridor_od.jl")
+include("opt/models/x_corridor_flow_regularizer.jl")
 include("opt/models/transportation.jl")
 include("opt/models/clustering_base.jl")
 
@@ -113,6 +114,7 @@ export AbstractCorridorODModel
 export AbstractTransportationModel
 export ZCorridorODModel
 export XCorridorODModel
+export XCorridorWithFlowRegularizerModel
 export TransportationModel
 export ClusteringBaseModel
 
@@ -131,6 +133,7 @@ export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!, add_detour_variables!
 export add_cluster_activation_variables!, add_corridor_variables!
+export add_route_activation_variables!
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
@@ -138,6 +141,7 @@ export add_assignment_to_flow_constraints!
 export add_assignment_to_same_source_detour_constraints!, add_assignment_to_same_dest_detour_constraints!
 export add_cluster_activation_constraints!, add_corridor_activation_constraints!
 export add_corridor_x_activation_constraints!
+export add_route_activation_constraints!
 export add_transportation_assignment_variables!, add_transportation_aggregation_variables!
 export add_transportation_flow_variables!, add_transportation_activation_variables!
 export add_transportation_assignment_constraints!, add_transportation_aggregation_constraints!
@@ -146,6 +150,7 @@ export add_transportation_viability_constraints!
 export set_transportation_objective!
 export set_two_stage_single_detour_objective!
 export set_clustering_od_objective!, set_corridor_od_objective!, set_clustering_base_objective!
+export set_x_corridor_flow_regularizer_objective!
 
 # Re-export objective expression functions (for debugging/customization)
 export assignment_cost_expr, flow_cost_expr

@@ -1,21 +1,24 @@
 """
-XCorridorODModel - Two-stage station selection with x-based corridor penalties.
+XCorridorWithFlowRegularizerModel - XCorridorODModel with route-activation regularization.
 
-Like ZCorridorODModel but corridor activation is based on assignment variables (x)
-rather than station activation variables (z). A corridor is only activated when
-an actual OD assignment crosses it.
+Extends XCorridorODModel by adding a penalty on the number of distinct (j,k)
+route segments used per scenario. This encourages multiple OD pairs to share the
+same pickup→dropoff station pair, promoting vehicle pooling at the route level.
 """
 
-export XCorridorODModel
+export XCorridorWithFlowRegularizerModel
 
 """
-    XCorridorODModel <: AbstractCorridorODModel
+    XCorridorWithFlowRegularizerModel <: AbstractCorridorODModel
 
-Two-stage stochastic station selection model with OD pair assignments and
-x-based corridor penalties for cross-zone vehicle movements.
+Two-stage stochastic station selection model with OD pair assignments,
+x-based corridor penalties, and route-activation regularization.
 
-Corridor g=(a,b) is activated only when some OD pair is assigned to a pickup
-station in cluster a and a dropoff station in cluster b.
+Extends XCorridorODModel with an additional penalty term:
+    + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+
+where w_route[s][(j,k)] ∈ [0,1] indicates that route (j→k) is used by at least
+one OD assignment in scenario s.
 
 # Fields
 - `k::Int`: Number of stations to activate per scenario (second stage)
@@ -29,14 +32,17 @@ station in cluster a and a dropoff station in cluster b.
 - `variable_reduction::Bool`: Whether to reduce assignment variables when walking limit is enabled
 - `tight_constraints::Bool`: Whether to use tighter assignment-to-active constraints
 - `max_active_per_zone::Union{Int, Nothing}`: Maximum active stations per cluster per scenario (nothing = disabled)
+- `flow_regularization_weight::Float64`: Weight μ for route-activation regularization penalty
 
 # Additional variables
-- f[g,s] ∈ {0,1}: corridor usage indicator (no α variables needed)
+- f[g,s] ∈ {0,1}: corridor usage indicator
+- w_route[s][(j,k)] ∈ [0,1]: sparse route activation indicator
 
 # Additional constraints
 - f_{gs} ≥ x_{odjks}  ∀(o,d), j∈C_a, k∈C_b, s  for g=(a,b)
+- w_route[s][(j,k)] ≥ x[s][od_idx][...] for all (o,d) in Ω_s and valid (j,k)
 """
-struct XCorridorODModel <: AbstractCorridorODModel
+struct XCorridorWithFlowRegularizerModel <: AbstractCorridorODModel
     k::Int
     l::Int
     in_vehicle_time_weight::Float64
@@ -48,8 +54,9 @@ struct XCorridorODModel <: AbstractCorridorODModel
     variable_reduction::Bool
     tight_constraints::Bool
     max_active_per_zone::Union{Int, Nothing}
+    flow_regularization_weight::Float64
 
-    function XCorridorODModel(
+    function XCorridorWithFlowRegularizerModel(
             k::Int,
             l::Int;
             in_vehicle_time_weight::Number=1.0,
@@ -60,12 +67,14 @@ struct XCorridorODModel <: AbstractCorridorODModel
             max_walking_distance::Union{Number, Nothing}=nothing,
             variable_reduction::Bool=true,
             tight_constraints::Bool=true,
-            max_active_per_zone::Union{Int, Nothing}=nothing
+            max_active_per_zone::Union{Int, Nothing}=nothing,
+            flow_regularization_weight::Number=1.0
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         in_vehicle_time_weight >= 0 || throw(ArgumentError("in_vehicle_time_weight must be non-negative"))
         corridor_weight >= 0 || throw(ArgumentError("corridor_weight must be non-negative"))
+        flow_regularization_weight >= 0 || throw(ArgumentError("flow_regularization_weight must be non-negative"))
 
         # Clustering mode: exactly one of max_cluster_diameter or n_clusters
         if !isnothing(max_cluster_diameter) && !isnothing(n_clusters)
@@ -103,12 +112,12 @@ struct XCorridorODModel <: AbstractCorridorODModel
             new(k, l, Float64(in_vehicle_time_weight), Float64(corridor_weight),
                 mcd, n_clusters, true,
                 Float64(max_walking_distance), variable_reduction, tight_constraints,
-                max_active_per_zone)
+                max_active_per_zone, Float64(flow_regularization_weight))
         else
             new(k, l, Float64(in_vehicle_time_weight), Float64(corridor_weight),
                 mcd, n_clusters, false,
                 nothing, variable_reduction, tight_constraints,
-                max_active_per_zone)
+                max_active_per_zone, Float64(flow_regularization_weight))
         end
     end
 end

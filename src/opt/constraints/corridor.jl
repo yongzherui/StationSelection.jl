@@ -10,6 +10,8 @@ using JuMP
 
 export add_cluster_activation_constraints!, add_corridor_activation_constraints!
 export add_corridor_x_activation_constraints!
+export add_zone_activation_limit_constraints!
+export add_route_activation_constraints!
 
 # =============================================================================
 # z-based corridor activation (ZCorridorODModel)
@@ -133,6 +135,83 @@ function add_corridor_x_activation_constraints!(
                     cluster_k = mapping.cluster_labels[k]
                     g = corridor_lookup[(cluster_j, cluster_k)]
                     @constraint(m, f_corridor[g, s] >= x[s][od_idx][j, k])
+                end
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+# =============================================================================
+# Per-zone activation limit (XCorridorODModel)
+# =============================================================================
+
+"""
+    add_zone_activation_limit_constraints!(m, data, mapping, max_active) -> Int
+
+Upper-bound the number of active stations per cluster per scenario:
+
+    Σ_{j ∈ C_a} z[j,s] ≤ max_active   ∀a ∈ 1:n_clusters, ∀s
+
+Prevents all k active stations from concentrating in a single cluster.
+Feasibility requires: max_active * n_clusters >= k.
+
+Used by: XCorridorODModel (when max_active_per_zone is set)
+"""
+function add_zone_activation_limit_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap,
+        max_active::Int
+    )::Int
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    z = m[:z]
+
+    for a in 1:mapping.n_clusters
+        members = mapping.cluster_station_sets[a]
+        for s in 1:S
+            @constraint(m,
+                zone_activation_limit[a, s],
+                sum(z[j, s] for j in members) <= max_active
+            )
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+"""
+    add_route_activation_constraints!(m, data, mapping; variable_reduction) -> Int
+
+Links sparse w_route to x:
+    w_route[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
+    w_route[s][(j,k)] ≥ x[s][od_idx][j,k]   (dense x)
+for all (o,d)∈Ω_s and all (j,k) in valid_pairs(o,d).
+
+Used by: XCorridorWithFlowRegularizerModel
+"""
+function add_route_activation_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CorridorTwoStageODMap;
+        variable_reduction::Bool=true
+    )::Int
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    x = m[:x]
+    w_route = m[:w_route]
+    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (idx, (j, k)) in enumerate(valid_pairs)
+                if use_sparse
+                    @constraint(m, w_route[s][(j, k)] >= x[s][od_idx][idx])
+                else
+                    @constraint(m, w_route[s][(j, k)] >= x[s][od_idx][j, k])
                 end
             end
         end

@@ -1,9 +1,9 @@
 # =============================================================================
-# XCorridorODModel (x-based corridor activation)
+# XCorridorWithFlowRegularizerModel (x-based corridor activation + route regularization)
 # =============================================================================
 
 function build_model(
-        model::XCorridorODModel,
+        model::XCorridorWithFlowRegularizerModel,
         data::StationSelectionData;
         optimizer_env=nothing
     )::BuildResult
@@ -47,17 +47,19 @@ function build_model(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
     variable_counts["corridor"] = add_corridor_variables!(m, data, mapping)
+    variable_counts["route_activation"] = add_route_activation_variables!(m, data, mapping)
 
     # ==========================================================================
     # Objective
     # ==========================================================================
 
-    set_corridor_od_objective!(
+    set_x_corridor_flow_regularizer_objective!(
         m,
         data,
         mapping;
         in_vehicle_time_weight=model.in_vehicle_time_weight,
         corridor_weight=model.corridor_weight,
+        flow_regularization_weight=model.flow_regularization_weight,
         variable_reduction=model.variable_reduction
     )
 
@@ -79,6 +81,11 @@ function build_model(
 
     # x-based corridor activation: f_{gs} ≥ x_{odjks} for j∈C_a, k∈C_b
     constraint_counts["corridor_x_activation"] = add_corridor_x_activation_constraints!(
+        m, data, mapping; variable_reduction=model.variable_reduction
+    )
+
+    # Route activation: w_route[s][(j,k)] ≥ x[s][od_idx][...]
+    constraint_counts["route_activation"] = add_route_activation_constraints!(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
 
