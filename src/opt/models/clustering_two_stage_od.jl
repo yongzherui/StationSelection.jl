@@ -20,14 +20,20 @@ Two-stage stochastic station selection model with OD pair assignments.
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance (only used when limit is enabled)
 - `variable_reduction::Bool`: Whether to reduce assignment variables when walking limit is enabled
 - `tight_constraints::Bool`: Whether to use tighter assignment-to-active constraints
+- `flow_regularization_weight::Union{Float64, Nothing}`: Weight μ for route-activation penalty (optional).
+  When set, adds route-activation variables w_route[s][(j,k)] and penalises distinct (j,k) segments.
+  Requires `variable_reduction=true` (sparse x). Must be ≥ 0.
 
 # Mathematical Formulation
 First stage: Select l stations to build (y[j] ∈ {0,1})
 Second stage: For each scenario s, activate k stations (z[j,s] ∈ {0,1})
               and assign OD pairs to station pairs (x[s][od][j,k] ∈ {0,1})
 
-Objective:
+Objective (base):
     min Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} q_{od,s} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) x_{od,jk,s}
+
+Objective (with flow regularization):
+    + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
 
 Constraints:
 - Σ_j y[j] = l                              (build exactly l stations)
@@ -44,6 +50,7 @@ struct ClusteringTwoStageODModel <: AbstractODModel
     max_walking_distance::Union{Float64, Nothing}
     variable_reduction::Bool
     tight_constraints::Bool
+    flow_regularization_weight::Union{Float64, Nothing}
 
     function ClusteringTwoStageODModel(
             k::Int,
@@ -52,21 +59,29 @@ struct ClusteringTwoStageODModel <: AbstractODModel
             use_walking_distance_limit::Bool=false,
             max_walking_distance::Union{Number, Nothing}=nothing,
             variable_reduction::Bool=true,
-            tight_constraints::Bool=true
+            tight_constraints::Bool=true,
+            flow_regularization_weight::Union{Number, Nothing}=nothing
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         in_vehicle_time_weight >= 0 || throw(ArgumentError("in_vehicle_time_weight must be non-negative"))
+
+        if !isnothing(flow_regularization_weight)
+            flow_regularization_weight >= 0 || throw(ArgumentError("flow_regularization_weight must be non-negative"))
+            variable_reduction || throw(ArgumentError("flow_regularization_weight requires variable_reduction=true (sparse x)"))
+        end
 
         if use_walking_distance_limit
             isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided when walking distance limit is enabled"))
             max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
 
             new(k, l, Float64(in_vehicle_time_weight), true,
-                Float64(max_walking_distance), variable_reduction, tight_constraints)
+                Float64(max_walking_distance), variable_reduction, tight_constraints,
+                isnothing(flow_regularization_weight) ? nothing : Float64(flow_regularization_weight))
         else
             new(k, l, Float64(in_vehicle_time_weight), false,
-                nothing, variable_reduction, tight_constraints)
+                nothing, variable_reduction, tight_constraints,
+                isnothing(flow_regularization_weight) ? nothing : Float64(flow_regularization_weight))
         end
     end
 end

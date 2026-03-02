@@ -13,6 +13,8 @@ This file includes:
 2. Assignment constraints (assignment, assignment-to-active) - from constraints/assignment.jl
 3. Flow constraints - from constraints/flow.jl
 4. Detour constraints - from constraints/detour.jl
+5. Corridor constraints (α, f_corridor) - from constraints/corridor.jl
+6. Route activation constraints (w_route ≥ x) - from constraints/route_activation.jl
 """
 
 include("constraints/base.jl")
@@ -20,4 +22,5 @@ include("constraints/assignment.jl")
 include("constraints/flow.jl")
 include("constraints/detour.jl")
 include("constraints/corridor.jl")
+include("constraints/route_activation.jl")
 include("constraints/transportation.jl")

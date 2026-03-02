@@ -35,18 +35,32 @@ function build_model(
     variable_counts["assignment"] = add_assignment_variables!(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
+    if !isnothing(model.flow_regularization_weight)
+        variable_counts["route_activation"] = add_route_activation_variables!(m, data, mapping)
+    end
 
     # ==========================================================================
     # Objective
     # ==========================================================================
 
-    set_clustering_od_objective!(
-        m,
-        data,
-        mapping;
-        in_vehicle_time_weight=model.in_vehicle_time_weight,
-        variable_reduction=model.variable_reduction
-    )
+    if isnothing(model.flow_regularization_weight)
+        set_clustering_od_objective!(
+            m,
+            data,
+            mapping;
+            in_vehicle_time_weight=model.in_vehicle_time_weight,
+            variable_reduction=model.variable_reduction
+        )
+    else
+        set_clustering_od_flow_regularizer_objective!(
+            m,
+            data,
+            mapping;
+            in_vehicle_time_weight=model.in_vehicle_time_weight,
+            flow_regularization_weight=model.flow_regularization_weight,
+            variable_reduction=model.variable_reduction
+        )
+    end
 
     # ==========================================================================
     # Constraints (reusing shared functions where possible)
@@ -67,6 +81,12 @@ function build_model(
     if model.use_walking_distance_limit && !model.variable_reduction
         constraint_counts["walking_limit_origin_dest"] = add_assignment_walking_limit_constraints!(
             m, data, mapping, model.max_walking_distance
+        )
+    end
+
+    if !isnothing(model.flow_regularization_weight)
+        constraint_counts["route_activation"] = add_route_activation_constraints!(
+            m, data, mapping; variable_reduction=model.variable_reduction
         )
     end
 

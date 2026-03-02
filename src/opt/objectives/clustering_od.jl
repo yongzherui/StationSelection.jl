@@ -8,6 +8,7 @@ Contains objective for:
 using JuMP
 
 export set_clustering_od_objective!
+export set_clustering_od_flow_regularizer_objective!
 
 
 """
@@ -80,5 +81,53 @@ function set_clustering_od_objective!(
         )
     end
 
+    return nothing
+end
+
+"""
+    set_clustering_od_flow_regularizer_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageODMap;
+        in_vehicle_time_weight::Float64=1.0,
+        flow_regularization_weight::Float64=1.0,
+        variable_reduction::Bool=true
+    )
+
+Set the minimization objective for ClusteringTwoStageODModel with flow regularization.
+
+Extends the base clustering-OD objective with a route-activation penalty:
+
+    min  Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} q_{od,s} · (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][od_idx][idx]
+       + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+
+Where μ = flow_regularization_weight penalises distinct (j,k) route segments used per scenario.
+Requires w_route variables already added via add_route_activation_variables!.
+"""
+function set_clustering_od_flow_regularizer_objective!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageODMap;
+        in_vehicle_time_weight::Float64=1.0,
+        flow_regularization_weight::Float64=1.0,
+        variable_reduction::Bool=true
+    )
+    # Set base objective
+    set_clustering_od_objective!(m, data, mapping;
+        in_vehicle_time_weight=in_vehicle_time_weight,
+        variable_reduction=variable_reduction)
+
+    S = n_scenarios(data)
+    w_route = m[:w_route]
+    route_penalty = @expression(m,
+        flow_regularization_weight * sum(
+            v
+            for s in 1:S
+            for v in values(w_route[s])
+        )
+    )
+
+    obj = objective_function(m)
+    @objective(m, Min, obj + route_penalty)
     return nothing
 end
