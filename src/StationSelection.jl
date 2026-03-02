@@ -72,6 +72,9 @@ include("utils/export_variables.jl")
 # Analysis helpers for exported variables (does not depend on OptResult)
 include("utils/solution_analysis_from_exported_variables.jl")
 
+# Objective decomposition (post-hoc attribution from exported CSVs)
+include("utils/objective_decomposition.jl")
+
 # Solution analysis (depends on OptResult, mapping types, and StationSelectionData)
 include("utils/solution_analysis.jl")
 
@@ -173,6 +176,7 @@ export build_station_selection_data_from_config
 export build_od_counts_from_data
 export calculate_exported_walking_distance
 export calculate_exported_vehicle_routing_distance
+export ObjectiveDecomposition, decompose_objective
 
 # Re-export solution analysis functions
 export annotate_orders_with_solution

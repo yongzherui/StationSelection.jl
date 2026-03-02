@@ -75,4 +75,8 @@ const MOI = JuMP.MOI
     @testset "Export Variables" begin
         include("utils/temp_export_variables.jl")
     end
+
+    @testset "Objective Decomposition" begin
+        include("utils/test_objective_decomposition.jl")
+    end
 end

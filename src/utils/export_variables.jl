@@ -471,6 +471,7 @@ function export_model_specific_variables(
 
     n_cluster_activations = export_cluster_activation_variables(m, mapping, export_dir)
     n_corridor_uses = export_corridor_usage_variables(m, mapping, export_dir)
+    export_corridor_costs(mapping, export_dir)
 
     metadata["n_cluster_activations"] = n_cluster_activations
     metadata["n_corridor_uses"] = n_corridor_uses
@@ -855,6 +856,31 @@ function export_corridor_usage_variables(m::JuMP.Model, mapping::CorridorTwoStag
     println("    ✓ corridor_usage.csv ($(nrow(df)) corridors)")
 
     return nrow(df)
+end
+
+
+"""
+    export_corridor_costs(mapping::CorridorTwoStageODMap, export_dir::String)
+
+Export per-corridor routing costs to `corridor_costs.csv` for post-hoc
+objective decomposition. One row per corridor index.
+
+Columns: corridor_idx, cluster_a, cluster_b, medoid_a_id, medoid_b_id, corridor_cost
+"""
+function export_corridor_costs(mapping::CorridorTwoStageODMap, export_dir::String)
+    rows = [
+        (
+            corridor_idx  = g,
+            cluster_a     = a,
+            cluster_b     = b,
+            medoid_a_id   = mapping.array_idx_to_station_id[mapping.cluster_medoids[a]],
+            medoid_b_id   = mapping.array_idx_to_station_id[mapping.cluster_medoids[b]],
+            corridor_cost = mapping.corridor_costs[g]
+        )
+        for (g, (a, b)) in enumerate(mapping.corridor_indices)
+    ]
+    CSV.write(joinpath(export_dir, "corridor_costs.csv"), DataFrame(rows))
+    println("    ✓ corridor_costs.csv ($(length(rows)) corridors)")
 end
 
 
