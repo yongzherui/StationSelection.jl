@@ -99,10 +99,10 @@ Set the minimization objective for ClusteringTwoStageODModel with flow regulariz
 Extends the base clustering-OD objective with a route-activation penalty:
 
     min  Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} q_{od,s} · (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][od_idx][idx]
-       + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+       + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 
-Where μ = flow_regularization_weight penalises distinct (j,k) route segments used per scenario.
-Requires w_route variables already added via add_route_activation_variables!.
+Where μ = flow_regularization_weight penalises distinct (j,k) route segments used per scenario,
+weighted by routing time c_{jk}. Requires f_flow variables already added via add_flow_variables!.
 """
 function set_clustering_od_flow_regularizer_objective!(
         m::Model,
@@ -118,12 +118,16 @@ function set_clustering_od_flow_regularizer_objective!(
         variable_reduction=variable_reduction)
 
     S = n_scenarios(data)
-    w_route = m[:w_route]
+    f_flow = m[:f_flow]
     route_penalty = @expression(m,
         flow_regularization_weight * sum(
-            v
+            get_routing_cost(
+                data,
+                mapping.array_idx_to_station_id[j],
+                mapping.array_idx_to_station_id[k]
+            ) * v
             for s in 1:S
-            for v in values(w_route[s])
+            for ((j, k), v) in f_flow[s]
         )
     )
 

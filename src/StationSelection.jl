@@ -136,7 +136,6 @@ export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!, add_detour_variables!
 export add_cluster_activation_variables!, add_corridor_variables!
-export add_route_activation_variables!
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!

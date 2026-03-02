@@ -47,7 +47,7 @@ function build_model(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
     variable_counts["corridor"] = add_corridor_variables!(m, data, mapping)
-    variable_counts["route_activation"] = add_route_activation_variables!(m, data, mapping)
+    variable_counts["route_activation"] = add_flow_variables!(m, data, mapping)
 
     # ==========================================================================
     # Objective
@@ -84,7 +84,7 @@ function build_model(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
 
-    # Route activation: w_route[s][(j,k)] ≥ x[s][od_idx][...]
+    # Route activation: f_flow[s][(j,k)] ≥ x[s][od_idx][...]
     constraint_counts["route_activation"] = add_route_activation_constraints!(
         m, data, mapping; variable_reduction=model.variable_reduction
     )

@@ -85,12 +85,12 @@ end
     set_x_corridor_flow_regularizer_objective!(m, data, mapping; ...)
 
 Extends the corridor-OD objective with a route-activation regularization term:
-    + μ Σ_{j,k,s} w_route[j,k,s]
+    + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 
 Full objective:
     min  Σ_s Σ_{(o,d)} Σ_{j,k} q_{od} (d_walk + λ·c_jk) x_{odjks}
        + γ Σ_{g,s} r_g f_{corridor}[g,s]
-       + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+       + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 """
 function set_x_corridor_flow_regularizer_objective!(
         m::Model,
@@ -110,12 +110,16 @@ function set_x_corridor_flow_regularizer_objective!(
     )
 
     S = n_scenarios(data)
-    w_route = m[:w_route]
+    f_flow = m[:f_flow]
     route_penalty = @expression(m,
         flow_regularization_weight * sum(
-            v
+            get_routing_cost(
+                data,
+                mapping.array_idx_to_station_id[j],
+                mapping.array_idx_to_station_id[k]
+            ) * v
             for s in 1:S
-            for v in values(w_route[s])
+            for ((j, k), v) in f_flow[s]
         )
     )
 

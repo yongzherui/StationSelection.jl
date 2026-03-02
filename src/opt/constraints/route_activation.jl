@@ -1,8 +1,8 @@
 """
 Route activation constraint creation functions.
 
-Links w_route variables to assignment variables x, ensuring
-w_route[s][(j,k)] = 1 whenever any OD pair uses route (j,k) in scenario s.
+Links f_flow variables to assignment variables x, ensuring
+f_flow[s][(j,k)] = 1 whenever any OD pair uses route (j,k) in scenario s.
 
 Supported mappings:
 - CorridorTwoStageODMap  (XCorridorWithFlowRegularizerModel; sparse or dense x)
@@ -16,9 +16,9 @@ export add_route_activation_constraints!
 """
     add_route_activation_constraints!(m, data, mapping::CorridorTwoStageODMap; variable_reduction) -> Int
 
-Links sparse w_route to x:
-    w_route[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
-    w_route[s][(j,k)] ≥ x[s][od_idx][j,k]   (dense x)
+Links sparse f_flow to x:
+    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
+    f_flow[s][(j,k)] ≥ x[s][od_idx][j,k]   (dense x)
 for all (o,d)∈Ω_s and all (j,k) in valid_pairs(o,d).
 
 Used by: XCorridorWithFlowRegularizerModel
@@ -32,7 +32,7 @@ function add_route_activation_constraints!(
     before = _total_num_constraints(m)
     S = n_scenarios(data)
     x = m[:x]
-    w_route = m[:w_route]
+    f_flow = m[:f_flow]
     use_sparse = variable_reduction && has_walking_distance_limit(mapping)
 
     for s in 1:S
@@ -40,9 +40,9 @@ function add_route_activation_constraints!(
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)
                 if use_sparse
-                    @constraint(m, w_route[s][(j, k)] >= x[s][od_idx][idx])
+                    @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][idx])
                 else
-                    @constraint(m, w_route[s][(j, k)] >= x[s][od_idx][j, k])
+                    @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][j, k])
                 end
             end
         end
@@ -54,8 +54,8 @@ end
 """
     add_route_activation_constraints!(m, data, mapping::ClusteringTwoStageODMap; variable_reduction) -> Int
 
-Links sparse w_route to x for ClusteringTwoStageODModel:
-    w_route[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
+Links sparse f_flow to x for ClusteringTwoStageODModel:
+    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
 for all (o,d)∈Ω_s and all (j,k) in valid_pairs(o,d).
 
 Requires variable_reduction=true (sparse x only).
@@ -70,13 +70,13 @@ function add_route_activation_constraints!(
     before = _total_num_constraints(m)
     S = n_scenarios(data)
     x = m[:x]
-    w_route = m[:w_route]
+    f_flow = m[:f_flow]
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)
-                @constraint(m, w_route[s][(j, k)] >= x[s][od_idx][idx])
+                @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][idx])
             end
         end
     end

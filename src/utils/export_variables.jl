@@ -436,12 +436,17 @@ function export_model_specific_variables(
     export_dir::String,
     metadata::Dict
 )
+    m = result.model
     metadata["model_type"] = "ClusteringTwoStageODModel"
     metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
 
     # Count OD pairs for metadata
     total_od_pairs = sum(length(od_pairs) for (_, od_pairs) in mapping.Omega_s)
     metadata["n_od_scenario_pairs"] = total_od_pairs
+
+    # Export route activations when flow regularizer is present (no-op otherwise)
+    n_route_activations = export_route_activation_variables(m, mapping, export_dir)
+    metadata["n_route_activations"] = n_route_activations
 end
 
 
@@ -458,9 +463,11 @@ function export_model_specific_variables(
 )
     m = result.model
 
-    # Distinguish Z vs X model by presence of α variables
+    # Distinguish model type by presence of model-specific variables
     if haskey(m.obj_dict, :α)
         metadata["model_type"] = "ZCorridorODModel"
+    elseif haskey(m.obj_dict, :f_flow)
+        metadata["model_type"] = "XCorridorWithFlowRegularizerModel"
     else
         metadata["model_type"] = "XCorridorODModel"
     end
@@ -472,9 +479,11 @@ function export_model_specific_variables(
     n_cluster_activations = export_cluster_activation_variables(m, mapping, export_dir)
     n_corridor_uses = export_corridor_usage_variables(m, mapping, export_dir)
     export_corridor_costs(mapping, export_dir)
+    n_route_activations = export_route_activation_variables(m, mapping, export_dir)
 
     metadata["n_cluster_activations"] = n_cluster_activations
     metadata["n_corridor_uses"] = n_corridor_uses
+    metadata["n_route_activations"] = n_route_activations
 end
 
 
@@ -881,6 +890,51 @@ function export_corridor_costs(mapping::CorridorTwoStageODMap, export_dir::Strin
     ]
     CSV.write(joinpath(export_dir, "corridor_costs.csv"), DataFrame(rows))
     println("    ✓ corridor_costs.csv ($(length(rows)) corridors)")
+end
+
+
+"""
+    export_route_activation_variables(m, mapping::CorridorTwoStageODMap, export_dir) -> Int
+
+Export route activation variables (f_flow) to `route_activation.csv`.
+
+Columns: scenario, pickup_id, dropoff_id, value
+
+Only activated routes (value > 0.5) are written. The (j, k) array indices
+are converted to station IDs via `mapping.array_idx_to_station_id`.
+Returns the count of activated routes written.
+"""
+function export_route_activation_variables(
+    m::JuMP.Model,
+    mapping::Union{CorridorTwoStageODMap, ClusteringTwoStageODMap},
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :f_flow)
+        println("    ✓ route_activation.csv (0 routes — f_flow not present)")
+        return 0
+    end
+
+    f_flow = m[:f_flow]
+    id_map  = mapping.array_idx_to_station_id
+
+    rows = []
+    for (s, route_dict) in enumerate(f_flow)
+        for ((j, k), var) in route_dict
+            val = JuMP.value(var)
+            val > 0.5 || continue
+            push!(rows, (
+                scenario   = s,
+                pickup_id  = id_map[j],
+                dropoff_id = id_map[k],
+                value      = val
+            ))
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "route_activation.csv"), df)
+    println("    ✓ route_activation.csv ($(nrow(df)) activated routes)")
+    return nrow(df)
 end
 
 

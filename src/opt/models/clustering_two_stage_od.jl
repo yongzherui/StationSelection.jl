@@ -21,7 +21,7 @@ Two-stage stochastic station selection model with OD pair assignments.
 - `variable_reduction::Bool`: Whether to reduce assignment variables when walking limit is enabled
 - `tight_constraints::Bool`: Whether to use tighter assignment-to-active constraints
 - `flow_regularization_weight::Union{Float64, Nothing}`: Weight μ for route-activation penalty (optional).
-  When set, adds route-activation variables w_route[s][(j,k)] and penalises distinct (j,k) segments.
+  When set, adds f_flow[s][(j,k)] variables and penalises distinct (j,k) segments weighted by routing time.
   Requires `variable_reduction=true` (sparse x). Must be ≥ 0.
 
 # Mathematical Formulation
@@ -33,7 +33,7 @@ Objective (base):
     min Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} q_{od,s} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) x_{od,jk,s}
 
 Objective (with flow regularization):
-    + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+    + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 
 Constraints:
 - Σ_j y[j] = l                              (build exactly l stations)

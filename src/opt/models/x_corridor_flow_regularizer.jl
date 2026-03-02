@@ -15,10 +15,10 @@ Two-stage stochastic station selection model with OD pair assignments,
 x-based corridor penalties, and route-activation regularization.
 
 Extends XCorridorODModel with an additional penalty term:
-    + μ Σ_s Σ_{(j,k)} w_route[s][(j,k)]
+    + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 
-where w_route[s][(j,k)] ∈ [0,1] indicates that route (j→k) is used by at least
-one OD assignment in scenario s.
+where f_flow[s][(j,k)] ∈ [0,1] indicates that route (j→k) is used by at least
+one OD assignment in scenario s, weighted by routing time c_{jk}.
 
 # Fields
 - `k::Int`: Number of stations to activate per scenario (second stage)
@@ -36,11 +36,11 @@ one OD assignment in scenario s.
 
 # Additional variables
 - f[g,s] ∈ {0,1}: corridor usage indicator
-- w_route[s][(j,k)] ∈ [0,1]: sparse route activation indicator
+- f_flow[s][(j,k)] ∈ [0,1]: sparse route activation indicator
 
 # Additional constraints
 - f_{gs} ≥ x_{odjks}  ∀(o,d), j∈C_a, k∈C_b, s  for g=(a,b)
-- w_route[s][(j,k)] ≥ x[s][od_idx][...] for all (o,d) in Ω_s and valid (j,k)
+- f_flow[s][(j,k)] ≥ x[s][od_idx][...] for all (o,d) in Ω_s and valid (j,k)
 """
 struct XCorridorWithFlowRegularizerModel <: AbstractCorridorODModel
     k::Int

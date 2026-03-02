@@ -14,7 +14,7 @@ This file includes:
 3. Flow constraints - from constraints/flow.jl
 4. Detour constraints - from constraints/detour.jl
 5. Corridor constraints (α, f_corridor) - from constraints/corridor.jl
-6. Route activation constraints (w_route ≥ x) - from constraints/route_activation.jl
+6. Route activation constraints (f_flow ≥ x) - from constraints/route_activation.jl
 """
 
 include("constraints/base.jl")

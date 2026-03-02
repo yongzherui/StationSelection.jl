@@ -307,7 +307,7 @@ Total corridors = n_clusters² (including self-corridors where a == b).
 # Returns
 - `corridor_indices::Vector{Tuple{Int,Int}}`: g → (cluster_a, cluster_b)
 - `cluster_station_sets::Vector{Vector{Int}}`: cluster_id → station array indices
-- `corridor_costs::Vector{Float64}`: r_g = routing distance between medoids
+- `corridor_costs::Vector{Float64}`: r_g = routing time (seconds) between medoids
 """
 function compute_corridor_data(
         cluster_labels::Vector{Int},
@@ -329,7 +329,7 @@ function compute_corridor_data(
     for a in 1:n_clusters
         for b in 1:n_clusters
             push!(corridor_indices, (a, b))
-            # r_g = routing distance between medoids
+            # r_g = routing time (seconds) between medoids
             id_a = array_idx_to_station_id[medoids[a]]
             id_b = array_idx_to_station_id[medoids[b]]
             push!(corridor_costs, get_routing_cost(data, id_a, id_b))
