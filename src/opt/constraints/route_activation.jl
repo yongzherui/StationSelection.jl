@@ -2,7 +2,11 @@
 Route activation constraint creation functions.
 
 Links f_flow variables to assignment variables x, ensuring
-f_flow[s][(j,k)] = 1 whenever any OD pair uses route (j,k) in scenario s.
+f_flow[s][(j,k)] = 1 iff any OD pair uses route (j,k) in scenario s.
+
+Both a lower bound (f_flow ≥ x for each OD pair) and an upper bound
+(f_flow ≤ Σ x over all OD pairs sharing that route) are added, so that
+f_flow tracks x exactly regardless of the flow_regularization_weight.
 
 Supported mappings:
 - CorridorTwoStageODMap  (XCorridorWithFlowRegularizerModel; sparse or dense x)
@@ -16,10 +20,9 @@ export add_route_activation_constraints!
 """
     add_route_activation_constraints!(m, data, mapping::CorridorTwoStageODMap; variable_reduction) -> Int
 
-Links sparse f_flow to x:
-    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
-    f_flow[s][(j,k)] ≥ x[s][od_idx][j,k]   (dense x)
-for all (o,d)∈Ω_s and all (j,k) in valid_pairs(o,d).
+Links f_flow to x with both lower and upper bounds:
+    f_flow[s][(j,k)] ≥ x[s][od_idx][...]            (one per OD pair)
+    f_flow[s][(j,k)] ≤ Σ_{od} x[s][od][...]         (one per (s,j,k))
 
 Used by: XCorridorWithFlowRegularizerModel
 """
@@ -35,17 +38,22 @@ function add_route_activation_constraints!(
     f_flow = m[:f_flow]
     use_sparse = variable_reduction && has_walking_distance_limit(mapping)
 
+    # Accumulate x terms per (s,j,k) for the upper-bound constraints
+    x_terms = Dict{Tuple{Int,Int,Int}, Vector{VariableRef}}()
+
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)
-                if use_sparse
-                    @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][idx])
-                else
-                    @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][j, k])
-                end
+                x_var = use_sparse ? x[s][od_idx][idx] : x[s][od_idx][j, k]
+                @constraint(m, f_flow[s][(j, k)] >= x_var)
+                push!(get!(x_terms, (s, j, k), VariableRef[]), x_var)
             end
         end
+    end
+
+    for ((s, j, k), xs) in x_terms
+        @constraint(m, f_flow[s][(j, k)] <= sum(xs))
     end
 
     return _total_num_constraints(m) - before
@@ -54,9 +62,9 @@ end
 """
     add_route_activation_constraints!(m, data, mapping::ClusteringTwoStageODMap; variable_reduction) -> Int
 
-Links sparse f_flow to x for ClusteringTwoStageODModel:
-    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]   (sparse x)
-for all (o,d)∈Ω_s and all (j,k) in valid_pairs(o,d).
+Links f_flow to x with both lower and upper bounds:
+    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]            (one per OD pair, sparse x only)
+    f_flow[s][(j,k)] ≤ Σ_{od} x[s][od][idx]         (one per (s,j,k))
 
 Requires variable_reduction=true (sparse x only).
 Used by: ClusteringTwoStageODModel (when flow_regularization_weight is set)
@@ -72,13 +80,21 @@ function add_route_activation_constraints!(
     x = m[:x]
     f_flow = m[:f_flow]
 
+    x_terms = Dict{Tuple{Int,Int,Int}, Vector{VariableRef}}()
+
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)
-                @constraint(m, f_flow[s][(j, k)] >= x[s][od_idx][idx])
+                x_var = x[s][od_idx][idx]
+                @constraint(m, f_flow[s][(j, k)] >= x_var)
+                push!(get!(x_terms, (s, j, k), VariableRef[]), x_var)
             end
         end
+    end
+
+    for ((s, j, k), xs) in x_terms
+        @constraint(m, f_flow[s][(j, k)] <= sum(xs))
     end
 
     return _total_num_constraints(m) - before

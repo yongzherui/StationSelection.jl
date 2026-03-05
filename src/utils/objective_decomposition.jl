@@ -145,9 +145,9 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
     n_activated_routes = length(activated_routes)
 
     # Step 4: Flow regularisation — cost-weighted route activations
-    # Prefer route_activation.csv (written for XCorridorWithFlowRegularizerModel and
-    # ClusteringTwoStageODModel with FR).  Fall back to activated_routes set (built
-    # above from assignments) for older runs that pre-date that export.
+    # f_flow is now tightly bounded (≥ and ≤ x-derived sums), so route_activation.csv
+    # correctly reflects activated routes even at frw=0.  Fall back to activated_routes
+    # for older runs that pre-date the route_activation export.
     route_activation_cost_raw = 0.0
     route_file = joinpath(export_dir, "route_activation.csv")
     if isfile(route_file) && filesize(route_file) > 0
