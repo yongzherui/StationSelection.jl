@@ -36,7 +36,7 @@ function build_model(
         m, data, mapping; variable_reduction=model.variable_reduction
     )
     if !isnothing(model.flow_regularization_weight)
-        variable_counts["route_activation"] = add_flow_variables!(m, data, mapping)
+        variable_counts["flow_activation"] = add_flow_variables!(m, data, mapping)
     end
 
     # ==========================================================================
@@ -85,7 +85,7 @@ function build_model(
     end
 
     if !isnothing(model.flow_regularization_weight)
-        constraint_counts["route_activation"] = add_route_activation_constraints!(
+        constraint_counts["flow_activation"] = add_flow_activation_constraints!(
             m, data, mapping; variable_reduction=model.variable_reduction
         )
     end

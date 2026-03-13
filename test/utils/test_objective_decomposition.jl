@@ -81,7 +81,7 @@
 
     @testset "Unit: show output contains key fields" begin
         d = ObjectiveDecomposition(
-            "XCorridorWithFlowRegularizerModel",
+            "ClusteringTwoStageODModel",
             1000.0, 2000.0, 0.5, 1000.0,
             500.0, 1.0, 500.0,
             15, 1.0, 15.0,
@@ -90,7 +90,7 @@
         )
         output = sprint(show, d)
 
-        @test occursin("XCorridorWithFlowRegularizerModel", output)
+        @test occursin("ClusteringTwoStageODModel", output)
         @test occursin("Walking cost", output)
         @test occursin("Routing cost", output)
         @test occursin("Corridor", output)
@@ -204,75 +204,6 @@
         end
     end
 
-    @testset "Unit: decompose corridor penalty from synthetic CSVs" begin
-        # Two corridors used, costs 50.0 and 30.0
-        # corridor_weight = 2.0 → penalty = 2*(50+30) = 160
-        # One OD assignment: (1,4)→(1,4), q=1, w_ivt=1.0
-        #   walk = 0+0=0, route = 30, weighted = 30
-        # computed_total = 0 + 30 + 160 = 190
-
-        mktempdir() do run_dir
-            export_dir = joinpath(run_dir, "variable_exports")
-            mkpath(export_dir)
-
-            metrics = Dict(
-                "method" => "XCorridorODModel",
-                "model"  => Dict(
-                    "in_vehicle_time_weight" => 1.0,
-                    "corridor_weight"        => 2.0
-                ),
-                "solve"  => Dict("objective_value" => 190.0)
-            )
-            open(joinpath(run_dir, "metrics.json"), "w") do f
-                JSON.print(f, metrics)
-            end
-
-            assign_df = DataFrame(
-                scenario   = [1],
-                od_idx     = [1],
-                origin_id  = [1],
-                dest_id    = [4],
-                pickup_idx = [1],
-                dropoff_idx= [4],
-                pickup_id  = [1],
-                dropoff_id = [4],
-                value      = [1.0]
-            )
-            CSV.write(joinpath(export_dir, "assignment_variables.csv"), assign_df)
-
-            # corridor_costs.csv: two corridors
-            costs_df = DataFrame(
-                corridor_idx  = [1, 2],
-                cluster_a     = [1, 1],
-                cluster_b     = [2, 3],
-                medoid_a_id   = [1, 1],
-                medoid_b_id   = [2, 3],
-                corridor_cost = [50.0, 30.0]
-            )
-            CSV.write(joinpath(export_dir, "corridor_costs.csv"), costs_df)
-
-            # corridor_usage.csv: both corridors active in scenario 1
-            usage_df = DataFrame(
-                corridor_idx = [1, 2],
-                cluster_a    = [1, 1],
-                cluster_b    = [2, 3],
-                scenario     = [1, 1],
-                value        = [1.0, 1.0]
-            )
-            CSV.write(joinpath(export_dir, "corridor_usage.csv"), usage_df)
-
-            d = decompose_objective(run_dir, data)
-
-            @test d.corridor_cost_raw ≈ 80.0   # 50+30
-            @test d.corridor_weight ≈ 2.0
-            @test d.corridor_penalty ≈ 160.0
-            @test d.routing_cost_raw ≈ 30.0    # |1-4|*10
-            @test d.weighted_routing_cost ≈ 30.0
-            @test d.computed_total ≈ 190.0
-            @test d.reported_objective ≈ 190.0
-        end
-    end
-
     @testset "Unit: flow regularization penalty from synthetic CSVs" begin
         # Two distinct (pickup, dropoff, scenario) routes activated
         # flow_regularization_weight = 3.0 → penalty = 3*2 = 6
@@ -285,7 +216,7 @@
             mkpath(export_dir)
 
             metrics = Dict(
-                "method" => "XCorridorWithFlowRegularizerModel",
+                "method" => "ClusteringTwoStageODModel",
                 "model"  => Dict(
                     "in_vehicle_time_weight"     => 1.0,
                     "corridor_weight"            => 0.0,
@@ -317,82 +248,6 @@
             @test d.n_activated_routes == 1
             @test d.flow_regularization_weight ≈ 3.0
             @test d.flow_regularization_penalty ≈ 3.0
-        end
-    end
-
-    @testset "Unit: TSD vehicle routing from synthetic CSVs" begin
-        # flow_variables: arc (1,4) with cost |1-4|*10=30, val=1.0
-        # same_source_pooling: j=1, k=2, l=4 → saving = c(1,4)-c(2,4) = 30-20=10
-        # same_dest_pooling: empty
-        # vehicle_routing_weight = 1.0
-        # vehicle_routing_cost = 1.0 * 30 = 30
-        # pooling_savings = 1.0 * 10 = 10
-        # walking/routing from assignment: one row (1,4)→(1,4), q=1, w_ivt=0.0
-        #   walk=0, route=30, weighted=0
-        # computed_total = 0 + 30 - 10 = 20
-
-        mktempdir() do run_dir
-            export_dir = joinpath(run_dir, "variable_exports")
-            mkpath(export_dir)
-
-            metrics = Dict(
-                "method" => "TwoStageSingleDetourModel",
-                "model"  => Dict(
-                    "in_vehicle_time_weight" => 0.0,
-                    "vehicle_routing_weight" => 1.0
-                ),
-                "solve"  => Dict("objective_value" => 20.0)
-            )
-            open(joinpath(run_dir, "metrics.json"), "w") do f
-                JSON.print(f, metrics)
-            end
-
-            # Assignment (walking/routing contribution = 0 since w_ivt=0)
-            assign_df = DataFrame(
-                scenario   = [1],
-                time_id    = [0],
-                origin_id  = [1],
-                dest_id    = [4],
-                pickup_idx = [1],
-                dropoff_idx= [4],
-                pickup_id  = [1],
-                dropoff_id = [4],
-                value      = [1.0]
-            )
-            CSV.write(joinpath(export_dir, "assignment_variables.csv"), assign_df)
-
-            flow_df = DataFrame(
-                scenario = [1],
-                time_id  = [0],
-                j_array  = [1],
-                k_array  = [4],
-                j_id     = [1],
-                k_id     = [4],
-                value    = [1.0]
-            )
-            CSV.write(joinpath(export_dir, "flow_variables.csv"), flow_df)
-
-            ss_df = DataFrame(
-                scenario = [1],
-                time_id  = [0],
-                xi_idx   = [1],
-                j_id     = [1],
-                k_id     = [2],
-                l_id     = [4],
-                value    = [1.0]
-            )
-            CSV.write(joinpath(export_dir, "same_source_pooling.csv"), ss_df)
-
-            d = decompose_objective(run_dir, data)
-
-            @test d.vehicle_flow_cost_raw ≈ 30.0    # c(1,4) = 30
-            @test d.same_source_savings_raw ≈ 10.0  # c(1,4)-c(2,4) = 30-20
-            @test d.same_dest_savings_raw ≈ 0.0
-            @test d.vehicle_routing_weight ≈ 1.0
-            @test d.vehicle_routing_cost ≈ 30.0
-            @test d.pooling_savings ≈ 10.0
-            @test d.computed_total ≈ 20.0
-            @test d.reported_objective ≈ 20.0
         end
     end
 
@@ -479,105 +334,6 @@
             @test abs(d.computed_total - reported) < 1.0
 
             println("\n--- ClusteringTwoStageODModel decomposition ---")
-            println(d)
-        end
-    end
-
-    @testset "Integration: XCorridorWithFlowRegularizerModel round-trip" begin
-        # Use n_clusters=2 (simple clustering) so corridor costs are deterministic
-        model = XCorridorWithFlowRegularizerModel(
-            3, 4;
-            n_clusters              = 2,
-            corridor_weight         = 1.0,
-            flow_regularization_weight = 1.0,
-            in_vehicle_time_weight  = 0.5
-        )
-        result = run_opt(model, data; optimizer_env=env, silent=true)
-        @test result.termination_status == JuMP.MOI.OPTIMAL
-
-        reported = result.objective_value
-
-        mktempdir() do run_dir
-            export_variables(result, run_dir)
-
-            # Verify corridor_costs.csv is written (Part 0 of the plan)
-            export_dir = joinpath(run_dir, "variable_exports")
-            @test isfile(joinpath(export_dir, "corridor_costs.csv"))
-
-            costs_df = CSV.read(joinpath(export_dir, "corridor_costs.csv"), DataFrame)
-            @test :corridor_idx  in propertynames(costs_df)
-            @test :cluster_a     in propertynames(costs_df)
-            @test :cluster_b     in propertynames(costs_df)
-            @test :medoid_a_id   in propertynames(costs_df)
-            @test :medoid_b_id   in propertynames(costs_df)
-            @test :corridor_cost in propertynames(costs_df)
-            @test nrow(costs_df) > 0
-            @test all(costs_df.corridor_cost .>= 0.0)
-
-            metrics = Dict(
-                "method" => "XCorridorWithFlowRegularizerModel",
-                "model"  => Dict(
-                    "in_vehicle_time_weight"     => model.in_vehicle_time_weight,
-                    "corridor_weight"            => model.corridor_weight,
-                    "flow_regularization_weight" => model.flow_regularization_weight
-                ),
-                "solve"  => Dict("objective_value" => reported)
-            )
-            open(joinpath(run_dir, "metrics.json"), "w") do f
-                JSON.print(f, metrics)
-            end
-
-            d = decompose_objective(run_dir, data)
-
-            @test d.model_type == "XCorridorWithFlowRegularizerModel"
-            @test d.walking_cost > 0.0
-            @test d.in_vehicle_time_weight ≈ 0.5
-            @test d.corridor_weight ≈ 1.0
-            @test d.flow_regularization_weight ≈ 1.0
-            @test d.n_activated_routes > 0
-            @test d.flow_regularization_penalty > 0.0
-            @test d.reported_objective ≈ reported
-
-            # computed_total should match solver's reported value within 1.0
-            @test abs(d.computed_total - reported) < 1.0
-
-            println("\n--- XCorridorWithFlowRegularizerModel decomposition ---")
-            println(d)
-        end
-    end
-
-    @testset "Integration: TwoStageSingleDetourModel round-trip" begin
-        model = TwoStageSingleDetourModel(3, 4, 1.0, 120.0, 60.0)
-        result = run_opt(model, data; optimizer_env=env, silent=true)
-        @test result.termination_status == JuMP.MOI.OPTIMAL
-
-        reported = result.objective_value
-
-        mktempdir() do run_dir
-            export_variables(result, run_dir)
-
-            metrics = Dict(
-                "method" => "TwoStageSingleDetourModel",
-                "model"  => Dict(
-                    "in_vehicle_time_weight" => model.in_vehicle_time_weight,
-                    "vehicle_routing_weight" => model.vehicle_routing_weight
-                ),
-                "solve"  => Dict("objective_value" => reported)
-            )
-            open(joinpath(run_dir, "metrics.json"), "w") do f
-                JSON.print(f, metrics)
-            end
-
-            d = decompose_objective(run_dir, data)
-
-            @test d.model_type == "TwoStageSingleDetourModel"
-            @test d.vehicle_routing_weight ≈ model.vehicle_routing_weight
-            @test d.vehicle_flow_cost_raw > 0.0  # vehicle must move
-            @test d.corridor_penalty ≈ 0.0
-            @test d.flow_regularization_penalty ≈ 0.0
-            @test d.reported_objective ≈ reported
-
-            println("\n--- TwoStageSingleDetourModel decomposition ---")
             println(d)
         end
     end

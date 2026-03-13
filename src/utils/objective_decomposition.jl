@@ -42,9 +42,9 @@ struct ObjectiveDecomposition
 
     # --- Flow regularisation (XCorridor+FR) ---
     n_activated_routes::Int                 # Σ_s |{(j,k) active in s}|
-    route_activation_cost_raw::Float64      # Σ_{s,(j,k)} c_jk * f_flow[s][(j,k)]  [unweighted]
+    flow_activation_cost_raw::Float64      # Σ_{s,(j,k)} c_jk * f_flow[s][(j,k)]  [unweighted]
     flow_regularization_weight::Float64     # μ (0.0 if no FR)
-    flow_regularization_penalty::Float64    # flow_regularization_weight * route_activation_cost_raw
+    flow_regularization_penalty::Float64    # flow_regularization_weight * flow_activation_cost_raw
 
     # --- Vehicle routing (TSD only; 0.0 for all other models) ---
     vehicle_flow_cost_raw::Float64          # Σ c_jk*f_jk  [unweighted]
@@ -145,21 +145,21 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
     n_activated_routes = length(activated_routes)
 
     # Step 4: Flow regularisation — cost-weighted route activations
-    # f_flow is now tightly bounded (≥ and ≤ x-derived sums), so route_activation.csv
+    # f_flow is now tightly bounded (≥ and ≤ x-derived sums), so flow_activation.csv
     # correctly reflects activated routes even at frw=0.  Fall back to activated_routes
-    # for older runs that pre-date the route_activation export.
-    route_activation_cost_raw = 0.0
-    route_file = joinpath(export_dir, "route_activation.csv")
+    # for older runs that pre-date the flow_activation export.
+    flow_activation_cost_raw = 0.0
+    route_file = joinpath(export_dir, "flow_activation.csv")
     if isfile(route_file) && filesize(route_file) > 0
         routes = CSV.read(route_file, DataFrame)
         for row in eachrow(routes)
             row.value > 0.5 || continue
-            route_activation_cost_raw += get_routing_cost(data, row.pickup_id, row.dropoff_id)
+            flow_activation_cost_raw += get_routing_cost(data, row.pickup_id, row.dropoff_id)
         end
     elseif !isempty(activated_routes)
         # Fallback: sum c_{jk} over distinct (j,k,s) triples from assignment variables
         for (j_id, k_id, _) in activated_routes
-            route_activation_cost_raw += get_routing_cost(data, j_id, k_id)
+            flow_activation_cost_raw += get_routing_cost(data, j_id, k_id)
         end
     end
 
@@ -221,7 +221,7 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
     # Step 7: Compute weighted components and total
     weighted_routing_cost       = in_vehicle_time_weight * routing_cost_raw
     corridor_penalty            = corridor_weight * corridor_cost_raw
-    flow_regularization_penalty = flow_regularization_weight * route_activation_cost_raw
+    flow_regularization_penalty = flow_regularization_weight * flow_activation_cost_raw
     vehicle_routing_cost        = vehicle_routing_weight * vehicle_flow_cost_raw
     pooling_savings             = vehicle_routing_weight * (same_source_savings_raw + same_dest_savings_raw)
 
@@ -238,7 +238,7 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
         corridor_weight,
         corridor_penalty,
         n_activated_routes,
-        route_activation_cost_raw,
+        flow_activation_cost_raw,
         flow_regularization_weight,
         flow_regularization_penalty,
         vehicle_flow_cost_raw,
@@ -265,7 +265,7 @@ function Base.show(io::IO, d::ObjectiveDecomposition)
         @printf io "  Corridor penalty (γ=%.2f):     %14.2f\n" d.corridor_weight d.corridor_penalty
     end
     if d.flow_regularization_weight > 0.0 || d.n_activated_routes > 0
-        @printf io "  Route activ. cost (raw):       %14.2f  [%d routes]\n" d.route_activation_cost_raw d.n_activated_routes
+        @printf io "  Flow activ. cost (raw):       %14.2f  [%d routes]\n" d.flow_activation_cost_raw d.n_activated_routes
         @printf io "  Flow reg. (μ=%.2f):            %14.2f\n" d.flow_regularization_weight d.flow_regularization_penalty
     end
     if d.vehicle_routing_weight > 0.0 || d.vehicle_flow_cost_raw > 0.0

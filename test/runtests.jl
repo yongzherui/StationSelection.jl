@@ -14,11 +14,8 @@ const MOI = JuMP.MOI
         @test isdefined(StationSelection, :bd09_to_wgs84)
         @test isdefined(StationSelection, :compute_station_pairwise_costs)
         @test isdefined(StationSelection, :generate_scenarios)
-        # New exports for TwoStageSingleDetourModel
-        @test isdefined(StationSelection, :TwoStageSingleDetourModel)
         @test isdefined(StationSelection, :StationSelectionData)
         @test isdefined(StationSelection, :ScenarioData)
-        @test isdefined(StationSelection, :find_detour_combinations)
     end
 
     @testset "CoordTransform" begin
@@ -48,32 +45,12 @@ const MOI = JuMP.MOI
         include("data/test_struct.jl")
     end
 
-    @testset "Detour Combinations" begin
-        include("utils/test_detour_combinations.jl")
-    end
-
-    @testset "Corridor Clustering" begin
-        include("utils/test_corridor_clustering.jl")
-    end
-
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
     end
 
-    @testset "Corridor Integration" begin
-        include("opt/test_corridor_integration.jl")
-    end
-
-    @testset "Transportation Integration" begin
-        include("opt/test_transportation_integration.jl")
-    end
-
     @testset "Solution Analysis" begin
         include("utils/test_solution_analysis.jl")
-    end
-
-    @testset "Export Variables" begin
-        include("utils/temp_export_variables.jl")
     end
 
     @testset "Objective Decomposition" begin

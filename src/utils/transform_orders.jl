@@ -352,7 +352,7 @@ end
 
 """
     transform_orders_from_assignments(order_file, selection_run_dir, cluster_file, method;
-        start_date, end_date, use_timeframes, time_window_sec) -> DataFrame
+        start_date, end_date, use_timeframes) -> DataFrame
 
 Transform orders using x-variable assignments exported from the optimization model.
 
@@ -360,19 +360,16 @@ Instead of assigning each order to the closest selected station, this function u
 the actual assignment decisions (x variables) from `variable_exports/assignment_variables.csv`.
 Orders without a matching assignment fall back to closest selected station.
 
-Lookup keys differ by model:
-- **TSD** (`TwoStageSingleDetourModel`): `(scenario, time_id, origin_id, dest_id)`
-- **Clustering** (`ClusteringTwoStageODModel`): `(scenario, origin_id, dest_id)`
+Lookup key: `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`.
 
 # Arguments
 - `order_file`: Path to order CSV
 - `selection_run_dir`: Path to the selection run directory (contains `variable_exports/`)
 - `cluster_file`: Path to station selection results CSV (for fallback)
-- `method`: `"TwoStageSingleDetourModel"` or `"ClusteringTwoStageODModel"`
+- `method`: `"ClusteringTwoStageODModel"`
 - `start_date`: Optional start date filter
 - `end_date`: Optional end date filter
 - `use_timeframes`: Whether to use timeframe columns for fallback
-- `time_window_sec`: Time discretization in seconds (for TSD, default 120)
 
 # Returns
 - DataFrame with same schema as `transform_orders`
@@ -383,9 +380,7 @@ function transform_orders_from_assignments(order_file::String,
                                             method::String;
                                             start_date::Union{DateTime, Nothing}=nothing,
                                             end_date::Union{DateTime, Nothing}=nothing,
-                                            use_timeframes::Bool=false,
-                                            time_window_sec::Int=120)
-    is_tsd = (method == "TwoStageSingleDetourModel")
+                                            use_timeframes::Bool=false)
 
     println("Reading input files...")
 
@@ -442,21 +437,12 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     # 6. Build assignment lookup dict
-    if is_tsd
-        assignment_lookup = Dict{Tuple{Int,Int,Int,Int}, Tuple{Int,Int}}()
-        for row in eachrow(assignments_df)
-            key = (row.scenario, row.time_id, row.origin_id, row.dest_id)
-            assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
-        end
-        println("Built TSD assignment lookup with $(length(assignment_lookup)) entries")
-    else
-        assignment_lookup = Dict{Tuple{Int,Int,Int}, Tuple{Int,Int}}()
-        for row in eachrow(assignments_df)
-            key = (row.scenario, row.origin_id, row.dest_id)
-            assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
-        end
-        println("Built Clustering assignment lookup with $(length(assignment_lookup)) entries")
+    assignment_lookup = Dict{Tuple{Int,Int,Int}, Tuple{Int,Int}}()
+    for row in eachrow(assignments_df)
+        key = (row.scenario, row.origin_id, row.dest_id)
+        assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
     end
+    println("Built Clustering assignment lookup with $(length(assignment_lookup)) entries")
 
     # 7. Precompute distances for fallback
     println("\nPrecomputing distances between all stations...")
@@ -505,21 +491,10 @@ function transform_orders_from_assignments(order_file::String,
         found_assignment = false
 
         if matched_scenario !== nothing && origin_id != 0 && target_id != 0
-            if is_tsd
-                scenario_start = scenario_ranges[matched_scenario][1]
-                time_diff_seconds = (order_time - scenario_start) / Dates.Second(1)
-                time_id = floor(Int, time_diff_seconds / time_window_sec)
-                key = (matched_scenario, time_id, origin_id, target_id)
-                if haskey(assignment_lookup, key)
-                    assigned_pickup_id, assigned_dropoff_id = assignment_lookup[key]
-                    found_assignment = true
-                end
-            else
-                key = (matched_scenario, origin_id, target_id)
-                if haskey(assignment_lookup, key)
-                    assigned_pickup_id, assigned_dropoff_id = assignment_lookup[key]
-                    found_assignment = true
-                end
+            key = (matched_scenario, origin_id, target_id)
+            if haskey(assignment_lookup, key)
+                assigned_pickup_id, assigned_dropoff_id = assignment_lookup[key]
+                found_assignment = true
             end
         end
 

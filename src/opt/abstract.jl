@@ -11,7 +11,7 @@ AbstractStationSelectionModel
 ├── AbstractSingleScenarioModel    # Single scenario (k-medoids style)
 └── AbstractMultiScenarioModel     # Multiple scenarios
     └── AbstractTwoStageModel      # First-stage build + second-stage activate
-        └── AbstractPoolingModel   # Includes passenger pooling decisions
+        └── AbstractODModel        # OD pair assignment
 ```
 """
 
@@ -22,9 +22,6 @@ export AbstractStationSelectionModel
 export AbstractSingleScenarioModel
 export AbstractMultiScenarioModel
 export AbstractTwoStageModel
-export AbstractCorridorODModel
-export AbstractTransportationModel
-export AbstractRoutingModel
 
 """
     AbstractStationSelectionModel
@@ -73,50 +70,3 @@ abstract type AbstractTwoStageModel <: AbstractMultiScenarioModel end
 Two-stage models with OD (origin-destination) pair assignment.
 """
 abstract type AbstractODModel <: AbstractTwoStageModel end
-
-"""
-    AbstractCorridorODModel <: AbstractODModel
-
-Two-stage models with corridor penalties for cross-zone vehicle movements.
-
-Common properties:
-- k: number of active stations per scenario
-- l: number of stations to build
-- in_vehicle_time_weight: weight for in-vehicle travel time costs
-- corridor_weight: weight for corridor penalty
-- max_cluster_diameter: routing distance diameter for station clustering
-"""
-abstract type AbstractCorridorODModel <: AbstractODModel end
-
-"""
-    AbstractSingleDetourModel <: AbstractODModel
-
-Models with single-detour pooling mechanism.
-
-Common properties:
-- k: number of active stations per scenario
-- l: number of stations to build
-- vehicle_routing_weight: weight for vehicle routing costs
-- in_vehicle_time_weight: weight for in-vehicle travel time in assignment costs
-- time_window: time discretization window
-- routing_delay: maximum detour delay
-"""
-abstract type AbstractSingleDetourModel <: AbstractODModel end
-
-"""
-    AbstractTransportationModel <: AbstractODModel
-
-Models with zone-pair anchor transportation flow.
-
-Separates pickup and dropoff assignments, uses ordered zone-pair anchors
-to capture movement directionality, and models per-passenger transportation
-flow on allowed station pairs within each anchor.
-"""
-abstract type AbstractTransportationModel <: AbstractODModel end
-
-"""
-    AbstractPoolingModel <: AbstractODModel
-
-Models with more complex pooling mechanisms.
-"""
-abstract type AbstractPoolingModel <: AbstractODModel end

@@ -12,41 +12,24 @@ AbstractStationSelectionModel
 └── AbstractMultiScenarioModel
     └── AbstractTwoStageModel        # y=build (stage 1), z=activate (stage 2)
         └── AbstractODModel
-            ├── ClusteringTwoStageODModel       # Baseline: pure cost minimisation
-            ├── AbstractSingleDetourModel
-            │   └── TwoStageSingleDetourModel   # TSD: same-src/dest pooling
-            ├── AbstractCorridorODModel
-            │   ├── ZCorridorODModel            # cluster-activation corridor penalty
-            │   └── XCorridorODModel            # assignment-crossing corridor penalty
-            └── AbstractTransportationModel
-                └── TransportationModel         # zone-pair anchor flow
+            └── ClusteringTwoStageODModel  # Two-stage: pure cost minimisation (+ optional flow reg.)
 ```
 
 ## Model Reference
 
-| Model                       | Key idea                                                        | Unique variables                            |
-| --------------------------- | --------------------------------------------------------------- | ------------------------------------------- |
-| `ClusteringBaseModel`       | k-medoids single scenario                                       | x[i,j]                                      |
-| `ClusteringTwoStageODModel` | Baseline two-stage; minimise walk+ride                          | y, z, x                                     |
-| `TwoStageSingleDetourModel` | Pooling via u (same-source) and v (same-dest); time-discretised | y, z, x, f, u, v                            |
-| `ZCorridorODModel`          | Penalise corridor (a,b) when α fires for both clusters          | y, z, x, α, f_corridor                      |
-| `XCorridorODModel`          | Penalise corridor (a,b) only when OD assignment crosses it      | y, z, x, f_corridor                         |
-| `TransportationModel`       | Separate pickup/dropoff assignment; anchor activation cost      | y, z, x_pick, x_drop, f_transport, u_anchor |
+| Model                       | Key idea                                                           | Unique variables         |
+| --------------------------- | ------------------------------------------------------------------ | ------------------------ |
+| `ClusteringBaseModel`       | k-medoids single scenario                                          | x[i,j]                   |
+| `ClusteringTwoStageODModel` | Two-stage; minimise walk+ride; optional flow regularization penalty | y, z, x, (f_flow)        |
 
 ## Decision Variables
 
-| Var                  | Domain | Meaning                                             |
-| -------------------- | ------ | --------------------------------------------------- |
-| y[j]                 | {0,1}  | Station j built (first stage)                       |
-| z[j,s]               | {0,1}  | Station j active in scenario s; z≤y                 |
-| x[s][od][j,k]        | {0,1}  | OD pair assigned to pickup j, dropoff k             |
-| f[s][t][j,k]         | {0,1}  | Vehicle flow on arc (j,k) at time t (TSD)           |
-| u[s][t]              | {0,1}  | Same-source pooling indicator (TSD)                 |
-| v[s][t]              | {0,1}  | Same-destination pooling indicator (TSD)            |
-| α[a,s]               | [0,1]  | Cluster a activation in scenario s (ZCorridor)      |
-| f_corridor[g,s]      | {0,1}  | Corridor g used in scenario s (corridor models)     |
-| x_pick/x_drop        | {0,1}  | Per-origin/dest station assignment (Transportation) |
-| f_transport[j,k,g,s] | ≥0     | Continuous flow within anchor g (Transportation)    |
+| Var           | Domain | Meaning                                                             |
+| ------------- | ------ | ------------------------------------------------------------------- |
+| y[j]          | {0,1}  | Station j built (first stage)                                       |
+| z[j,s]        | {0,1}  | Station j active in scenario s; z≤y                                 |
+| x[s][od][j,k] | {0,1}  | OD pair assigned to pickup j, dropoff k                             |
+| f_flow[s][j,k]| [0,1]  | Route (j,k) activated in scenario s (ClusteringTwoStageOD with FR)  |
 
 ## Parameters
 
