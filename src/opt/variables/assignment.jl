@@ -77,6 +77,54 @@ end
 # ClusteringBaseModelMap (ClusteringBaseModel)
 # ============================================================================
 
+# ============================================================================
+# TwoStageRouteODMap (TwoStageRouteModel)
+# ============================================================================
+
+"""
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::TwoStageRouteODMap)
+
+Add sparse binary assignment variables x[s][t_id][od_idx] for TwoStageRouteModel.
+
+For each OD pair (o,d) in time window t of scenario s, one binary variable is created
+per valid (j,k) pair in `mapping.valid_jk_pairs[(o,d)]`.
+
+Structure: `m[:x]` is a `Vector{Dict{Int, Dict{Int, Vector{VariableRef}}}}` indexed
+by scenario → time_id → od_idx → pair variables.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::TwoStageRouteODMap
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    x = [Dict{Int, Dict{Int, Vector{VariableRef}}}() for _ in 1:S]
+
+    for s in 1:S
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            x[s][t_id] = Dict{Int, Vector{VariableRef}}()
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                n_pairs = length(valid_pairs)
+                if n_pairs > 0
+                    x[s][t_id][od_idx] = @variable(m, [1:n_pairs], Bin)
+                else
+                    x[s][t_id][od_idx] = VariableRef[]
+                end
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+
+# ============================================================================
+# ClusteringBaseModelMap (ClusteringBaseModel)
+# ============================================================================
+
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 

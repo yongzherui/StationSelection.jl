@@ -202,3 +202,101 @@ end
 Check if routing costs are available.
 """
 has_routing_costs(data::StationSelectionData) = !isnothing(data.routing_costs)
+
+
+# =============================================================================
+# Station and Scenario Index Mapping Helpers
+# =============================================================================
+
+export create_station_id_mappings, create_scenario_label_mappings
+export get_station_id, get_station_idx
+export compute_time_to_od_count_mapping
+
+"""
+    create_station_id_mappings(station_ids::Vector{Int}) -> (Dict{Int,Int}, Vector{Int})
+
+Build bidirectional station ID ↔ array-index mappings.
+Returns `(id_to_idx, idx_to_id)`.
+"""
+function create_station_id_mappings(station_ids::Vector{Int})
+    id_to_idx = Dict{Int, Int}()
+    for (idx, id) in enumerate(station_ids)
+        id_to_idx[id] = idx
+    end
+    return id_to_idx, copy(station_ids)
+end
+
+"""
+    create_scenario_label_mappings(scenarios::Vector{ScenarioData}) -> (Dict{String,Int}, Vector{String})
+
+Build bidirectional scenario label ↔ array-index mappings.
+Returns `(label_to_idx, idx_to_label)`.
+"""
+function create_scenario_label_mappings(scenarios::Vector{ScenarioData})
+    label_to_idx = Dict{String, Int}()
+    idx_to_label = String[]
+    for (idx, s) in enumerate(scenarios)
+        label_to_idx[s.label] = idx
+        push!(idx_to_label, s.label)
+    end
+    return label_to_idx, idx_to_label
+end
+
+"""
+    get_station_id(mapping, idx::Int) -> Int
+
+Get the station ID at array index `idx`.
+Works for any mapping with an `array_idx_to_station_id` field.
+"""
+get_station_id(mapping, idx::Int) = mapping.array_idx_to_station_id[idx]
+
+"""
+    get_station_idx(mapping, id::Int) -> Int
+
+Get the array index for station with the given ID.
+Works for any mapping with a `station_id_to_array_idx` field.
+"""
+get_station_idx(mapping, id::Int) = mapping.station_id_to_array_idx[id]
+
+"""
+    compute_time_to_od_count_mapping(scenario::ScenarioData, time_window_sec::Int)
+    -> Dict{Int, Dict{Tuple{Int,Int}, Int}}
+
+Group requests by time window and count OD pair demand.
+
+For each request, the time window index is:
+    t = floor((request_time - scenario.start_time) / time_window_sec)
+
+Returns: `time_id → (origin_id, dest_id) → count`.
+
+Requires `scenario.start_time` to be set.
+"""
+function compute_time_to_od_count_mapping(
+    scenario::ScenarioData,
+    time_window_sec::Int
+)::Dict{Int, Dict{Tuple{Int, Int}, Int}}
+    isnothing(scenario.start_time) && error(
+        "Scenario '$(scenario.label)' must have a start_time to compute time window mappings"
+    )
+    time_to_od = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
+
+    for row in eachrow(scenario.requests)
+        o = row.start_station_id
+        d = row.end_station_id
+
+        req_time = row.request_time isa AbstractString ?
+            DateTime(row.request_time, "yyyy-mm-dd HH:MM:SS") :
+            row.request_time
+
+        t_diff_sec = (req_time - scenario.start_time) / Dates.Second(1)
+        t_id = floor(Int, t_diff_sec / time_window_sec)
+
+        if !haskey(time_to_od, t_id)
+            time_to_od[t_id] = Dict{Tuple{Int, Int}, Int}()
+        end
+        od = (o, d)
+        time_to_od[t_id][od] = get(time_to_od[t_id], od, 0) + 1
+    end
+
+    return time_to_od
+end

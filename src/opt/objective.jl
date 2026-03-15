@@ -11,3 +11,4 @@ Uses multiple dispatch for different model/mapping types.
 # Model-specific objectives
 include("objectives/clustering_od.jl")
 include("objectives/clustering_base.jl")
+include("objectives/route_od.jl")

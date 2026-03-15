@@ -344,6 +344,149 @@ function export_model_specific_variables(
 end
 
 
+# =============================================================================
+# TwoStageRouteODMap exports
+# =============================================================================
+
+"""
+    export_assignment_variables(m, mapping::TwoStageRouteODMap, export_dir) -> Int
+
+Export assignment variables for TwoStageRouteModel.
+Structure: x[s][t_id][od_idx] → Vector{VariableRef} (one per valid (j,k) pair).
+"""
+function export_assignment_variables(
+    m::JuMP.Model,
+    mapping::TwoStageRouteODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    id_map = mapping.array_idx_to_station_id
+
+    rows = []
+    for (s, x_s) in enumerate(x)
+        for (t_id, x_t) in x_s
+            od_pairs = mapping.Omega_s_t[s][t_id]
+            for (od_idx, x_od) in x_t
+                isempty(x_od) && continue
+                o, d = od_pairs[od_idx]
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                    val = JuMP.value(x_od[pair_idx])
+                    val > 0.5 || continue
+                    push!(rows, (
+                        scenario   = s,
+                        time_id    = t_id,
+                        od_idx     = od_idx,
+                        origin_id  = o,
+                        dest_id    = d,
+                        pickup_id  = id_map[j],
+                        dropoff_id = id_map[k],
+                        value      = val
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+    return nrow(df)
+end
+
+
+"""
+    export_model_specific_variables(result, mapping::TwoStageRouteODMap, export_dir, metadata)
+
+Export TwoStageRouteModel-specific metadata and route activation variables.
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::TwoStageRouteODMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"]       = "TwoStageRouteModel"
+    metadata["n_routes"]         = length(mapping.routes)
+    metadata["time_window_sec"]  = mapping.time_window_sec
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+
+    n_theta = export_route_theta_variables(result.model, mapping, export_dir)
+    metadata["n_route_activations"] = n_theta
+
+    n_pool = export_route_pool(mapping, export_dir)
+    metadata["n_route_pool"] = n_pool
+end
+
+
+"""
+    export_route_pool(mapping::TwoStageRouteODMap, export_dir::String) -> Int
+
+Export all pre-generated routes (the full pool) to `route_pool.csv`.
+Columns: route_id, station_ids (pipe-separated), n_stops, travel_time.
+Returns the number of routes written. No-op when pool is empty.
+"""
+function export_route_pool(mapping::TwoStageRouteODMap, export_dir::String)
+    routes = mapping.routes
+    isempty(routes) && return 0
+    rows = [(
+        route_id    = r.id,
+        station_ids = join(r.station_ids, "|"),
+        n_stops     = length(r.station_ids),
+        travel_time = r.travel_time,
+    ) for r in routes]
+    CSV.write(joinpath(export_dir, "route_pool.csv"), DataFrame(rows))
+    println("    ✓ route_pool.csv ($(length(routes)) routes)")
+    return length(routes)
+end
+
+
+"""
+    export_route_theta_variables(m, mapping::TwoStageRouteODMap, export_dir) -> Int
+
+Export route activation variables (theta) to `route_activations.csv`.
+Columns: scenario, route_id, station_ids, travel_time, value.
+Returns count of activated routes written.
+"""
+function export_route_theta_variables(
+    m::JuMP.Model,
+    mapping::TwoStageRouteODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :theta)
+        println("    ✓ route_activations.csv (0 activations — theta not present)")
+        return 0
+    end
+
+    theta = m[:theta]
+    S, _ = size(theta)
+
+    rows = []
+    for s in 1:S
+        for (r_idx, route) in enumerate(mapping.routes)
+            val = JuMP.value(theta[s, r_idx])
+            val > 0.5 || continue
+            push!(rows, (
+                scenario    = s,
+                route_id    = route.id,
+                station_ids = join(route.station_ids, "|"),
+                travel_time = route.travel_time,
+                value       = val
+            ))
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "route_activations.csv"), df)
+    println("    ✓ route_activations.csv ($(nrow(df)) activations)")
+    return nrow(df)
+end
+
+
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 

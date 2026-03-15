@@ -47,6 +47,43 @@ end
 
 
 """
+    compute_valid_jk_pairs(
+        all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
+    ) -> Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int}}}
+
+For each OD pair (o,d), compute which station pairs (j_idx, k_idx) satisfy both:
+- walking_cost(o → j_id) ≤ max_walking_distance
+- walking_cost(k_id → d) ≤ max_walking_distance
+"""
+function compute_valid_jk_pairs(
+    all_od_pairs::Set{Tuple{Int, Int}},
+    data::StationSelectionData,
+    station_id_to_array_idx::Dict{Int, Int},
+    array_idx_to_station_id::Vector{Int},
+    max_walking_distance::Float64
+)::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+    n = length(array_idx_to_station_id)
+    valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+
+    for (o, d) in all_od_pairs
+        pairs = Tuple{Int, Int}[]
+        for j in 1:n
+            j_id = array_idx_to_station_id[j]
+            get_walking_cost(data, o, j_id) <= max_walking_distance || continue
+            for k in 1:n
+                k_id = array_idx_to_station_id[k]
+                get_walking_cost(data, k_id, d) <= max_walking_distance || continue
+                push!(pairs, (j, k))
+            end
+        end
+        valid_jk_pairs[(o, d)] = pairs
+    end
+
+    return valid_jk_pairs
+end
+
+
+"""
     compute_scenario_od_count(scenario_data::ScenarioData) -> Dict{Tuple{Int, Int}, Int}
 
 Compute OD pair demand counts for a single scenario (aggregated across all times).

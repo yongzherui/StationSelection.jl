@@ -30,3 +30,15 @@ function create_map(
     )::ClusteringBaseModelMap
     return create_clustering_base_model_map(model, data)
 end
+
+"""
+    create_map(model::TwoStageRouteModel, data::StationSelectionData)
+
+Create a TwoStageRouteODMap for TwoStageRouteModel.
+"""
+function create_map(
+        model::TwoStageRouteModel,
+        data::StationSelectionData
+    )::TwoStageRouteODMap
+    return create_two_stage_route_od_map(model, data)
+end
