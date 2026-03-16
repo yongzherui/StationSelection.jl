@@ -129,7 +129,7 @@ function create_two_stage_route_od_map(
     for s in 1:S
         # Build _TimedOrder list for this scenario
         timed_orders = _TimedOrder[]
-        for (t_id, od_count) in Omega_s_t[s]
+        for (t_id, od_count) in Q_s_t[s]
             for ((o_id, d_id), q) in od_count
                 valid_pairs = get(valid_jk_pairs, (o_id, d_id), Tuple{Int,Int}[])
                 isempty(valid_pairs) && continue
