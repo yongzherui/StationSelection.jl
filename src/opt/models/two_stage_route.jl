@@ -23,7 +23,6 @@ Routes are pre-generated sequences of VBS stops; θ^r_s activates route r in sce
 - `vehicle_capacity::Int`: Passengers per route leg (C)
 - `time_window_sec::Int`: Groups requests into discrete time windows within each scenario
 - `max_route_travel_time::Union{Float64,Nothing}`: Upper bound on route travel time (filter passed to generate_routes)
-- `max_intermediate_stops::Int`: 0 = direct only; 1 = allow one intermediate stop
 - `max_walking_distance::Float64`: Required walking limit; prunes valid (j,k) pairs
 - `max_detour_time::Float64`: Max extra in-vehicle seconds vs direct trip; always enforced
 - `max_detour_ratio::Float64`: Max ratio `in_vehicle/direct - 1`; always enforced
@@ -49,7 +48,6 @@ struct TwoStageRouteModel <: AbstractODModel
     vehicle_capacity::Int
     time_window_sec::Int
     max_route_travel_time::Union{Float64, Nothing}
-    max_intermediate_stops::Int
     max_walking_distance::Float64
     max_detour_time::Float64
     max_detour_ratio::Float64
@@ -62,7 +60,6 @@ struct TwoStageRouteModel <: AbstractODModel
             vehicle_capacity::Int = 18,
             time_window_sec::Int = 1,
             max_route_travel_time::Union{Number, Nothing} = nothing,
-            max_intermediate_stops::Union{Int, Nothing} = nothing,
             max_walking_distance::Number = 300, # this is in seconds
             max_detour_time::Number = 1200, # in seconds
             max_detour_ratio::Number = 2.0, # ratio
@@ -74,7 +71,6 @@ struct TwoStageRouteModel <: AbstractODModel
         route_regularization_weight >= 0 || throw(ArgumentError("route_regularization_weight must be non-negative"))
         vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
-        max_intermediate_stops >= 0 || throw(ArgumentError("max_intermediate_stops must be non-negative"))
 
         mdt  = Float64(max_detour_time)
         mdr  = Float64(max_detour_ratio)
@@ -87,7 +83,7 @@ struct TwoStageRouteModel <: AbstractODModel
 
         max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
         new(k, l, Float64(route_regularization_weight), vehicle_capacity,
-            time_window_sec, mrtt, max_intermediate_stops,
+            time_window_sec, mrtt,
             Float64(max_walking_distance), mdt, mdr, mwt)
     end
 end

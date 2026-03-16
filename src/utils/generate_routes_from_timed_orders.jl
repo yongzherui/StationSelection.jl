@@ -132,7 +132,8 @@ function generate_routes_from_timed_orders(
     max_wait_time        :: Float64,
     max_delay_time       :: Float64,
     max_delay_ratio      :: Float64,
-    time_window_sec      :: Int = 120
+    time_window_sec      :: Int = 120,
+    max_labels           :: Int = 400_000
 )::Vector{TimedRouteData}
     has_routing_costs(data) || error(
         "generate_routes_from_timed_orders requires routing costs " *
@@ -178,7 +179,7 @@ function generate_routes_from_timed_orders(
         labels, orders, data, station_id_to_array_idx,
         vehicle_capacity, max_wait_time,
         max_delay_time, max_delay_ratio, time_window_sec,
-        routes_map, next_id
+        routes_map, next_id, max_labels
     )
 
     routes_sorted = sort!(collect(values(routes_map)), by = r -> r.route.id)
@@ -208,13 +209,19 @@ function _timed_run_label_setting!(
     max_delay_ratio   :: Union{Float64,Nothing},
     time_window_sec   :: Int,
     routes_map        :: Dict{Tuple{Vector{Int},UInt64}, TimedRouteData},
-    next_id           :: Ref{Int}
+    next_id           :: Ref{Int},
+    max_labels        :: Int
 )
     n = length(orders)
     ε = 1e-9
 
     idx = 1
     while idx <= length(labels)
+        if idx > max_labels
+            println("    BFS: label limit ($max_labels explored) reached; stopping early with $(length(routes_map)) routes")
+            flush(stdout)
+            break
+        end
         if idx % 50_000 == 1 && idx > 1
             println("    BFS: processed $idx / $(length(labels)) labels, $(length(routes_map)) routes so far")
             flush(stdout)

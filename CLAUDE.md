@@ -40,8 +40,7 @@ AbstractStationSelectionModel
 **Shared:** `k` (active stations/scenario), `l` (stations built), `in_vehicle_time_weight` (λ).
 
 **TwoStageRoute only:** `route_regularization_weight` (μ), `vehicle_capacity` (C),
-`time_window_sec` (discretisation step), `max_route_travel_time` (route filter),
-`max_intermediate_stops` (0=direct, 1=one-stop).
+`time_window_sec` (discretisation step), `max_route_travel_time` (route filter).
 
 **TSD only:** `vehicle_routing_weight` (γ), `time_window` (sec, discretisation step),
 `routing_delay` (max detour), `detour_use_flow_bounds`.
