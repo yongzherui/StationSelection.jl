@@ -25,6 +25,8 @@ Routes are pre-generated sequences of VBS stops; θ^r_s activates route r in sce
 - `max_route_travel_time::Union{Float64,Nothing}`: Upper bound on route travel time (filter passed to generate_routes)
 - `max_intermediate_stops::Int`: 0 = direct only; 1 = allow one intermediate stop
 - `max_walking_distance::Float64`: Required walking limit; prunes valid (j,k) pairs
+- `max_detour_time::Float64`: Max extra in-vehicle seconds vs direct trip; always enforced
+- `max_detour_ratio::Float64`: Max ratio `in_vehicle/direct - 1`; always enforced
 - `max_wait_time::Float64`: Max seconds after `t_id * time_window_sec` that the vehicle
   can arrive at a pickup. Routes are always generated per-scenario via cross-window BFS.
 
@@ -49,8 +51,8 @@ struct TwoStageRouteModel <: AbstractODModel
     max_route_travel_time::Union{Float64, Nothing}
     max_intermediate_stops::Int
     max_walking_distance::Float64
-    max_detour_time::Union{Float64, Nothing}
-    max_detour_ratio::Union{Float64, Nothing}
+    max_detour_time::Float64
+    max_detour_ratio::Float64
     max_wait_time::Float64
 
     function TwoStageRouteModel(
@@ -62,8 +64,8 @@ struct TwoStageRouteModel <: AbstractODModel
             max_route_travel_time::Union{Number, Nothing} = nothing,
             max_intermediate_stops::Union{Int, Nothing} = nothing,
             max_walking_distance::Number = 300, # this is in seconds
-            max_detour_time::Union{Number, Nothing} = 1200, # in seconds
-            max_detour_ratio::Union{Number, Nothing} = 2.0, # ratio
+            max_detour_time::Number = 1200, # in seconds
+            max_detour_ratio::Number = 2.0, # ratio
             max_wait_time::Number = 900 # in seconds
         )
 
@@ -74,11 +76,13 @@ struct TwoStageRouteModel <: AbstractODModel
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
         max_intermediate_stops >= 0 || throw(ArgumentError("max_intermediate_stops must be non-negative"))
 
-        mdt  = isnothing(max_detour_time)  ? nothing : Float64(max_detour_time)
-        mdr  = isnothing(max_detour_ratio) ? nothing : Float64(max_detour_ratio)
+        mdt  = Float64(max_detour_time)
+        mdr  = Float64(max_detour_ratio)
         mrtt = isnothing(max_route_travel_time) ? nothing : Float64(max_route_travel_time)
         mwt  = Float64(max_wait_time)
 
+        mdt >= 0.0 || throw(ArgumentError("max_detour_time must be non-negative"))
+        mdr >= 0.0 || throw(ArgumentError("max_detour_ratio must be non-negative"))
         mwt >= 0.0 || throw(ArgumentError("max_wait_time must be non-negative"))
 
         max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))

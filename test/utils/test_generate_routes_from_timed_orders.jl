@@ -49,6 +49,8 @@ using Dates
             orders, data, station_id_to_idx;
             vehicle_capacity = 4,
             max_wait_time    = 10.0,   # 1 window
+            max_delay_time   = 900.0,
+            max_delay_ratio  = 2.0,
             time_window_sec  = time_window_sec
         )
         @test length(routes) == 1
@@ -74,6 +76,8 @@ using Dates
             orders, data, station_id_to_idx;
             vehicle_capacity = 4,
             max_wait_time    = Float64(2 * time_window_sec),
+            max_delay_time   = 900.0,
+            max_delay_ratio  = 2.0,
             time_window_sec  = time_window_sec
         )
         # Each order has its own direct route; cross-window not feasible (early arrival)
@@ -98,6 +102,8 @@ using Dates
             orders, data, station_id_to_idx;
             vehicle_capacity = 4,
             max_wait_time    = Float64(time_window_sec),
+            max_delay_time   = 900.0,
+            max_delay_ratio  = 2.0,
             time_window_sec  = time_window_sec
         )
         sids = [r.route.station_ids for r in routes]
@@ -167,6 +173,8 @@ using Dates
             orders, data, station_id_to_idx;
             vehicle_capacity = 4,
             max_wait_time    = Float64(time_window_sec),
+            max_delay_time   = 900.0,
+            max_delay_ratio  = 2.0,
             time_window_sec  = time_window_sec
         )
         sids = [r.route.station_ids for r in routes]
@@ -189,7 +197,9 @@ using Dates
     @testset "empty orders" begin
         @test isempty(generate_routes_from_timed_orders(
             StationSelection._TimedOrder[], data, station_id_to_idx;
-            max_wait_time = 10.0
+            max_wait_time   = 10.0,
+            max_delay_time  = 900.0,
+            max_delay_ratio = 2.0
         ))
     end
 
@@ -207,6 +217,8 @@ using Dates
             orders, data, station_id_to_idx;
             vehicle_capacity = 4,
             max_wait_time    = Float64(time_window_sec),
+            max_delay_time   = 900.0,
+            max_delay_ratio  = 2.0,
             time_window_sec  = time_window_sec
         )
         @test length(routes) == 12

@@ -113,8 +113,8 @@ and arrives within `[t_k_start, t_k_start + max_wait_time]`. No vehicle waiting 
 - `station_id_to_array_idx`: station ID → 1-based array index mapping
 - `vehicle_capacity`: max total passengers on board at any time
 - `max_wait_time`: seconds after t_id * time_window_sec that vehicle can arrive at pickup
-- `max_delay_time`: max extra in-vehicle time vs direct trip (nothing = no limit)
-- `max_delay_ratio`: max ratio `in_vehicle/direct - 1` (nothing = no limit)
+- `max_delay_time`: max extra in-vehicle time vs direct trip (use `Inf` for no limit)
+- `max_delay_ratio`: max ratio `in_vehicle/direct - 1` (use `Inf` for no limit)
 - `time_window_sec`: seconds per time window (for t_start = t_id * time_window_sec)
 
 # Returns
@@ -130,8 +130,8 @@ function generate_routes_from_timed_orders(
     station_id_to_array_idx :: Dict{Int,Int};
     vehicle_capacity     :: Int = 4,
     max_wait_time        :: Float64,
-    max_delay_time       :: Union{Float64,Nothing} = nothing,
-    max_delay_ratio      :: Union{Float64,Nothing} = nothing,
+    max_delay_time       :: Float64,
+    max_delay_ratio      :: Float64,
     time_window_sec      :: Int = 120
 )::Vector{TimedRouteData}
     has_routing_costs(data) || error(
@@ -235,11 +235,10 @@ function _timed_run_label_setting!(
             in_vehicle = arr - lbl.board_abstime[j + 1]
             direct     = get_routing_cost(data, p_id, d_id)
 
-            if !isnothing(max_delay_time) && in_vehicle - direct > max_delay_time + ε
+            if in_vehicle - direct > max_delay_time + ε
                 continue
             end
-            if !isnothing(max_delay_ratio) && direct > 0.0 &&
-               in_vehicle / direct > 1.0 + max_delay_ratio + ε
+            if direct > 0.0 && in_vehicle / direct > 1.0 + max_delay_ratio + ε
                 continue
             end
 
@@ -278,6 +277,26 @@ function _timed_run_label_setting!(
                 arr < t_k_start - ε && continue
                 # Vehicle arrives too late
                 arr > t_k_start + max_wait_time + ε && continue
+
+                # Forward delay feasibility: check on-board orders can still make their dropoffs
+                feasible = true
+                for j in 0:(n - 1)
+                    (lbl.picked  >> j) & UInt64(1) == UInt64(0) && continue  # not on board
+                    (lbl.dropped >> j) & UInt64(1) == UInt64(1) && continue  # already dropped
+
+                    j_dropoff  = lbl.chosen_dropoff[j + 1]
+                    j_pickup   = lbl.chosen_pickup[j + 1]
+                    min_invehi = (arr + get_routing_cost(data, p_id, j_dropoff)) - lbl.board_abstime[j + 1]
+                    direct_j   = get_routing_cost(data, j_pickup, j_dropoff)
+
+                    if min_invehi - direct_j > max_delay_time + ε
+                        feasible = false; break
+                    end
+                    if direct_j > 0.0 && min_invehi / direct_j > 1.0 + max_delay_ratio + ε
+                        feasible = false; break
+                    end
+                end
+                feasible || continue
 
                 new_bct      = copy(lbl.board_abstime);  new_bct[k + 1] = arr
                 new_cp       = copy(lbl.chosen_pickup);  new_cp[k + 1]  = p_id
