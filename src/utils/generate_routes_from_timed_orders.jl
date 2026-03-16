@@ -68,7 +68,6 @@ BFS label for temporal cross-window route generation.
 - `picked`:         bit j set ⟺ order j+1 has been picked up
 - `dropped`:        bit j set ⟺ order j+1 has been dropped off
 - `parent`:         1-based index into labels array; 0 = root
-- `max_picked_t_id`: highest t_id among all orders already picked up (enforces forward-in-time pickup order)
 - `board_abstime`:  length-n; entry j = abs_time when order j was picked up (Inf = not yet)
 - `chosen_pickup`:  length-n; entry j = pickup VBS station ID for order j (0 = not yet)
 - `chosen_dropoff`: length-n; entry j = dropoff VBS station ID for order j (0 = not yet)
@@ -80,7 +79,6 @@ struct TimedRouteLabel
     picked          :: UInt64
     dropped         :: UInt64
     parent          :: Int
-    max_picked_t_id :: Int
     board_abstime   :: Vector{Float64}
     chosen_pickup   :: Vector{Int}
     chosen_dropoff  :: Vector{Int}
@@ -172,7 +170,6 @@ function generate_routes_from_timed_orders(
             push!(labels, TimedRouteLabel(
                 p_id, t_start, order.demand,
                 bit_j, UInt64(0), 0,
-                order.t_id,
                 bct, cp, cd
             ))
         end
@@ -198,6 +195,71 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
+Returns the dominance key for a label: same key ⟺ same partial-route state
+(same location, same orders served/on-board, same VBS assignments).
+"""
+function _dom_key(lbl::TimedRouteLabel)
+    return (lbl.station, lbl.picked, lbl.dropped,
+            Tuple(lbl.chosen_pickup), Tuple(lbl.chosen_dropoff))
+end
+
+"""
+Returns true if `lbl1` dominates `lbl2` for the same partial-route state.
+lbl1 dominates lbl2 iff lbl1 arrives no later AND has no more accumulated
+in-vehicle time for every on-board passenger.
+"""
+function _dominates(lbl1::TimedRouteLabel, lbl2::TimedRouteLabel, n::Int, ε::Float64)
+    lbl1.abs_time > lbl2.abs_time + ε && return false
+    on_board = lbl1.picked & ~lbl1.dropped
+    for j in 0:(n - 1)
+        (on_board >> j) & UInt64(1) == UInt64(0) && continue
+        tov1 = lbl1.abs_time - lbl1.board_abstime[j + 1]
+        tov2 = lbl2.abs_time - lbl2.board_abstime[j + 1]
+        tov1 > tov2 + ε && return false
+    end
+    return true
+end
+
+"""
+Push `child` into `labels` unless it is dominated by an existing live label with the
+same key. Also marks any existing labels that child dominates as dead.
+"""
+function _push_if_not_dominated!(
+    child    :: TimedRouteLabel,
+    labels   :: Vector{TimedRouteLabel},
+    alive    :: BitVector,
+    dom_dict :: Dict,
+    n        :: Int,
+    ε        :: Float64
+) :: Bool
+    key      = _dom_key(child)
+    existing = get(dom_dict, key, nothing)
+
+    if existing !== nothing
+        for ex_idx in existing
+            !alive[ex_idx] && continue
+            _dominates(labels[ex_idx], child, n, ε) && return false  # child dominated; discard
+        end
+        # child survives; mark dominated existing labels dead
+        for ex_idx in existing
+            !alive[ex_idx] && continue
+            if _dominates(child, labels[ex_idx], n, ε)
+                alive[ex_idx] = false
+            end
+        end
+        filter!(i -> alive[i], existing)
+        push!(existing, length(labels) + 1)
+    else
+        dom_dict[key] = [length(labels) + 1]
+    end
+
+    push!(labels, child)
+    push!(alive, true)
+    return true
+end
+
+
+"""
 BFS label-setting main loop. Processes labels in push order; extends each by one
 dropoff or pickup action. Calls `_timed_record_route!` for complete labels.
 """
@@ -218,6 +280,18 @@ function _timed_run_label_setting!(
     n = length(orders)
     ε = 1e-9
 
+    alive    = trues(length(labels))
+    dom_dict = Dict{Any, Vector{Int}}()
+    for i in eachindex(labels)
+        key = _dom_key(labels[i])
+        existing = get(dom_dict, key, nothing)
+        if existing === nothing
+            dom_dict[key] = [i]
+        else
+            push!(existing, i)
+        end
+    end
+
     idx = 1
     while idx <= length(labels)
         if idx > max_labels
@@ -232,6 +306,7 @@ function _timed_run_label_setting!(
 
         lbl = labels[idx]
         idx += 1  # always advance first so any `continue` below does not stall the loop
+        !alive[idx - 1] && continue  # skip dominated labels
 
         # ── Stage 1: drop off on-board passengers ─────────────────────────────
         for j in 0:(n - 1)
@@ -257,12 +332,11 @@ function _timed_run_label_setting!(
             child = TimedRouteLabel(
                 d_id, arr, lbl.passengers - orders[j + 1].demand,
                 lbl.picked, new_dropped, idx - 1,
-                lbl.max_picked_t_id,
                 lbl.board_abstime, lbl.chosen_pickup, lbl.chosen_dropoff
             )
-            push!(labels, child)
+            pushed = _push_if_not_dominated!(child, labels, alive, dom_dict, n, ε)
 
-            if child.picked == child.dropped
+            if pushed && child.picked == child.dropped
                 _timed_record_route!(
                     labels, length(labels), orders,
                     data, station_id_to_idx, vehicle_capacity,
@@ -277,7 +351,6 @@ function _timed_run_label_setting!(
             (lbl.picked >> k) & UInt64(1) == UInt64(1) && continue  # already picked
 
             order_k = orders[k + 1]
-            order_k.t_id < lbl.max_picked_t_id && continue  # enforce forward-in-time pickup order
             lbl.passengers + order_k.demand > vehicle_capacity && continue
 
             t_k_start = Float64(order_k.t_id * time_window_sec)
@@ -317,10 +390,9 @@ function _timed_run_label_setting!(
                 child = TimedRouteLabel(
                     p_id, arr, lbl.passengers + order_k.demand,
                     lbl.picked | (UInt64(1) << k), lbl.dropped, idx - 1,
-                    max(lbl.max_picked_t_id, order_k.t_id),
                     new_bct, new_cp, new_cd
                 )
-                push!(labels, child)
+                _push_if_not_dominated!(child, labels, alive, dom_dict, n, ε)
             end
         end
     end
