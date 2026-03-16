@@ -132,6 +132,23 @@ function compute_order_time_id(
 end
 
 """
+    parse_exported_datetime(value, field_name, scenario_idx) -> DateTime
+
+Parse a scenario timestamp exported to CSV, accepting either strings or DateTime values.
+"""
+function parse_exported_datetime(value, field_name::String, scenario_idx::Int)::DateTime
+    if value isa DateTime
+        return value
+    end
+
+    value_str = string(value)
+    isempty(value_str) && error(
+        "scenario_info.csv has empty $field_name for scenario $scenario_idx"
+    )
+    return DateTime(value_str)
+end
+
+"""
     precompute_distances(stations::DataFrame) -> Dict{Tuple{Int,Int}, Float64}
 
 Precompute all pairwise distances between stations using Haversine distance.
@@ -495,10 +512,8 @@ function transform_orders_from_assignments(order_file::String,
     # 5. Build scenario time ranges: scenario_idx => (start_time, end_time)
     scenario_ranges = Dict{Int, Tuple{DateTime, DateTime}}()
     for row in eachrow(scenario_df)
-        isempty(row.start_time) && error("scenario_info.csv has empty start_time for scenario $(row.scenario_idx)")
-        isempty(row.end_time) && error("scenario_info.csv has empty end_time for scenario $(row.scenario_idx)")
-        s_start = DateTime(row.start_time)
-        s_end = DateTime(row.end_time)
+        s_start = parse_exported_datetime(row.start_time, "start_time", row.scenario_idx)
+        s_end = parse_exported_datetime(row.end_time, "end_time", row.scenario_idx)
         scenario_ranges[row.scenario_idx] = (s_start, s_end)
     end
 
