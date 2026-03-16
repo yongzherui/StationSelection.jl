@@ -443,7 +443,7 @@ function export_route_theta_s_variables(
             push!(rows, (
                 scenario    = s,
                 route_idx   = r_idx,
-                station_ids = join(trd.station_ids, "|"),
+                station_ids = join(trd.route.station_ids, "|"),
                 travel_time = trd.route.travel_time,
                 value       = val
             ))
