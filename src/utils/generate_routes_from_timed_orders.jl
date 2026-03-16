@@ -68,20 +68,22 @@ BFS label for temporal cross-window route generation.
 - `picked`:         bit j set ⟺ order j+1 has been picked up
 - `dropped`:        bit j set ⟺ order j+1 has been dropped off
 - `parent`:         1-based index into labels array; 0 = root
+- `max_picked_t_id`: highest t_id among all orders already picked up (enforces forward-in-time pickup order)
 - `board_abstime`:  length-n; entry j = abs_time when order j was picked up (Inf = not yet)
 - `chosen_pickup`:  length-n; entry j = pickup VBS station ID for order j (0 = not yet)
 - `chosen_dropoff`: length-n; entry j = dropoff VBS station ID for order j (0 = not yet)
 """
 struct TimedRouteLabel
-    station        :: Int
-    abs_time       :: Float64
-    passengers     :: Int
-    picked         :: UInt64
-    dropped        :: UInt64
-    parent         :: Int
-    board_abstime  :: Vector{Float64}
-    chosen_pickup  :: Vector{Int}
-    chosen_dropoff :: Vector{Int}
+    station         :: Int
+    abs_time        :: Float64
+    passengers      :: Int
+    picked          :: UInt64
+    dropped         :: UInt64
+    parent          :: Int
+    max_picked_t_id :: Int
+    board_abstime   :: Vector{Float64}
+    chosen_pickup   :: Vector{Int}
+    chosen_dropoff  :: Vector{Int}
 end
 
 
@@ -170,6 +172,7 @@ function generate_routes_from_timed_orders(
             push!(labels, TimedRouteLabel(
                 p_id, t_start, order.demand,
                 bit_j, UInt64(0), 0,
+                order.t_id,
                 bct, cp, cd
             ))
         end
@@ -254,6 +257,7 @@ function _timed_run_label_setting!(
             child = TimedRouteLabel(
                 d_id, arr, lbl.passengers - orders[j + 1].demand,
                 lbl.picked, new_dropped, idx - 1,
+                lbl.max_picked_t_id,
                 lbl.board_abstime, lbl.chosen_pickup, lbl.chosen_dropoff
             )
             push!(labels, child)
@@ -273,6 +277,7 @@ function _timed_run_label_setting!(
             (lbl.picked >> k) & UInt64(1) == UInt64(1) && continue  # already picked
 
             order_k = orders[k + 1]
+            order_k.t_id < lbl.max_picked_t_id && continue  # enforce forward-in-time pickup order
             lbl.passengers + order_k.demand > vehicle_capacity && continue
 
             t_k_start = Float64(order_k.t_id * time_window_sec)
@@ -312,6 +317,7 @@ function _timed_run_label_setting!(
                 child = TimedRouteLabel(
                     p_id, arr, lbl.passengers + order_k.demand,
                     lbl.picked | (UInt64(1) << k), lbl.dropped, idx - 1,
+                    max(lbl.max_picked_t_id, order_k.t_id),
                     new_bct, new_cp, new_cd
                 )
                 push!(labels, child)
