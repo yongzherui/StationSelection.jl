@@ -72,6 +72,66 @@ function get_timeframe_column(order_time::DateTime, columns::Vector{String})
 end
 
 """
+    get_selected_station_ids(order_time, stations_df, all_columns, timeframe_columns, use_timeframes)
+        -> Vector{Int}
+
+Return the selected station IDs used for closest-station fallback.
+"""
+function get_selected_station_ids(
+    order_time::DateTime,
+    stations_df::DataFrame,
+    all_columns::Vector{String},
+    timeframe_columns::Vector{String},
+    use_timeframes::Bool
+)::Vector{Int}
+    if use_timeframes && !isempty(timeframe_columns)
+        timeframe_col = get_timeframe_column(order_time, timeframe_columns)
+        if timeframe_col !== nothing
+            return [r.id for r in eachrow(stations_df) if r[timeframe_col] == 1.0 || r[timeframe_col] == 1]
+        end
+        return Int[]
+    end
+
+    if "selected" in all_columns
+        return [r.id for r in eachrow(stations_df) if r.selected == 1]
+    end
+
+    return Int[]
+end
+
+"""
+    find_matching_scenario(order_time, scenario_ranges) -> Union{Int, Nothing}
+
+Find the exported scenario index whose time range contains the order time.
+"""
+function find_matching_scenario(
+    order_time::DateTime,
+    scenario_ranges::Dict{Int, Tuple{DateTime, DateTime}}
+)::Union{Int, Nothing}
+    for (s_idx, (s_start, s_end)) in scenario_ranges
+        if order_time >= s_start && order_time <= s_end
+            return s_idx
+        end
+    end
+    return nothing
+end
+
+"""
+    compute_order_time_id(order_time, scenario_start, time_window_sec) -> Int
+
+Compute the order's time bucket relative to the scenario start.
+"""
+function compute_order_time_id(
+    order_time::DateTime,
+    scenario_start::DateTime,
+    time_window_sec::Int
+)::Int
+    time_window_sec > 0 || error("time_window_sec must be positive, got $time_window_sec")
+    t_diff_sec = (order_time - scenario_start) / Dates.Second(1)
+    return floor(Int, t_diff_sec / time_window_sec)
+end
+
+"""
     precompute_distances(stations::DataFrame) -> Dict{Tuple{Int,Int}, Float64}
 
 Precompute all pairwise distances between stations using Haversine distance.
@@ -352,7 +412,7 @@ end
 
 """
     transform_orders_from_assignments(order_file, selection_run_dir, cluster_file, method;
-        start_date, end_date, use_timeframes) -> DataFrame
+        start_date, end_date, use_timeframes, time_window_sec) -> DataFrame
 
 Transform orders using x-variable assignments exported from the optimization model.
 
@@ -360,7 +420,9 @@ Instead of assigning each order to the closest selected station, this function u
 the actual assignment decisions (x variables) from `variable_exports/assignment_variables.csv`.
 Orders without a matching assignment fall back to closest selected station.
 
-Lookup key: `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`.
+Lookup key:
+- `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`
+- `(scenario, time_id, origin_id, dest_id)` for `TwoStageRouteModel`
 
 # Arguments
 - `order_file`: Path to order CSV
@@ -370,6 +432,7 @@ Lookup key: `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`.
 - `start_date`: Optional start date filter
 - `end_date`: Optional end date filter
 - `use_timeframes`: Whether to use timeframe columns for fallback
+- `time_window_sec`: Required for `TwoStageRouteModel`; ignored otherwise
 
 # Returns
 - DataFrame with same schema as `transform_orders`
@@ -380,7 +443,8 @@ function transform_orders_from_assignments(order_file::String,
                                             method::String;
                                             start_date::Union{DateTime, Nothing}=nothing,
                                             end_date::Union{DateTime, Nothing}=nothing,
-                                            use_timeframes::Bool=false)
+                                            use_timeframes::Bool=false,
+                                            time_window_sec::Union{Int, Nothing}=nothing)
 
     println("Reading input files...")
 
@@ -431,18 +495,33 @@ function transform_orders_from_assignments(order_file::String,
     # 5. Build scenario time ranges: scenario_idx => (start_time, end_time)
     scenario_ranges = Dict{Int, Tuple{DateTime, DateTime}}()
     for row in eachrow(scenario_df)
+        isempty(row.start_time) && error("scenario_info.csv has empty start_time for scenario $(row.scenario_idx)")
+        isempty(row.end_time) && error("scenario_info.csv has empty end_time for scenario $(row.scenario_idx)")
         s_start = DateTime(row.start_time)
         s_end = DateTime(row.end_time)
         scenario_ranges[row.scenario_idx] = (s_start, s_end)
     end
 
     # 6. Build assignment lookup dict
-    assignment_lookup = Dict{Tuple{Int,Int,Int}, Tuple{Int,Int}}()
+    route_model = method == "TwoStageRouteModel"
+    route_model && isnothing(time_window_sec) &&
+        error("transform_orders_from_assignments requires time_window_sec for TwoStageRouteModel")
+
+    assignment_lookup = route_model ?
+        Dict{NTuple{4, Int}, Tuple{Int,Int}}() :
+        Dict{NTuple{3, Int}, Tuple{Int,Int}}()
+
+    if route_model && !("time_id" in names(assignments_df))
+        error("assignment_variables.csv missing required column 'time_id' for TwoStageRouteModel")
+    end
+
     for row in eachrow(assignments_df)
-        key = (row.scenario, row.origin_id, row.dest_id)
+        key = route_model ?
+            (row.scenario, row.time_id, row.origin_id, row.dest_id) :
+            (row.scenario, row.origin_id, row.dest_id)
         assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
     end
-    println("Built Clustering assignment lookup with $(length(assignment_lookup)) entries")
+    println("Built $method assignment lookup with $(length(assignment_lookup)) entries")
 
     # 7. Precompute distances for fallback
     println("\nPrecomputing distances between all stations...")
@@ -478,42 +557,41 @@ function transform_orders_from_assignments(order_file::String,
         order_time = DateTime(row.order_time, "yyyy-mm-dd HH:MM:SS")
 
         # Find matching scenario
-        matched_scenario = nothing
-        for (s_idx, (s_start, s_end)) in scenario_ranges
-            if order_time >= s_start && order_time <= s_end
-                matched_scenario = s_idx
-                break
-            end
-        end
+        matched_scenario = find_matching_scenario(order_time, scenario_ranges)
 
         assigned_pickup_id = 0
         assigned_dropoff_id = 0
         found_assignment = false
 
         if matched_scenario !== nothing && origin_id != 0 && target_id != 0
-            key = (matched_scenario, origin_id, target_id)
+            key = if route_model
+                scenario_start = scenario_ranges[matched_scenario][1]
+                time_id = compute_order_time_id(order_time, scenario_start, something(time_window_sec))
+                (matched_scenario, time_id, origin_id, target_id)
+            else
+                (matched_scenario, origin_id, target_id)
+            end
             if haskey(assignment_lookup, key)
                 assigned_pickup_id, assigned_dropoff_id = assignment_lookup[key]
                 found_assignment = true
+            elseif route_model
+                error(
+                    "No exact route assignment found for order $(row.order_id): " *
+                    "scenario=$(matched_scenario), time_id=$(key[2]), origin_id=$origin_id, dest_id=$target_id, " *
+                    "order_time=$(row.order_time)"
+                )
             end
+        elseif route_model
+            error(
+                "No matching scenario found for route assignment on order $(row.order_id) at $(row.order_time)"
+            )
         end
 
         # Fallback: closest selected station
         if !found_assignment
-            if use_timeframes && !isempty(timeframe_columns)
-                timeframe_col = get_timeframe_column(order_time, timeframe_columns)
-                if timeframe_col !== nothing
-                    selected_ids = [r.id for r in eachrow(stations_df) if r[timeframe_col] == 1.0 || r[timeframe_col] == 1]
-                else
-                    selected_ids = Int[]
-                end
-            else
-                if "selected" in all_columns
-                    selected_ids = [r.id for r in eachrow(stations_df) if r.selected == 1]
-                else
-                    selected_ids = Int[]
-                end
-            end
+            selected_ids = get_selected_station_ids(
+                order_time, stations_df, all_columns, timeframe_columns, use_timeframes
+            )
 
             assigned_pickup_id = find_closest_selected_station(
                 origin_id, selected_ids, distance_matrix)
@@ -524,20 +602,9 @@ function transform_orders_from_assignments(order_file::String,
             n_assigned += 1
 
             # Compare x-assignment against what closest-station would have given
-            if use_timeframes && !isempty(timeframe_columns)
-                timeframe_col = get_timeframe_column(order_time, timeframe_columns)
-                if timeframe_col !== nothing
-                    selected_ids = [r.id for r in eachrow(stations_df) if r[timeframe_col] == 1.0 || r[timeframe_col] == 1]
-                else
-                    selected_ids = Int[]
-                end
-            else
-                if "selected" in all_columns
-                    selected_ids = [r.id for r in eachrow(stations_df) if r.selected == 1]
-                else
-                    selected_ids = Int[]
-                end
-            end
+            selected_ids = get_selected_station_ids(
+                order_time, stations_df, all_columns, timeframe_columns, use_timeframes
+            )
 
             closest_pickup = find_closest_selected_station(origin_id, selected_ids, distance_matrix)
             closest_dropoff = find_closest_selected_station(target_id, selected_ids, distance_matrix)
