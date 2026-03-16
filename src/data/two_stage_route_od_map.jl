@@ -127,6 +127,9 @@ function create_two_stage_route_od_map(
     routes_by_jkt_s = Dict{NTuple{4,Int}, Vector{Tuple{Int,Int}}}()
 
     for s in 1:S
+        println("  Scenario $s / $S: building timed orders...")
+        flush(stdout)
+
         # Build _TimedOrder list for this scenario
         timed_orders = _TimedOrder[]
         for (t_id, od_count) in Q_s_t[s]
@@ -148,6 +151,8 @@ function create_two_stage_route_od_map(
             resize!(timed_orders, 63)
         end
 
+        println("  Scenario $s / $S: running BFS with $(length(timed_orders)) timed orders...")
+        flush(stdout)
         routes_s[s] = generate_routes_from_timed_orders(
             timed_orders, data, station_id_to_array_idx;
             vehicle_capacity = model.vehicle_capacity,
@@ -156,6 +161,9 @@ function create_two_stage_route_od_map(
             max_delay_ratio  = model.max_detour_ratio,
             time_window_sec  = model.time_window_sec
         )
+
+        println("  Scenario $s / $S: $(length(routes_s[s])) routes generated")
+        flush(stdout)
 
         # Build (s, t_id, j_idx, k_idx) → [(route_idx_within_s, α)] index
         for (r_idx, trd) in enumerate(routes_s[s])

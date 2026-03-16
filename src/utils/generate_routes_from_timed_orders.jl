@@ -215,6 +215,11 @@ function _timed_run_label_setting!(
 
     idx = 1
     while idx <= length(labels)
+        if idx % 50_000 == 1 && idx > 1
+            println("    BFS: processed $idx / $(length(labels)) labels, $(length(routes_map)) routes so far")
+            flush(stdout)
+        end
+
         lbl = labels[idx]
         idx += 1  # always advance first so any `continue` below does not stall the loop
 
