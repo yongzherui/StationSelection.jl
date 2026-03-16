@@ -22,22 +22,17 @@ function build_model(
     extra_counts      = Dict{String, Int}()
 
     # Extra counts
-    n_routes = is_temporal_mode(mapping) ?
-        sum(length(mapping.routes_s[s]) for s in 1:S; init = 0) :
-        length(mapping.routes)
+    n_routes = sum(length(mapping.routes_s[s]) for s in 1:S; init = 0)
+
     total_od_time_pairs = sum(
         length(od_pairs)
         for s in 1:S
         for (_, od_pairs) in mapping.Omega_s_t[s];
         init = 0
     )
+
     extra_counts["n_routes"]           = n_routes
     extra_counts["total_od_time_pairs"] = total_od_time_pairs
-
-    if !is_temporal_mode(mapping)
-        extra_counts["n_direct_routes"]   = count(r -> length(r.station_ids) == 2, mapping.routes)
-        extra_counts["n_one_stop_routes"] = count(r -> length(r.station_ids) == 3, mapping.routes)
-    end
 
     # ==========================================================================
     # Variables

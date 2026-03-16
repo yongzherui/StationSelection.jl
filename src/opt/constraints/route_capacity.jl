@@ -26,16 +26,13 @@ For each `(s, t_id, j_idx, k_idx)` entry in `mapping.routes_by_jkt_s`:
     Σ_{(r, α) ∈ routes_by_jkt_s[(s,t,j,k)]} α * theta_s[s][r]
       ≥  Σ_{(o,d): (j,k) valid} q * x[s][t][od][pair]
 
-Returns the number of constraints added. Returns 0 if the mapping was not built
-in temporal mode (`mapping.routes_by_jkt_s === nothing`).
+Returns the number of constraints added.
 """
 function add_route_capacity_constraints!(
     m::Model,
     data::StationSelectionData,
     mapping::TwoStageRouteODMap
 )::Int
-    isnothing(mapping.routes_by_jkt_s) && return 0
-
     before  = _total_num_constraints(m)
     x       = m[:x]
     theta_s = m[:theta_s]

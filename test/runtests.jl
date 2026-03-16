@@ -39,7 +39,6 @@ const MOI = JuMP.MOI
     @testset "Utilities" begin
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
-        include("utils/test_generate_routes_from_orders.jl")
         include("utils/test_generate_routes_from_timed_orders.jl")
     end
 

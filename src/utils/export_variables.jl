@@ -411,70 +411,40 @@ function export_model_specific_variables(
     metadata::Dict
 )
     metadata["model_type"]       = "TwoStageRouteModel"
-    metadata["n_routes"]         = length(mapping.routes)
+    metadata["n_routes"]         = sum(length(rs) for rs in values(mapping.routes_s); init=0)
     metadata["time_window_sec"]  = mapping.time_window_sec
     metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
 
-    n_theta = export_route_theta_variables(result.model, mapping, export_dir)
+    n_theta = export_route_theta_s_variables(result.model, mapping, export_dir)
     metadata["n_route_activations"] = n_theta
-
-    n_pool = export_route_pool(mapping, export_dir)
-    metadata["n_route_pool"] = n_pool
 end
 
 
 """
-    export_route_pool(mapping::TwoStageRouteODMap, export_dir::String) -> Int
+    export_route_theta_s_variables(m, mapping::TwoStageRouteODMap, export_dir) -> Int
 
-Export all pre-generated routes (the full pool) to `route_pool.csv`.
-Columns: route_id, station_ids (pipe-separated), n_stops, travel_time.
-Returns the number of routes written. No-op when pool is empty.
-"""
-function export_route_pool(mapping::TwoStageRouteODMap, export_dir::String)
-    routes = mapping.routes
-    isempty(routes) && return 0
-    rows = [(
-        route_id    = r.id,
-        station_ids = join(r.station_ids, "|"),
-        n_stops     = length(r.station_ids),
-        travel_time = r.travel_time,
-    ) for r in routes]
-    CSV.write(joinpath(export_dir, "route_pool.csv"), DataFrame(rows))
-    println("    ✓ route_pool.csv ($(length(routes)) routes)")
-    return length(routes)
-end
-
-
-"""
-    export_route_theta_variables(m, mapping::TwoStageRouteODMap, export_dir) -> Int
-
-Export route activation variables (theta) to `route_activations.csv`.
-Columns: scenario, route_id, station_ids, travel_time, value.
+Export temporal BFS route activation variables (theta_s) to `route_activations.csv`.
+Columns: scenario, route_idx, station_ids, travel_time, value.
 Returns count of activated routes written.
 """
-function export_route_theta_variables(
+function export_route_theta_s_variables(
     m::JuMP.Model,
     mapping::TwoStageRouteODMap,
     export_dir::String
 )
-    if !haskey(m.obj_dict, :theta)
-        println("    ✓ route_activations.csv (0 activations — theta not present)")
-        return 0
-    end
-
-    theta = m[:theta]
-    S, _ = size(theta)
+    theta_s = m[:theta_s]
+    S = length(theta_s)
 
     rows = []
     for s in 1:S
-        for (r_idx, route) in enumerate(mapping.routes)
-            val = JuMP.value(theta[s, r_idx])
+        for (r_idx, trd) in enumerate(mapping.routes_s[s])
+            val = JuMP.value(theta_s[s][r_idx])
             val > 0.5 || continue
             push!(rows, (
                 scenario    = s,
-                route_id    = route.id,
-                station_ids = join(route.station_ids, "|"),
-                travel_time = route.travel_time,
+                route_idx   = r_idx,
+                station_ids = join(trd.station_ids, "|"),
+                travel_time = trd.route.travel_time,
                 value       = val
             ))
         end

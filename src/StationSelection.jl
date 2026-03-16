@@ -26,8 +26,6 @@ include("utils/candidate_stations.jl")
 include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
 include("utils/route_data.jl")
-include("utils/generate_routes.jl")
-include("utils/generate_routes_from_orders.jl")
 include("utils/generate_routes_from_timed_orders.jl")
 include("data/stations.jl")
 include("data/requests.jl")
@@ -44,7 +42,7 @@ include("data/clustering_od_map.jl")
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/clustering_base_map.jl")
 
-# Route OD map (depends on TwoStageRouteModel, RouteData, generate_routes)
+# Route OD map (depends on TwoStageRouteModel, RouteData)
 include("data/two_stage_route_od_map.jl")
 
 # Model-to-map dispatch
@@ -93,9 +91,7 @@ export compute_time_to_od_count_mapping
 export has_walking_distance_limit, get_valid_jk_pairs
 
 # Re-export route utilities
-export RouteData, generate_routes, generate_routes_from_orders
-export TimedRouteData, generate_routes_from_timed_orders
-export is_temporal_mode
+export RouteData, TimedRouteData, generate_routes_from_timed_orders
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel

@@ -24,22 +24,11 @@ Routes are pre-generated sequences of VBS stops; θ^r_s activates route r in sce
 - `time_window_sec::Int`: Groups requests into discrete time windows within each scenario
 - `max_route_travel_time::Union{Float64,Nothing}`: Upper bound on route travel time (filter passed to generate_routes)
 - `max_intermediate_stops::Int`: 0 = direct only; 1 = allow one intermediate stop
-- `use_walking_distance_limit::Bool`: Restrict valid (j,k) pairs by walking distance
-- `max_walking_distance::Union{Float64,Nothing}`: Walking limit (required when limit is enabled)
-- `max_wait_time::Union{Float64,Nothing}`: Enables cross-window temporal BFS when set.
-  Max seconds after `t_id * time_window_sec` that the vehicle can arrive at a pickup.
-  When `nothing` (default), uses the standard scenario-independent route pool.
+- `max_walking_distance::Float64`: Required walking limit; prunes valid (j,k) pairs
+- `max_wait_time::Float64`: Max seconds after `t_id * time_window_sec` that the vehicle
+  can arrive at a pickup. Routes are always generated per-scenario via cross-window BFS.
 
-# Formulation (standard mode, `max_wait_time = nothing`)
-
-**Objective:**
-    min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} q_{odts} (d_{oj} + d_{kd}) x_{odtjks}
-            + μ Σ_r τ^r θ^r_s ]
-
-**Capacity constraint (per j,k,t,s):**
-    Σ_{(o,d)∈Ω_{s,t}} q_{odts} x_{odtjks}  ≤  Σ_{r: (j,k)∈r} C · θ^r_s
-
-# Formulation (temporal mode, `max_wait_time` set)
+# Formulation
 
 Routes are generated per-scenario via cross-window BFS. θ^r_s activates route r
 (scenario-specific index). The capacity constraint becomes a covering constraint:
@@ -59,26 +48,25 @@ struct TwoStageRouteModel <: AbstractODModel
     time_window_sec::Int
     max_route_travel_time::Union{Float64, Nothing}
     max_intermediate_stops::Int
-    use_walking_distance_limit::Bool
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
     max_detour_time::Union{Float64, Nothing}
     max_detour_ratio::Union{Float64, Nothing}
-    max_wait_time::Union{Float64, Nothing}
+    max_wait_time::Float64
 
     function TwoStageRouteModel(
             k::Int,
             l::Int;
             route_regularization_weight::Number = 1.0,
-            vehicle_capacity::Int = 4,
-            time_window_sec::Int = 120,
+            vehicle_capacity::Int = 18,
+            time_window_sec::Int = 1,
             max_route_travel_time::Union{Number, Nothing} = nothing,
-            max_intermediate_stops::Int = 0,
-            use_walking_distance_limit::Bool = false,
-            max_walking_distance::Union{Number, Nothing} = nothing,
-            max_detour_time::Union{Number, Nothing} = nothing,
-            max_detour_ratio::Union{Number, Nothing} = nothing,
-            max_wait_time::Union{Number, Nothing} = nothing
+            max_intermediate_stops::Union{Int, Nothing} = nothing,
+            max_walking_distance::Number = 300, # this is in seconds
+            max_detour_time::Union{Number, Nothing} = 1200, # in seconds
+            max_detour_ratio::Union{Number, Nothing} = 2.0, # ratio
+            max_wait_time::Number = 900 # in seconds
         )
+
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         route_regularization_weight >= 0 || throw(ArgumentError("route_regularization_weight must be non-negative"))
@@ -89,24 +77,13 @@ struct TwoStageRouteModel <: AbstractODModel
         mdt  = isnothing(max_detour_time)  ? nothing : Float64(max_detour_time)
         mdr  = isnothing(max_detour_ratio) ? nothing : Float64(max_detour_ratio)
         mrtt = isnothing(max_route_travel_time) ? nothing : Float64(max_route_travel_time)
-        mwt  = isnothing(max_wait_time)    ? nothing : Float64(max_wait_time)
+        mwt  = Float64(max_wait_time)
 
-        if !isnothing(mwt)
-            mwt >= 0.0 || throw(ArgumentError("max_wait_time must be non-negative"))
-        end
+        mwt >= 0.0 || throw(ArgumentError("max_wait_time must be non-negative"))
 
-        if use_walking_distance_limit
-            isnothing(max_walking_distance) && throw(ArgumentError(
-                "max_walking_distance must be provided when use_walking_distance_limit=true"
-            ))
-            max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
-            new(k, l, Float64(route_regularization_weight), vehicle_capacity,
-                time_window_sec, mrtt, max_intermediate_stops,
-                true, Float64(max_walking_distance), mdt, mdr, mwt)
-        else
-            new(k, l, Float64(route_regularization_weight), vehicle_capacity,
-                time_window_sec, mrtt, max_intermediate_stops,
-                false, nothing, mdt, mdr, mwt)
-        end
+        max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+        new(k, l, Float64(route_regularization_weight), vehicle_capacity,
+            time_window_sec, mrtt, max_intermediate_stops,
+            Float64(max_walking_distance), mdt, mdr, mwt)
     end
 end

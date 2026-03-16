@@ -1,8 +1,7 @@
 """
 Objective function for TwoStageRouteModel.
 
-Walking cost (no in-vehicle time) plus route activation penalty.
-Supports both standard mode (global route pool) and temporal BFS mode (per-scenario routes).
+Walking cost (no in-vehicle time) plus route activation penalty (temporal BFS mode).
 """
 
 using JuMP
@@ -15,15 +14,10 @@ export set_route_od_objective!
 
 Set the minimization objective for TwoStageRouteModel.
 
-**Standard mode:**
-    min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} q_{odts} (d_{oj} + d_{kd}) x_{odtjks}
-            + μ Σ_r τ^r θ[s,r] ]
-
-**Temporal mode:**
     min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} q_{odts} (d_{oj} + d_{kd}) x_{odtjks}
             + μ Σ_r τ^r_s theta_s[s][r] ]
 
-where r iterates over the per-scenario route pool.
+where r iterates over the per-scenario route pool from temporal BFS.
 """
 function set_route_od_objective!(
     m::Model,
@@ -57,25 +51,12 @@ function set_route_od_objective!(
     end
 
     # ── Route activation penalty ───────────────────────────────────────────────
-    if is_temporal_mode(mapping)
-        # Temporal mode: per-scenario route pool stored in theta_s
-        theta_s = m[:theta_s]
-        for s in 1:S
-            for (r_idx, trd) in enumerate(mapping.routes_s[s])
-                tau_r = trd.route.travel_time
-                add_to_expression!(obj,
-                    route_regularization_weight * tau_r, theta_s[s][r_idx])
-            end
-        end
-    else
-        # Standard mode: global route pool stored in theta
-        theta    = m[:theta]
-        n_routes = length(mapping.routes)
-        for s in 1:S
-            for r in 1:n_routes
-                tau_r = mapping.routes[r].travel_time
-                add_to_expression!(obj, route_regularization_weight * tau_r, theta[s, r])
-            end
+    theta_s = m[:theta_s]
+    for s in 1:S
+        for (r_idx, trd) in enumerate(mapping.routes_s[s])
+            tau_r = trd.route.travel_time
+            add_to_expression!(obj,
+                route_regularization_weight * tau_r, theta_s[s][r_idx])
         end
     end
 
