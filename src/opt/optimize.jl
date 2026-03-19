@@ -1,4 +1,5 @@
 include("optimize/build_clustering_two_stage_od.jl")
 include("optimize/build_clustering_base.jl")
 include("optimize/build_two_stage_route.jl")
+include("optimize/build_route_model.jl")
 include("optimize/run_opt.jl")

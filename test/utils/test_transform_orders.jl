@@ -72,7 +72,7 @@ using CSV
         end
     end
 
-    @testset "TwoStageRouteModel matches exact time buckets" begin
+    @testset "TwoStageRouteWithTimeModel matches exact time buckets" begin
         mktempdir() do tmpdir
             order_file, cluster_file, selection_run_dir = write_common_inputs(tmpdir)
 
@@ -95,7 +95,7 @@ using CSV
                 order_file,
                 selection_run_dir,
                 cluster_file,
-                "TwoStageRouteModel";
+                "TwoStageRouteWithTimeModel";
                 time_window_sec = 120
             )
 
@@ -106,7 +106,7 @@ using CSV
         end
     end
 
-    @testset "TwoStageRouteModel requires time_id export" begin
+    @testset "TwoStageRouteWithTimeModel requires time_id export" begin
         mktempdir() do tmpdir
             order_file, cluster_file, selection_run_dir = write_common_inputs(tmpdir)
 
@@ -129,7 +129,7 @@ using CSV
                     order_file,
                     selection_run_dir,
                     cluster_file,
-                    "TwoStageRouteModel";
+                    "TwoStageRouteWithTimeModel";
                     time_window_sec = 120
                 )
                 nothing
@@ -142,7 +142,7 @@ using CSV
         end
     end
 
-    @testset "TwoStageRouteModel errors on missing exact bucket" begin
+    @testset "TwoStageRouteWithTimeModel errors on missing exact bucket" begin
         mktempdir() do tmpdir
             order_file, cluster_file, selection_run_dir = write_common_inputs(tmpdir)
 
@@ -166,7 +166,7 @@ using CSV
                     order_file,
                     selection_run_dir,
                     cluster_file,
-                    "TwoStageRouteModel";
+                    "TwoStageRouteWithTimeModel";
                     time_window_sec = 120
                 )
                 nothing

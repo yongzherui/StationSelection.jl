@@ -1,5 +1,5 @@
 """
-Route data structure for TwoStageRouteModel.
+Route data structure for TwoStageRouteWithTimeModel.
 """
 
 export RouteData

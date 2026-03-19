@@ -1,5 +1,5 @@
 """
-OD mapping with time windows and pre-generated routes for TwoStageRouteModel.
+OD mapping with time windows and pre-generated routes for TwoStageRouteWithTimeModel.
 """
 
 export TwoStageRouteODMap
@@ -8,7 +8,7 @@ export create_two_stage_route_od_map
 """
     TwoStageRouteODMap <: AbstractClusteringMap
 
-Data mapping for TwoStageRouteModel. Extends the clustering OD structure with
+Data mapping for TwoStageRouteWithTimeModel. Extends the clustering OD structure with
 time-indexed OD pairs and pre-generated vehicle routes.
 
 # Fields
@@ -65,17 +65,17 @@ end
 
 
 """
-    create_two_stage_route_od_map(model::TwoStageRouteModel, data::StationSelectionData)
+    create_two_stage_route_od_map(model::TwoStageRouteWithTimeModel, data::StationSelectionData)
     -> TwoStageRouteODMap
 
-Build the full OD mapping for TwoStageRouteModel:
+Build the full OD mapping for TwoStageRouteWithTimeModel:
 1. Station and scenario index mappings
 2. Time-indexed OD pairs and demand per scenario
 3. Valid (j,k) pairs per OD pair (walking-filtered)
 4. Per-scenario routes via cross-window temporal BFS
 """
 function create_two_stage_route_od_map(
-    model::TwoStageRouteModel,
+    model::TwoStageRouteWithTimeModel,
     data::StationSelectionData
 )::TwoStageRouteODMap
 

@@ -439,7 +439,7 @@ Orders without a matching assignment fall back to closest selected station.
 
 Lookup key:
 - `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`
-- `(scenario, time_id, origin_id, dest_id)` for `TwoStageRouteModel`
+- `(scenario, time_id, origin_id, dest_id)` for `TwoStageRouteWithTimeModel`
 
 # Arguments
 - `order_file`: Path to order CSV
@@ -449,7 +449,7 @@ Lookup key:
 - `start_date`: Optional start date filter
 - `end_date`: Optional end date filter
 - `use_timeframes`: Whether to use timeframe columns for fallback
-- `time_window_sec`: Required for `TwoStageRouteModel`; ignored otherwise
+- `time_window_sec`: Required for `TwoStageRouteWithTimeModel`; ignored otherwise
 
 # Returns
 - DataFrame with same schema as `transform_orders`
@@ -518,16 +518,19 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     # 6. Build assignment lookup dict
-    route_model = method == "TwoStageRouteModel"
+    # TwoStageRouteWithTimeModel uses a time-indexed (4-key) lookup
+    # All other OD models (including RouteAlphaCapacityModel, RouteVehicleCapacityModel)
+    # use a scenario+OD (3-key) lookup with no time_id
+    route_model = method == "TwoStageRouteWithTimeModel"
     route_model && isnothing(time_window_sec) &&
-        error("transform_orders_from_assignments requires time_window_sec for TwoStageRouteModel")
+        error("transform_orders_from_assignments requires time_window_sec for TwoStageRouteWithTimeModel")
 
     assignment_lookup = route_model ?
         Dict{NTuple{4, Int}, Tuple{Int,Int}}() :
         Dict{NTuple{3, Int}, Tuple{Int,Int}}()
 
     if route_model && !("time_id" in names(assignments_df))
-        error("assignment_variables.csv missing required column 'time_id' for TwoStageRouteModel")
+        error("assignment_variables.csv missing required column 'time_id' for TwoStageRouteWithTimeModel")
     end
 
     for row in eachrow(assignments_df)

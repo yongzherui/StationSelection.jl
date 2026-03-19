@@ -27,6 +27,7 @@ include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
 include("utils/route_data.jl")
 include("utils/generate_routes_from_timed_orders.jl")
+include("utils/generate_routes_from_orders.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
@@ -35,6 +36,7 @@ include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_base.jl")
 include("opt/models/two_stage_route.jl")
+include("opt/models/route_models.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
@@ -42,8 +44,11 @@ include("data/clustering_od_map.jl")
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/clustering_base_map.jl")
 
-# Route OD map (depends on TwoStageRouteModel, RouteData)
+# Route OD map (depends on TwoStageRouteWithTimeModel, RouteData)
 include("data/two_stage_route_od_map.jl")
+
+# Non-temporal route OD map (depends on RouteAlphaCapacityModel, RouteVehicleCapacityModel, NonTimedRouteData)
+include("data/route_od_map.jl")
 
 # Model-to-map dispatch
 include("data/create_map.jl")
@@ -77,10 +82,12 @@ export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export TwoStageRouteODMap
+export RouteODMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_base_model_map
 export create_two_stage_route_od_map
+export create_route_od_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, has_routing_costs
@@ -92,6 +99,7 @@ export has_walking_distance_limit, get_valid_jk_pairs
 
 # Re-export route utilities
 export RouteData, TimedRouteData, generate_routes_from_timed_orders
+export NonTimedRouteData, generate_routes_from_orders
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -99,7 +107,8 @@ export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
 export ClusteringBaseModel
-export TwoStageRouteModel
+export TwoStageRouteWithTimeModel
+export RouteAlphaCapacityModel, RouteVehicleCapacityModel
 
 # Re-export optimization functions
 export run_opt, build_model

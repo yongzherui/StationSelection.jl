@@ -1,15 +1,15 @@
 """
-TwoStageRouteModel — two-stage stochastic model with pre-generated vehicle routes.
+TwoStageRouteWithTimeModel — two-stage stochastic model with pre-generated vehicle routes.
 
 Extends the OD assignment approach by lifting station-pair assignments to explicit
 vehicle routes, adding a capacity constraint that links demand to route activations,
 and penalising total activated route travel time.
 """
 
-export TwoStageRouteModel
+export TwoStageRouteWithTimeModel
 
 """
-    TwoStageRouteModel <: AbstractODModel
+    TwoStageRouteWithTimeModel <: AbstractODModel
 
 Two-stage stochastic station selection with route-based capacity constraints.
 
@@ -41,7 +41,7 @@ where α^r_{t,jk} is the actual passengers route r carries on leg (j,k) in windo
 Standard two-stage constraints: station_limit, activation_limit, activation_linking,
 assignment_coverage, assignment_to_active (tight: x ≤ z[j,s], x ≤ z[k,s]).
 """
-struct TwoStageRouteModel <: AbstractODModel
+struct TwoStageRouteWithTimeModel <: AbstractODModel
     k::Int
     l::Int
     route_regularization_weight::Float64
@@ -53,7 +53,7 @@ struct TwoStageRouteModel <: AbstractODModel
     max_detour_ratio::Float64
     max_wait_time::Float64
 
-    function TwoStageRouteModel(
+    function TwoStageRouteWithTimeModel(
             k::Int,
             l::Int;
             route_regularization_weight::Number = 1.0,

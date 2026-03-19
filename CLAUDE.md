@@ -13,7 +13,9 @@ AbstractStationSelectionModel
     └── AbstractTwoStageModel        # y=build (stage 1), z=activate (stage 2)
         └── AbstractODModel
             ├── ClusteringTwoStageODModel  # Two-stage: pure cost minimisation (+ optional flow reg.)
-            └── TwoStageRouteModel         # Two-stage: route-based capacity + route penalty
+            ├── TwoStageRouteWithTimeModel         # Two-stage: route-based capacity + route penalty
+            ├── RouteAlphaCapacityModel    # Two-stage: non-temporal routes; α = actual passengers
+            └── RouteVehicleCapacityModel  # Two-stage: non-temporal routes; α = C (vehicle capacity)
 ```
 
 ## Model Reference
@@ -22,7 +24,9 @@ AbstractStationSelectionModel
 | --------------------------- | ----------------------------------------------------------------------- | ----------------------------- |
 | `ClusteringBaseModel`       | k-medoids single scenario                                               | x[i,j]                        |
 | `ClusteringTwoStageODModel` | Two-stage; minimise walk+ride; optional flow regularization penalty      | y, z, x, (f_flow)             |
-| `TwoStageRouteModel`        | Two-stage; time-indexed OD; pre-generated routes; vehicle capacity link  | y, z, x[s][t][od], θ[s,r]    |
+| `TwoStageRouteWithTimeModel`        | Two-stage; time-indexed OD; pre-generated routes; vehicle capacity link  | y, z, x[s][t][od], θ[s,r]    |
+| `RouteAlphaCapacityModel`   | Two-stage; aggregated OD (no time index); non-temporal BFS; α = actual passengers | y, z, x[s][od], θ[s,r] |
+| `RouteVehicleCapacityModel` | Two-stage; aggregated OD (no time index); non-temporal BFS; α = C (vehicle capacity) | y, z, x[s][od], θ[s,r] |
 
 ## Decision Variables
 

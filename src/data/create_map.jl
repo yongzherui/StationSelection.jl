@@ -32,13 +32,37 @@ function create_map(
 end
 
 """
-    create_map(model::TwoStageRouteModel, data::StationSelectionData)
+    create_map(model::TwoStageRouteWithTimeModel, data::StationSelectionData)
 
-Create a TwoStageRouteODMap for TwoStageRouteModel.
+Create a TwoStageRouteODMap for TwoStageRouteWithTimeModel.
 """
 function create_map(
-        model::TwoStageRouteModel,
+        model::TwoStageRouteWithTimeModel,
         data::StationSelectionData
     )::TwoStageRouteODMap
     return create_two_stage_route_od_map(model, data)
+end
+
+"""
+    create_map(model::RouteAlphaCapacityModel, data::StationSelectionData)
+
+Create a RouteODMap for RouteAlphaCapacityModel.
+"""
+function create_map(
+        model::RouteAlphaCapacityModel,
+        data::StationSelectionData
+    )::RouteODMap
+    return create_route_od_map(model, data)
+end
+
+"""
+    create_map(model::RouteVehicleCapacityModel, data::StationSelectionData)
+
+Create a RouteODMap for RouteVehicleCapacityModel.
+"""
+function create_map(
+        model::RouteVehicleCapacityModel,
+        data::StationSelectionData
+    )::RouteODMap
+    return create_route_od_map(model, data)
 end
