@@ -250,7 +250,8 @@ function add_route_capacity_constraints!(
     # ── Constraint (ii): d_{jkts} ≤ Σ_r α^r_{jkts} ───────────────────────────
     for ((s, j_idx, k_idx, t_id), d_var) in d_jkts
         rhs = AffExpr(0.0)
-        for r_idx in 1:length(mapping.routes_s[s])
+        routes_t = get(mapping.routes_s[s], t_id, RouteData[])
+        for r_idx in 1:length(routes_t)
             key5 = (s, r_idx, j_idx, k_idx, t_id)
             alpha_var = get(alpha_r_jkts, key5, nothing)
             alpha_var === nothing && continue
@@ -261,11 +262,11 @@ function add_route_capacity_constraints!(
 
     # ── Constraint (iii): Σ_{j,k: β^r_{jkl}=1} α^r_{jkts} ≤ Cap_r * θ^r_{ts} ──
     for s in 1:S
-        for (r_idx, route) in enumerate(mapping.routes_s[s])
-            n_segs = length(route.station_ids) - 1
-            n_segs <= 0 && continue
+        for (t_id, routes_t) in mapping.routes_s[s]
+            for (r_idx, route) in enumerate(routes_t)
+                n_segs = length(route.station_ids) - 1
+                n_segs <= 0 && continue
 
-            for t_id in keys(mapping.Q_s_t[s])
                 theta_var = get(theta_ts, (s, t_id, r_idx), nothing)
                 theta_var === nothing && continue
 
@@ -363,9 +364,10 @@ function add_route_capacity_lazy_constraints!(
         # Constraint (ii): d_{jkts} ≤ Σ_r α^r_{jkts}
         for ((s, j_idx, k_idx, t_id), d_var) in d_jkts
             d_val = callback_value(cb_data, d_var)
+            routes_t = get(mapping.routes_s[s], t_id, RouteData[])
+            n_routes_t = length(routes_t)
             alpha_sum = 0.0
-            n_routes_s = length(mapping.routes_s[s])
-            for r_idx in 1:n_routes_s
+            for r_idx in 1:n_routes_t
                 avar = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
                 avar === nothing && continue
                 alpha_sum += callback_value(cb_data, avar)
@@ -374,7 +376,7 @@ function add_route_capacity_lazy_constraints!(
 
             # Violated — submit constraint (ii)
             rhs = AffExpr(0.0)
-            for r_idx in 1:n_routes_s
+            for r_idx in 1:n_routes_t
                 avar = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
                 avar === nothing && continue
                 add_to_expression!(rhs, 1.0, avar)
@@ -385,13 +387,12 @@ function add_route_capacity_lazy_constraints!(
 
         # Constraint (iii): Σ_{j,k: β=1} α^r_{jkts} ≤ Cap_r · θ^r_{ts}
         for s in 1:S
-            for (r_idx, route) in enumerate(mapping.routes_s[s])
-                n_segs = length(route.station_ids) - 1
-                n_segs <= 0 && continue
+            for (t_id, routes_t) in mapping.routes_s[s]
+                for (r_idx, route) in enumerate(routes_t)
+                    n_segs = length(route.station_ids) - 1
+                    n_segs <= 0 && continue
 
-                for t_id in keys(mapping.Q_s_t[s])
-                    theta_key = (s, t_id, r_idx)
-                    theta_var = get(theta_ts, theta_key, nothing)
+                    theta_var = get(theta_ts, (s, t_id, r_idx), nothing)
                     theta_var === nothing && continue
                     theta_val = callback_value(cb_data, theta_var)
 

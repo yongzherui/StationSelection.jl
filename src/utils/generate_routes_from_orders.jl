@@ -391,6 +391,41 @@ end
 
 
 """
+Returns true if every on-board order j can be delivered within the detour constraints,
+assuming the vehicle travels directly from `current_station` to j's chosen dropoff next.
+
+Used as a proactive prune at label-expansion time. Since `cum_time` is non-decreasing,
+if this lower bound is already infeasible, no future extension will fix it.
+"""
+@inline function _proactive_detour_feasible(
+    current_station  :: Int,
+    cum_time         :: Float64,
+    picked           :: UInt64,
+    dropped          :: UInt64,
+    chosen_pickup    :: Vector{Int},
+    chosen_dropoff   :: Vector{Int},
+    board_cumtime    :: Vector{Float64},
+    n                :: Int,
+    data             :: StationSelectionData,
+    max_detour_time  :: Float64,
+    max_detour_ratio :: Float64,
+    ε                :: Float64
+) :: Bool
+    for j in 0:(n - 1)
+        (picked  >> j) & UInt64(1) == UInt64(0) && continue
+        (dropped >> j) & UInt64(1) == UInt64(1) && continue
+        d_j      = chosen_dropoff[j + 1]
+        p_j      = chosen_pickup[j + 1]
+        min_inv  = cum_time + get_routing_cost(data, current_station, d_j) - board_cumtime[j + 1]
+        direct_j = get_routing_cost(data, p_j, d_j)
+        min_inv - direct_j > max_detour_time + ε && return false
+        direct_j > 0.0 && min_inv / direct_j > 1.0 + max_detour_ratio + ε && return false
+    end
+    return true
+end
+
+
+"""
 BFS label-setting core. Processes labels in push order; extends each by one
 dropoff or pickup action. Calls `record_fn!(labels, terminal_idx)` for complete labels.
 
@@ -444,6 +479,20 @@ function _nontimed_bfs_core!(
         idx += 1
         if !alive[idx - 1]
             # Free heavy arrays — path reconstruction only needs .station and .parent
+            empty!(lbl.board_cumtime)
+            empty!(lbl.chosen_pickup)
+            empty!(lbl.chosen_dropoff)
+            continue
+        end
+
+        # ── Proactive detour lower-bound check ────────────────────────────────
+        # cum_time is non-decreasing: if going directly to any on-board dropoff
+        # already violates the detour constraint, no future extension can fix it.
+        if !_proactive_detour_feasible(
+                lbl.station, lbl.cum_time, lbl.picked, lbl.dropped,
+                lbl.chosen_pickup, lbl.chosen_dropoff, lbl.board_cumtime,
+                n, data, max_detour_time, max_detour_ratio, ε)
+            alive[idx - 1] = false
             empty!(lbl.board_cumtime)
             empty!(lbl.chosen_pickup)
             empty!(lbl.chosen_dropoff)

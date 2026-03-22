@@ -188,16 +188,25 @@ function add_alpha_r_jkts_variables!(
         jkt_list = get(d_keys_by_s, s, NTuple{3,Int}[])
         isempty(jkt_list) && continue
 
-        for (r_idx, route) in enumerate(mapping.routes_s[s])
-            for (j_idx, k_idx, t_id) in jkt_list
-                _route_serves_jk(route, j_idx, k_idx, mapping.array_idx_to_station_id) || continue
+        # Group jkt_list by t_id so we can look up per-time-bucket routes efficiently
+        jk_by_t = Dict{Int, Vector{Tuple{Int,Int}}}()
+        for (j_idx, k_idx, t_id) in jkt_list
+            push!(get!(jk_by_t, t_id, Tuple{Int,Int}[]), (j_idx, k_idx))
+        end
 
-                key5 = (s, r_idx, j_idx, k_idx, t_id)
-                alpha_r_jkts[key5] = @variable(m, integer = true, lower_bound = 0)
+        for (t_id, jk_list_t) in jk_by_t
+            routes_t = get(mapping.routes_s[s], t_id, RouteData[])
+            for (r_idx, route) in enumerate(routes_t)
+                for (j_idx, k_idx) in jk_list_t
+                    _route_serves_jk(route, j_idx, k_idx, mapping.array_idx_to_station_id) || continue
 
-                srt_key = (s, r_idx, t_id)
-                push!(get!(alpha_r_jkts_by_srt, srt_key, Tuple{Int,Int}[]),
-                      (j_idx, k_idx))
+                    key5 = (s, r_idx, j_idx, k_idx, t_id)
+                    alpha_r_jkts[key5] = @variable(m, integer = true, lower_bound = 0)
+
+                    srt_key = (s, r_idx, t_id)
+                    push!(get!(alpha_r_jkts_by_srt, srt_key, Tuple{Int,Int}[]),
+                          (j_idx, k_idx))
+                end
             end
         end
     end
