@@ -188,7 +188,7 @@ end
 
 Add the three covering constraints for RouteVehicleCapacityModel (new formulation):
 
-    (i)   d_{jkts} = Σ_{od: (j,k) valid} Q_s_t[s][t][od] · x[s][od][pair]
+    (i)   d_{jkts} = Σ_{od: (j,k) valid} x[s][t][od][pair]
                                                                      ∀ j,k,t,s
 
     (ii)  d_{jkts} ≤ Σ_r α^r_{jkts}
@@ -196,6 +196,8 @@ Add the three covering constraints for RouteVehicleCapacityModel (new formulatio
 
     (iii) Σ_{j,k: β^r_{jkl}=1} α^r_{jkts}  ≤  Cap_r · θ^r_{ts}
                                                                      ∀ t,r,l∈V(r),s
+
+x is time-indexed integer; d is a direct sum of x (no Q scaling).
 
 Returns the number of constraints added.
 """
@@ -214,31 +216,32 @@ function add_route_capacity_constraints!(
     # Cap_r is set by build_model before calling this function
     Cap_r = Float64(m[:vehicle_capacity])
 
-    # Precompute reverse OD index per scenario: (o,d) → od_idx in Omega_s[s]
-    od_to_idx = Dict{Int, Dict{Tuple{Int,Int}, Int}}()
+    # Precompute reverse OD index per scenario and time bucket:
+    # (o,d) → od_idx in Omega_s_t[s][t_id]
+    od_to_idx_t = Dict{Int, Dict{Int, Dict{Tuple{Int,Int}, Int}}}()
     for s in 1:S
-        od_to_idx[s] = Dict{Tuple{Int,Int}, Int}(
-            od => idx for (idx, od) in enumerate(mapping.Omega_s[s])
-        )
+        od_to_idx_t[s] = Dict{Int, Dict{Tuple{Int,Int}, Int}}()
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            od_to_idx_t[s][t_id] = Dict{Tuple{Int,Int}, Int}(
+                od => idx for (idx, od) in enumerate(od_pairs)
+            )
+        end
     end
 
-    # ── Constraint (i): d_{jkts} = Σ_{od: (j,k) valid} Q_s_t[s][t][od] * x[s][od][pair] ──
+    # ── Constraint (i): d_{jkts} = Σ_{od: (j,k) valid} x[s][t][od][pair] ─────
     for ((s, j_idx, k_idx, t_id), d_var) in d_jkts
         rhs = AffExpr(0.0)
-        od_pairs_t  = get(mapping.Omega_s_t[s], t_id, Tuple{Int,Int}[])
-        od_demand_t = get(mapping.Q_s_t[s], t_id, Dict{Tuple{Int,Int},Int}())
+        od_pairs_t = get(mapping.Omega_s_t[s], t_id, Tuple{Int,Int}[])
 
         for (o, d) in od_pairs_t
-            demand = Float64(get(od_demand_t, (o, d), 0))
-            demand == 0.0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             pair_idx = findfirst(==((j_idx, k_idx)), valid_pairs)
             pair_idx === nothing && continue
-            od_idx = get(od_to_idx[s], (o, d), 0)
+            od_idx = get(get(od_to_idx_t[s], t_id, Dict{Tuple{Int,Int},Int}()), (o, d), 0)
             od_idx == 0 && continue
-            x_od = get(x[s], od_idx, VariableRef[])
+            x_od = get(get(x[s], t_id, Dict{Int, Vector{VariableRef}}()), od_idx, VariableRef[])
             isempty(x_od) && continue
-            add_to_expression!(rhs, demand, x_od[pair_idx])
+            add_to_expression!(rhs, 1.0, x_od[pair_idx])
         end
 
         @constraint(m, d_var == rhs)
@@ -298,11 +301,11 @@ end
 
 Add constraint (i) explicitly and register a lazy-constraint callback for (ii) and (iii).
 
-Constraint (i) is always explicit (it defines d as a linear function of x).
+Constraint (i) is always explicit (it defines d as a direct sum of time-indexed integer x).
 Constraints (ii) and (iii) are submitted only when violated at integer-feasible B&B nodes,
 which can dramatically reduce solve time on large instances.
 
-    (i)   d_{jkts} = Σ_{od: (j,k) valid} Q_s_t[s][t][od] · x[s][od][pair]   (explicit)
+    (i)   d_{jkts} = Σ_{od: (j,k) valid} x[s][t][od][pair]                   (explicit)
     (ii)  d_{jkts} ≤ Σ_r α^r_{jkts}                                           (lazy)
     (iii) Σ_{j,k: β^r_{jkl}=1} α^r_{jkts} ≤ Cap_r · θ^r_{ts}                (lazy)
 
@@ -322,31 +325,32 @@ function add_route_capacity_lazy_constraints!(
     theta_ts = m[:theta_ts]
     Cap_r    = Float64(m[:vehicle_capacity])
 
-    # Precompute reverse OD index per scenario: (o,d) → od_idx in Omega_s[s]
-    od_to_idx = Dict{Int, Dict{Tuple{Int,Int}, Int}}()
+    # Precompute reverse OD index per scenario and time bucket:
+    # (o,d) → od_idx in Omega_s_t[s][t_id]
+    od_to_idx_t = Dict{Int, Dict{Int, Dict{Tuple{Int,Int}, Int}}}()
     for s in 1:S
-        od_to_idx[s] = Dict{Tuple{Int,Int}, Int}(
-            od => idx for (idx, od) in enumerate(mapping.Omega_s[s])
-        )
+        od_to_idx_t[s] = Dict{Int, Dict{Tuple{Int,Int}, Int}}()
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            od_to_idx_t[s][t_id] = Dict{Tuple{Int,Int}, Int}(
+                od => idx for (idx, od) in enumerate(od_pairs)
+            )
+        end
     end
 
     # ── Constraint (i): explicit, always ──────────────────────────────────────
     for ((s, j_idx, k_idx, t_id), d_var) in d_jkts
         rhs = AffExpr(0.0)
-        od_pairs_t  = get(mapping.Omega_s_t[s], t_id, Tuple{Int,Int}[])
-        od_demand_t = get(mapping.Q_s_t[s], t_id, Dict{Tuple{Int,Int},Int}())
+        od_pairs_t = get(mapping.Omega_s_t[s], t_id, Tuple{Int,Int}[])
 
         for (o, d) in od_pairs_t
-            demand = Float64(get(od_demand_t, (o, d), 0))
-            demand == 0.0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             pair_idx = findfirst(==((j_idx, k_idx)), valid_pairs)
             pair_idx === nothing && continue
-            od_idx = get(od_to_idx[s], (o, d), 0)
+            od_idx = get(get(od_to_idx_t[s], t_id, Dict{Tuple{Int,Int},Int}()), (o, d), 0)
             od_idx == 0 && continue
-            x_od = get(x[s], od_idx, VariableRef[])
+            x_od = get(get(x[s], t_id, Dict{Int, Vector{VariableRef}}()), od_idx, VariableRef[])
             isempty(x_od) && continue
-            add_to_expression!(rhs, demand, x_od[pair_idx])
+            add_to_expression!(rhs, 1.0, x_od[pair_idx])
         end
 
         @constraint(m, d_var == rhs)

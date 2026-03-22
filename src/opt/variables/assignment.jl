@@ -169,13 +169,15 @@ end
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::VehicleCapacityODMap)
 
-Add sparse binary assignment variables x[s][od_idx] for RouteVehicleCapacityModel.
+Add sparse integer assignment variables x[s][t_id][od_idx] for RouteVehicleCapacityModel
+(new formulation from March 17 journal note).
 
-For each OD pair (o,d) in scenario s (time-aggregated), one binary variable is created
-per valid (j,k) pair. Same structure as RouteODMap dispatch.
+For each OD pair (o,d) in time bucket t of scenario s, one integer variable is created
+per valid (j,k) pair, with upper bound equal to Q_s_t[s][t][(o,d)] (the demand count).
+This allows demand splitting: passengers with the same OD can use different station pairs.
 
-Structure: `m[:x]` is a `Vector{Dict{Int, Vector{VariableRef}}}` indexed by
-scenario → od_idx → pair variables.
+Structure: `m[:x]` is a `Vector{Dict{Int, Dict{Int, Vector{VariableRef}}}}` indexed by
+scenario → t_id → od_idx → pair variables.
 """
 function add_assignment_variables!(
         m::Model,
@@ -184,16 +186,21 @@ function add_assignment_variables!(
     )
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
-    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+    x = [Dict{Int, Dict{Int, Vector{VariableRef}}}() for _ in 1:S]
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            n_pairs = length(valid_pairs)
-            if n_pairs > 0
-                x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
-            else
-                x[s][od_idx] = VariableRef[]
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            x[s][t_id] = Dict{Int, Vector{VariableRef}}()
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                n_pairs = length(valid_pairs)
+                demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
+                if n_pairs > 0 && demand > 0
+                    x[s][t_id][od_idx] = @variable(m, [1:n_pairs],
+                        integer = true, lower_bound = 0, upper_bound = demand)
+                else
+                    x[s][t_id][od_idx] = VariableRef[]
+                end
             end
         end
     end

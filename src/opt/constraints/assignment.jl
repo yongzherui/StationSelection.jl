@@ -286,8 +286,10 @@ end
 """
     add_assignment_constraints!(m, data, mapping::VehicleCapacityODMap)
 
-Each OD pair must be assigned to exactly one valid (j,k) pair.
-    Σ x[s][od_idx] == 1  ∀(s, od_idx)
+All demand for each (OD, time bucket) must be assigned across valid (j,k) pairs.
+    Σ_{(j,k)} x[s][t_id][od_idx] == Q_s_t[s][t_id][(o,d)]  ∀(s, t_id, od_idx)
+
+x is integer-valued; the RHS equals the passenger count for that OD/time/scenario.
 """
 function add_assignment_constraints!(
         m::Model,
@@ -299,9 +301,13 @@ function add_assignment_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for od_idx in 1:length(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            @constraint(m, sum(x_od) == 1)
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                x_od = get(x[s][t_id], od_idx, VariableRef[])
+                isempty(x_od) && continue
+                demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
+                @constraint(m, sum(x_od) == demand)
+            end
         end
     end
 
@@ -310,17 +316,18 @@ end
 
 
 """
-    add_assignment_to_active_constraints!(m, data, mapping::VehicleCapacityODMap;
-                                          tight_constraints=true)
+    add_assignment_to_active_constraints!(m, data, mapping::VehicleCapacityODMap)
 
-Assignments require both pickup and dropoff stations to be active.
-Tight form (default): x[s][od_idx][pair_idx] ≤ z[j,s]  AND  x[...][pair_idx] ≤ z[k,s]
+Assignments require both pickup and dropoff stations to be active (big-M formulation).
+    x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[j,s]
+    x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[k,s]
+
+The big-M coefficient equals the per-(OD, time bucket, scenario) demand count.
 """
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::VehicleCapacityODMap;
-        tight_constraints::Bool = true
+        mapping::VehicleCapacityODMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -328,16 +335,16 @@ function add_assignment_to_active_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
-            for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                if tight_constraints
-                    @constraint(m, x_od[pair_idx] <= z[j, s])
-                    @constraint(m, x_od[pair_idx] <= z[k, s])
-                else
-                    @constraint(m, 2 * x_od[pair_idx] <= z[j, s] + z[k, s])
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
+                demand == 0 && continue
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                x_od = get(x[s][t_id], od_idx, VariableRef[])
+                isempty(x_od) && continue
+                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                    @constraint(m, x_od[pair_idx] <= demand * z[j, s])
+                    @constraint(m, x_od[pair_idx] <= demand * z[k, s])
                 end
             end
         end

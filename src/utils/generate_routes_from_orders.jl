@@ -72,7 +72,7 @@ BFS label for non-temporal route generation.
 - `chosen_pickup`:   length-n; entry j = pickup VBS station ID for order j (0 = not yet)
 - `chosen_dropoff`:  length-n; entry j = dropoff VBS station ID for order j (0 = not yet)
 """
-struct _NonTimedLabel
+mutable struct _NonTimedLabel
     station       :: Int
     cum_time      :: Float64
     passengers    :: Int
@@ -130,7 +130,8 @@ function generate_routes_from_orders(
     max_detour_time         :: Float64,
     max_detour_ratio        :: Float64,
     max_stations_visited    :: Int = typemax(Int),
-    max_labels              :: Int = 400_000
+    max_labels              :: Int = 400_000,
+    print_interval          :: Int = 10_000
 )::Vector{NonTimedRouteData}
     has_routing_costs(data) || error(
         "generate_routes_from_orders requires routing costs " *
@@ -146,8 +147,9 @@ function generate_routes_from_orders(
     )
 
     # (station_sequence, picked_bitmask) → NonTimedRouteData
-    routes_map = Dict{Tuple{Vector{Int},UInt64}, NonTimedRouteData}()
-    next_id    = Ref(0)
+    routes_map   = Dict{Tuple{Vector{Int},UInt64}, NonTimedRouteData}()
+    next_id      = Ref(0)
+    n_routes_ref = Ref(0)
 
     labels = _NonTimedLabel[]
     sizehint!(labels, max(200, 20 * n))
@@ -171,15 +173,20 @@ function generate_routes_from_orders(
         end
     end
 
-    record_fn! = (lbls, tidx) -> _nontimed_record_route!(
-        lbls, tidx, orders, data, station_id_to_array_idx, vehicle_capacity,
-        routes_map, next_id
-    )
+    record_fn! = (lbls, tidx) -> begin
+        prev = length(routes_map)
+        _nontimed_record_route!(
+            lbls, tidx, orders, data, station_id_to_array_idx, vehicle_capacity,
+            routes_map, next_id
+        )
+        length(routes_map) > prev && (n_routes_ref[] += 1)
+    end
 
     _nontimed_bfs_core!(
         labels, orders, data, station_id_to_array_idx,
         vehicle_capacity, max_detour_time, max_detour_ratio,
-        record_fn!, max_labels, max_stations_visited
+        record_fn!, max_labels, max_stations_visited;
+        n_routes_ref = n_routes_ref, print_interval = print_interval
     )
 
     routes_sorted = sort!(collect(values(routes_map)), by = r -> r.route.id)
@@ -221,7 +228,8 @@ function generate_simple_routes_from_orders(
     max_detour_time         :: Float64,
     max_detour_ratio        :: Float64,
     max_stations_visited    :: Int = typemax(Int),
-    max_labels              :: Int = 400_000
+    max_labels              :: Int = 400_000,
+    print_interval          :: Int = 10_000
 )::Vector{RouteData}
     has_routing_costs(data) || error(
         "generate_simple_routes_from_orders requires routing costs " *
@@ -237,8 +245,9 @@ function generate_simple_routes_from_orders(
     )
 
     # (station_sequence, picked_bitmask) → RouteData
-    routes_map = Dict{Tuple{Vector{Int},UInt64}, RouteData}()
-    next_id    = Ref(0)
+    routes_map   = Dict{Tuple{Vector{Int},UInt64}, RouteData}()
+    next_id      = Ref(0)
+    n_routes_ref = Ref(0)
 
     labels = _NonTimedLabel[]
     sizehint!(labels, max(200, 20 * n))
@@ -262,14 +271,17 @@ function generate_simple_routes_from_orders(
         end
     end
 
-    record_fn! = (lbls, tidx) -> _nontimed_record_simple_route!(
-        lbls, tidx, data, routes_map, next_id
-    )
+    record_fn! = (lbls, tidx) -> begin
+        prev = length(routes_map)
+        _nontimed_record_simple_route!(lbls, tidx, data, routes_map, next_id)
+        length(routes_map) > prev && (n_routes_ref[] += 1)
+    end
 
     _nontimed_bfs_core!(
         labels, orders, data, station_id_to_array_idx,
         vehicle_capacity, max_detour_time, max_detour_ratio,
-        record_fn!, max_labels, max_stations_visited
+        record_fn!, max_labels, max_stations_visited;
+        n_routes_ref = n_routes_ref, print_interval = print_interval
     )
 
     routes_sorted = sort!(collect(values(routes_map)), by = r -> r.id)
@@ -348,8 +360,41 @@ end
 
 
 """
+Returns true if the on-board passengers can all be dropped off within `rem_stops`
+additional station visits. Dropoffs equal to `current_station` are free (no stop used).
+`new_k` (0-based) and `new_d_id` handle a newly picked-up order whose dropoff is not
+yet written into `chosen_dropoff`; pass `new_k = -1` when not applicable.
+"""
+@inline function _remaining_dropoffs_feasible(
+    current_station :: Int,
+    picked          :: UInt64,
+    dropped         :: UInt64,
+    chosen_dropoff  :: Vector{Int},
+    n               :: Int,
+    rem_stops       :: Int,
+    new_k           :: Int,
+    new_d_id        :: Int
+) :: Bool
+    rem_stops < 0 && return false
+    seen = Int[]
+    for j in 0:(n - 1)
+        (picked  >> j) & UInt64(1) == UInt64(0) && continue
+        (dropped >> j) & UInt64(1) == UInt64(1) && continue
+        dj = (j == new_k) ? new_d_id : chosen_dropoff[j + 1]
+        dj == current_station && continue
+        dj in seen && continue
+        push!(seen, dj)
+        length(seen) > rem_stops && return false
+    end
+    return true
+end
+
+
+"""
 BFS label-setting core. Processes labels in push order; extends each by one
 dropoff or pickup action. Calls `record_fn!(labels, terminal_idx)` for complete labels.
+
+Dead labels (dominated) have their heavy arrays freed in-place to reduce memory.
 
 Shared by `generate_routes_from_orders` and `generate_simple_routes_from_orders`.
 """
@@ -363,7 +408,9 @@ function _nontimed_bfs_core!(
     max_detour_ratio     :: Float64,
     record_fn!           :: Function,
     max_labels           :: Int,
-    max_stations_visited :: Int
+    max_stations_visited :: Int;
+    n_routes_ref         :: Ref{Int} = Ref(0),
+    print_interval       :: Int      = 10_000
 )
     n = length(orders)
     ε = 1e-9
@@ -382,19 +429,26 @@ function _nontimed_bfs_core!(
 
     idx = 1
     while idx <= length(labels)
-        if idx > max_labels
-            println("    BFS: label limit ($max_labels explored) reached; stopping early")
+        if length(labels) >= max_labels
+            println("    BFS: label limit ($max_labels generated) reached; stopping early — $(n_routes_ref[]) routes found")
             flush(stdout)
             break
         end
-        if idx % 50_000 == 1 && idx > 1
-            println("    BFS: processed $idx / $(length(labels)) labels so far")
+        if print_interval > 0 && idx % print_interval == 1 && idx > 1
+            n_alive = count(alive[1:idx-1])
+            println("    BFS: $idx labels processed  |  $(length(labels)) total  |  $n_alive alive  |  $(n_routes_ref[]) routes")
             flush(stdout)
         end
 
         lbl = labels[idx]
         idx += 1
-        !alive[idx - 1] && continue
+        if !alive[idx - 1]
+            # Free heavy arrays — path reconstruction only needs .station and .parent
+            empty!(lbl.board_cumtime)
+            empty!(lbl.chosen_pickup)
+            empty!(lbl.chosen_dropoff)
+            continue
+        end
 
         # ── Stage 1: drop off on-board passengers ─────────────────────────────
         for j in 0:(n - 1)
@@ -418,6 +472,10 @@ function _nontimed_bfs_core!(
             new_dropped = lbl.dropped | (UInt64(1) << j)
             new_ns_drop = (d_id != lbl.station) ? lbl.n_stations + 1 : lbl.n_stations
             new_ns_drop > max_stations_visited && continue
+            _remaining_dropoffs_feasible(
+                d_id, lbl.picked, new_dropped, lbl.chosen_dropoff, n,
+                max_stations_visited - new_ns_drop, -1, 0
+            ) || continue
             child = _NonTimedLabel(
                 d_id, arr, lbl.passengers - orders[j + 1].demand,
                 lbl.picked, new_dropped, idx - 1, new_ns_drop,
@@ -463,6 +521,10 @@ function _nontimed_bfs_core!(
 
                 new_ns_pick = (p_id != lbl.station) ? lbl.n_stations + 1 : lbl.n_stations
                 new_ns_pick > max_stations_visited && continue
+                _remaining_dropoffs_feasible(
+                    p_id, lbl.picked | (UInt64(1) << k), lbl.dropped, lbl.chosen_dropoff, n,
+                    max_stations_visited - new_ns_pick, k, d_id
+                ) || continue
 
                 new_bct = copy(lbl.board_cumtime);  new_bct[k + 1] = arr
                 new_cp  = copy(lbl.chosen_pickup);  new_cp[k + 1]  = p_id
@@ -477,6 +539,9 @@ function _nontimed_bfs_core!(
             end
         end
     end
+
+    println("    BFS done: $(idx-1) labels processed  |  $(length(labels)) total  |  $(n_routes_ref[]) routes found")
+    flush(stdout)
 end
 
 

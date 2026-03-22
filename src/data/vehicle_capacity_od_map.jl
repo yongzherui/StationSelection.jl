@@ -81,8 +81,9 @@ Build the full OD mapping for RouteVehicleCapacityModel (new formulation):
 4. Per-scenario plain routes via non-temporal BFS (RouteData, no alpha dict)
 """
 function create_vehicle_capacity_od_map(
-    model :: RouteVehicleCapacityModel,
-    data  :: StationSelectionData
+    model      :: RouteVehicleCapacityModel,
+    data       :: StationSelectionData;
+    max_labels :: Int = 400_000
 )::VehicleCapacityODMap
 
     # ── 1. Index mappings ──────────────────────────────────────────────────────
@@ -155,7 +156,8 @@ function create_vehicle_capacity_od_map(
             vehicle_capacity     = model.vehicle_capacity,
             max_detour_time      = model.max_detour_time,
             max_detour_ratio     = model.max_detour_ratio,
-            max_stations_visited = model.max_stations_visited
+            max_stations_visited = model.max_stations_visited,
+            max_labels           = max_labels
         )
 
         println("  Scenario $s / $S: $(length(routes_s[s])) routes generated")

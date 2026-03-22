@@ -131,11 +131,11 @@ end
 
 Set the minimization objective for RouteVehicleCapacityModel (new formulation).
 
-    min Σ_s [ Σ_{(o,d)∈Ω_s} Σ_{(j,k)} q_{od,s} (d_{oj} + d_{kd}) x_{odjks}
+    min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} (d_{oj} + d_{kd}) x_{odjkts}
             + μ Σ_{(s,t,r)} τ^r · θ^r_{ts} ]
 
-Walking cost uses time-aggregated demand (Q_s); route penalty sums over all
-θ^r_{ts} deployments weighted by route travel time τ^r.
+x is time-indexed integer (counts passengers directly); no Q scaling needed.
+Route penalty sums over all θ^r_{ts} deployments weighted by route travel time τ^r.
 """
 function set_route_od_objective!(
     m::Model,
@@ -147,21 +147,19 @@ function set_route_od_objective!(
     x   = m[:x]
     obj = AffExpr(0.0)
 
-    # ── Walking cost ───────────────────────────────────────────────────────────
+    # ── Walking cost (x already counts passengers — no Q scaling) ─────────────
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
-            valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            demand = Float64(mapping.Q_s[s][(o, d)])
-            for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                j_id = mapping.array_idx_to_station_id[j]
-                k_id = mapping.array_idx_to_station_id[k]
-                cost = demand * (
-                    get_walking_cost(data, o, j_id) +
-                    get_walking_cost(data, k_id, d)
-                )
-                add_to_expression!(obj, cost, x_od[pair_idx])
+        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                x_od = get(x[s][t_id], od_idx, VariableRef[])
+                isempty(x_od) && continue
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                    j_id = mapping.array_idx_to_station_id[j]
+                    k_id = mapping.array_idx_to_station_id[k]
+                    cost = get_walking_cost(data, o, j_id) + get_walking_cost(data, k_id, d)
+                    add_to_expression!(obj, cost, x_od[pair_idx])
+                end
             end
         end
     end
