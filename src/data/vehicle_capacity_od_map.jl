@@ -1,18 +1,21 @@
 """
-Non-temporal OD mapping with pre-generated routes for RouteAlphaCapacityModel
-and RouteVehicleCapacityModel.
+Non-temporal OD mapping for RouteVehicleCapacityModel (new formulation).
+
+Routes are stored as plain RouteData (no alpha dict). The covering constraints
+use explicit integer variables d_{jkts}, α^r_{jkts}, θ^r_{ts} at solve time.
 """
 
-export RouteODMap
-export create_route_od_map
+export VehicleCapacityODMap
+export create_vehicle_capacity_od_map
 
 
 """
-    RouteODMap <: AbstractClusteringMap
+    VehicleCapacityODMap <: AbstractClusteringMap
 
-Data mapping for RouteAlphaCapacityModel and RouteVehicleCapacityModel.
-Extends the clustering OD structure with per-scenario route pools (no time index for
-BFS routes, but time-indexed demand buckets for the covering constraints).
+Data mapping for RouteVehicleCapacityModel (new formulation).
+
+Unlike RouteODMap, this struct stores plain RouteData (no per-leg alpha counts).
+Route loading is made explicit via integer JuMP variables d/α/θ.
 
 # Fields
 - `station_id_to_array_idx::Dict{Int,Int}`: Station ID → array index
@@ -27,65 +30,60 @@ BFS routes, but time-indexed demand buckets for the covering constraints).
 - `valid_jk_pairs::Dict{Tuple{Int,Int},Vector{Tuple{Int,Int}}}`: (o,d) → valid (j_idx,k_idx)
 - `max_walking_distance::Float64`: Walking limit used to compute valid_jk_pairs
 - `time_window_sec::Int`: Width of time bucket (seconds)
-- `routes_s::Dict{Int,Vector{NonTimedRouteData}}`: Per-scenario route pool
-- `routes_by_jks::Dict{NTuple{3,Int},Vector{Tuple{Int,Int}}}`:
-  `(s, j_idx, k_idx) → [(route_idx_within_s, α)]` for the covering constraint.
-  α is actual passengers for RouteAlphaCapacityModel; C for RouteVehicleCapacityModel.
+- `routes_s::Dict{Int,Vector{RouteData}}`: Per-scenario route pool (plain routes, no alpha)
 """
-struct RouteODMap <: AbstractClusteringMap
-    station_id_to_array_idx::Dict{Int, Int}
-    array_idx_to_station_id::Vector{Int}
+struct VehicleCapacityODMap <: AbstractClusteringMap
+    station_id_to_array_idx     :: Dict{Int, Int}
+    array_idx_to_station_id     :: Vector{Int}
 
-    scenarios::Vector{ScenarioData}
-    scenario_label_to_array_idx::Dict{String, Int}
-    array_idx_to_scenario_label::Vector{String}
+    scenarios                   :: Vector{ScenarioData}
+    scenario_label_to_array_idx :: Dict{String, Int}
+    array_idx_to_scenario_label :: Vector{String}
 
-    Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}
-    Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}
+    Omega_s   :: Dict{Int, Vector{Tuple{Int, Int}}}
+    Q_s       :: Dict{Int, Dict{Tuple{Int, Int}, Int}}
 
-    Omega_s_t::Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
-    Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
+    Omega_s_t :: Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
+    Q_s_t     :: Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
 
-    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+    valid_jk_pairs       :: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 
-    max_walking_distance::Float64
-    time_window_sec::Int
+    max_walking_distance :: Float64
+    time_window_sec      :: Int
 
-    routes_s::Dict{Int, Vector{NonTimedRouteData}}
-    routes_by_jks::Dict{NTuple{3,Int}, Vector{Tuple{Int,Int}}}
+    routes_s :: Dict{Int, Vector{RouteData}}
 end
 
 
 """
-    has_walking_distance_limit(mapping::RouteODMap) -> Bool
+    has_walking_distance_limit(mapping::VehicleCapacityODMap) -> Bool
 """
-has_walking_distance_limit(mapping::RouteODMap) = true
+has_walking_distance_limit(mapping::VehicleCapacityODMap) = true
 
 
 """
-    get_valid_jk_pairs(mapping::RouteODMap, o::Int, d::Int) -> Vector{Tuple{Int,Int}}
+    get_valid_jk_pairs(mapping::VehicleCapacityODMap, o::Int, d::Int) -> Vector{Tuple{Int,Int}}
 
 Return valid (j_idx, k_idx) pairs for OD pair (o_id, d_id).
 """
-function get_valid_jk_pairs(mapping::RouteODMap, o::Int, d::Int)
+function get_valid_jk_pairs(mapping::VehicleCapacityODMap, o::Int, d::Int)
     return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
 end
 
 
 """
-    create_route_od_map(model, data) -> RouteODMap
+    create_vehicle_capacity_od_map(model::RouteVehicleCapacityModel, data) -> VehicleCapacityODMap
 
-Build the full OD mapping for RouteAlphaCapacityModel or RouteVehicleCapacityModel:
+Build the full OD mapping for RouteVehicleCapacityModel (new formulation):
 1. Station and scenario index mappings
-2. Aggregated OD pairs and demand per scenario
+2. Aggregated OD pairs and demand per scenario (both time-aggregated and time-indexed)
 3. Valid (j,k) pairs per OD pair (walking-filtered)
-4. Per-scenario routes via non-temporal BFS
-5. `routes_by_jks` index with α = actual passengers (Alpha) or C (Vehicle)
+4. Per-scenario plain routes via non-temporal BFS (RouteData, no alpha dict)
 """
-function create_route_od_map(
-    model::Union{RouteAlphaCapacityModel, RouteVehicleCapacityModel},
-    data::StationSelectionData
-)::RouteODMap
+function create_vehicle_capacity_od_map(
+    model :: RouteVehicleCapacityModel,
+    data  :: StationSelectionData
+)::VehicleCapacityODMap
 
     # ── 1. Index mappings ──────────────────────────────────────────────────────
     station_ids = Vector{Int}(data.stations.id)
@@ -126,15 +124,13 @@ function create_route_od_map(
         model.max_walking_distance
     )
 
-    # ── 4. Non-temporal BFS routes ─────────────────────────────────────────────
-    routes_s   = Dict{Int, Vector{NonTimedRouteData}}()
-    routes_by_jks = Dict{NTuple{3,Int}, Vector{Tuple{Int,Int}}}()
+    # ── 4. Non-temporal BFS routes (plain RouteData, no alpha) ─────────────────
+    routes_s = Dict{Int, Vector{RouteData}}()
 
     for s in 1:S
-        println("  Scenario $s / $S: building non-timed orders...")
+        println("  Scenario $s / $S: building non-timed orders (simple)...")
         flush(stdout)
 
-        # Build _NonTimedOrder list for this scenario
         nontimed_orders = _NonTimedOrder[]
         for ((o_id, d_id), q) in Q_s[s]
             valid_pairs = get(valid_jk_pairs, (o_id, d_id), Tuple{Int,Int}[])
@@ -154,36 +150,19 @@ function create_route_od_map(
 
         println("  Scenario $s / $S: running BFS with $(length(nontimed_orders)) orders...")
         flush(stdout)
-        routes_s[s] = generate_routes_from_orders(
+        routes_s[s] = generate_simple_routes_from_orders(
             nontimed_orders, data, station_id_to_array_idx;
-            vehicle_capacity = model.vehicle_capacity,
-            max_detour_time  = model.max_detour_time,
-            max_detour_ratio = model.max_detour_ratio
+            vehicle_capacity     = model.vehicle_capacity,
+            max_detour_time      = model.max_detour_time,
+            max_detour_ratio     = model.max_detour_ratio,
+            max_stations_visited = model.max_stations_visited
         )
 
         println("  Scenario $s / $S: $(length(routes_s[s])) routes generated")
         flush(stdout)
-
-        # Build (s, j_idx, k_idx) → [(route_idx_within_s, α)] index
-        for (r_idx, ntr) in enumerate(routes_s[s])
-            if model isa RouteAlphaCapacityModel
-                # α = actual passengers on this leg
-                for ((j_idx, k_idx), α) in ntr.alpha
-                    key = (s, j_idx, k_idx)
-                    push!(get!(routes_by_jks, key, Tuple{Int,Int}[]), (r_idx, α))
-                end
-            else
-                # RouteVehicleCapacityModel: α = C (flat vehicle capacity)
-                C = model.vehicle_capacity
-                for (j_idx, k_idx) in keys(ntr.alpha)
-                    key = (s, j_idx, k_idx)
-                    push!(get!(routes_by_jks, key, Tuple{Int,Int}[]), (r_idx, C))
-                end
-            end
-        end
     end
 
-    return RouteODMap(
+    return VehicleCapacityODMap(
         station_id_to_array_idx,
         array_idx_to_station_id,
         data.scenarios,
@@ -196,7 +175,6 @@ function create_route_od_map(
         valid_jk_pairs,
         model.max_walking_distance,
         model.time_window_sec,
-        routes_s,
-        routes_by_jks
+        routes_s
     )
 end

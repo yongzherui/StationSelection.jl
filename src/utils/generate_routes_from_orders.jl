@@ -12,6 +12,7 @@ No time-window gate is applied when picking up orders.
 
 export NonTimedRouteData
 export generate_routes_from_orders
+export generate_simple_routes_from_orders
 
 
 """
@@ -66,6 +67,7 @@ BFS label for non-temporal route generation.
 - `picked`:          bit j set ⟺ order j+1 has been picked up
 - `dropped`:         bit j set ⟺ order j+1 has been dropped off
 - `parent`:          1-based index into labels array; 0 = root
+- `n_stations`:      number of distinct sequential stops visited so far (including start)
 - `board_cumtime`:   length-n; entry j = cum_time when order j was picked up (Inf = not yet)
 - `chosen_pickup`:   length-n; entry j = pickup VBS station ID for order j (0 = not yet)
 - `chosen_dropoff`:  length-n; entry j = dropoff VBS station ID for order j (0 = not yet)
@@ -77,6 +79,7 @@ struct _NonTimedLabel
     picked        :: UInt64
     dropped       :: UInt64
     parent        :: Int
+    n_stations    :: Int
     board_cumtime :: Vector{Float64}
     chosen_pickup :: Vector{Int}
     chosen_dropoff:: Vector{Int}
@@ -95,6 +98,7 @@ end
         vehicle_capacity::Int = 4,
         max_detour_time::Float64,
         max_detour_ratio::Float64,
+        max_stations_visited::Int = typemax(Int),
         max_labels::Int = 400_000
     ) -> Vector{NonTimedRouteData}
 
@@ -125,6 +129,7 @@ function generate_routes_from_orders(
     vehicle_capacity        :: Int = 4,
     max_detour_time         :: Float64,
     max_detour_ratio        :: Float64,
+    max_stations_visited    :: Int = typemax(Int),
     max_labels              :: Int = 400_000
 )::Vector{NonTimedRouteData}
     has_routing_costs(data) || error(
@@ -160,23 +165,115 @@ function generate_routes_from_orders(
             cd  = zeros(Int, n); cd[j]  = d_id
             push!(labels, _NonTimedLabel(
                 p_id, 0.0, order.demand,
-                bit_j, UInt64(0), 0,
+                bit_j, UInt64(0), 0, 1,
                 bct, cp, cd
             ))
         end
     end
 
-    _nontimed_run_label_setting!(
+    record_fn! = (lbls, tidx) -> _nontimed_record_route!(
+        lbls, tidx, orders, data, station_id_to_array_idx, vehicle_capacity,
+        routes_map, next_id
+    )
+
+    _nontimed_bfs_core!(
         labels, orders, data, station_id_to_array_idx,
-        vehicle_capacity,
-        max_detour_time, max_detour_ratio,
-        routes_map, next_id, max_labels
+        vehicle_capacity, max_detour_time, max_detour_ratio,
+        record_fn!, max_labels, max_stations_visited
     )
 
     routes_sorted = sort!(collect(values(routes_map)), by = r -> r.route.id)
     return [NonTimedRouteData(
                 RouteData(i, r.route.station_ids, r.route.travel_time, r.route.od_capacity),
                 r.alpha)
+            for (i, r) in enumerate(routes_sorted)]
+end
+
+
+"""
+    generate_simple_routes_from_orders(
+        orders::Vector{_NonTimedOrder},
+        data::StationSelectionData,
+        station_id_to_array_idx::Dict{Int,Int};
+        vehicle_capacity::Int = 4,
+        max_detour_time::Float64,
+        max_detour_ratio::Float64,
+        max_stations_visited::Int = typemax(Int),
+        max_labels::Int = 400_000
+    ) -> Vector{RouteData}
+
+Generate feasible vehicle routes (plain RouteData, no alpha dict) for a single scenario.
+
+Used by RouteVehicleCapacityModel where route loading is handled by explicit integer
+variables (d, α, θ) rather than pre-computed alpha counts.
+
+Same BFS logic as `generate_routes_from_orders` but records only the station sequence
+and travel time; `od_capacity` is stored as an empty dict.
+
+# Limits
+Supports at most 63 orders per call (UInt64 bitmask). Throws an error if exceeded.
+"""
+function generate_simple_routes_from_orders(
+    orders                  :: Vector{_NonTimedOrder},
+    data                    :: StationSelectionData,
+    station_id_to_array_idx :: Dict{Int,Int};
+    vehicle_capacity        :: Int = 4,
+    max_detour_time         :: Float64,
+    max_detour_ratio        :: Float64,
+    max_stations_visited    :: Int = typemax(Int),
+    max_labels              :: Int = 400_000
+)::Vector{RouteData}
+    has_routing_costs(data) || error(
+        "generate_simple_routes_from_orders requires routing costs " *
+        "(data.routing_costs must not be nothing)"
+    )
+    vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
+    isempty(orders) && return RouteData[]
+
+    n = length(orders)
+    n <= 63 || error(
+        "generate_simple_routes_from_orders supports at most 63 orders per scenario; " *
+        "got $n. Consider reducing scenario duration."
+    )
+
+    # (station_sequence, picked_bitmask) → RouteData
+    routes_map = Dict{Tuple{Vector{Int},UInt64}, RouteData}()
+    next_id    = Ref(0)
+
+    labels = _NonTimedLabel[]
+    sizehint!(labels, max(200, 20 * n))
+
+    # ── Initialise: one root label per (order j, feasible VBS pair (p, d)) ────
+    for j in 1:n
+        order = orders[j]
+        isempty(order.feasible_vbs) && continue
+
+        bit_j = UInt64(1) << (j - 1)
+
+        for (p_id, d_id) in order.feasible_vbs
+            bct = fill(Inf, n);  bct[j] = 0.0
+            cp  = zeros(Int, n); cp[j]  = p_id
+            cd  = zeros(Int, n); cd[j]  = d_id
+            push!(labels, _NonTimedLabel(
+                p_id, 0.0, order.demand,
+                bit_j, UInt64(0), 0, 1,
+                bct, cp, cd
+            ))
+        end
+    end
+
+    record_fn! = (lbls, tidx) -> _nontimed_record_simple_route!(
+        lbls, tidx, data, routes_map, next_id
+    )
+
+    _nontimed_bfs_core!(
+        labels, orders, data, station_id_to_array_idx,
+        vehicle_capacity, max_detour_time, max_detour_ratio,
+        record_fn!, max_labels, max_stations_visited
+    )
+
+    routes_sorted = sort!(collect(values(routes_map)), by = r -> r.id)
+    return [RouteData(i, r.station_ids, r.travel_time, r.od_capacity)
             for (i, r) in enumerate(routes_sorted)]
 end
 
@@ -201,6 +298,7 @@ in-vehicle time for every on-board passenger.
 """
 function _nt_dominates(lbl1::_NonTimedLabel, lbl2::_NonTimedLabel, n::Int, ε::Float64)
     lbl1.cum_time > lbl2.cum_time + ε && return false
+    lbl1.n_stations > lbl2.n_stations && return false
     on_board = lbl1.picked & ~lbl1.dropped
     for j in 0:(n - 1)
         (on_board >> j) & UInt64(1) == UInt64(0) && continue
@@ -250,20 +348,22 @@ end
 
 
 """
-BFS label-setting main loop. Processes labels in push order; extends each by one
-dropoff or pickup action. Calls `_nontimed_record_route!` for complete labels.
+BFS label-setting core. Processes labels in push order; extends each by one
+dropoff or pickup action. Calls `record_fn!(labels, terminal_idx)` for complete labels.
+
+Shared by `generate_routes_from_orders` and `generate_simple_routes_from_orders`.
 """
-function _nontimed_run_label_setting!(
-    labels            :: Vector{_NonTimedLabel},
-    orders            :: Vector{_NonTimedOrder},
-    data              :: StationSelectionData,
-    station_id_to_idx :: Dict{Int,Int},
-    vehicle_capacity  :: Int,
-    max_detour_time   :: Float64,
-    max_detour_ratio  :: Float64,
-    routes_map        :: Dict{Tuple{Vector{Int},UInt64}, NonTimedRouteData},
-    next_id           :: Ref{Int},
-    max_labels        :: Int
+function _nontimed_bfs_core!(
+    labels               :: Vector{_NonTimedLabel},
+    orders               :: Vector{_NonTimedOrder},
+    data                 :: StationSelectionData,
+    station_id_to_idx    :: Dict{Int,Int},
+    vehicle_capacity     :: Int,
+    max_detour_time      :: Float64,
+    max_detour_ratio     :: Float64,
+    record_fn!           :: Function,
+    max_labels           :: Int,
+    max_stations_visited :: Int
 )
     n = length(orders)
     ε = 1e-9
@@ -283,12 +383,12 @@ function _nontimed_run_label_setting!(
     idx = 1
     while idx <= length(labels)
         if idx > max_labels
-            println("    BFS: label limit ($max_labels explored) reached; stopping early with $(length(routes_map)) routes")
+            println("    BFS: label limit ($max_labels explored) reached; stopping early")
             flush(stdout)
             break
         end
         if idx % 50_000 == 1 && idx > 1
-            println("    BFS: processed $idx / $(length(labels)) labels, $(length(routes_map)) routes so far")
+            println("    BFS: processed $idx / $(length(labels)) labels so far")
             flush(stdout)
         end
 
@@ -316,19 +416,17 @@ function _nontimed_run_label_setting!(
             end
 
             new_dropped = lbl.dropped | (UInt64(1) << j)
+            new_ns_drop = (d_id != lbl.station) ? lbl.n_stations + 1 : lbl.n_stations
+            new_ns_drop > max_stations_visited && continue
             child = _NonTimedLabel(
                 d_id, arr, lbl.passengers - orders[j + 1].demand,
-                lbl.picked, new_dropped, idx - 1,
+                lbl.picked, new_dropped, idx - 1, new_ns_drop,
                 lbl.board_cumtime, lbl.chosen_pickup, lbl.chosen_dropoff
             )
             pushed = _nt_push_if_not_dominated!(child, labels, alive, dom_dict, n, ε)
 
             if pushed && child.picked == child.dropped
-                _nontimed_record_route!(
-                    labels, length(labels), orders,
-                    data, station_id_to_idx, vehicle_capacity,
-                    routes_map, next_id
-                )
+                record_fn!(labels, length(labels))
             end
         end
 
@@ -363,13 +461,16 @@ function _nontimed_run_label_setting!(
                 end
                 feasible || continue
 
+                new_ns_pick = (p_id != lbl.station) ? lbl.n_stations + 1 : lbl.n_stations
+                new_ns_pick > max_stations_visited && continue
+
                 new_bct = copy(lbl.board_cumtime);  new_bct[k + 1] = arr
                 new_cp  = copy(lbl.chosen_pickup);  new_cp[k + 1]  = p_id
                 new_cd  = copy(lbl.chosen_dropoff); new_cd[k + 1]  = d_id
 
                 child = _NonTimedLabel(
                     p_id, arr, lbl.passengers + order_k.demand,
-                    lbl.picked | (UInt64(1) << k), lbl.dropped, idx - 1,
+                    lbl.picked | (UInt64(1) << k), lbl.dropped, idx - 1, new_ns_pick,
                     new_bct, new_cp, new_cd
                 )
                 _nt_push_if_not_dominated!(child, labels, alive, dom_dict, n, ε)
@@ -382,6 +483,7 @@ end
 """
 Reconstruct the station sequence for a complete non-timed label and merge into `routes_map`.
 Collapses consecutive same-station stops; rejects routes with repeated stations.
+Records a NonTimedRouteData (with alpha passenger counts).
 """
 function _nontimed_record_route!(
     labels            :: Vector{_NonTimedLabel},
@@ -444,4 +546,47 @@ function _nontimed_record_route!(
     next_id[] += 1
     route = RouteData(next_id[], stations, travel_time, od_cap)
     routes_map[dup_key] = NonTimedRouteData(route, alpha)
+end
+
+
+"""
+Reconstruct the station sequence for a complete non-timed label and merge into `routes_map`.
+Records a plain RouteData with empty od_capacity (used by RouteVehicleCapacityModel).
+"""
+function _nontimed_record_simple_route!(
+    labels       :: Vector{_NonTimedLabel},
+    terminal_idx :: Int,
+    data         :: StationSelectionData,
+    routes_map   :: Dict{Tuple{Vector{Int},UInt64}, RouteData},
+    next_id      :: Ref{Int}
+)
+    path = Int[]
+    cur = terminal_idx
+    while cur != 0
+        push!(path, cur)
+        cur = labels[cur].parent
+    end
+    reverse!(path)
+
+    raw = [labels[i].station for i in path]
+    stations = [raw[1]]
+    for i in 2:length(raw)
+        raw[i] != stations[end] && push!(stations, raw[i])
+    end
+
+    length(unique(stations)) == length(stations) || return
+
+    travel_time = length(stations) < 2 ? 0.0 :
+        sum(get_routing_cost(data, stations[i], stations[i + 1])
+            for i in 1:length(stations) - 1)
+
+    lbl_term = labels[terminal_idx]
+    picked   = lbl_term.picked
+
+    dup_key = (stations, picked)
+    haskey(routes_map, dup_key) && return
+
+    next_id[] += 1
+    route = RouteData(next_id[], stations, travel_time, Dict{Tuple{Int,Int},Int}())
+    routes_map[dup_key] = route
 end

@@ -567,6 +567,201 @@ function export_route_theta_s_nontimed_variables(
 end
 
 
+# =============================================================================
+# VehicleCapacityODMap exports (RouteVehicleCapacityModel — new formulation)
+# =============================================================================
+
+"""
+    export_assignment_variables(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+
+Export assignment variables for RouteVehicleCapacityModel (new formulation).
+Structure: x[s][od_idx] → Vector{VariableRef} (one per valid (j,k) pair).
+Columns: scenario, od_idx, origin_id, dest_id, pickup_id, dropoff_id, value.
+Only rows with value > 0.5 are written.
+"""
+function export_assignment_variables(
+    m::JuMP.Model,
+    mapping::VehicleCapacityODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    id_map = mapping.array_idx_to_station_id
+
+    rows = []
+    for (s, x_s) in enumerate(x)
+        od_pairs = mapping.Omega_s[s]
+        for (od_idx, x_od) in x_s
+            isempty(x_od) && continue
+            o, d = od_pairs[od_idx]
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                val = JuMP.value(x_od[pair_idx])
+                val > 0.5 || continue
+                push!(rows, (
+                    scenario   = s,
+                    od_idx     = od_idx,
+                    origin_id  = o,
+                    dest_id    = d,
+                    pickup_id  = id_map[j],
+                    dropoff_id = id_map[k],
+                    value      = val
+                ))
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+    return nrow(df)
+end
+
+
+"""
+    export_model_specific_variables(result, mapping::VehicleCapacityODMap, export_dir, metadata)
+
+Export RouteVehicleCapacityModel (new formulation) specific variables:
+theta_ts.csv, d_jkts.csv, alpha_r_jkts.csv.
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::VehicleCapacityODMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"] = "RouteVehicleCapacityModel"
+    metadata["n_routes"]   = sum(length(rs) for rs in values(mapping.routes_s); init=0)
+
+    n_theta = _export_theta_ts(result.model, mapping, export_dir)
+    n_d     = _export_d_jkts(result.model, mapping, export_dir)
+    n_alpha = _export_alpha_r_jkts(result.model, mapping, export_dir)
+
+    metadata["n_theta_ts_nonzero"]     = n_theta
+    metadata["n_d_jkts_nonzero"]       = n_d
+    metadata["n_alpha_r_jkts_nonzero"] = n_alpha
+end
+
+
+"""
+    _export_theta_ts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+
+Export timed route deployment variables (theta_ts) to `theta_ts.csv`.
+Key: (s, t_id, r_idx). Columns: scenario, t_id, route_idx, station_ids, travel_time, value.
+Only rows with value > 0.5 are written.
+"""
+function _export_theta_ts(
+    m::JuMP.Model,
+    mapping::VehicleCapacityODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :theta_ts)
+        println("    ✓ theta_ts.csv (0 deployments — theta_ts not present)")
+        return 0
+    end
+
+    rows = []
+    for ((s, t_id, r_idx), var) in m[:theta_ts]
+        val = JuMP.value(var)
+        val > 0.5 || continue
+        route = mapping.routes_s[s][r_idx]
+        push!(rows, (
+            scenario    = s,
+            t_id        = t_id,
+            route_idx   = r_idx,
+            station_ids = join(route.station_ids, "|"),
+            travel_time = route.travel_time,
+            value       = round(Int, val)
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "theta_ts.csv"), df)
+    println("    ✓ theta_ts.csv ($(nrow(df)) deployments)")
+    return nrow(df)
+end
+
+
+"""
+    _export_d_jkts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+
+Export OD demand-to-timeslot integer variables (d_jkts) to `d_jkts.csv`.
+Key: (s, j_idx, k_idx, t_id). Columns: scenario, t_id, pickup_id, dropoff_id, value.
+Only rows with value > 0 are written.
+"""
+function _export_d_jkts(
+    m::JuMP.Model,
+    mapping::VehicleCapacityODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :d_jkts)
+        println("    ✓ d_jkts.csv (0 rows — d_jkts not present)")
+        return 0
+    end
+
+    id_map = mapping.array_idx_to_station_id
+    rows = []
+    for ((s, j_idx, k_idx, t_id), var) in m[:d_jkts]
+        val = JuMP.value(var)
+        val > 0 || continue
+        push!(rows, (
+            scenario   = s,
+            t_id       = t_id,
+            pickup_id  = id_map[j_idx],
+            dropoff_id = id_map[k_idx],
+            value      = round(Int, val)
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "d_jkts.csv"), df)
+    println("    ✓ d_jkts.csv ($(nrow(df)) rows)")
+    return nrow(df)
+end
+
+
+"""
+    _export_alpha_r_jkts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+
+Export route-OD assignment indicator variables (alpha_r_jkts) to `alpha_r_jkts.csv`.
+Key: (s, r_idx, j_idx, k_idx, t_id). Columns: scenario, t_id, route_idx, pickup_id, dropoff_id, value.
+Only rows with value > 0 are written.
+"""
+function _export_alpha_r_jkts(
+    m::JuMP.Model,
+    mapping::VehicleCapacityODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :alpha_r_jkts)
+        println("    ✓ alpha_r_jkts.csv (0 rows — alpha_r_jkts not present)")
+        return 0
+    end
+
+    id_map = mapping.array_idx_to_station_id
+    rows = []
+    for ((s, r_idx, j_idx, k_idx, t_id), var) in m[:alpha_r_jkts]
+        val = JuMP.value(var)
+        val > 0 || continue
+        push!(rows, (
+            scenario   = s,
+            t_id       = t_id,
+            route_idx  = r_idx,
+            pickup_id  = id_map[j_idx],
+            dropoff_id = id_map[k_idx],
+            value      = round(Int, val)
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "alpha_r_jkts.csv"), df)
+    println("    ✓ alpha_r_jkts.csv ($(nrow(df)) rows)")
+    return nrow(df)
+end
+
+
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 

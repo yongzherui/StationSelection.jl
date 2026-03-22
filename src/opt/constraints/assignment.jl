@@ -280,6 +280,74 @@ end
 
 
 # ============================================================================
+# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ============================================================================
+
+"""
+    add_assignment_constraints!(m, data, mapping::VehicleCapacityODMap)
+
+Each OD pair must be assigned to exactly one valid (j,k) pair.
+    Σ x[s][od_idx] == 1  ∀(s, od_idx)
+"""
+function add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::VehicleCapacityODMap
+    )
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    x = m[:x]
+
+    for s in 1:S
+        for od_idx in 1:length(mapping.Omega_s[s])
+            x_od = get(x[s], od_idx, VariableRef[])
+            @constraint(m, sum(x_od) == 1)
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
+"""
+    add_assignment_to_active_constraints!(m, data, mapping::VehicleCapacityODMap;
+                                          tight_constraints=true)
+
+Assignments require both pickup and dropoff stations to be active.
+Tight form (default): x[s][od_idx][pair_idx] ≤ z[j,s]  AND  x[...][pair_idx] ≤ z[k,s]
+"""
+function add_assignment_to_active_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::VehicleCapacityODMap;
+        tight_constraints::Bool = true
+    )
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    z = m[:z]
+    x = m[:x]
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            x_od = get(x[s], od_idx, VariableRef[])
+            isempty(x_od) && continue
+            for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                if tight_constraints
+                    @constraint(m, x_od[pair_idx] <= z[j, s])
+                    @constraint(m, x_od[pair_idx] <= z[k, s])
+                else
+                    @constraint(m, 2 * x_od[pair_idx] <= z[j, s] + z[k, s])
+                end
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+
+# ============================================================================
 # Assignment Walking Limit Constraints - For dense x with walking limit
 # ============================================================================
 

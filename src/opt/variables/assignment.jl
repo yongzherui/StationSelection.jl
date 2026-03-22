@@ -163,6 +163,47 @@ end
 
 
 # ============================================================================
+# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ============================================================================
+
+"""
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::VehicleCapacityODMap)
+
+Add sparse binary assignment variables x[s][od_idx] for RouteVehicleCapacityModel.
+
+For each OD pair (o,d) in scenario s (time-aggregated), one binary variable is created
+per valid (j,k) pair. Same structure as RouteODMap dispatch.
+
+Structure: `m[:x]` is a `Vector{Dict{Int, Vector{VariableRef}}}` indexed by
+scenario → od_idx → pair variables.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::VehicleCapacityODMap
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            n_pairs = length(valid_pairs)
+            if n_pairs > 0
+                x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
+            else
+                x[s][od_idx] = VariableRef[]
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+
+# ============================================================================
 # ClusteringBaseModelMap (ClusteringBaseModel)
 # ============================================================================
 

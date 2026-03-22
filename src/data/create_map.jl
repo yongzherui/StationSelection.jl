@@ -58,11 +58,11 @@ end
 """
     create_map(model::RouteVehicleCapacityModel, data::StationSelectionData)
 
-Create a RouteODMap for RouteVehicleCapacityModel.
+Create a VehicleCapacityODMap for RouteVehicleCapacityModel.
 """
 function create_map(
         model::RouteVehicleCapacityModel,
         data::StationSelectionData
-    )::RouteODMap
-    return create_route_od_map(model, data)
+    )::VehicleCapacityODMap
+    return create_vehicle_capacity_od_map(model, data)
 end

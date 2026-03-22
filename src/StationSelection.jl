@@ -28,6 +28,7 @@ include("utils/transform_stations.jl")
 include("utils/route_data.jl")
 include("utils/generate_routes_from_timed_orders.jl")
 include("utils/generate_routes_from_orders.jl")
+include("utils/route_capacity_coefficients.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
@@ -36,7 +37,8 @@ include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_base.jl")
 include("opt/models/two_stage_route.jl")
-include("opt/models/route_models.jl")
+include("opt/models/route_alpha_capacity_model.jl")
+include("opt/models/route_vehicle_capacity_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
@@ -49,6 +51,9 @@ include("data/two_stage_route_od_map.jl")
 
 # Non-temporal route OD map (depends on RouteAlphaCapacityModel, RouteVehicleCapacityModel, NonTimedRouteData)
 include("data/route_od_map.jl")
+
+# Vehicle capacity OD map for RouteVehicleCapacityModel new formulation (depends on RouteData)
+include("data/vehicle_capacity_od_map.jl")
 
 # Model-to-map dispatch
 include("data/create_map.jl")
@@ -83,11 +88,13 @@ export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export TwoStageRouteODMap
 export RouteODMap
+export VehicleCapacityODMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_base_model_map
 export create_two_stage_route_od_map
 export create_route_od_map
+export create_vehicle_capacity_od_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, has_routing_costs
@@ -100,6 +107,7 @@ export has_walking_distance_limit, get_valid_jk_pairs
 # Re-export route utilities
 export RouteData, TimedRouteData, generate_routes_from_timed_orders
 export NonTimedRouteData, generate_routes_from_orders
+export generate_simple_routes_from_orders
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -117,11 +125,14 @@ export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!
 export add_route_theta_variables!
+export add_d_jkts_variables!, add_alpha_r_jkts_variables!, add_theta_ts_variables!
+export compute_alpha_r_jkt, compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_flow_activation_constraints!
 export add_route_capacity_constraints!
+export add_route_capacity_lazy_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_route_od_objective!
