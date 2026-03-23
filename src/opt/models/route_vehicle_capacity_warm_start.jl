@@ -235,13 +235,128 @@ function get_warm_start_solution(
         x_vals, ws_build.mapping, build_result.mapping, model.vehicle_capacity
     )
 
-    return Dict{Symbol, Any}(
+    sol = Dict{Symbol, Any}(
         :y     => y_vals,
         :z     => z_vals,
         :x     => x_vals,
         :alpha => alpha_hints,
         :theta => theta_hints,
     )
+
+    println("  [warm start] checking lazy constraint satisfaction on hints...")
+    flush(stdout)
+    _check_lazy_constraints_on_hints(sol, build_result.mapping, model.vehicle_capacity)
+
+    return sol
+end
+
+
+"""
+    _check_lazy_constraints_on_hints(sol, main_mapping, vehicle_capacity; atol=1e-6)
+
+Manually evaluate the two lazy constraints against the warm start hint values and print
+any violations. Called before `optimize!` to diagnose why a warm start may be rejected.
+
+Constraint (ii):  Σ_{od using (j,k)} x[s][t][od][pair]  ≤  Σ_r α^r_{jkts}
+Constraint (iii): Σ_{(j,k): β^r_{jkl}=1} α^r_{jkts}    ≤  Cap_r · θ^r_{ts}
+"""
+function _check_lazy_constraints_on_hints(
+    sol              :: Dict{Symbol, Any},
+    main_mapping     :: VehicleCapacityODMap,
+    vehicle_capacity :: Int;
+    atol             :: Float64 = 1e-6
+)
+    x_vals      = sol[:x]
+    alpha_hints = get(sol, :alpha, Dict{NTuple{5,Int}, Float64}())
+    theta_hints = get(sol, :theta, Dict{NTuple{3,Int}, Float64}())
+    S           = length(x_vals)
+
+    viol_ii_count   = 0;  max_viol_ii   = 0.0
+    viol_iii_count  = 0;  max_viol_iii  = 0.0
+
+    # ── Constraint (ii) ───────────────────────────────────────────────────────
+    for s in 1:S
+        for (t_id, od_pairs) in main_mapping.Omega_s_t[s]
+            # Collect every (j,k) leg active in this (s, t_id)
+            jk_set = Set{Tuple{Int,Int}}()
+            for (o, d) in od_pairs
+                for (j, k) in get_valid_jk_pairs(main_mapping, o, d)
+                    push!(jk_set, (j, k))
+                end
+            end
+
+            od_dict = get(x_vals[s], t_id, nothing)
+
+            for (j_idx, k_idx) in jk_set
+                # x sum: Σ_{od using (j,k)} x hint value
+                x_sum = 0.0
+                if !isnothing(od_dict)
+                    for (od_idx, (o, d)) in enumerate(od_pairs)
+                        valid_pairs = get_valid_jk_pairs(main_mapping, o, d)
+                        pair_idx    = findfirst(==((j_idx, k_idx)), valid_pairs)
+                        pair_idx === nothing && continue
+                        pair_vals = get(od_dict, od_idx, nothing)
+                        isnothing(pair_vals) && continue
+                        pair_idx > length(pair_vals) && continue
+                        x_sum += pair_vals[pair_idx]
+                    end
+                end
+
+                # alpha sum: Σ_r α^r_{jkts}
+                alpha_sum = 0.0
+                routes_t  = get(get(main_mapping.routes_s, s, Dict{Int,Vector{RouteData}}()), t_id, RouteData[])
+                for r_idx in 1:length(routes_t)
+                    alpha_sum += get(alpha_hints, (s, r_idx, j_idx, k_idx, t_id), 0.0)
+                end
+
+                viol = x_sum - alpha_sum
+                if viol > atol
+                    viol_ii_count += 1
+                    max_viol_ii    = max(max_viol_ii, viol)
+                end
+            end
+        end
+    end
+
+    # ── Constraint (iii) ──────────────────────────────────────────────────────
+    for s in 1:S
+        for (t_id, routes_t) in get(main_mapping.routes_s, s, Dict{Int,Vector{RouteData}}())
+            for (r_idx, route) in enumerate(routes_t)
+                n_segs = length(route.station_ids) - 1
+                n_segs <= 0 && continue
+
+                theta_val = get(theta_hints, (s, t_id, r_idx), 0.0)
+                cap       = vehicle_capacity * theta_val
+
+                # Segment loads from alpha hints for this route
+                seg_load = zeros(Float64, n_segs)
+                for ((s2, r2, j_idx, k_idx, t2), alpha_val) in alpha_hints
+                    (s2 == s && r2 == r_idx && t2 == t_id && alpha_val > 0) || continue
+                    for l in 1:n_segs
+                        compute_beta_r_jkl(route, j_idx, k_idx, l,
+                                           main_mapping.array_idx_to_station_id) || continue
+                        seg_load[l] += alpha_val
+                    end
+                end
+
+                for l in 1:n_segs
+                    viol = seg_load[l] - cap
+                    if viol > atol
+                        viol_iii_count += 1
+                        max_viol_iii    = max(max_viol_iii, viol)
+                    end
+                end
+            end
+        end
+    end
+
+    # ── Report ────────────────────────────────────────────────────────────────
+    if viol_ii_count == 0 && viol_iii_count == 0
+        println("  [warm start lazy check] all lazy constraints satisfied")
+    else
+        viol_ii_count  > 0 && println("  [warm start lazy check] (ii)  violations: $(viol_ii_count),  max=$(round(max_viol_ii;  digits=6))")
+        viol_iii_count > 0 && println("  [warm start lazy check] (iii) violations: $(viol_iii_count), max=$(round(max_viol_iii; digits=6))")
+    end
 end
 
 

@@ -83,6 +83,8 @@ function run_opt(
         if !isnothing(warm_start_solution)
             _apply_warm_start!(m, warm_start_solution)
             if check_feasibility
+                println("  [warm start] verifying start completeness...")
+                _verify_start_completeness(m)
                 println("  [warm start] checking primal feasibility of hints...")
                 _check_warm_start_feasibility(m, warm_start_solution)
             end
@@ -203,6 +205,32 @@ function _apply_warm_start!(m::JuMP.Model, sol::Dict{Symbol, Any})
         end
     end
 end
+
+"""
+    _verify_start_completeness(m)
+
+Check that every variable in `m` has a start value set (non-`nothing`), that no start
+value is negative, and that integer variables have exact integer starts.
+"""
+function _verify_start_completeness(m::JuMP.Model)
+    vars       = all_variables(m)
+    n_total    = length(vars)
+    n_missing  = count(v -> start_value(v) === nothing, vars)
+    n_nonzero  = count(v -> !isnothing(start_value(v)) && start_value(v) != 0.0, vars)
+    n_negative = count(v -> !isnothing(start_value(v)) && start_value(v) < -1e-9, vars)
+    n_nonint   = count(
+        v -> is_integer(v) && !isnothing(start_value(v)) &&
+             abs(start_value(v) - round(start_value(v))) > 1e-6,
+        vars
+    )
+    println("  [warm start completeness]")
+    println("    total variables : $(n_total)")
+    println("    missing starts  : $(n_missing)  ← must be 0 for a complete start")
+    println("    non-zero starts : $(n_nonzero)")
+    println("    negative starts : $(n_negative)  ← must be 0 (all vars have lb=0)")
+    println("    non-integer int : $(n_nonint)   ← must be 0 (integer vars need integer starts)")
+end
+
 
 """
     _check_warm_start_feasibility(m, sol)
