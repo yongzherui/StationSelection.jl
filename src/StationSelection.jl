@@ -54,6 +54,9 @@ include("opt/constraints.jl")
 include("opt/objective.jl")
 include("opt/optimize.jl")
 
+# Warm start model for RouteVehicleCapacityModel (depends on opt/optimize.jl)
+include("opt/models/route_vehicle_capacity_warm_start.jl")
+
 # Variable export (depends on OptResult and all mapping types)
 include("utils/export_variables.jl")
 
@@ -100,6 +103,7 @@ export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel
+export RouteVehicleCapacityWarmStartModel
 
 # Re-export optimization functions
 export run_opt, build_model

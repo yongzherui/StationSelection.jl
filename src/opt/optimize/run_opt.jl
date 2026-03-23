@@ -16,7 +16,7 @@ Construct and solve a station selection optimization model.
 - `silent::Bool`: Whether to suppress solver output (default: false)
 - `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
 - `do_optimize::Bool`: Whether to run `optimize!` (default: true)
-- `warm_start::Bool`: Reserved (no-op; warm start is not supported by current models)
+- `warm_start::Bool`: When true, solve a restricted warm start model first and inject its solution as starting hints (supported by RouteVehicleCapacityModel)
 - `mip_gap::Union{Float64, Nothing}`: MIP optimality gap tolerance; solver stops when gap ≤ this value (default: nothing = Gurobi default 1e-4)
 
 # Returns
@@ -70,6 +70,19 @@ function run_opt(
     warm_start_solution = nothing
     warm_start_time_sec = nothing
 
+    if warm_start
+        ws_start = now()
+        warm_start_solution = get_warm_start_solution(
+            model, data, build_result;
+            optimizer_env=optimizer_env, silent=true
+        )
+        warm_start_time_sec = Dates.value(now() - ws_start) / 1000
+        @info "run_opt: warm start complete" warm_start_time_sec=warm_start_time_sec found=!isnothing(warm_start_solution)
+        if !isnothing(warm_start_solution)
+            _apply_warm_start!(m, warm_start_solution)
+        end
+    end
+
     # Solve the model
     solve_time_sec = nothing
     if do_optimize
@@ -113,10 +126,71 @@ end
 
 function get_warm_start_solution(
         model::AbstractStationSelectionModel,
-        data::StationSelectionData;
+        data::StationSelectionData,
+        build_result;
         kwargs...
     )
     return nothing
+end
+
+
+"""
+    _apply_warm_start!(m, sol)
+
+Apply warm start hint values from `sol` (Dict{Symbol,Any}) to the JuMP model `m`
+using `set_start_value`. Keys: :y, :z, :x, :alpha (optional), :theta (optional).
+"""
+function _apply_warm_start!(m::JuMP.Model, sol::Dict{Symbol, Any})
+    # y[j] — JuMP container indexed 1:n
+    y_vars = m[:y]
+    y_vals = sol[:y]
+    for j in eachindex(y_vals)
+        set_start_value(y_vars[j], y_vals[j])
+    end
+
+    # z[j,s] — JuMP container indexed [1:n, 1:S]
+    z_vars = m[:z]
+    z_vals = sol[:z]
+    n_stat, n_scen = size(z_vals)
+    for j in 1:n_stat, s in 1:n_scen
+        set_start_value(z_vars[j, s], z_vals[j, s])
+    end
+
+    # x[s][t_id][od_idx][pair_idx] — nested Dict/Vector structure
+    x_vars = m[:x]
+    x_vals = sol[:x]
+    for s in eachindex(x_vars)
+        for (t_id, od_dict_vars) in x_vars[s]
+            od_dict_vals = get(x_vals[s], t_id, nothing)
+            isnothing(od_dict_vals) && continue
+            for (od_idx, pair_vars) in od_dict_vars
+                pair_vals = get(od_dict_vals, od_idx, nothing)
+                isnothing(pair_vals) && continue
+                for pair_idx in eachindex(pair_vars)
+                    pair_idx > length(pair_vals) && break
+                    set_start_value(pair_vars[pair_idx], pair_vals[pair_idx])
+                end
+            end
+        end
+    end
+
+    # alpha — optional (only present for route-based models)
+    if haskey(m, :alpha_r_jkts) && haskey(sol, :alpha)
+        alpha_vars  = m[:alpha_r_jkts]
+        alpha_hints = sol[:alpha]
+        for (key, var) in alpha_vars
+            set_start_value(var, get(alpha_hints, key, 0.0))
+        end
+    end
+
+    # theta — optional
+    if haskey(m, :theta_r_ts) && haskey(sol, :theta)
+        theta_vars  = m[:theta_r_ts]
+        theta_hints = sol[:theta]
+        for (key, var) in theta_vars
+            set_start_value(var, get(theta_hints, key, 0.0))
+        end
+    end
 end
 
 function _print_counts(title::String, counts::Dict{String, Int})
