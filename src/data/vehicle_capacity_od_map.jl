@@ -14,7 +14,7 @@ export create_vehicle_capacity_od_map
 
 Data mapping for RouteVehicleCapacityModel (new formulation).
 
-Unlike RouteODMap, this struct stores plain RouteData (no per-leg alpha counts).
+Routes are stored as plain RouteData (no per-leg alpha counts).
 Route loading is made explicit via integer JuMP variables d/α/θ.
 
 # Fields
@@ -149,10 +149,9 @@ function create_vehicle_capacity_od_map(
 
             println("  Scenario $s/$S, time bucket $t_id: $(length(jk_set)) (j,k) pairs, running exhaustive DFS...")
             flush(stdout)
-            routes_s[s][t_id] = generate_simple_routes_exhaustive(
+            routes_s[s][t_id] = generate_simple_routes(
                 jk_set, array_idx_to_station_id, data;
                 max_route_length = model.max_stations_visited,
-                vehicle_capacity = model.vehicle_capacity,
                 max_detour_time  = model.max_detour_time,
                 max_detour_ratio = model.max_detour_ratio
             )

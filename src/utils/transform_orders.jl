@@ -519,7 +519,7 @@ function transform_orders_from_assignments(order_file::String,
 
     # 6. Build assignment lookup dict
     # TwoStageRouteWithTimeModel uses a time-indexed (4-key) lookup
-    # All other OD models (including RouteAlphaCapacityModel, RouteVehicleCapacityModel)
+    # All other OD models (including RouteVehicleCapacityModel)
     # use a scenario+OD (3-key) lookup with no time_id
     route_model = method == "TwoStageRouteWithTimeModel"
     route_model && isnothing(time_window_sec) &&
