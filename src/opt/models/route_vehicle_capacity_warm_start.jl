@@ -196,7 +196,7 @@ function get_warm_start_solution(
     data         :: StationSelectionData,
     build_result;
     optimizer_env :: Union{Gurobi.Env, Nothing} = nothing,
-    silent        :: Bool = true,
+    silent        :: Bool = false,
     kwargs...
 )
     ws_model = RouteVehicleCapacityWarmStartModel(

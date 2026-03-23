@@ -30,6 +30,7 @@ function run_opt(
         show_counts::Bool=false,
         do_optimize::Bool=true,
         warm_start::Bool=false,
+        check_feasibility::Bool=true,
         mip_gap::Union{Float64, Nothing}=nothing
     )
 
@@ -74,12 +75,17 @@ function run_opt(
         ws_start = now()
         warm_start_solution = get_warm_start_solution(
             model, data, build_result;
-            optimizer_env=optimizer_env, silent=true
+            optimizer_env=optimizer_env, silent=false
         )
         warm_start_time_sec = Dates.value(now() - ws_start) / 1000
         @info "run_opt: warm start complete" warm_start_time_sec=warm_start_time_sec found=!isnothing(warm_start_solution)
+
         if !isnothing(warm_start_solution)
             _apply_warm_start!(m, warm_start_solution)
+            if check_feasibility
+                println("  [warm start] checking primal feasibility of hints...")
+                _check_warm_start_feasibility(m, warm_start_solution)
+            end
         end
     end
 
@@ -192,6 +198,78 @@ function _apply_warm_start!(m::JuMP.Model, sol::Dict{Symbol, Any})
         end
     end
 end
+
+"""
+    _check_warm_start_feasibility(m, sol)
+
+Build a point Dict from `sol` and run `primal_feasibility_report` on `m`.
+Prints any violated upfront constraints (lazy constraints are not checked).
+"""
+function _check_warm_start_feasibility(m::JuMP.Model, sol::Dict{Symbol, Any})
+    point = Dict{VariableRef, Float64}()
+
+    # y
+    y_vars = m[:y]
+    y_vals = sol[:y]
+    for j in eachindex(y_vals)
+        point[y_vars[j]] = Float64(round(y_vals[j]))
+    end
+
+    # z
+    z_vars = m[:z]
+    z_vals = sol[:z]
+    n_stat, n_scen = size(z_vals)
+    for j in 1:n_stat, s in 1:n_scen
+        point[z_vars[j, s]] = Float64(round(z_vals[j, s]))
+    end
+
+    # x — nested Dict structure
+    x_vars = m[:x]
+    x_vals = sol[:x]
+    for s in eachindex(x_vars)
+        for (t_id, od_dict_vars) in x_vars[s]
+            od_dict_vals = get(x_vals[s], t_id, nothing)
+            isnothing(od_dict_vals) && continue
+            for (od_idx, pair_vars) in od_dict_vars
+                pair_vals = get(od_dict_vals, od_idx, nothing)
+                isnothing(pair_vals) && continue
+                for pair_idx in eachindex(pair_vars)
+                    pair_idx > length(pair_vals) && break
+                    point[pair_vars[pair_idx]] = Float64(round(pair_vals[pair_idx]))
+                end
+            end
+        end
+    end
+
+    # alpha (optional)
+    if haskey(m, :alpha_r_jkts) && haskey(sol, :alpha)
+        alpha_vars  = m[:alpha_r_jkts]
+        alpha_hints = sol[:alpha]
+        for (key, var) in alpha_vars
+            point[var] = Float64(round(get(alpha_hints, key, 0.0)))
+        end
+    end
+
+    # theta (optional)
+    if haskey(m, :theta_r_ts) && haskey(sol, :theta)
+        theta_vars  = m[:theta_r_ts]
+        theta_hints = sol[:theta]
+        for (key, var) in theta_vars
+            point[var] = Float64(round(get(theta_hints, key, 0.0)))
+        end
+    end
+
+    report = primal_feasibility_report(m, point; atol=1e-6)
+    if isempty(report)
+        println("  [warm start feasibility] all upfront constraints satisfied")
+    else
+        println("  [warm start feasibility] $(length(report)) violated constraint(s):")
+        for (con, viol) in sort(collect(report); by = x -> -x[2])
+            println("    violation=$(round(viol; digits=6))  con=$(con)")
+        end
+    end
+end
+
 
 function _print_counts(title::String, counts::Dict{String, Int})
     total = sum(values(counts))
