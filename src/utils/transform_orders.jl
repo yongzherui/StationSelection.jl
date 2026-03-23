@@ -17,6 +17,7 @@ using Dates
 
 export transform_orders,
        transform_orders_from_assignments,
+       remap_order_times_stacked,
        parse_station_list,
        precompute_distances,
        find_closest_selected_station,
@@ -518,12 +519,11 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     # 6. Build assignment lookup dict
-    # TwoStageRouteWithTimeModel uses a time-indexed (4-key) lookup
-    # All other OD models (including RouteVehicleCapacityModel)
-    # use a scenario+OD (3-key) lookup with no time_id
-    route_model = method == "TwoStageRouteWithTimeModel"
+    # TwoStageRouteWithTimeModel and RouteVehicleCapacityModel both use a
+    # time-indexed (4-key) lookup keyed (scenario, time_id, origin_id, dest_id)
+    route_model = method in ("TwoStageRouteWithTimeModel", "RouteVehicleCapacityModel")
     route_model && isnothing(time_window_sec) &&
-        error("transform_orders_from_assignments requires time_window_sec for TwoStageRouteWithTimeModel")
+        error("transform_orders_from_assignments requires time_window_sec for $method")
 
     assignment_lookup = route_model ?
         Dict{NTuple{4, Int}, Tuple{Int,Int}}() :
@@ -685,4 +685,55 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     return output_df, assignment_stats
+end
+
+
+"""
+    remap_order_times_stacked(df, scenario_ranges, base_date) -> (DataFrame, Float64)
+
+Remap the `order_time` column so that all scenarios are concatenated back-to-back with
+no gaps, starting from `base_date`.
+
+Each scenario's orders are shifted by the cumulative duration of all preceding scenarios,
+closing any real-time gaps between non-contiguous windows. The calendar date of
+`base_date` is arbitrary — only the relative offsets within each scenario are preserved.
+
+Returns the remapped DataFrame and the total stacked duration in seconds.
+
+# Example
+
+Two 4-hour scenarios with a 2-hour gap (08:00–12:00 and 14:00–18:00):
+- Scenario 1 orders: keep their offset from 08:00 → placed in [0, 14400) sec
+- Scenario 2 orders: gap closed → placed in [14400, 28800) sec
+- Total stacked duration = 28800 sec
+"""
+function remap_order_times_stacked(
+    df              :: DataFrame,
+    scenario_ranges :: Vector{<:Dict},
+    base_date       :: DateTime
+)::Tuple{DataFrame, Float64}
+    ranges = [(DateTime(r["start"], "yyyy-mm-dd HH:MM:SS"),
+               DateTime(r["end"],   "yyyy-mm-dd HH:MM:SS")) for r in scenario_ranges]
+
+    # Cumulative offset (seconds) at the start of each scenario after stacking
+    cum_offsets = zeros(Float64, length(ranges))
+    for i in 2:length(ranges)
+        dur = (ranges[i-1][2] - ranges[i-1][1]).value / 1000.0
+        cum_offsets[i] = cum_offsets[i-1] + dur
+    end
+    total_duration = cum_offsets[end] + (ranges[end][2] - ranges[end][1]).value / 1000.0
+
+    out_df = copy(df)
+    for row_i in 1:nrow(out_df)
+        order_dt = DateTime(string(out_df[row_i, :order_time]), "yyyy-mm-dd HH:MM:SS")
+        for j in 1:length(ranges)
+            if ranges[j][1] <= order_dt <= ranges[j][2]
+                within_sec = (order_dt - ranges[j][1]).value / 1000.0
+                new_dt = base_date + Dates.Millisecond(round(Int, (cum_offsets[j] + within_sec) * 1000))
+                out_df[row_i, :order_time] = Dates.format(new_dt, "yyyy-mm-dd HH:MM:SS")
+                break
+            end
+        end
+    end
+    return out_df, total_duration
 end

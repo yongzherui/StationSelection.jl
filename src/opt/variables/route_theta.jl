@@ -6,10 +6,38 @@ Route activation variables for RouteVehicleCapacityModel (new formulation).
 
 export add_alpha_r_jkts_variables!
 export add_theta_r_ts_variables!
+export compute_beta_r_jkl
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
 # ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    compute_beta_r_jkl(route, j_idx, k_idx, l, array_idx_to_station_id) -> Bool
+
+Return true if leg (j_idx → k_idx) occupies segment l of route r.
+
+Segment l is the arc from `route.station_ids[l]` to `route.station_ids[l+1]`.
+A passenger riding from j to k occupies segment l iff `pos_j ≤ l < pos_k`,
+where pos_j and pos_k are the 1-based positions of j and k in the station sequence.
+"""
+function compute_beta_r_jkl(
+    route                   :: RouteData,
+    j_idx                   :: Int,
+    k_idx                   :: Int,
+    l                       :: Int,
+    array_idx_to_station_id :: Vector{Int}
+)::Bool
+    j_id  = array_idx_to_station_id[j_idx]
+    k_id  = array_idx_to_station_id[k_idx]
+    sids  = route.station_ids
+    pos_j = findfirst(==(j_id), sids)
+    pos_k = findfirst(==(k_id), sids)
+    pos_j === nothing && return false
+    pos_k === nothing && return false
+    return pos_j <= l < pos_k
+end
+
 
 """
 Check whether route serves leg (j_idx → k_idx): j_id and k_id must both appear in
