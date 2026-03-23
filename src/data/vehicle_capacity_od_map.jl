@@ -142,12 +142,17 @@ function create_vehicle_capacity_od_map(
                 end
             end
 
+            n_requests = sum(values(Q_s_t[s][t_id]); init=0)
+            n_od       = length(Omega_s_t[s][t_id])
+            println("  Scenario $s/$S, time bucket $t_id: $n_requests requests, $n_od OD pairs, $(length(jk_set)) (j,k) pairs")
+            flush(stdout)
+
             if isempty(jk_set)
                 routes_s[s][t_id] = RouteData[]
                 continue
             end
 
-            println("  Scenario $s/$S, time bucket $t_id: $(length(jk_set)) (j,k) pairs, running exhaustive DFS...")
+            println("    running exhaustive DFS...")
             flush(stdout)
             routes_s[s][t_id] = generate_simple_routes(
                 jk_set, array_idx_to_station_id, data;
@@ -155,7 +160,7 @@ function create_vehicle_capacity_od_map(
                 max_detour_time  = model.max_detour_time,
                 max_detour_ratio = model.max_detour_ratio
             )
-            println("  Scenario $s/$S, time bucket $t_id: $(length(routes_s[s][t_id])) routes generated")
+            println("    → $(length(routes_s[s][t_id])) routes generated")
             flush(stdout)
         end
     end

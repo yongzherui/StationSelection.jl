@@ -162,13 +162,17 @@ function generate_simple_routes(
     end
 
     # Launch DFS from each valid pickup station
-    for j in p_s
+    n_roots = length(p_s)
+    for (j_num, j) in enumerate(p_s)
         push!(route, j)
         push!(in_route, j)
         dfs!(BitSet())
         pop!(route)
         delete!(in_route, j)
+        print("\r    DFS: $j_num/$n_roots roots done, $(length(routes_map)) routes found")
+        flush(stdout)
     end
+    println()
 
     return sort!(collect(values(routes_map)), by = r -> r.id)
 end
