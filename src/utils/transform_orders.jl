@@ -440,7 +440,7 @@ Orders without a matching assignment fall back to closest selected station.
 
 Lookup key:
 - `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`
-- `(scenario, time_id, origin_id, dest_id)` for `TwoStageRouteWithTimeModel`
+- `(scenario, t_id, origin_id, dest_id)` for `RouteVehicleCapacityModel`
 
 # Arguments
 - `order_file`: Path to order CSV
@@ -529,13 +529,13 @@ function transform_orders_from_assignments(order_file::String,
         Dict{NTuple{4, Int}, Tuple{Int,Int}}() :
         Dict{NTuple{3, Int}, Tuple{Int,Int}}()
 
-    if route_model && !("time_id" in names(assignments_df))
-        error("assignment_variables.csv missing required column 'time_id' for TwoStageRouteWithTimeModel")
+    if route_model && !("t_id" in names(assignments_df))
+        error("assignment_variables.csv missing required column 't_id' for $method")
     end
 
     for row in eachrow(assignments_df)
         key = route_model ?
-            (row.scenario, row.time_id, row.origin_id, row.dest_id) :
+            (row.scenario, row.t_id, row.origin_id, row.dest_id) :
             (row.scenario, row.origin_id, row.dest_id)
         assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
     end
