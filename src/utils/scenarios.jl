@@ -55,7 +55,7 @@ Generate scenarios from explicit ranges. Each range can be a tuple of:
 - String formatted as `yyyy-mm-dd HH:MM:SS`.
 """
 function generate_scenarios_from_ranges(
-    ranges::Vector{Tuple{Any, Any}}
+    ranges::Vector{<:Tuple}
 )::Vector{Tuple{String, String}}
     scenarios = Vector{Tuple{String, String}}()
     for (start_val, end_val) in ranges
