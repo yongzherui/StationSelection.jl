@@ -81,10 +81,8 @@ Build the full OD mapping for RouteVehicleCapacityModel (new formulation):
 4. Per-scenario plain routes via non-temporal BFS (RouteData, no alpha dict)
 """
 function create_vehicle_capacity_od_map(
-    model          :: RouteVehicleCapacityModel,
-    data           :: StationSelectionData;
-    max_labels     :: Int = 400_000,
-    print_interval :: Int = 10_000
+    model :: RouteVehicleCapacityModel,
+    data  :: StationSelectionData
 )::VehicleCapacityODMap
 
     # ── 1. Index mappings ──────────────────────────────────────────────────────
@@ -126,7 +124,7 @@ function create_vehicle_capacity_od_map(
         model.max_walking_distance
     )
 
-    # ── 4. Non-temporal BFS routes per (scenario, time bucket) ─────────────────
+    # ── 4. Exhaustive DFS routes per (scenario, time bucket) ───────────────────
     # Routes are generated separately for each time bucket so that routes for
     # time t can only cover demand within time t.
     routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
@@ -136,40 +134,29 @@ function create_vehicle_capacity_od_map(
         t_ids = sort(collect(keys(Q_s_t[s])))
 
         for t_id in t_ids
-            od_count_t = Q_s_t[s][t_id]
-            println("  Scenario $s / $S, time bucket $t_id: building non-timed orders...")
-            flush(stdout)
-
-            nontimed_orders = _NonTimedOrder[]
-            for ((o_id, d_id), q) in od_count_t
-                valid_pairs = get(valid_jk_pairs, (o_id, d_id), Tuple{Int,Int}[])
-                isempty(valid_pairs) && continue
-                vbs_id_pairs = Tuple{Int,Int}[
-                    (array_idx_to_station_id[j_idx], array_idx_to_station_id[k_idx])
-                    for (j_idx, k_idx) in valid_pairs
-                ]
-                push!(nontimed_orders, _NonTimedOrder(o_id, d_id, q, vbs_id_pairs))
+            # Build A_s_t: union of valid (j_idx, k_idx) pairs for all OD in this bucket
+            jk_set = Set{Tuple{Int, Int}}()
+            for (o, d) in Omega_s_t[s][t_id]
+                for pair in get(valid_jk_pairs, (o, d), Tuple{Int,Int}[])
+                    push!(jk_set, pair)
+                end
             end
 
-            if length(nontimed_orders) > 63
-                @warn "Scenario $s, time bucket $t_id has $(length(nontimed_orders)) orders " *
-                      "for non-temporal BFS (limit 63); truncating to first 63."
-                resize!(nontimed_orders, 63)
+            if isempty(jk_set)
+                routes_s[s][t_id] = RouteData[]
+                continue
             end
 
-            println("  Scenario $s / $S, time bucket $t_id: running BFS with $(length(nontimed_orders)) orders...")
+            println("  Scenario $s/$S, time bucket $t_id: $(length(jk_set)) (j,k) pairs, running exhaustive DFS...")
             flush(stdout)
-            routes_s[s][t_id] = generate_simple_routes_from_orders(
-                nontimed_orders, data, station_id_to_array_idx;
-                vehicle_capacity     = model.vehicle_capacity,
-                max_detour_time      = model.max_detour_time,
-                max_detour_ratio     = model.max_detour_ratio,
-                max_stations_visited = model.max_stations_visited,
-                max_labels           = max_labels,
-                print_interval       = print_interval
+            routes_s[s][t_id] = generate_simple_routes_exhaustive(
+                jk_set, array_idx_to_station_id, data;
+                max_route_length = model.max_stations_visited,
+                vehicle_capacity = model.vehicle_capacity,
+                max_detour_time  = model.max_detour_time,
+                max_detour_ratio = model.max_detour_ratio
             )
-
-            println("  Scenario $s / $S, time bucket $t_id: $(length(routes_s[s][t_id])) routes generated")
+            println("  Scenario $s/$S, time bucket $t_id: $(length(routes_s[s][t_id])) routes generated")
             flush(stdout)
         end
     end

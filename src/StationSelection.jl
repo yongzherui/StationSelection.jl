@@ -28,6 +28,7 @@ include("utils/transform_stations.jl")
 include("utils/route_data.jl")
 include("utils/generate_routes_from_timed_orders.jl")
 include("utils/generate_routes_from_orders.jl")
+include("utils/generate_routes_from_orders_exhaustive.jl")
 include("utils/route_capacity_coefficients.jl")
 include("data/stations.jl")
 include("data/requests.jl")
@@ -125,7 +126,7 @@ export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!
 export add_route_theta_variables!
-export add_d_jkts_variables!, add_alpha_r_jkts_variables!, add_theta_ts_variables!
+export add_d_jkts_variables!, add_alpha_r_jkts_variables!, add_theta_r_ts_variables!
 export compute_alpha_r_jkt, compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!

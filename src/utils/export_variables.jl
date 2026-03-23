@@ -625,7 +625,7 @@ end
     export_model_specific_variables(result, mapping::VehicleCapacityODMap, export_dir, metadata)
 
 Export RouteVehicleCapacityModel (new formulation) specific variables:
-theta_ts.csv, d_jkts.csv, alpha_r_jkts.csv.
+theta_r_ts.csv, d_jkts.csv, alpha_r_jkts.csv.
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -636,35 +636,35 @@ function export_model_specific_variables(
     metadata["model_type"] = "RouteVehicleCapacityModel"
     metadata["n_routes"]   = sum(length(rs) for rs in values(mapping.routes_s); init=0)
 
-    n_theta = _export_theta_ts(result.model, mapping, export_dir)
+    n_theta = _export_theta_r_ts(result.model, mapping, export_dir)
     n_d     = _export_d_jkts(result.model, mapping, export_dir)
     n_alpha = _export_alpha_r_jkts(result.model, mapping, export_dir)
 
-    metadata["n_theta_ts_nonzero"]     = n_theta
+    metadata["n_theta_r_ts_nonzero"]   = n_theta
     metadata["n_d_jkts_nonzero"]       = n_d
     metadata["n_alpha_r_jkts_nonzero"] = n_alpha
 end
 
 
 """
-    _export_theta_ts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+    _export_theta_r_ts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
 
-Export timed route deployment variables (theta_ts) to `theta_ts.csv`.
+Export timed route deployment variables (theta_r_ts) to `theta_r_ts.csv`.
 Key: (s, t_id, r_idx). Columns: scenario, t_id, route_idx, station_ids, travel_time, value.
 Only rows with value > 0.5 are written.
 """
-function _export_theta_ts(
+function _export_theta_r_ts(
     m::JuMP.Model,
     mapping::VehicleCapacityODMap,
     export_dir::String
 )
-    if !haskey(m.obj_dict, :theta_ts)
-        println("    ✓ theta_ts.csv (0 deployments — theta_ts not present)")
+    if !haskey(m.obj_dict, :theta_r_ts)
+        println("    ✓ theta_r_ts.csv (0 deployments — theta_r_ts not present)")
         return 0
     end
 
     rows = []
-    for ((s, t_id, r_idx), var) in m[:theta_ts]
+    for ((s, t_id, r_idx), var) in m[:theta_r_ts]
         val = JuMP.value(var)
         val > 0.5 || continue
         route = mapping.routes_s[s][r_idx]
@@ -679,8 +679,8 @@ function _export_theta_ts(
     end
 
     df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "theta_ts.csv"), df)
-    println("    ✓ theta_ts.csv ($(nrow(df)) deployments)")
+    CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
+    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments)")
     return nrow(df)
 end
 

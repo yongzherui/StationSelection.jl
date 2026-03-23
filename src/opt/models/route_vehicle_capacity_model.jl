@@ -33,6 +33,7 @@ Covering constraints (replacing the single α-based constraint):
 - `k::Int`: Stations to activate per scenario (second stage)
 - `l::Int`: Stations to build (first stage)
 - `route_regularization_weight::Float64`: μ — penalty per unit route travel time activated
+- `repositioning_time::Float64`: ρ — constant repositioning time (seconds) added to route travel time in objective per deployment
 - `vehicle_capacity::Int`: Cap_r — vehicle capacity used in segment capacity constraints
 - `max_route_travel_time::Union{Float64,Nothing}`: Upper bound on route travel time filter
 - `max_walking_distance::Float64`: Required walking limit; prunes valid (j,k) pairs
@@ -46,6 +47,7 @@ struct RouteVehicleCapacityModel <: AbstractODModel
     k::Int
     l::Int
     route_regularization_weight::Float64
+    repositioning_time::Float64
     vehicle_capacity::Int
     max_route_travel_time::Union{Float64, Nothing}
     max_walking_distance::Float64
@@ -59,6 +61,7 @@ struct RouteVehicleCapacityModel <: AbstractODModel
             k::Int,
             l::Int;
             route_regularization_weight::Number = 1.0,
+            repositioning_time::Number = 20.0,
             vehicle_capacity::Int = 18,
             max_route_travel_time::Union{Number, Nothing} = nothing,
             max_walking_distance::Number = 300,
@@ -87,7 +90,7 @@ struct RouteVehicleCapacityModel <: AbstractODModel
         max_walking_distance >= 0 ||
             throw(ArgumentError("max_walking_distance must be non-negative"))
 
-        new(k, l, Float64(route_regularization_weight), vehicle_capacity, mrtt,
+        new(k, l, Float64(route_regularization_weight), Float64(repositioning_time), vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr, time_window_sec, use_lazy_constraints,
             max_stations_visited)
     end

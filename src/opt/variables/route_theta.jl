@@ -11,7 +11,7 @@ stored as sparse Dicts keyed by NTuples.
 export add_route_theta_variables!
 export add_d_jkts_variables!
 export add_alpha_r_jkts_variables!
-export add_theta_ts_variables!
+export add_theta_r_ts_variables!
 
 """
     add_route_theta_variables!(m, data, mapping::TwoStageRouteODMap) -> Int
@@ -92,7 +92,8 @@ function _route_serves_jk(
     sids  = route.station_ids
     pos_j = findfirst(==(j_id), sids)
     pos_k = findfirst(==(k_id), sids)
-    pos_j !== nothing && pos_k !== nothing && pos_j < pos_k
+    pos_j !== nothing && pos_k !== nothing && pos_j < pos_k &&
+        get(route.od_capacity, (j_id, k_id), 0) > 0
 end
 
 
@@ -218,18 +219,18 @@ end
 
 
 """
-    add_theta_ts_variables!(m, data, mapping::VehicleCapacityODMap) -> Int
+    add_theta_r_ts_variables!(m, data, mapping::VehicleCapacityODMap) -> Int
 
 Add integer route-deployment variables θ^r_{ts} ∈ Z+ for RouteVehicleCapacityModel.
 
 `θ^r_{ts}` counts how many times route r is deployed in time window t of scenario s.
 Created for each (s, t_id, r_idx) where at least one α^r_{jkts} variable exists.
 
-Stored as `m[:theta_ts]::Dict{NTuple{3,Int}, VariableRef}` keyed `(s, t_id, r_idx)`.
+Stored as `m[:theta_r_ts]::Dict{NTuple{3,Int}, VariableRef}` keyed `(s, t_id, r_idx)`.
 
 Returns the number of variables added.
 """
-function add_theta_ts_variables!(
+function add_theta_r_ts_variables!(
     m::Model,
     data::StationSelectionData,
     mapping::VehicleCapacityODMap
@@ -242,11 +243,11 @@ function add_theta_ts_variables!(
         push!(srt_with_alpha, (s, t_id, r_idx))
     end
 
-    theta_ts = Dict{NTuple{3,Int}, VariableRef}()
+    theta_r_ts = Dict{NTuple{3,Int}, VariableRef}()
     for (s, t_id, r_idx) in srt_with_alpha
-        theta_ts[(s, t_id, r_idx)] = @variable(m, integer = true, lower_bound = 0)
+        theta_r_ts[(s, t_id, r_idx)] = @variable(m, integer = true, lower_bound = 0)
     end
 
-    m[:theta_ts] = theta_ts
+    m[:theta_r_ts] = theta_r_ts
     return JuMP.num_variables(m) - before
 end

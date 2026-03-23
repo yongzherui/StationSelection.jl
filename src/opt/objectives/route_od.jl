@@ -127,21 +127,24 @@ end
 
 """
     set_route_od_objective!(m, data, mapping::VehicleCapacityODMap;
-                             route_regularization_weight::Float64=1.0)
+                             route_regularization_weight::Float64=1.0,
+                             repositioning_time::Float64=20.0)
 
 Set the minimization objective for RouteVehicleCapacityModel (new formulation).
 
     min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} (d_{oj} + d_{kd}) x_{odjkts}
-            + μ Σ_{(s,t,r)} τ^r · θ^r_{ts} ]
+            + μ Σ_{(s,t,r)} (τ^r + ρ) · θ^r_{ts} ]
 
 x is time-indexed integer (counts passengers directly); no Q scaling needed.
-Route penalty sums over all θ^r_{ts} deployments weighted by route travel time τ^r.
+Route penalty sums over all θ^r_{ts} deployments weighted by (τ^r + ρ), where ρ is
+a constant repositioning time (seconds) added to each route deployment cost.
 """
 function set_route_od_objective!(
     m::Model,
     data::StationSelectionData,
     mapping::VehicleCapacityODMap;
-    route_regularization_weight::Float64 = 1.0
+    route_regularization_weight::Float64 = 1.0,
+    repositioning_time::Float64 = 20.0
 )
     S   = n_scenarios(data)
     x   = m[:x]
@@ -164,11 +167,11 @@ function set_route_od_objective!(
         end
     end
 
-    # ── Route deployment penalty: μ Σ_{(s,t_id,r_idx)} τ^r * θ^r_{ts} ────────
-    theta_ts = m[:theta_ts]
-    for ((s, t_id, r_idx), theta_var) in theta_ts
-        tau_r = mapping.routes_s[s][r_idx].travel_time
-        add_to_expression!(obj, route_regularization_weight * tau_r, theta_var)
+    # ── Route deployment penalty: μ Σ_{(s,t_id,r_idx)} (τ^r + ρ) * θ^r_{ts} ──
+    theta_r_ts = m[:theta_r_ts]
+    for ((s, t_id, r_idx), theta_var) in theta_r_ts
+        tau_r = mapping.routes_s[s][t_id][r_idx].travel_time
+        add_to_expression!(obj, route_regularization_weight * (tau_r + repositioning_time), theta_var)
     end
 
     @objective(m, Min, obj)

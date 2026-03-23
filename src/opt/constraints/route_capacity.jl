@@ -212,7 +212,7 @@ function add_route_capacity_constraints!(
     d_jkts   = m[:d_jkts]
     alpha_r_jkts     = m[:alpha_r_jkts]
     alpha_r_jkts_by_srt = m[:alpha_r_jkts_by_srt]
-    theta_ts = m[:theta_ts]
+    theta_r_ts = m[:theta_r_ts]
     # Cap_r is set by build_model before calling this function
     Cap_r = Float64(m[:vehicle_capacity])
 
@@ -267,7 +267,7 @@ function add_route_capacity_constraints!(
                 n_segs = length(route.station_ids) - 1
                 n_segs <= 0 && continue
 
-                theta_var = get(theta_ts, (s, t_id, r_idx), nothing)
+                theta_var = get(theta_r_ts, (s, t_id, r_idx), nothing)
                 theta_var === nothing && continue
 
                 srt_key  = (s, r_idx, t_id)
@@ -323,7 +323,7 @@ function add_route_capacity_lazy_constraints!(
     d_jkts   = m[:d_jkts]
     alpha_r_jkts        = m[:alpha_r_jkts]
     alpha_r_jkts_by_srt = m[:alpha_r_jkts_by_srt]
-    theta_ts = m[:theta_ts]
+    theta_r_ts = m[:theta_r_ts]
     Cap_r    = Float64(m[:vehicle_capacity])
 
     # Precompute reverse OD index per scenario and time bucket:
@@ -392,7 +392,7 @@ function add_route_capacity_lazy_constraints!(
                     n_segs = length(route.station_ids) - 1
                     n_segs <= 0 && continue
 
-                    theta_var = get(theta_ts, (s, t_id, r_idx), nothing)
+                    theta_var = get(theta_r_ts, (s, t_id, r_idx), nothing)
                     theta_var === nothing && continue
                     theta_val = callback_value(cb_data, theta_var)
 

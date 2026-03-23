@@ -110,7 +110,10 @@ function build_model(
     extra_counts      = Dict{String, Int}()
 
     # Extra counts
-    n_routes = sum(length(mapping.routes_s[s]) for s in 1:S; init = 0)
+    n_routes = sum(
+        sum(length(v) for v in values(mapping.routes_s[s]); init = 0)
+        for s in 1:S; init = 0
+    )
     total_od_pairs = sum(length(mapping.Omega_s[s]) for s in 1:S; init = 0)
 
     extra_counts["n_routes"]       = n_routes
@@ -128,14 +131,15 @@ function build_model(
     variable_counts["assignment"]          = add_assignment_variables!(m, data, mapping)
     variable_counts["d_jkts"]             = add_d_jkts_variables!(m, data, mapping)
     variable_counts["alpha_r_jkts"]       = add_alpha_r_jkts_variables!(m, data, mapping)
-    variable_counts["theta_ts"]           = add_theta_ts_variables!(m, data, mapping)
+    variable_counts["theta_r_ts"]         = add_theta_r_ts_variables!(m, data, mapping)
 
     # ==========================================================================
     # Objective
     # ==========================================================================
 
     set_route_od_objective!(m, data, mapping;
-        route_regularization_weight = model.route_regularization_weight)
+        route_regularization_weight = model.route_regularization_weight,
+        repositioning_time          = model.repositioning_time)
 
     # ==========================================================================
     # Constraints
