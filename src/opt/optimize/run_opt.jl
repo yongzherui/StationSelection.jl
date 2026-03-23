@@ -2,8 +2,8 @@ using Dates
 using Logging
 
 """
-    run_opt(model, data; optimizer_env=nothing, silent=true, show_counts=false,
-            do_optimize=true, warm_start=false)
+    run_opt(model, data; optimizer_env=nothing, silent=false, show_counts=false,
+            do_optimize=true, warm_start=false, mip_gap=nothing)
 
 Construct and solve a station selection optimization model.
 
@@ -13,10 +13,11 @@ Construct and solve a station selection optimization model.
 
 # Keyword Arguments
 - `optimizer_env`: Gurobi environment (created if not provided)
-- `silent::Bool`: Whether to suppress solver output (default: true)
+- `silent::Bool`: Whether to suppress solver output (default: false)
 - `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
 - `do_optimize::Bool`: Whether to run `optimize!` (default: true)
 - `warm_start::Bool`: Reserved (no-op; warm start is not supported by current models)
+- `mip_gap::Union{Float64, Nothing}`: MIP optimality gap tolerance; solver stops when gap ≤ this value (default: nothing = Gurobi default 1e-4)
 
 # Returns
 - `OptResult`
@@ -25,10 +26,11 @@ function run_opt(
         model::AbstractStationSelectionModel,
         data::StationSelectionData;
         optimizer_env=nothing,
-        silent::Bool=true,
+        silent::Bool=false,
         show_counts::Bool=false,
         do_optimize::Bool=true,
-        warm_start::Bool=false
+        warm_start::Bool=false,
+        mip_gap::Union{Float64, Nothing}=nothing
     )
 
     start_time = now()
@@ -59,6 +61,10 @@ function run_opt(
 
     if silent
         set_silent(m)
+    end
+
+    if !isnothing(mip_gap)
+        set_optimizer_attribute(m, "MIPGap", mip_gap)
     end
 
     warm_start_solution = nothing
