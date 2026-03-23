@@ -147,6 +147,11 @@ Apply warm start hint values from `sol` (Dict{Symbol,Any}) to the JuMP model `m`
 using `set_start_value`. Keys: :y, :z, :x, :alpha (optional), :theta (optional).
 """
 function _apply_warm_start!(m::JuMP.Model, sol::Dict{Symbol, Any})
+    # Zero every variable first so Gurobi sees a complete start (no GRB_UNDEFINED).
+    for var in all_variables(m)
+        set_start_value(var, 0.0)
+    end
+
     # y[j] — JuMP container indexed 1:n
     y_vars = m[:y]
     y_vals = sol[:y]
@@ -163,18 +168,18 @@ function _apply_warm_start!(m::JuMP.Model, sol::Dict{Symbol, Any})
     end
 
     # x[s][t_id][od_idx][pair_idx] — nested Dict/Vector structure
+    # All x variables are explicitly set (0.0 for any unmatched) to avoid GRB_UNDEFINED.
     x_vars = m[:x]
     x_vals = sol[:x]
     for s in eachindex(x_vars)
         for (t_id, od_dict_vars) in x_vars[s]
             od_dict_vals = get(x_vals[s], t_id, nothing)
-            isnothing(od_dict_vals) && continue
             for (od_idx, pair_vars) in od_dict_vars
-                pair_vals = get(od_dict_vals, od_idx, nothing)
-                isnothing(pair_vals) && continue
+                pair_vals = isnothing(od_dict_vals) ? nothing : get(od_dict_vals, od_idx, nothing)
                 for pair_idx in eachindex(pair_vars)
-                    pair_idx > length(pair_vals) && break
-                    set_start_value(pair_vars[pair_idx], pair_vals[pair_idx])
+                    v = (!isnothing(pair_vals) && pair_idx <= length(pair_vals)) ?
+                            pair_vals[pair_idx] : 0.0
+                    set_start_value(pair_vars[pair_idx], v)
                 end
             end
         end

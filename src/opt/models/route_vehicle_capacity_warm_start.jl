@@ -235,6 +235,12 @@ function get_warm_start_solution(
         x_vals, ws_build.mapping, build_result.mapping, model.vehicle_capacity
     )
 
+    # Correct x: reassign demand away from (j,k) pairs not covered by any route so that
+    # constraint (ii) (Σ x ≤ Σ_r α) is not violated by the warm start hint.
+    println("  [warm start] correcting x hints for route coverage...")
+    flush(stdout)
+    x_vals = _correct_x_for_route_coverage(x_vals, alpha_hints, ws_build.mapping)
+
     return Dict{Symbol, Any}(
         :y     => y_vals,
         :z     => z_vals,
@@ -242,6 +248,83 @@ function get_warm_start_solution(
         :alpha => alpha_hints,
         :theta => theta_hints,
     )
+end
+
+
+"""
+    _correct_x_for_route_coverage(x_vals, alpha_hints, ws_mapping) -> x_vals
+
+For each OD pair in each (s, t_id), zero out x values assigned to (j,k) legs that have
+no alpha coverage (i.e. no route in the main model serves that leg). Reassign the demand
+to the first covered (j,k) leg so that constraint (ii) (Σ x ≤ Σ_r α) is satisfied.
+
+Modifies and returns x_vals in place.
+"""
+function _correct_x_for_route_coverage(
+    x_vals      :: Vector,
+    alpha_hints :: Dict{NTuple{5,Int}, Float64},
+    ws_mapping  :: VehicleCapacityODMap
+)
+    # Build set of (s, t_id, j_idx, k_idx) legs that have at least one alpha hint
+    covered = Set{NTuple{4,Int}}()
+    for (s, _r, j_idx, k_idx, t_id) in keys(alpha_hints)
+        push!(covered, (s, t_id, j_idx, k_idx))
+    end
+
+    S = length(x_vals)
+    n_zeroed = 0
+    n_reassigned = 0
+
+    for s in 1:S
+        for (t_id, od_pairs) in ws_mapping.Omega_s_t[s]
+            od_dict = get(x_vals[s], t_id, nothing)
+            isnothing(od_dict) && continue
+            for (od_idx, (o, d)) in enumerate(od_pairs)
+                pair_vals = get(od_dict, od_idx, nothing)
+                isnothing(pair_vals) && continue
+                isempty(pair_vals) && continue
+
+                valid_pairs = get_valid_jk_pairs(ws_mapping, o, d)
+                demand      = sum(pair_vals)
+                demand <= 0 && continue
+
+                # Find first covered pair index
+                best_idx = 0
+                for (pair_idx, (j_idx, k_idx)) in enumerate(valid_pairs)
+                    pair_idx > length(pair_vals) && break
+                    if (s, t_id, j_idx, k_idx) ∈ covered
+                        best_idx = pair_idx
+                        break
+                    end
+                end
+
+                # Count uncovered demand before zeroing
+                uncovered = sum(
+                    pair_vals[pi]
+                    for (pi, (j, k)) in enumerate(valid_pairs)
+                    if pi <= length(pair_vals) && (s, t_id, j, k) ∉ covered;
+                    init = 0.0
+                )
+                uncovered > 0 && (n_zeroed += 1)
+
+                # Zero all, reassign demand to first covered pair
+                fill!(pair_vals, 0.0)
+                if best_idx > 0
+                    pair_vals[best_idx] = demand
+                    uncovered > 0 && (n_reassigned += 1)
+                end
+                # If best_idx == 0: no covered pair — all x left at 0 (partial infeasibility)
+            end
+        end
+    end
+
+    if n_zeroed > 0
+        println("  [warm start] corrected $(n_zeroed) OD-pair slots with uncovered (j,k) legs; $(n_reassigned) reassigned to a covered pair")
+    else
+        println("  [warm start] all x assignments already covered by routes")
+    end
+
+    return x_vals
 end
 
 
