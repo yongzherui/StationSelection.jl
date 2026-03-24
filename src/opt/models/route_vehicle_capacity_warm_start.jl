@@ -177,6 +177,113 @@ function build_model(
 end
 
 
+# ── Fixed-variable feasibility test ─────────────────────────────────────────────
+
+
+"""
+    _check_fixed_start_feasibility(model, data, sol; optimizer_env=nothing)
+
+Rebuild the full RouteVehicleCapacityModel (including lazy constraint callbacks), fix every
+variable to its warm start hint value, and solve. Reports feasibility.
+
+If infeasible (warm start violates some constraint including lazy capacity constraints),
+computes the IIS and writes it to a .ilp file so the conflicting constraints can be
+inspected directly.
+
+This test catches violations that `primal_feasibility_report` misses because lazy
+constraints are not part of the upfront model.
+"""
+function _check_fixed_start_feasibility(
+    model         :: RouteVehicleCapacityModel,
+    data          :: StationSelectionData,
+    sol           :: Dict{Symbol, Any};
+    optimizer_env :: Union{Gurobi.Env, Nothing} = nothing
+)
+    println("  [fixed-start] rebuilding main model for feasibility test...")
+    flush(stdout)
+    fixed_build = build_model(model, data; optimizer_env=optimizer_env)
+    fixed_m = fixed_build.model
+    set_silent(fixed_m)
+
+    # Fix y
+    y_vars = fixed_m[:y]
+    y_vals = sol[:y]
+    for j in eachindex(y_vals)
+        fix(y_vars[j], round(Float64(y_vals[j])); force=true)
+    end
+
+    # Fix z
+    z_vars = fixed_m[:z]
+    z_vals = sol[:z]
+    n_stat, n_scen = size(z_vals)
+    for j in 1:n_stat, s in 1:n_scen
+        fix(z_vars[j, s], round(Float64(z_vals[j, s])); force=true)
+    end
+
+    # Fix x — nested Dict/Vector structure
+    x_vars = fixed_m[:x]
+    x_vals = sol[:x]
+    for s in eachindex(x_vars)
+        for (t_id, od_dict_vars) in x_vars[s]
+            od_dict_vals = get(x_vals[s], t_id, nothing)
+            for (od_idx, pair_vars) in od_dict_vars
+                pair_vals = isnothing(od_dict_vals) ? nothing : get(od_dict_vals, od_idx, nothing)
+                for pair_idx in eachindex(pair_vars)
+                    v = (!isnothing(pair_vals) && pair_idx <= length(pair_vals)) ?
+                            pair_vals[pair_idx] : 0.0
+                    fix(pair_vars[pair_idx], round(Float64(v)); force=true)
+                end
+            end
+        end
+    end
+
+    # Fix alpha (optional)
+    if haskey(fixed_m, :alpha_r_jkts) && haskey(sol, :alpha)
+        alpha_vars  = fixed_m[:alpha_r_jkts]
+        alpha_hints = sol[:alpha]
+        for (key, var) in alpha_vars
+            fix(var, round(Float64(get(alpha_hints, key, 0.0))); force=true)
+        end
+    end
+
+    # Fix theta (optional)
+    if haskey(fixed_m, :theta_r_ts) && haskey(sol, :theta)
+        theta_vars  = fixed_m[:theta_r_ts]
+        theta_hints = sol[:theta]
+        for (key, var) in theta_vars
+            fix(var, round(Float64(get(theta_hints, key, 0.0))); force=true)
+        end
+    end
+
+    println("  [fixed-start] solving fixed model...")
+    flush(stdout)
+    optimize!(fixed_m)
+
+    ts = termination_status(fixed_m)
+    println("  [fixed-start] termination: $(string(ts))")
+
+    if ts == MOI.INFEASIBLE
+        println("  [fixed-start] INFEASIBLE — warm start values violate constraints")
+        println("  [fixed-start] computing IIS...")
+        flush(stdout)
+        try
+            grb = backend(fixed_m)
+            Gurobi.GRBcomputeIIS(grb)
+            ilp_path = "warm_start_fixed_$(Dates.format(now(), "yyyy-mm-dd_HH-MM-SS")).ilp"
+            Gurobi.GRBwrite(grb, ilp_path)
+            println("  [fixed-start] IIS written to: $ilp_path")
+            println("  [fixed-start] inspect the .ilp file to identify the conflicting constraints")
+        catch e
+            @warn "  [fixed-start] IIS computation failed" exception=e
+        end
+    elseif has_values(fixed_m)
+        println("  [fixed-start] FEASIBLE — warm start values satisfy all constraints (incl. lazy)")
+    else
+        println("  [fixed-start] status=$(string(ts)) primal=$(string(primal_status(fixed_m)))")
+    end
+end
+
+
 # ── Warm start solution extraction ──────────────────────────────────────────────
 
 
@@ -195,8 +302,9 @@ function get_warm_start_solution(
     model        :: RouteVehicleCapacityModel,
     data         :: StationSelectionData,
     build_result;
-    optimizer_env :: Union{Gurobi.Env, Nothing} = nothing,
-    silent        :: Bool = false,
+    optimizer_env    :: Union{Gurobi.Env, Nothing} = nothing,
+    silent           :: Bool = false,
+    check_feasibility :: Bool = true,
     kwargs...
 )
     ws_model = RouteVehicleCapacityWarmStartModel(
@@ -235,6 +343,11 @@ function get_warm_start_solution(
         x_vals, ws_build.mapping, build_result.mapping, model.vehicle_capacity
     )
 
+    if isnothing(alpha_hints)
+        @warn "get_warm_start_solution: aborting — α/θ derivation failed; solving cold without warm start"
+        return nothing
+    end
+
     sol = Dict{Symbol, Any}(
         :y     => y_vals,
         :z     => z_vals,
@@ -246,6 +359,12 @@ function get_warm_start_solution(
     println("  [warm start] checking lazy constraint satisfaction on hints...")
     flush(stdout)
     _check_lazy_constraints_on_hints(sol, build_result.mapping, model.vehicle_capacity)
+
+    if check_feasibility
+        println("  [warm start] running fixed-variable feasibility test...")
+        flush(stdout)
+        _check_fixed_start_feasibility(model, data, sol; optimizer_env=optimizer_env)
+    end
 
     return sol
 end
@@ -413,7 +532,10 @@ function _derive_alpha_theta_hints(
                 best_r    = r_idx
             end
         end
-        best_r == 0 && continue
+        if best_r == 0
+            @warn "_derive_alpha_theta_hints: no covering route for (s=$s, t_id=$t_id, j=$j_idx, k=$k_idx); aborting warm start — check route generation"
+            return nothing, nothing
+        end
 
         alpha_hints[(s, best_r, j_idx, k_idx, t_id)] = demand
     end

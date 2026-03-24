@@ -75,6 +75,25 @@ function generate_simple_routes(
     routes_map = Dict{Vector{Int}, RouteData}()
     next_id    = Ref(0)
 
+    # ── Phase 0: seed one direct 2-stop route for every valid (j,k) pair ─────────
+    # This guarantees that every (j,k) demand bucket has at least one covering route,
+    # preventing the lazy capacity constraint from forcing x=0 for uncoverable pairs.
+    # A direct j→k route has zero detour, so its single leg is always detour-feasible.
+    # DFS-generated 2-stop routes that duplicate a seed are skipped via the existing
+    # !haskey(routes_map, sids) check.
+    for (j_idx, k_idx) in valid_jk_pairs
+        j_idx == k_idx && continue   # skip trivial self-assignment
+        j_id = array_idx_to_station_id[j_idx]
+        k_id = array_idx_to_station_id[k_idx]
+        j_id == k_id && continue     # same physical station — skip
+        sids = [j_id, k_id]
+        haskey(routes_map, sids) && continue
+        tt = get_routing_cost(data, j_id, k_id)
+        isinf(tt) && continue        # stations not connected in road network
+        next_id[] += 1
+        routes_map[sids] = RouteData(next_id[], sids, tt, [(j_id, k_id)])
+    end
+
     # DFS state (mutated in-place with backtracking)
     route    = Int[]       # current station-index sequence
     in_route = Set{Int}()  # O(1) membership test

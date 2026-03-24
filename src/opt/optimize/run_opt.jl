@@ -75,7 +75,8 @@ function run_opt(
         ws_start = now()
         warm_start_solution = get_warm_start_solution(
             model, data, build_result;
-            optimizer_env=optimizer_env, silent=false
+            optimizer_env=optimizer_env, silent=false,
+            check_feasibility=check_feasibility
         )
         warm_start_time_sec = Dates.value(now() - ws_start) / 1000
         @info "run_opt: warm start complete" warm_start_time_sec=warm_start_time_sec found=!isnothing(warm_start_solution)
