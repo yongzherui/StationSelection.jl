@@ -71,6 +71,7 @@ function compute_valid_jk_pairs(
             j_id = array_idx_to_station_id[j]
             get_walking_cost(data, o, j_id) <= max_walking_distance || continue
             for k in 1:n
+                j == k && continue
                 k_id = array_idx_to_station_id[k]
                 get_walking_cost(data, k_id, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
