@@ -203,13 +203,29 @@ function _check_fixed_start_feasibility(
     flush(stdout)
     fixed_build = build_model(model, data; optimizer_env=optimizer_env)
     fixed_m = fixed_build.model
-    set_silent(fixed_m)
+
+    # Disable presolve so Gurobi doesn't eliminate fixed variables before B&B starts.
+    # Without this, the lazy constraint callback never fires on a fully-fixed model.
+    set_optimizer_attribute(fixed_m, "Presolve", 0)
+
+    # Helper: for binary/integer variables preserve the integrality declaration by
+    # tightening bounds rather than using fix(...; force=true), which strips integrality
+    # and turns the model into a pure LP where lazy callbacks never fire.
+    function _fix_var(var::VariableRef, val::Float64)
+        rounded = round(val)
+        if is_binary(var) || is_integer(var)
+            set_lower_bound(var, rounded)
+            set_upper_bound(var, rounded)
+        else
+            fix(var, rounded; force=true)
+        end
+    end
 
     # Fix y
     y_vars = fixed_m[:y]
     y_vals = sol[:y]
     for j in eachindex(y_vals)
-        fix(y_vars[j], round(Float64(y_vals[j])); force=true)
+        _fix_var(y_vars[j], Float64(y_vals[j]))
     end
 
     # Fix z
@@ -217,7 +233,7 @@ function _check_fixed_start_feasibility(
     z_vals = sol[:z]
     n_stat, n_scen = size(z_vals)
     for j in 1:n_stat, s in 1:n_scen
-        fix(z_vars[j, s], round(Float64(z_vals[j, s])); force=true)
+        _fix_var(z_vars[j, s], Float64(z_vals[j, s]))
     end
 
     # Fix x — nested Dict/Vector structure
@@ -231,7 +247,7 @@ function _check_fixed_start_feasibility(
                 for pair_idx in eachindex(pair_vars)
                     v = (!isnothing(pair_vals) && pair_idx <= length(pair_vals)) ?
                             pair_vals[pair_idx] : 0.0
-                    fix(pair_vars[pair_idx], round(Float64(v)); force=true)
+                    _fix_var(pair_vars[pair_idx], Float64(v))
                 end
             end
         end
@@ -242,7 +258,7 @@ function _check_fixed_start_feasibility(
         alpha_vars  = fixed_m[:alpha_r_jkts]
         alpha_hints = sol[:alpha]
         for (key, var) in alpha_vars
-            fix(var, round(Float64(get(alpha_hints, key, 0.0))); force=true)
+            _fix_var(var, Float64(get(alpha_hints, key, 0.0)))
         end
     end
 
@@ -251,11 +267,11 @@ function _check_fixed_start_feasibility(
         theta_vars  = fixed_m[:theta_r_ts]
         theta_hints = sol[:theta]
         for (key, var) in theta_vars
-            fix(var, round(Float64(get(theta_hints, key, 0.0))); force=true)
+            _fix_var(var, Float64(get(theta_hints, key, 0.0)))
         end
     end
 
-    println("  [fixed-start] solving fixed model...")
+    println("  [fixed-start] solving fixed model (Presolve=0, lazy callbacks active)...")
     flush(stdout)
     optimize!(fixed_m)
 
