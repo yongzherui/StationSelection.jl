@@ -68,7 +68,7 @@ function create_map(
     for s in 1:S
         scenario = data.scenarios[s]
         od_count = compute_scenario_od_count(scenario)
-        Omega_s[s] = collect(keys(od_count))
+        Omega_s[s] = sort!(collect(keys(od_count)))
         Q_s[s]     = od_count
         union!(all_od_pairs, keys(od_count))
 
@@ -76,7 +76,7 @@ function create_map(
         Omega_s_t[s] = Dict{Int, Vector{Tuple{Int, Int}}}()
         Q_s_t[s]     = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
         for (t_id, od_cnt) in time_to_od
-            Omega_s_t[s][t_id] = collect(keys(od_cnt))
+            Omega_s_t[s][t_id] = sort!(collect(keys(od_cnt)))
             Q_s_t[s][t_id]     = od_cnt
         end
     end
@@ -199,80 +199,67 @@ function _check_fixed_start_feasibility(
     sol           :: Dict{Symbol, Any};
     optimizer_env :: Union{Gurobi.Env, Nothing} = nothing
 )
-    println("  [fixed-start] rebuilding main model for feasibility test...")
+    # Build with use_lazy_constraints=false so constraints (ii) and (iii) are added as
+    # regular upfront constraints. Lazy callbacks are not triggered on a fully-fixed model,
+    # so using the callback version would silently skip the capacity constraints.
+    println("  [fixed-start] rebuilding model with explicit (non-lazy) capacity constraints...")
     flush(stdout)
-    fixed_build = build_model(model, data; optimizer_env=optimizer_env)
+    explicit_model = RouteVehicleCapacityModel(
+        model.k, model.l;
+        route_regularization_weight = model.route_regularization_weight,
+        repositioning_time          = model.repositioning_time,
+        vehicle_capacity            = model.vehicle_capacity,
+        max_route_travel_time       = model.max_route_travel_time,
+        max_walking_distance        = model.max_walking_distance,
+        max_detour_time             = model.max_detour_time,
+        max_detour_ratio            = model.max_detour_ratio,
+        time_window_sec             = model.time_window_sec,
+        use_lazy_constraints        = false,
+        max_stations_visited        = model.max_stations_visited
+    )
+    fixed_build = build_model(explicit_model, data; optimizer_env=optimizer_env)
     fixed_m = fixed_build.model
 
-    # Disable presolve so Gurobi doesn't eliminate fixed variables before B&B starts.
-    # Without this, the lazy constraint callback never fires on a fully-fixed model.
-    set_optimizer_attribute(fixed_m, "Presolve", 0)
+    # Set start values on fixed_m via the same warm start logic (zeros all variables first,
+    # then applies sol values). This populates start_value(v) for every variable.
+    _apply_warm_start!(fixed_m, sol)
 
-    # Helper: for binary/integer variables preserve the integrality declaration by
-    # tightening bounds rather than using fix(...; force=true), which strips integrality
-    # and turns the model into a pure LP where lazy callbacks never fire.
-    function _fix_var(var::VariableRef, val::Float64)
-        rounded = round(val)
-        if is_binary(var) || is_integer(var)
-            set_lower_bound(var, rounded)
-            set_upper_bound(var, rounded)
-        else
-            fix(var, rounded; force=true)
+    # Fix every variable to its start value. Use fix(...; force=true) for all types —
+    # we do not need to preserve integrality since there are no lazy callbacks.
+    vars          = all_variables(fixed_m)
+    n_total       = length(vars)
+    n_with_start  = 0
+    n_fixed       = 0
+    missing_start = String[]
+
+    for v in vars
+        sv = start_value(v)
+        if sv === nothing
+            push!(missing_start, name(v))
+            continue
         end
+        n_with_start += 1
+        fix(v, sv; force = true)
+        is_fixed(v) && (n_fixed += 1)
     end
 
-    # Fix y
-    y_vars = fixed_m[:y]
-    y_vals = sol[:y]
-    for j in eachindex(y_vals)
-        _fix_var(y_vars[j], Float64(y_vals[j]))
-    end
-
-    # Fix z
-    z_vars = fixed_m[:z]
-    z_vals = sol[:z]
-    n_stat, n_scen = size(z_vals)
-    for j in 1:n_stat, s in 1:n_scen
-        _fix_var(z_vars[j, s], Float64(z_vals[j, s]))
-    end
-
-    # Fix x — nested Dict/Vector structure
-    x_vars = fixed_m[:x]
-    x_vals = sol[:x]
-    for s in eachindex(x_vars)
-        for (t_id, od_dict_vars) in x_vars[s]
-            od_dict_vals = get(x_vals[s], t_id, nothing)
-            for (od_idx, pair_vars) in od_dict_vars
-                pair_vals = isnothing(od_dict_vals) ? nothing : get(od_dict_vals, od_idx, nothing)
-                for pair_idx in eachindex(pair_vars)
-                    v = (!isnothing(pair_vals) && pair_idx <= length(pair_vals)) ?
-                            pair_vals[pair_idx] : 0.0
-                    _fix_var(pair_vars[pair_idx], Float64(v))
-                end
-            end
+    println("  [fixed-start] variable audit:")
+    println("    total variables   : $n_total")
+    println("    with start value  : $n_with_start  ($(n_total - n_with_start) missing)")
+    println("    fixed (is_fixed)  : $n_fixed")
+    if !isempty(missing_start)
+        println("    ✗ variables missing a start value:")
+        for nm in first(missing_start, 10)
+            println("      $nm")
         end
+        length(missing_start) > 10 &&
+            println("      ... ($(length(missing_start) - 10) more not shown)")
     end
-
-    # Fix alpha (optional)
-    if haskey(fixed_m, :alpha_r_jkts) && haskey(sol, :alpha)
-        alpha_vars  = fixed_m[:alpha_r_jkts]
-        alpha_hints = sol[:alpha]
-        for (key, var) in alpha_vars
-            _fix_var(var, Float64(get(alpha_hints, key, 0.0)))
-        end
-    end
-
-    # Fix theta (optional)
-    if haskey(fixed_m, :theta_r_ts) && haskey(sol, :theta)
-        theta_vars  = fixed_m[:theta_r_ts]
-        theta_hints = sol[:theta]
-        for (key, var) in theta_vars
-            _fix_var(var, Float64(get(theta_hints, key, 0.0)))
-        end
-    end
-
-    println("  [fixed-start] solving fixed model (Presolve=0, lazy callbacks active)...")
     flush(stdout)
+
+    println("  [fixed-start] solving (all vars fixed, (ii)/(iii) as explicit constraints)...")
+    flush(stdout)
+    set_silent(fixed_m)
     optimize!(fixed_m)
 
     ts = termination_status(fixed_m)
@@ -293,7 +280,7 @@ function _check_fixed_start_feasibility(
             @warn "  [fixed-start] IIS computation failed" exception=e
         end
     elseif has_values(fixed_m)
-        println("  [fixed-start] FEASIBLE — warm start values satisfy all constraints (incl. lazy)")
+        println("  [fixed-start] FEASIBLE — warm start satisfies all constraints (incl. (ii) and (iii))")
     else
         println("  [fixed-start] status=$(string(ts)) primal=$(string(primal_status(fixed_m)))")
     end
@@ -360,9 +347,13 @@ function get_warm_start_solution(
     )
 
     if isnothing(alpha_hints)
-        @warn "get_warm_start_solution: aborting — α/θ derivation failed; solving cold without warm start"
+        println("  [warm start] ✗ α/θ derivation failed — some (j,k) demand has no covering route")
+        println("  [warm start]   aborting warm start; main model will solve cold")
+        flush(stdout)
         return nothing
     end
+    println("  [warm start] α/θ hints derived ($(length(alpha_hints)) α entries, $(length(theta_hints)) θ entries)")
+    flush(stdout)
 
     sol = Dict{Symbol, Any}(
         :y     => y_vals,
@@ -549,7 +540,8 @@ function _derive_alpha_theta_hints(
             end
         end
         if best_r == 0
-            @warn "_derive_alpha_theta_hints: no covering route for (s=$s, t_id=$t_id, j=$j_idx, k=$k_idx); aborting warm start — check route generation"
+            println("  [warm start] ✗ no covering route for (s=$s, t_id=$t_id, j=$j_idx, k=$k_idx) — seeded routes may be missing for this time bucket")
+            flush(stdout)
             return nothing, nothing
         end
 

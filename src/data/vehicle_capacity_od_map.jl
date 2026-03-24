@@ -103,7 +103,7 @@ function create_vehicle_capacity_od_map(
     for s in 1:S
         scenario = data.scenarios[s]
         od_count = compute_scenario_od_count(scenario)
-        Omega_s[s] = collect(keys(od_count))
+        Omega_s[s] = sort!(collect(keys(od_count)))
         Q_s[s]     = od_count
         union!(all_od_pairs, keys(od_count))
 
@@ -112,7 +112,7 @@ function create_vehicle_capacity_od_map(
         Omega_s_t[s] = Dict{Int, Vector{Tuple{Int, Int}}}()
         Q_s_t[s]     = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
         for (t_id, od_cnt) in time_to_od
-            Omega_s_t[s][t_id] = collect(keys(od_cnt))
+            Omega_s_t[s][t_id] = sort!(collect(keys(od_cnt)))
             Q_s_t[s][t_id]     = od_cnt
         end
     end
