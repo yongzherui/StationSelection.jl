@@ -505,6 +505,122 @@ function _export_alpha_r_jkts(
 end
 
 
+# =============================================================================
+# AlphaRouteODMap exports (AlphaRouteModel)
+# =============================================================================
+
+"""
+    export_assignment_variables(m, mapping::AlphaRouteODMap, export_dir) -> Int
+
+Export assignment variables for AlphaRouteModel. Same structure as VehicleCapacityODMap.
+"""
+function export_assignment_variables(
+    m::JuMP.Model,
+    mapping::AlphaRouteODMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x      = m[:x]
+    id_map = mapping.array_idx_to_station_id
+    rows   = []
+
+    for (s, x_s) in enumerate(x)
+        for (t_id, x_t) in x_s
+            od_pairs = mapping.Omega_s_t[s][t_id]
+            for (od_idx, x_od) in x_t
+                isempty(x_od) && continue
+                o, d = od_pairs[od_idx]
+                valid_pairs = get_valid_jk_pairs(mapping, o, d)
+                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                    val = JuMP.value(x_od[pair_idx])
+                    val > 0 || continue
+                    push!(rows, (
+                        scenario   = s,
+                        t_id       = t_id,
+                        od_idx     = od_idx,
+                        origin_id  = o,
+                        dest_id    = d,
+                        pickup_id  = id_map[j],
+                        dropoff_id = id_map[k],
+                        value      = round(Int, val)
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+    return nrow(df)
+end
+
+
+"""
+    export_model_specific_variables(result, mapping::AlphaRouteODMap, export_dir, metadata)
+
+Export AlphaRouteModel-specific variables: theta_r_ts.csv.
+Alpha values are fixed parameters (not variables); the input CSV is the source of record.
+"""
+function export_model_specific_variables(
+    result    :: OptResult,
+    mapping   :: AlphaRouteODMap,
+    export_dir :: String,
+    metadata  :: Dict
+)
+    metadata["model_type"] = "AlphaRouteModel"
+    metadata["n_routes"]   = sum(
+        sum(length(v) for v in values(rs); init = 0)
+        for rs in values(mapping.routes_s); init = 0
+    )
+
+    n_theta = _arm_export_theta_r_ts(result.model, mapping, export_dir)
+    metadata["n_theta_r_ts_nonzero"] = n_theta
+end
+
+
+"""
+    _arm_export_theta_r_ts(m, mapping::AlphaRouteODMap, export_dir) -> Int
+
+Export theta_r_ts variables to `theta_r_ts.csv`.
+Columns: scenario, t_id, route_idx, station_ids, travel_time, value.
+Only rows with value > 0.5 are written.
+"""
+function _arm_export_theta_r_ts(
+    m          :: JuMP.Model,
+    mapping    :: AlphaRouteODMap,
+    export_dir :: String
+)
+    if !haskey(m.obj_dict, :theta_r_ts)
+        println("    ✓ theta_r_ts.csv (0 deployments — theta_r_ts not present)")
+        return 0
+    end
+
+    rows = []
+    for ((s, t_id, r_idx), var) in m[:theta_r_ts]
+        val = JuMP.value(var)
+        val > 0.5 || continue
+        route = mapping.routes_s[s][t_id][r_idx]
+        push!(rows, (
+            scenario    = s,
+            t_id        = t_id,
+            route_idx   = r_idx,
+            station_ids = join(route.station_ids, "|"),
+            travel_time = route.travel_time,
+            value       = round(Int, val)
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
+    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments)")
+    return nrow(df)
+end
+
+
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 

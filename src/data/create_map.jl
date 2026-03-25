@@ -42,3 +42,15 @@ function create_map(
     )::VehicleCapacityODMap
     return create_vehicle_capacity_od_map(model, data)
 end
+
+"""
+    create_map(model::AlphaRouteModel, data::StationSelectionData)
+
+Create an AlphaRouteODMap for AlphaRouteModel.
+"""
+function create_map(
+        model::AlphaRouteModel,
+        data::StationSelectionData
+    )::AlphaRouteODMap
+    return create_alpha_route_od_map(model, data)
+end

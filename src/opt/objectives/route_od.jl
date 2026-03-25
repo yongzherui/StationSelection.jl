@@ -9,11 +9,12 @@ using JuMP
 export set_route_od_objective!
 
 """
-    set_route_od_objective!(m, data, mapping::VehicleCapacityODMap;
+    set_route_od_objective!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap};
                              route_regularization_weight::Float64=1.0,
                              repositioning_time::Float64=20.0)
 
-Set the minimization objective for RouteVehicleCapacityModel (new formulation).
+Set the minimization objective for time-bucketed route models
+(RouteVehicleCapacityModel and AlphaRouteModel).
 
     min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} (d_{oj} + d_{kd}) x_{odjkts}
             + μ Σ_{(s,t,r)} (τ^r + ρ) · θ^r_{ts} ]
@@ -25,7 +26,7 @@ a constant repositioning time (seconds) added to each route deployment cost.
 function set_route_od_objective!(
     m::Model,
     data::StationSelectionData,
-    mapping::VehicleCapacityODMap;
+    mapping::Union{VehicleCapacityODMap, AlphaRouteODMap};
     route_regularization_weight::Float64 = 1.0,
     repositioning_time::Float64 = 20.0
 )

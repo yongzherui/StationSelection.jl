@@ -27,6 +27,7 @@ include("utils/transform_orders.jl")
 include("utils/transform_stations.jl")
 include("utils/route_data.jl")
 include("utils/generate_routes_from_orders.jl")
+include("utils/route_io.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
@@ -35,6 +36,7 @@ include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_base.jl")
 include("opt/models/route_vehicle_capacity_model.jl")
+include("opt/models/alpha_route_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/clustering_od_map.jl")
@@ -44,6 +46,9 @@ include("data/clustering_base_map.jl")
 
 # Vehicle capacity OD map for RouteVehicleCapacityModel (depends on RouteData)
 include("data/vehicle_capacity_od_map.jl")
+
+# Alpha route OD map for AlphaRouteModel (depends on RouteData, route_io)
+include("data/alpha_route_od_map.jl")
 
 # Model-to-map dispatch
 include("data/create_map.jl")
@@ -80,10 +85,12 @@ export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export VehicleCapacityODMap
+export AlphaRouteODMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_base_model_map
 export create_vehicle_capacity_od_map
+export create_alpha_route_od_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, has_routing_costs
@@ -95,6 +102,7 @@ export has_walking_distance_limit, get_valid_jk_pairs
 
 # Re-export route utilities
 export RouteData, generate_simple_routes
+export RouteIOData, load_routes_and_alpha
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -104,6 +112,7 @@ export ClusteringTwoStageODModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel
 export RouteVehicleCapacityWarmStartModel
+export AlphaRouteModel
 
 # Re-export optimization functions
 export run_opt, build_model

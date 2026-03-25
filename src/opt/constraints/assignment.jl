@@ -145,7 +145,7 @@ end
 # ============================================================================
 
 """
-    add_assignment_constraints!(m, data, mapping::VehicleCapacityODMap)
+    add_assignment_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
 
 All demand for each (OD, time bucket) must be assigned across valid (j,k) pairs.
     Σ_{(j,k)} x[s][t_id][od_idx] == Q_s_t[s][t_id][(o,d)]  ∀(s, t_id, od_idx)
@@ -155,7 +155,7 @@ x is integer-valued; the RHS equals the passenger count for that OD/time/scenari
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::VehicleCapacityODMap
+        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -177,7 +177,7 @@ end
 
 
 """
-    add_assignment_to_active_constraints!(m, data, mapping::VehicleCapacityODMap)
+    add_assignment_to_active_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
 
 Assignments require both pickup and dropoff stations to be active (big-M formulation).
     x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[j,s]
@@ -188,7 +188,7 @@ The big-M coefficient equals the per-(OD, time bucket, scenario) demand count.
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::VehicleCapacityODMap
+        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)

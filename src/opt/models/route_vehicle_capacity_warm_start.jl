@@ -103,7 +103,8 @@ function create_map(
         valid_jk_pairs,
         model.max_walking_distance,
         model.time_window_sec,
-        routes_s
+        routes_s,
+        nothing   # no alpha profile for the warm start map
     )
 end
 
@@ -215,7 +216,9 @@ function _check_fixed_start_feasibility(
         max_detour_ratio            = model.max_detour_ratio,
         time_window_sec             = model.time_window_sec,
         use_lazy_constraints        = false,
-        max_stations_visited        = model.max_stations_visited
+        max_stations_visited        = model.max_stations_visited,
+        routes_file                 = model.routes_file,
+        alpha_profile_file          = model.alpha_profile_file
     )
     fixed_build = build_model(explicit_model, data; optimizer_env=optimizer_env)
     fixed_m = fixed_build.model
@@ -545,7 +548,20 @@ function _derive_alpha_theta_hints(
             return nothing, nothing
         end
 
-        alpha_hints[(s, best_r, j_idx, k_idx, t_id)] = demand
+        # Use alpha profile hint value if available; otherwise fall back to demand
+        alpha_val = demand
+        profile = main_mapping.alpha_profile_hint
+        if !isnothing(profile) && !isempty(profile)
+            route    = routes_t[best_r]
+            j_id     = main_mapping.array_idx_to_station_id[j_idx]
+            k_id     = main_mapping.array_idx_to_station_id[k_idx]
+            hint_val = get(profile, (route.id, j_id, k_id), nothing)
+            if !isnothing(hint_val)
+                alpha_val = hint_val
+            end
+        end
+
+        alpha_hints[(s, best_r, j_idx, k_idx, t_id)] = alpha_val
     end
 
     # ── Step 3: derive θ from segment loads ────────────────────────────────────
