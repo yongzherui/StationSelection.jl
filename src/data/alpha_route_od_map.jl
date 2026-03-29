@@ -132,6 +132,40 @@ function create_alpha_route_od_map(
         max_detour_ratio = model.max_detour_ratio
     )
 
+    # ── 4b. Generate direct routes for every valid (j,k) station pair ──────────
+    # Collect all unique (j_sid, k_sid) pairs across all OD pairs
+    all_jk_sids = Set{Tuple{Int, Int}}()
+    for pairs in values(valid_jk_pairs)
+        for (j_idx, k_idx) in pairs
+            push!(all_jk_sids, (array_idx_to_station_id[j_idx],
+                                array_idx_to_station_id[k_idx]))
+        end
+    end
+
+    max_csv_id    = isempty(rio.routes) ? 0 : maximum(r.id for r in rio.routes)
+    direct_routes = RouteData[]
+    direct_alpha  = Dict{NTuple{3, Int}, Float64}()
+
+    for (j_sid, k_sid) in sort!(collect(all_jk_sids))
+        route_id = max_csv_id + length(direct_routes) + 1
+        tt       = get_routing_cost(data, j_sid, k_sid)
+        push!(direct_routes, RouteData(route_id, [j_sid, k_sid], tt, [(j_sid, k_sid)]))
+        direct_alpha[(route_id, j_sid, k_sid)] = Float64(model.vehicle_capacity)
+    end
+
+    all_routes   = vcat(rio.routes, direct_routes)
+    all_alpha    = merge(rio.alpha_profile, direct_alpha)
+
+    println("  Generated $(length(direct_routes)) direct routes (vehicle_capacity=$(model.vehicle_capacity))")
+    flush(stdout)
+
+    # Pre-build index: route_id → Vector{(j_sid, k_sid)} with alpha > 0
+    # Used to filter routes per bucket based on alpha coverage rather than detour_feasible_legs.
+    route_alpha_jk = Dict{Int, Vector{Tuple{Int, Int}}}()
+    for (route_id, j_sid, k_sid) in keys(all_alpha)
+        push!(get!(route_alpha_jk, route_id, Tuple{Int,Int}[]), (j_sid, k_sid))
+    end
+
     routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
     for s in 1:S
         routes_s[s] = Dict{Int, Vector{RouteData}}()
@@ -157,11 +191,19 @@ function create_alpha_route_od_map(
                 continue
             end
 
-            bucket_routes = filter(rio.routes) do r
-                any(leg in jk_sids for leg in r.detour_feasible_legs)
+            # Include a route if enough of its alpha-covered legs appear in jk_sids.
+            # Direct routes (2 stops) need 1 match; multi-leg routes need 2 — this
+            # prevents deploying a multi-leg route that only helps one passenger class
+            # (a direct route already covers that case).
+            bucket_routes = RouteData[]
+            for r in all_routes
+                alpha_jk    = get(route_alpha_jk, r.id, Tuple{Int,Int}[])
+                min_covered = length(r.station_ids) == 2 ? 1 : 2
+                count(jk -> jk ∈ jk_sids, alpha_jk) >= min_covered &&
+                    push!(bucket_routes, r)
             end
             routes_s[s][t_id] = bucket_routes
-            println(" → $(length(bucket_routes)) routes from CSV")
+            println(" → $(length(bucket_routes)) routes (incl. direct)")
             flush(stdout)
         end
     end
@@ -180,6 +222,6 @@ function create_alpha_route_od_map(
         model.max_walking_distance,
         model.time_window_sec,
         routes_s,
-        rio.alpha_profile
+        all_alpha
     )
 end

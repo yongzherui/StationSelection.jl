@@ -41,6 +41,7 @@ No constraint (iii).  θ^r_{ts} ∈ Z+ remains a decision variable.
 - `max_detour_ratio::Float64`: Max ratio `in_vehicle/direct - 1`
 - `time_window_sec::Int`: Width of time bucket t (seconds)
 - `use_lazy_constraints::Bool`: If true, the capacity constraint is submitted lazily
+- `vehicle_capacity::Int`: Vehicle capacity C used for direct-route alpha values (default 18)
 """
 struct AlphaRouteModel <: AbstractODModel
     k                           :: Int
@@ -54,6 +55,7 @@ struct AlphaRouteModel <: AbstractODModel
     max_detour_ratio            :: Float64
     time_window_sec             :: Int
     use_lazy_constraints        :: Bool
+    vehicle_capacity            :: Int
 
     function AlphaRouteModel(
             k::Int,
@@ -66,7 +68,8 @@ struct AlphaRouteModel <: AbstractODModel
             max_detour_time             :: Number = 1200,
             max_detour_ratio            :: Number = 2.0,
             time_window_sec             :: Int    = 3600,
-            use_lazy_constraints        :: Bool   = false
+            use_lazy_constraints        :: Bool   = false,
+            vehicle_capacity            :: Int    = 18
         )
 
         k > 0                           || throw(ArgumentError("k must be positive"))
@@ -77,6 +80,7 @@ struct AlphaRouteModel <: AbstractODModel
         isfile(alpha_profile_file)      ||
             throw(ArgumentError("alpha_profile_file not found: $alpha_profile_file"))
         time_window_sec > 0             || throw(ArgumentError("time_window_sec must be positive"))
+        vehicle_capacity > 0            || throw(ArgumentError("vehicle_capacity must be positive"))
 
         mdt = Float64(max_detour_time)
         mdr = Float64(max_detour_ratio)
@@ -93,6 +97,7 @@ struct AlphaRouteModel <: AbstractODModel
             Float64(max_walking_distance),
             mdt, mdr,
             time_window_sec,
-            use_lazy_constraints)
+            use_lazy_constraints,
+            vehicle_capacity)
     end
 end

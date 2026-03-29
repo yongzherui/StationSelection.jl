@@ -128,8 +128,6 @@ function _arm_add_theta_variables!(
             routes_t = get(mapping.routes_s[s], t_id, RouteData[])
             for (r_idx, route) in enumerate(routes_t)
                 for (j_idx, k_idx) in jk_set
-                    _route_serves_jk(route, j_idx, k_idx,
-                                     mapping.array_idx_to_station_id) || continue
                     j_id = mapping.array_idx_to_station_id[j_idx]
                     k_id = mapping.array_idx_to_station_id[k_idx]
                     alpha_val = get(alpha_profile, (route.id, j_id, k_id), 0.0)
