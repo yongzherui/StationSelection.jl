@@ -121,43 +121,62 @@ function create_alpha_route_od_map(
         model.max_walking_distance
     )
 
-    # ── 4. Load routes from CSV and filter per (scenario, time-bucket) ─────────
-    println("  Loading routes from CSV: $(model.routes_file)")
-    flush(stdout)
-    rio = load_routes_and_alpha(
-        model.routes_file,
-        model.alpha_profile_file,
-        data;
-        max_detour_time  = model.max_detour_time,
-        max_detour_ratio = model.max_detour_ratio
-    )
-
-    # ── 4b. Generate direct routes for every valid (j,k) station pair ──────────
-    # Collect all unique (j_sid, k_sid) pairs across all OD pairs
-    all_jk_sids = Set{Tuple{Int, Int}}()
-    for pairs in values(valid_jk_pairs)
-        for (j_idx, k_idx) in pairs
-            push!(all_jk_sids, (array_idx_to_station_id[j_idx],
-                                array_idx_to_station_id[k_idx]))
+    # ── 4. Load/generate routes ────────────────────────────────────────────────
+    if model.generate_routes
+        # ── 4a (DFS). Generate routes and balanced alpha from demand data ──────
+        # Collect valid (j_idx, k_idx) pairs (array indices) across all OD pairs
+        valid_jk_global = Set{Tuple{Int, Int}}()
+        for pairs in values(valid_jk_pairs)
+            union!(valid_jk_global, pairs)
         end
+
+        all_routes, all_alpha = generate_routes_and_alpha(
+            data, valid_jk_global, array_idx_to_station_id;
+            vehicle_capacity = model.vehicle_capacity,
+            max_route_length = model.max_route_length,
+            max_detour_time  = model.max_detour_time,
+            max_detour_ratio = model.max_detour_ratio
+        )
+        # generate_simple_routes (Phase 0) already creates direct routes with α=C,
+        # so no Step 4b is needed here.
+    else
+        # ── 4a (CSV). Load routes and alpha from files ─────────────────────────
+        println("  Loading routes from CSV: $(model.routes_file)")
+        flush(stdout)
+        rio = load_routes_and_alpha(
+            model.routes_file,
+            model.alpha_profile_file,
+            data;
+            max_detour_time  = model.max_detour_time,
+            max_detour_ratio = model.max_detour_ratio
+        )
+
+        # ── 4b. Supplement with direct routes for every valid (j,k) station pair
+        all_jk_sids = Set{Tuple{Int, Int}}()
+        for pairs in values(valid_jk_pairs)
+            for (j_idx, k_idx) in pairs
+                push!(all_jk_sids, (array_idx_to_station_id[j_idx],
+                                    array_idx_to_station_id[k_idx]))
+            end
+        end
+
+        max_csv_id    = isempty(rio.routes) ? 0 : maximum(r.id for r in rio.routes)
+        direct_routes = RouteData[]
+        direct_alpha  = Dict{NTuple{3, Int}, Float64}()
+
+        for (j_sid, k_sid) in sort!(collect(all_jk_sids))
+            route_id = max_csv_id + length(direct_routes) + 1
+            tt       = get_routing_cost(data, j_sid, k_sid)
+            push!(direct_routes, RouteData(route_id, [j_sid, k_sid], tt, [(j_sid, k_sid)]))
+            direct_alpha[(route_id, j_sid, k_sid)] = Float64(model.vehicle_capacity)
+        end
+
+        all_routes = vcat(rio.routes, direct_routes)
+        all_alpha  = merge(rio.alpha_profile, direct_alpha)
+
+        println("  Generated $(length(direct_routes)) direct routes (vehicle_capacity=$(model.vehicle_capacity))")
+        flush(stdout)
     end
-
-    max_csv_id    = isempty(rio.routes) ? 0 : maximum(r.id for r in rio.routes)
-    direct_routes = RouteData[]
-    direct_alpha  = Dict{NTuple{3, Int}, Float64}()
-
-    for (j_sid, k_sid) in sort!(collect(all_jk_sids))
-        route_id = max_csv_id + length(direct_routes) + 1
-        tt       = get_routing_cost(data, j_sid, k_sid)
-        push!(direct_routes, RouteData(route_id, [j_sid, k_sid], tt, [(j_sid, k_sid)]))
-        direct_alpha[(route_id, j_sid, k_sid)] = Float64(model.vehicle_capacity)
-    end
-
-    all_routes   = vcat(rio.routes, direct_routes)
-    all_alpha    = merge(rio.alpha_profile, direct_alpha)
-
-    println("  Generated $(length(direct_routes)) direct routes (vehicle_capacity=$(model.vehicle_capacity))")
-    flush(stdout)
 
     # Pre-build index: route_id → Vector{(j_sid, k_sid)} with alpha > 0
     # Used to filter routes per bucket based on alpha coverage rather than detour_feasible_legs.

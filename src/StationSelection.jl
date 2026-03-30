@@ -28,6 +28,7 @@ include("utils/transform_stations.jl")
 include("utils/route_data.jl")
 include("utils/generate_routes_from_orders.jl")
 include("utils/route_io.jl")
+include("utils/generate_alpha_routes.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
