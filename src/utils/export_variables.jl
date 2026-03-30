@@ -586,7 +586,7 @@ end
     _arm_export_theta_r_ts(m, mapping::AlphaRouteODMap, export_dir) -> Int
 
 Export theta_r_ts variables to `theta_r_ts.csv`.
-Columns: scenario, t_id, route_idx, station_ids, travel_time, value.
+Columns: scenario, t_id, route_id, route_idx, n_stops, is_direct, station_ids, travel_time, value.
 Only rows with value > 0.5 are written.
 """
 function _arm_export_theta_r_ts(
@@ -604,19 +604,35 @@ function _arm_export_theta_r_ts(
         val = JuMP.value(var)
         val > 0.5 || continue
         route = mapping.routes_s[s][t_id][r_idx]
+        n_stops = length(route.station_ids)
         push!(rows, (
             scenario    = s,
             t_id        = t_id,
+            route_id    = route.id,
             route_idx   = r_idx,
+            n_stops     = n_stops,
+            is_direct   = n_stops == 2,
             station_ids = join(route.station_ids, "|"),
             travel_time = route.travel_time,
             value       = round(Int, val)
         ))
     end
 
+    if isempty(rows)
+        df = DataFrame(scenario=Int[], t_id=Int[], route_id=Int[], route_idx=Int[],
+                       n_stops=Int[], is_direct=Bool[], station_ids=String[],
+                       travel_time=Float64[], value=Int[])
+        CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
+        println("    ✓ theta_r_ts.csv (0 deployments)")
+        return 0
+    end
+
     df = DataFrame(rows)
+    sort!(df, [:scenario, :t_id, :route_id])
     CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
-    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments)")
+    n_direct   = count(r -> r.is_direct,  eachrow(df))
+    n_multileg = count(r -> !r.is_direct, eachrow(df))
+    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments: $n_direct direct, $n_multileg multi-leg)")
     return nrow(df)
 end
 

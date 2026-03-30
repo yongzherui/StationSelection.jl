@@ -310,15 +310,17 @@ function _arm_add_capacity_lazy_constraints!(
 
                 for (j_idx, k_idx) in get(jk_by_st, (s, t_id), Tuple{Int,Int}[])
                     # Evaluate RHS: Σ_r α^r_{jk} · θ^r_{ts}
-                    rhs_val = 0.0
+                    rhs_val    = 0.0
+                    has_coverage = false
                     for (r_idx, _route) in enumerate(routes_t)
                         alpha_val = get(arm_alpha_params, (s, t_id, r_idx, j_idx, k_idx), 0.0)
                         alpha_val > 0 || continue
                         theta_var = get(theta_r_ts, (s, t_id, r_idx), nothing)
                         theta_var === nothing && continue
+                        has_coverage = true
                         rhs_val += alpha_val * callback_value(cb_data, theta_var)
                     end
-                    rhs_val == 0.0 && continue   # no alpha coverage
+                    !has_coverage && continue   # no alpha coverage for this (j,k,t,s)
 
                     # Evaluate LHS: Σ_{od} x[s][t][od][pair]
                     lhs_val = 0.0
