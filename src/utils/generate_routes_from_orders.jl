@@ -53,7 +53,8 @@ function generate_simple_routes(
     data                    :: StationSelectionData;
     max_route_length        :: Int     = 4,
     max_detour_time         :: Float64 = Inf,
-    max_detour_ratio        :: Float64 = Inf
+    max_detour_ratio        :: Float64 = Inf,
+    stop_dwell_time         :: Float64 = 0.0
 ) :: Vector{RouteData}
 
     isempty(valid_jk_pairs) && return RouteData[]
@@ -121,7 +122,8 @@ function generate_simple_routes(
                 for i in 1:(m - 1)
                     seg[i] = get_routing_cost(data, sids[i], sids[i + 1])
                 end
-                tt = sum(seg; init = 0.0)
+                n_intermediate = m - 2
+                tt = sum(seg; init = 0.0) + n_intermediate * stop_dwell_time
                 # Build detour_feasible_legs: include (i,j) leg only if detour is feasible
                 feasible_legs = Tuple{Int,Int}[]
                 for i in 1:m

@@ -104,7 +104,8 @@ function generate_routes_and_alpha(
     vehicle_capacity  :: Int     = 18,
     max_route_length  :: Int     = 3,
     max_detour_time   :: Float64 = Inf,
-    max_detour_ratio  :: Float64 = Inf
+    max_detour_ratio  :: Float64 = Inf,
+    stop_dwell_time   :: Float64 = 0.0
 ) :: Tuple{Vector{RouteData}, Dict{NTuple{3, Int}, Float64}}
 
     println("  Generating routes via DFS (max_route_length=$max_route_length)...")
@@ -116,7 +117,8 @@ function generate_routes_and_alpha(
         data;
         max_route_length = max_route_length,
         max_detour_time  = max_detour_time,
-        max_detour_ratio = max_detour_ratio
+        max_detour_ratio = max_detour_ratio,
+        stop_dwell_time  = stop_dwell_time
     )
 
     n_direct   = count(r -> length(r.station_ids) == 2, routes)

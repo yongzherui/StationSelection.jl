@@ -17,6 +17,7 @@ using Dates
 
 export transform_orders,
        transform_orders_from_assignments,
+       transform_orders_quick_extend,
        remap_order_times_stacked,
        parse_station_list,
        precompute_distances,
@@ -736,4 +737,105 @@ function remap_order_times_stacked(
         end
     end
     return out_df, total_duration
+end
+
+"""
+    transform_orders_quick_extend(order_file, selection_run_dir, cluster_file, uncovered_ranges)
+        -> DataFrame
+
+Quick Transform for (date, time_window) pairs not covered by original selection scenarios.
+
+`uncovered_ranges` is a vector of `(window_start, window_end, scenario_idx)` tuples, where
+`scenario_idx` identifies which z* active-station set to use for that window (matched by
+time-of-day to an original scenario).
+
+For each order whose `order_time` falls within an uncovered range, assigns greedily:
+
+    j*(p) = closest station in (Z*_s ∩ available_pickup_stations),
+    k*(p) = closest station in (Z*_s ∩ available_dropoff_stations),
+
+where Z*_s = active stations for `scenario_idx`. Falls back to Y* (built stations,
+selected==1 in cluster_file) when Z*_s has no station within walking distance.
+
+Reads from `selection_run_dir/variable_exports/`:
+  - `scenario_activation.csv`  — z*_{js} (active stations per scenario)
+"""
+function transform_orders_quick_extend(
+    order_file        :: String,
+    selection_run_dir :: String,
+    cluster_file      :: String,
+    uncovered_ranges  :: Vector{Tuple{DateTime, DateTime, Int}}
+)
+    isempty(uncovered_ranges) && return DataFrame()
+
+    # Load all orders; keep only those falling in an uncovered range
+    orders_df = CSV.read(order_file, DataFrame)
+    orders_df.order_time_parsed = DateTime.(orders_df.order_time, "yyyy-mm-dd HH:MM:SS")
+    orders_df = filter(r -> any(w -> w[1] <= r.order_time_parsed <= w[2], uncovered_ranges),
+                       orders_df)
+    println("  Quick Transform: $(nrow(orders_df)) orders across $(length(uncovered_ranges)) uncovered windows")
+
+    # Load z* (active stations per scenario)
+    activation_file = joinpath(selection_run_dir, "variable_exports", "scenario_activation.csv")
+    isfile(activation_file) || error("scenario_activation.csv not found: $activation_file")
+    activation_df = CSV.read(activation_file, DataFrame)
+    z_star = Dict{Int, Set{Int}}()
+    for row in eachrow(activation_df)
+        row.value >= 0.5 || continue
+        push!(get!(z_star, row.scenario_idx, Set{Int}()), row.station_id)
+    end
+
+    # Load y* (built stations: selected == 1 in cluster_file)
+    stations_df = CSV.read(cluster_file, DataFrame)
+    y_star = Set{Int}(r.id for r in eachrow(stations_df)
+                      if hasproperty(r, :selected) && r.selected >= 0.5)
+    distance_matrix = precompute_distances(stations_df)
+
+    transformed_orders = []
+    n_z = 0; n_y = 0
+
+    for row in eachrow(orders_df)
+        dt = row.order_time_parsed
+        # Find which uncovered range this order belongs to → get its scenario_idx
+        range_match = findfirst(w -> w[1] <= dt <= w[2], uncovered_ranges)
+        range_match === nothing && continue
+        s_idx = uncovered_ranges[range_match][3]
+
+        available_pickup  = parse_station_list(string(row.available_pickup_station_list))
+        available_dropoff = parse_station_list(string(row.available_dropoff_station_list))
+        origin_id = isempty(available_pickup)  ? 0 : available_pickup[1]
+        target_id = isempty(available_dropoff) ? 0 : available_dropoff[1]
+
+        z_s = get(z_star, s_idx, Set{Int}())
+        pickup_cands  = collect(intersect(z_s, Set(available_pickup)))
+        dropoff_cands = collect(intersect(z_s, Set(available_dropoff)))
+
+        is_fallback = isempty(pickup_cands) || isempty(dropoff_cands)
+        isempty(pickup_cands)  && (pickup_cands  = collect(intersect(y_star, Set(available_pickup))))
+        isempty(dropoff_cands) && (dropoff_cands = collect(intersect(y_star, Set(available_dropoff))))
+
+        assigned_pickup_id  = isempty(pickup_cands)  ? 0 :
+            find_closest_selected_station(origin_id, pickup_cands, distance_matrix)
+        assigned_dropoff_id = isempty(dropoff_cands) ? 0 :
+            find_closest_selected_station(target_id, dropoff_cands, distance_matrix)
+
+        is_fallback ? (n_y += 1) : (n_z += 1)
+
+        push!(transformed_orders, (
+            order_id   = row.order_id,
+            pax_num    = row.pax_num,
+            order_time = row.order_time,
+            origin_id  = origin_id,
+            target_id  = target_id,
+            assigned_pickup_id  = assigned_pickup_id,
+            assigned_dropoff_id = assigned_dropoff_id,
+            available_pickup_station_list      = row.available_pickup_station_list,
+            available_pickup_walkingtime_list  = row.available_pickup_walkingtime_list,
+            available_dropoff_station_list     = row.available_dropoff_station_list,
+            available_dropoff_walkingtime_list = row.available_dropoff_walkingtime_list
+        ))
+    end
+
+    println("    Assigned: $n_z via z*, $n_y via y* fallback")
+    return DataFrame(transformed_orders)
 end

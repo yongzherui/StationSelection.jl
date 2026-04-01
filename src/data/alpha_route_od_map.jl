@@ -135,7 +135,8 @@ function create_alpha_route_od_map(
             vehicle_capacity = model.vehicle_capacity,
             max_route_length = model.max_route_length,
             max_detour_time  = model.max_detour_time,
-            max_detour_ratio = model.max_detour_ratio
+            max_detour_ratio = model.max_detour_ratio,
+            stop_dwell_time  = model.stop_dwell_time
         )
         # generate_simple_routes (Phase 0) already creates direct routes with α=C,
         # so no Step 4b is needed here.

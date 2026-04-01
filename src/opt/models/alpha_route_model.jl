@@ -48,6 +48,8 @@ No constraint (iii).  θ^r_{ts} ∈ Z+ remains a decision variable.
 - `time_window_sec::Int`: Width of time bucket t (seconds)
 - `use_lazy_constraints::Bool`: If true, the capacity constraint is submitted lazily
 - `vehicle_capacity::Int`: Vehicle capacity C (default 18)
+- `stop_dwell_time::Float64`: Extra seconds added to route travel_time per intermediate stop
+  (i.e. (n_stops-2) × stop_dwell_time). Makes multi-stop routes costlier; default 0.0
 """
 struct AlphaRouteModel <: AbstractODModel
     k                           :: Int
@@ -64,6 +66,7 @@ struct AlphaRouteModel <: AbstractODModel
     time_window_sec             :: Int
     use_lazy_constraints        :: Bool
     vehicle_capacity            :: Int
+    stop_dwell_time             :: Float64
 
     function AlphaRouteModel(
             k::Int,
@@ -79,7 +82,8 @@ struct AlphaRouteModel <: AbstractODModel
             max_detour_ratio            :: Number               = 2.0,
             time_window_sec             :: Int                  = 3600,
             use_lazy_constraints        :: Bool                 = false,
-            vehicle_capacity            :: Int                  = 18
+            vehicle_capacity            :: Int                  = 18,
+            stop_dwell_time             :: Number               = 10.0
         )
 
         k > 0                           || throw(ArgumentError("k must be positive"))
@@ -107,6 +111,8 @@ struct AlphaRouteModel <: AbstractODModel
         mdr >= 0.0 || throw(ArgumentError("max_detour_ratio must be non-negative"))
         Float64(max_walking_distance) >= 0 ||
             throw(ArgumentError("max_walking_distance must be non-negative"))
+        Float64(stop_dwell_time) >= 0 ||
+            throw(ArgumentError("stop_dwell_time must be non-negative"))
 
         new(k, l,
             Float64(route_regularization_weight),
@@ -119,6 +125,7 @@ struct AlphaRouteModel <: AbstractODModel
             mdt, mdr,
             time_window_sec,
             use_lazy_constraints,
-            vehicle_capacity)
+            vehicle_capacity,
+            Float64(stop_dwell_time))
     end
 end
