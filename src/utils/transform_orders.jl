@@ -740,7 +740,8 @@ function remap_order_times_stacked(
 end
 
 """
-    transform_orders_quick_extend(order_file, selection_run_dir, cluster_file, uncovered_ranges)
+    transform_orders_quick_extend(order_file, selection_run_dir, cluster_file,
+                                  uncovered_ranges, segment_file, max_walking_distance)
         -> DataFrame
 
 Quick Transform for (date, time_window) pairs not covered by original selection scenarios.
@@ -749,22 +750,25 @@ Quick Transform for (date, time_window) pairs not covered by original selection 
 `scenario_idx` identifies which z* active-station set to use for that window (matched by
 time-of-day to an original scenario).
 
-For each order whose `order_time` falls within an uncovered range, assigns greedily:
+For each order whose `order_time` falls within an uncovered range, assigns greedily using
+the segment network directly (not the pre-computed available_pickup_station_list):
 
-    j*(p) = closest station in (Z*_s ∩ available_pickup_stations),
-    k*(p) = closest station in (Z*_s ∩ available_dropoff_stations),
+    j*(p) = z*/y* station with minimum seg_time from origin reachable within max_walking_distance,
+    k*(p) = z*/y* station with minimum seg_time from target reachable within max_walking_distance,
 
 where Z*_s = active stations for `scenario_idx`. Falls back to Y* (built stations,
-selected==1 in cluster_file) when Z*_s has no station within walking distance.
+selected==1 in cluster_file) when Z*_s has no reachable station.
 
 Reads from `selection_run_dir/variable_exports/`:
   - `scenario_activation.csv`  — z*_{js} (active stations per scenario)
 """
 function transform_orders_quick_extend(
-    order_file        :: String,
-    selection_run_dir :: String,
-    cluster_file      :: String,
-    uncovered_ranges  :: Vector{Tuple{DateTime, DateTime, Int}}
+    order_file           :: String,
+    selection_run_dir    :: String,
+    cluster_file         :: String,
+    uncovered_ranges     :: Vector{Tuple{DateTime, DateTime, Int}},
+    segment_file         :: String,
+    max_walking_distance :: Float64
 )
     isempty(uncovered_ranges) && return DataFrame()
 
@@ -789,10 +793,39 @@ function transform_orders_quick_extend(
     stations_df = CSV.read(cluster_file, DataFrame)
     y_star = Set{Int}(r.id for r in eachrow(stations_df)
                       if hasproperty(r, :selected) && r.selected >= 0.5)
-    distance_matrix = precompute_distances(stations_df)
+
+    # Build walking reachability from segment.csv:
+    # walk_reach[from_id] = [(to_id, seg_time), ...] for seg_time <= max_walking_distance
+    # Also include self (seg_time = 0) so a passenger already at a selected station is valid.
+    seg_df = CSV.read(segment_file, DataFrame)
+    walk_reach = Dict{Int, Vector{Tuple{Int, Float64}}}()
+    for r in eachrow(seg_df)
+        r.seg_time <= max_walking_distance || continue
+        push!(get!(walk_reach, r.from_station, Tuple{Int,Float64}[]), (r.to_station, Float64(r.seg_time)))
+    end
+    # Add self-loops (seg_time = 0) for every station that appears
+    all_station_ids = unique(stations_df.id)
+    for sid in all_station_ids
+        push!(get!(walk_reach, sid, Tuple{Int,Float64}[]), (sid, 0.0))
+    end
+
+    # Helper: given an origin station and a candidate set, return the candidate with
+    # minimum seg_time reachable from origin within max_walking_distance.
+    function closest_reachable(origin::Int, candidates::Set{Int})
+        best_id   = 0
+        best_time = Inf
+        for (sid, t) in get(walk_reach, origin, Tuple{Int,Float64}[])
+            sid ∈ candidates || continue
+            if t < best_time
+                best_time = t
+                best_id   = sid
+            end
+        end
+        return best_id
+    end
 
     transformed_orders = []
-    n_z = 0; n_y = 0
+    n_z = 0; n_y = 0; n_dropped = 0
 
     for row in eachrow(orders_df)
         dt = row.order_time_parsed
@@ -807,19 +840,34 @@ function transform_orders_quick_extend(
         target_id = isempty(available_dropoff) ? 0 : available_dropoff[1]
 
         z_s = get(z_star, s_idx, Set{Int}())
-        pickup_cands  = collect(intersect(z_s, Set(available_pickup)))
-        dropoff_cands = collect(intersect(z_s, Set(available_dropoff)))
 
-        is_fallback = isempty(pickup_cands) || isempty(dropoff_cands)
-        isempty(pickup_cands)  && (pickup_cands  = collect(intersect(y_star, Set(available_pickup))))
-        isempty(dropoff_cands) && (dropoff_cands = collect(intersect(y_star, Set(available_dropoff))))
+        # Step 1: try z* — active stations for this scenario's time-of-day window.
+        # Walk from origin_id / target_id through segment network; pick minimum seg_time
+        # station in z* that is reachable within max_walking_distance.
+        assigned_pickup_id  = closest_reachable(origin_id, z_s)
+        assigned_dropoff_id = closest_reachable(target_id, z_s)
 
-        assigned_pickup_id  = isempty(pickup_cands)  ? 0 :
-            find_closest_selected_station(origin_id, pickup_cands, distance_matrix)
-        assigned_dropoff_id = isempty(dropoff_cands) ? 0 :
-            find_closest_selected_station(target_id, dropoff_cands, distance_matrix)
+        # Step 2: fall back to y* — ALL built stations — only when z* yields nothing.
+        # Each side is tried independently: if pickup found in z* it stays, only the
+        # missing side falls back.
+        using_z_pickup  = assigned_pickup_id  != 0
+        using_z_dropoff = assigned_dropoff_id != 0
+        if !using_z_pickup
+            assigned_pickup_id  = closest_reachable(origin_id, y_star)
+        end
+        if !using_z_dropoff
+            assigned_dropoff_id = closest_reachable(target_id, y_star)
+        end
 
-        is_fallback ? (n_y += 1) : (n_z += 1)
+        # Step 3: if still unassigned after y* fallback, drop the order entirely.
+        # (origin/target is isolated — no built station reachable within max_walking_distance)
+        if assigned_pickup_id == 0 || assigned_dropoff_id == 0
+            n_dropped += 1
+            continue
+        end
+
+        used_z_star = using_z_pickup && using_z_dropoff
+        used_z_star ? (n_z += 1) : (n_y += 1)
 
         push!(transformed_orders, (
             order_id   = row.order_id,
@@ -836,6 +884,6 @@ function transform_orders_quick_extend(
         ))
     end
 
-    println("    Assigned: $n_z via z*, $n_y via y* fallback")
+    println("    Assigned: $n_z fully via z* | $n_y at least one side via y* fallback | $n_dropped dropped (no built station reachable within $(max_walking_distance)s)")
     return DataFrame(transformed_orders)
 end
