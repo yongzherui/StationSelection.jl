@@ -7,7 +7,7 @@ station selection optimization.
 
 ### TwoStageSingleDetourModel
 
-Two-stage model with optional walking distance limits.
+Two-stage model with optional walking-distance limits.
 
 Constructor:
 
@@ -27,6 +27,9 @@ Behavior:
 - If `use_walking_distance_limit=false`, dense assignment variables are created.
 - If `use_walking_distance_limit=true`, a walking limit is enforced and sparse
   assignment variables are used based on valid (j,k) pairs.
+- `max_walking_distance` is compared against walking costs from
+  `compute_station_pairwise_costs`, so its unit is seconds when those default
+  costs are used.
 - If `tight_constraints=false`, detour constraints use a single combined inequality
   instead of two tighter edge constraints.
 - If `detour_use_flow_bounds=true`, detour bounds use flow variables `f` instead of
@@ -55,6 +58,8 @@ Behavior:
   assignment variables are used.
 - When `use_walking_distance_limit=true` and `variable_reduction=false`, dense
   assignment variables are used and walking limits are enforced via constraints.
+- `max_walking_distance` uses the same units as the walking-cost matrix; with the
+  default Haversine-based costs, that means seconds.
 - If `tight_constraints=false`, assignment-to-active uses a single combined inequality
   instead of two tighter station constraints.
 

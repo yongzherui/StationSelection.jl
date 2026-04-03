@@ -96,10 +96,10 @@ function main()
         color=:orange
     )
 
-    # Add reference line at specified walking distance (default 400m)
+    # Add reference line at specified walking-cost limit (default 400 s).
     ref_line = args["reference-line"]
     vline!(plt, [ref_line];
-        label="$(Int(ref_line))m reference",
+        label="$(Int(ref_line))s reference",
         color=:red,
         linestyle=:dash,
         lw=2

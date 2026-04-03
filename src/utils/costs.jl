@@ -8,7 +8,11 @@ export compute_station_pairwise_costs, read_routing_costs_from_segments
 
 """
 compute_station_pairwise_costs(candidate_stations::DataFrame) -> Dict::Tuple{Int, Int}, Float64}
-matrix between candidate stations based on Haversine distance.
+
+Compute pairwise walking costs between candidate stations using Haversine distance.
+
+The returned values are walking times in seconds, computed as:
+Haversine distance in metres / walking_speed in metres per second.
 """
 function compute_station_pairwise_costs(candidate_stations::DataFrame, walking_speed::Float64=1.4)::Dict{Tuple{Int, Int}, Float64}
     n = nrow(candidate_stations)

@@ -35,6 +35,7 @@ stations = read_candidate_stations("data/stations.csv")
 requests = read_customer_requests("data/orders.csv")
 
 # Compute costs
+# `walking_costs` stores walking time in seconds (distance / walking_speed).
 walking_costs = compute_station_pairwise_costs(stations)
 routing_costs = read_routing_costs_from_segments("data/segment.csv", stations)
 
@@ -51,7 +52,7 @@ model = TwoStageSingleDetourModel(
     5, 10, 1.0, 120.0, 900.0;
     in_vehicle_time_weight=1.0,
     use_walking_distance_limit=true,
-    max_walking_distance=800.0,
+    max_walking_distance=800.0,  # seconds
     detour_use_flow_bounds=false
 )
 

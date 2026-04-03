@@ -143,7 +143,7 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         )
         println("  - k=$(model.k), l=$(model.l), γ=$(model.vehicle_routing_weight), w_ivt=$(model.in_vehicle_time_weight)")
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
-        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
+        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)s")
         println("  - tight_constraints=$(model.tight_constraints)")
         println("  - detour_use_flow_bounds=$(model.detour_use_flow_bounds)")
     elseif model_type == "ClusteringTwoStageODModel"
@@ -161,7 +161,7 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
             tight_constraints=tight_constraints
         )
         println("  - k=$(model.k), l=$(model.l), w_ivt=$(model.in_vehicle_time_weight)")
-        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)")
+        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)s")
         println("  - variable_reduction=$(model.variable_reduction)")
         println("  - tight_constraints=$(model.tight_constraints)")
     elseif model_type == "ClusteringBaseModel"

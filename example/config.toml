@@ -19,8 +19,8 @@ in_vehicle_time_weight = 1.0  # Weight for in-vehicle travel time (c_{jk})
 vehicle_routing_weight = 1.0     # Weight γ for vehicle routing/pooling terms
 time_window = 120.0      # Time discretization window in seconds
 routing_delay = 900.0    # Maximum allowed detour delay in seconds
-use_walking_distance_limit = false  # Enable walking limit for TwoStageSingleDetourModel
-max_walking_distance = 800.0         # Only used when walking limit is enabled
+use_walking_distance_limit = false  # Enable walking-time limit for TwoStageSingleDetourModel
+max_walking_distance = 800.0         # Only used when walking limit is enabled; seconds with default walking costs
 tight_constraints = true             # Use tighter assignment/ detour constraints
 
 # ClusteringTwoStageODModel specific parameters

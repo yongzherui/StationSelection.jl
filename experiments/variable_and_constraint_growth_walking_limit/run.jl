@@ -1,5 +1,5 @@
 """
-Experiment to measure variable/constraint growth vs walking distance limit.
+Experiment to measure variable/constraint growth vs walking-distance limit.
 
 Runs StationSelection model builds with varying max_walking_distance to count
 variables and constraints.
@@ -21,7 +21,7 @@ const PROJECT_ROOT = dirname(dirname(dirname(@__FILE__)))
 
 function parse_commandline()
     s = ArgParseSettings(
-        description = "Measure variable/constraint growth vs walking distance limit",
+        description = "Measure variable/constraint growth vs walking-distance limit",
         prog = "run.jl"
     )
 
@@ -108,7 +108,7 @@ function main()
 
     # Find maximum walking distance needed
     max_walking_cost = maximum(values(walking_costs))
-    println("  - Maximum walking distance in data: $(max_walking_cost)m")
+    println("  - Maximum walking cost in data: $(max_walking_cost)s")
 
     scenarios = [(config["scenario"]["start_time"], config["scenario"]["end_time"])]
 
@@ -124,20 +124,21 @@ function main()
     walking_start = Float64(exp_cfg["walking_distance_start"])
     walking_step = Float64(exp_cfg["walking_distance_step"])
 
-    # Generate walking distance values from start to max in increments
+    # Generate walking-limit values from start to max in increments.
+    # Units follow `walking_costs`, which are seconds with the default setup.
     max_limit = max(walking_start, ceil(max_walking_cost / walking_step) * walking_step)
     walking_distances = collect(walking_start:walking_step:max_limit)
 
     println("\n[3] Computing growth across walking distance limits...")
     println("  - Testing $(length(walking_distances)) walking distance values")
-    println("  - Range: $(walking_start)m to $(last(walking_distances))m in $(walking_step)m increments")
+    println("  - Range: $(walking_start)s to $(last(walking_distances))s in $(walking_step)s increments")
 
     rows = Vector{Dict{Symbol, Any}}()
 
     env = Gurobi.Env()
 
     for walking_dist in walking_distances
-        print("  - max_walking_distance=$(walking_dist)m ... ")
+        print("  - max_walking_distance=$(walking_dist)s ... ")
 
         model = TwoStageSingleDetourModel(
             model_cfg["k"],
