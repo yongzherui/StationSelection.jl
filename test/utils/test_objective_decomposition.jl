@@ -52,7 +52,7 @@
             "TestModel",
             100.0, 200.0, 0.5, 100.0,   # walking, routing raw/weight/weighted
             50.0, 1.0, 50.0,             # corridor raw/weight/penalty
-            10, 1.0, 10.0,               # n_routes, fr_weight, fr_penalty
+            10, 10.0, 1.0, 10.0,         # n_routes, fr_raw, fr_weight, fr_penalty
             300.0, 5.0, 3.0, 1.0, 300.0, 8.0,  # vehicle flow, ss, sd, weight, cost, savings
             552.0,                       # computed_total
             552.0                        # reported_objective
@@ -67,6 +67,7 @@
         @test d.corridor_weight ≈ 1.0
         @test d.corridor_penalty ≈ 50.0
         @test d.n_activated_routes == 10
+        @test d.flow_activation_cost_raw ≈ 10.0
         @test d.flow_regularization_weight ≈ 1.0
         @test d.flow_regularization_penalty ≈ 10.0
         @test d.vehicle_flow_cost_raw ≈ 300.0
@@ -84,7 +85,7 @@
             "ClusteringTwoStageODModel",
             1000.0, 2000.0, 0.5, 1000.0,
             500.0, 1.0, 500.0,
-            15, 1.0, 15.0,
+            15, 15.0, 1.0, 15.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             2515.0, 2515.0
         )
@@ -104,7 +105,7 @@
             "SomeModel",
             1000.0, 2000.0, 1.0, 2000.0,
             0.0, 0.0, 0.0,
-            0, 0.0, 0.0,
+            0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             3000.0, 9999.0   # deliberately wrong reported objective
         )
@@ -117,7 +118,7 @@
             "SomeModel",
             500.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0,
-            0, 0.0, 0.0,
+            0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             500.0, nothing
         )
@@ -205,11 +206,11 @@
     end
 
     @testset "Unit: flow regularization penalty from synthetic CSVs" begin
-        # Two distinct (pickup, dropoff, scenario) routes activated
-        # flow_regularization_weight = 3.0 → penalty = 3*2 = 6
+        # One distinct (pickup, dropoff, scenario) route activated.
+        # flow_regularization_weight = 3.0, routing_cost(1,2)=10 → penalty = 30
         # One OD assignment: (1,3)→(1,2), q=1, w_ivt=1.0
         #   walk = 0+200=200, route=10
-        # computed_total = 200+10+6 = 216
+        # computed_total = 200+10+30 = 240
 
         mktempdir() do run_dir
             export_dir = joinpath(run_dir, "variable_exports")
@@ -222,7 +223,7 @@
                     "corridor_weight"            => 0.0,
                     "flow_regularization_weight" => 3.0
                 ),
-                "solve"  => Dict("objective_value" => 216.0)
+                "solve"  => Dict("objective_value" => 240.0)
             )
             open(joinpath(run_dir, "metrics.json"), "w") do f
                 JSON.print(f, metrics)
@@ -246,8 +247,9 @@
 
             # Both rows share (pickup=1, dropoff=2, s=1) → only 1 distinct route
             @test d.n_activated_routes == 1
+            @test d.flow_activation_cost_raw ≈ 10.0
             @test d.flow_regularization_weight ≈ 3.0
-            @test d.flow_regularization_penalty ≈ 3.0
+            @test d.flow_regularization_penalty ≈ 30.0
         end
     end
 

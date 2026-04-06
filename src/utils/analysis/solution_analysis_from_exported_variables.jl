@@ -151,8 +151,8 @@ function calculate_exported_walking_distance(
     total = 0.0
     for row in eachrow(assign)
         val = row.value
-        walking_pickup = get_walking_cost(data, row.origin_id, row.pickup_id)
-        walking_dropoff = get_walking_cost(data, row.dropoff_id, row.dest_id)
+        walking_pickup = get_walking_cost_by_id(data, row.origin_id, row.pickup_id)
+        walking_dropoff = get_walking_cost_by_id(data, row.dropoff_id, row.dest_id)
         q = 1
         if !isnothing(od_counts_by_scenario) && :scenario in cols_sym
             s = row.scenario
@@ -199,7 +199,7 @@ function calculate_exported_vehicle_routing_distance(
 
             total = 0.0
             for row in eachrow(flows)
-                total += get_routing_cost(data, row.j_id, row.k_id) * row.value
+                total += get_routing_cost_by_id(data, row.j_id, row.k_id) * row.value
             end
 
             # Subtract pooling savings if u/v variables are available
@@ -210,7 +210,7 @@ function calculate_exported_vehicle_routing_distance(
                 missing_cols_ss = setdiff(required_ss, cols_sym_ss)
                 isempty(missing_cols_ss) || error("same_source_pooling.csv missing columns: $(missing_cols_ss)")
                 for row in eachrow(ss)
-                    r = get_routing_cost(data, row.j_id, row.l_id) - get_routing_cost(data, row.k_id, row.l_id)
+                    r = get_routing_cost_by_id(data, row.j_id, row.l_id) - get_routing_cost_by_id(data, row.k_id, row.l_id)
                     if r > 0
                         total -= r * row.value
                     end
@@ -224,7 +224,7 @@ function calculate_exported_vehicle_routing_distance(
                 missing_cols_sd = setdiff(required_sd, cols_sym_sd)
                 isempty(missing_cols_sd) || error("same_dest_pooling.csv missing columns: $(missing_cols_sd)")
                 for row in eachrow(sd)
-                    r = get_routing_cost(data, row.j_id, row.l_id) - get_routing_cost(data, row.j_id, row.k_id)
+                    r = get_routing_cost_by_id(data, row.j_id, row.l_id) - get_routing_cost_by_id(data, row.j_id, row.k_id)
                     if r > 0
                         total -= r * row.value
                     end
@@ -254,7 +254,7 @@ function calculate_exported_vehicle_routing_distance(
                 q = 0
             end
         end
-        total += get_routing_cost(data, row.pickup_id, row.dropoff_id) * row.value * q
+        total += get_routing_cost_by_id(data, row.pickup_id, row.dropoff_id) * row.value * q
     end
     return total
 end

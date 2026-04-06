@@ -250,10 +250,8 @@ function add_assignment_walking_limit_constraints!(
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             for j in 1:n, k in 1:n
-                j_id = mapping.array_idx_to_station_id[j]
-                k_id = mapping.array_idx_to_station_id[k]
-                @constraint(m, get_walking_cost(data, o, j_id) * x[s][od_idx][j, k] <= max_walking_distance)
-                @constraint(m, get_walking_cost(data, k_id, d) * x[s][od_idx][j, k] <= max_walking_distance)
+                @constraint(m, get_walking_cost(data, o, j) * x[s][od_idx][j, k] <= max_walking_distance)
+                @constraint(m, get_walking_cost(data, k, d) * x[s][od_idx][j, k] <= max_walking_distance)
             end
         end
     end

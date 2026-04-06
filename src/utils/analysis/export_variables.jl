@@ -222,8 +222,8 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
                         push!(rows, (
                             scenario = s,
                             od_idx = od_idx,
-                            origin_id = o,
-                            dest_id = d,
+                            origin_id = array_idx_to_station_id[o],
+                            dest_id = array_idx_to_station_id[d],
                             pickup_idx = j,
                             dropoff_idx = k,
                             pickup_id = array_idx_to_station_id[j],
@@ -240,8 +240,8 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
                         push!(rows, (
                             scenario = s,
                             od_idx = od_idx,
-                            origin_id = o,
-                            dest_id = d,
+                            origin_id = array_idx_to_station_id[o],
+                            dest_id = array_idx_to_station_id[d],
                             pickup_idx = j,
                             dropoff_idx = k,
                             pickup_id = array_idx_to_station_id[j],
@@ -383,8 +383,8 @@ function export_assignment_variables(
                         scenario   = s,
                         t_id       = t_id,
                         od_idx     = od_idx,
-                        origin_id  = o,
-                        dest_id    = d,
+                        origin_id  = id_map[o],
+                        dest_id    = id_map[d],
                         pickup_id  = id_map[j],
                         dropoff_id = id_map[k],
                         value      = round(Int, val)
@@ -453,7 +453,7 @@ function _export_theta_r_ts(
             scenario    = s,
             t_id        = t_id,
             route_idx   = r_idx,
-            station_ids = join(route.station_ids, "|"),
+            station_ids = join((mapping.array_idx_to_station_id[idx] for idx in route.station_indices), "|"),
             travel_time = route.travel_time,
             value       = round(Int, val)
         ))
@@ -541,8 +541,8 @@ function export_assignment_variables(
                         scenario   = s,
                         t_id       = t_id,
                         od_idx     = od_idx,
-                        origin_id  = o,
-                        dest_id    = d,
+                        origin_id  = id_map[o],
+                        dest_id    = id_map[d],
                         pickup_id  = id_map[j],
                         dropoff_id = id_map[k],
                         value      = round(Int, val)
@@ -604,7 +604,7 @@ function _arm_export_theta_r_ts(
         val = JuMP.value(var)
         val > 0.5 || continue
         route = mapping.routes_s[s][t_id][r_idx]
-        n_stops = length(route.station_ids)
+        n_stops = length(route.station_indices)
         push!(rows, (
             scenario    = s,
             t_id        = t_id,
@@ -612,7 +612,7 @@ function _arm_export_theta_r_ts(
             route_idx   = r_idx,
             n_stops     = n_stops,
             is_direct   = n_stops == 2,
-            station_ids = join(route.station_ids, "|"),
+            station_ids = join((mapping.array_idx_to_station_id[idx] for idx in route.station_indices), "|"),
             travel_time = route.travel_time,
             value       = round(Int, val)
         ))

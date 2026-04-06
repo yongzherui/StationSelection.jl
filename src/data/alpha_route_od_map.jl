@@ -2,7 +2,7 @@
 OD mapping for AlphaRouteModel.
 
 Routes are loaded from CSV via `load_routes_and_alpha`. Alpha capacity values are stored
-as a fixed parameter dict keyed by (route_id, pickup_station_id, dropoff_station_id).
+as a fixed parameter dict keyed by (route_id, pickup_idx, dropoff_idx).
 """
 
 export AlphaRouteODMap
@@ -26,7 +26,7 @@ JuMP variables.
 - `max_walking_distance`: Walking limit used to compute valid_jk_pairs
 - `time_window_sec`: Time bucket width (seconds)
 - `routes_s`: Per-(scenario, time-bucket) route pool; routes filtered from CSV
-- `alpha_profile`: Fixed alpha parameters keyed (route_id, pickup_sid, dropoff_sid) → Float64
+- `alpha_profile`: Fixed alpha parameters keyed (route_id, pickup_idx, dropoff_idx) → Float64
 """
 struct AlphaRouteODMap <: AbstractClusteringMap
     station_id_to_array_idx     :: Dict{Int, Int}
@@ -44,7 +44,7 @@ struct AlphaRouteODMap <: AbstractClusteringMap
     time_window_sec      :: Int
 
     routes_s      :: Dict{Int, Dict{Int, Vector{RouteData}}}
-    alpha_profile :: Dict{NTuple{3, Int}, Float64}   # (route_id, pickup_sid, dropoff_sid)
+    alpha_profile :: Dict{NTuple{3, Int}, Float64}   # (route_id, pickup_idx, dropoff_idx)
 end
 
 
@@ -95,10 +95,6 @@ function create_alpha_route_od_map(
     data  :: StationSelectionData
 )::AlphaRouteODMap
 
-    # ── 1. Index mappings ──────────────────────────────────────────────────────
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
-
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
@@ -120,7 +116,6 @@ function create_alpha_route_od_map(
     # ── 3. Valid (j,k) pairs per OD pair ──────────────────────────────────────
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs, data,
-        station_id_to_array_idx, array_idx_to_station_id,
         model.max_walking_distance
     )
 
@@ -134,7 +129,7 @@ function create_alpha_route_od_map(
         end
 
         all_routes, all_alpha = generate_routes_and_alpha(
-            data, valid_jk_global, array_idx_to_station_id;
+            data, valid_jk_global;
             vehicle_capacity = model.vehicle_capacity,
             max_route_length = model.max_route_length,
             max_detour_time  = model.max_detour_time,
@@ -155,24 +150,21 @@ function create_alpha_route_od_map(
             max_detour_ratio = model.max_detour_ratio
         )
 
-        # ── 4b. Supplement with direct routes for every valid (j,k) station pair
-        all_jk_sids = Set{Tuple{Int, Int}}()
+        # ── 4b. Supplement with direct routes for every valid (j,k) station-index pair
+        all_jk_pairs = Set{Tuple{Int, Int}}()
         for pairs in values(valid_jk_pairs)
-            for (j_idx, k_idx) in pairs
-                push!(all_jk_sids, (array_idx_to_station_id[j_idx],
-                                    array_idx_to_station_id[k_idx]))
-            end
+            union!(all_jk_pairs, pairs)
         end
 
         max_csv_id    = isempty(rio.routes) ? 0 : maximum(r.id for r in rio.routes)
         direct_routes = RouteData[]
         direct_alpha  = Dict{NTuple{3, Int}, Float64}()
 
-        for (j_sid, k_sid) in sort!(collect(all_jk_sids))
+        for (j_idx, k_idx) in sort!(collect(all_jk_pairs))
             route_id = max_csv_id + length(direct_routes) + 1
-            tt       = get_routing_cost(data, j_sid, k_sid)
-            push!(direct_routes, RouteData(route_id, [j_sid, k_sid], tt, [(j_sid, k_sid)]))
-            direct_alpha[(route_id, j_sid, k_sid)] = Float64(model.vehicle_capacity)
+            tt       = get_routing_cost(data, j_idx, k_idx)
+            push!(direct_routes, RouteData(route_id, [j_idx, k_idx], tt, [(j_idx, k_idx)]))
+            direct_alpha[(route_id, j_idx, k_idx)] = Float64(model.vehicle_capacity)
         end
 
         all_routes = vcat(rio.routes, direct_routes)
@@ -182,48 +174,47 @@ function create_alpha_route_od_map(
         flush(stdout)
     end
 
-    # Pre-build index: route_id → Vector{(j_sid, k_sid)} with alpha > 0
+    # Pre-build index: route_id → Vector{(j_idx, k_idx)} with alpha > 0
     # Used to filter routes per bucket based on alpha coverage rather than detour_feasible_legs.
     route_alpha_jk = Dict{Int, Vector{Tuple{Int, Int}}}()
-    for (route_id, j_sid, k_sid) in keys(all_alpha)
-        push!(get!(route_alpha_jk, route_id, Tuple{Int,Int}[]), (j_sid, k_sid))
+    for (route_id, j_idx, k_idx) in keys(all_alpha)
+        push!(get!(route_alpha_jk, route_id, Tuple{Int,Int}[]), (j_idx, k_idx))
     end
 
     routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
     for s in 1:S
         routes_s[s] = Dict{Int, Vector{RouteData}}()
         for t_id in sort!(collect(keys(Q_s_t[s])))
-            # Build (j_sid, k_sid) pairs for this bucket
-            jk_sids = Set{Tuple{Int, Int}}()
+            # Build station-index pickup/dropoff pairs for this bucket
+            jk_set = Set{Tuple{Int, Int}}()
             od_pairs = sort!(collect(keys(Q_s_t[s][t_id])))
             for (o, d) in od_pairs
                 for (j_idx, k_idx) in get(valid_jk_pairs, (o, d), Tuple{Int,Int}[])
-                    push!(jk_sids, (array_idx_to_station_id[j_idx],
-                                    array_idx_to_station_id[k_idx]))
+                    push!(jk_set, (j_idx, k_idx))
                 end
             end
 
             n_requests = sum(values(Q_s_t[s][t_id]); init=0)
             n_od       = length(od_pairs)
-            print("  Scenario $s/$S, time bucket $t_id: $n_requests requests, $n_od OD pairs, $(length(jk_sids)) (j,k) pairs")
+            print("  Scenario $s/$S, time bucket $t_id: $n_requests requests, $n_od OD pairs, $(length(jk_set)) (j,k) pairs")
             flush(stdout)
 
-            if isempty(jk_sids)
+            if isempty(jk_set)
                 routes_s[s][t_id] = RouteData[]
                 println()
                 flush(stdout)
                 continue
             end
 
-            # Include a route if enough of its alpha-covered legs appear in jk_sids.
+            # Include a route if enough of its alpha-covered legs appear in jk_set.
             # Direct routes (2 stops) need 1 match; multi-leg routes need 2 — this
             # prevents deploying a multi-leg route that only helps one passenger class
             # (a direct route already covers that case).
             bucket_routes = RouteData[]
             for r in all_routes
                 alpha_jk    = get(route_alpha_jk, r.id, Tuple{Int,Int}[])
-                min_covered = length(r.station_ids) == 2 ? 1 : 2
-                count(jk -> jk ∈ jk_sids, alpha_jk) >= min_covered &&
+                min_covered = length(r.station_indices) == 2 ? 1 : 2
+                count(jk -> jk ∈ jk_set, alpha_jk) >= min_covered &&
                     push!(bucket_routes, r)
             end
             routes_s[s][t_id] = bucket_routes
@@ -233,8 +224,8 @@ function create_alpha_route_od_map(
     end
 
     return AlphaRouteODMap(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
+        data.station_id_to_array_idx,
+        data.array_idx_to_station_id,
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,

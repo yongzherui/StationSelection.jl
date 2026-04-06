@@ -21,14 +21,14 @@ at each station location, aggregated across all scenarios.
 # Fields
 - `station_id_to_array_idx::Dict{Int, Int}`: Station ID → array index mapping
 - `array_idx_to_station_id::Vector{Int}`: Array index → station ID mapping
-- `request_counts::Dict{Int, Int}`: Station ID → total request count (pickups + dropoffs)
+- `request_counts::Dict{Int, Int}`: Station index → total request count (pickups + dropoffs)
 - `n_stations::Int`: Number of candidate stations
 """
 struct ClusteringBaseModelMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
 
-    # request_counts[station_id] = count of requests (both pickup and dropoff)
+    # request_counts[station_idx] = count of requests (both pickup and dropoff)
     request_counts::Dict{Int, Int}
 
     n_stations::Int
@@ -40,32 +40,33 @@ end
 
 Compute aggregated request counts per station location.
 
-Counts both pickup requests (start_station_id) and dropoff requests (end_station_id)
+Counts both pickup requests (origin_idx) and dropoff requests (dest_idx)
 across all scenarios.
 
 # Arguments
 - `data::StationSelectionData`: Problem data with scenarios containing requests
 
 # Returns
-- Dict mapping station_id → total count of pickups + dropoffs
+- Dict mapping station_idx → total count of pickups + dropoffs
 """
 function compute_request_counts(data::StationSelectionData)::Dict{Int, Int}
     request_counts = Dict{Int, Int}()
 
     # Initialize all candidate stations with zero count
-    for station_id in data.stations.id
-        request_counts[station_id] = 0
+    for station_idx in 1:data.n_stations
+        request_counts[station_idx] = 0
     end
 
     # Aggregate across all scenarios
     for scenario in data.scenarios
+        _require_indexed_request_columns(scenario.requests)
         for row in eachrow(scenario.requests)
             # Count pickup at origin
-            o = row.start_station_id
+            o = row.origin_idx
             request_counts[o] = get(request_counts, o, 0) + 1
 
             # Count dropoff at destination
-            d = row.end_station_id
+            d = row.dest_idx
             request_counts[d] = get(request_counts, d, 0) + 1
         end
     end
@@ -94,16 +95,12 @@ function create_clustering_base_model_map(
     data::StationSelectionData
 )::ClusteringBaseModelMap
 
-    # Create station ID mappings
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
-
     # Compute request counts (pickups + dropoffs aggregated)
     request_counts = compute_request_counts(data)
 
     return ClusteringBaseModelMap(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
+        data.station_id_to_array_idx,
+        data.array_idx_to_station_id,
         request_counts,
         data.n_stations
     )

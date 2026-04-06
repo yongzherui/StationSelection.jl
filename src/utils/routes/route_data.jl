@@ -7,9 +7,9 @@ Represents a pre-generated vehicle route (ordered sequence of VBS stops).
 
 # Fields
 - `id::Int`: 1-based index in the routes vector
-- `station_ids::Vector{Int}`: Ordered station ID sequence
+- `station_indices::Vector{Int}`: Ordered compact station-index sequence
 - `travel_time::Float64`: τ^r = sum of routing costs between consecutive stops
-- `detour_feasible_legs::Vector{Tuple{Int,Int}}`: (pickup_id, dropoff_id) pairs whose
+- `detour_feasible_legs::Vector{Tuple{Int,Int}}`: (pickup_idx, dropoff_idx) pairs whose
   in-vehicle detour satisfies the detour constraints. Only these legs are eligible for
   `alpha_r_jkts` variable creation in the MILP.
 
@@ -21,7 +21,7 @@ For a one-stop route [j, l, k] where all legs are feasible:
 """
 struct RouteData
     id::Int
-    station_ids::Vector{Int}
+    station_indices::Vector{Int}
     travel_time::Float64
     detour_feasible_legs::Vector{Tuple{Int, Int}}
 end

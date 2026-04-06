@@ -43,9 +43,7 @@ function set_route_od_objective!(
                 isempty(x_od) && continue
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-                    cost = get_walking_cost(data, o, j_id) + get_walking_cost(data, k_id, d)
+                    cost = get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
                     add_to_expression!(obj, cost, x_od[pair_idx])
                 end
             end

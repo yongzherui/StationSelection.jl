@@ -6,7 +6,7 @@ and derives balanced alpha values purely from route structure.
 
 ## Alpha formula
 
-For a route with station sequence [s₁, …, sₙ] and detour-feasible legs:
+For a route with station-index sequence [s₁, …, sₙ] and detour-feasible legs:
 - Segment l covers the arc sₗ → sₗ₊₁  (l = 1 … n-1)
 - n_classes[l] = number of feasible legs (j,k) whose passengers occupy segment l
   (i.e., pos_j ≤ l < pos_k, 1-based positions)
@@ -34,7 +34,7 @@ Compute balanced alpha values for a set of routes purely from route structure.
 For each route, for each detour-feasible leg (j,k):
   α = floor(C / max n_classes[l]) where n_classes[l] = number of feasible legs spanning l.
 
-Returns a dict keyed (route_id, pickup_sid, dropoff_sid) → alpha value.
+Returns a dict keyed (route_id, pickup_idx, dropoff_idx) → alpha value.
 """
 function derive_balanced_alpha(
     routes           :: Vector{RouteData},
@@ -44,31 +44,31 @@ function derive_balanced_alpha(
     alpha = Dict{NTuple{3, Int}, Float64}()
 
     for route in routes
-        sids  = route.station_ids
-        n     = length(sids)
+        station_indices = route.station_indices
+        n     = length(station_indices)
         legs  = route.detour_feasible_legs
 
         isempty(legs) && continue
 
         if n == 2
             # Direct route: only one leg, one segment, n_classes = 1
-            j_id, k_id = sids[1], sids[2]
-            alpha[(route.id, j_id, k_id)] = Float64(vehicle_capacity)
+            pickup_idx, dropoff_idx = station_indices[1], station_indices[2]
+            alpha[(route.id, pickup_idx, dropoff_idx)] = Float64(vehicle_capacity)
             continue
         end
 
         # 1-based position of each station in the route
-        pos = Dict{Int, Int}(sid => i for (i, sid) in enumerate(sids))
+        pos = Dict{Int, Int}(station_idx => i for (i, station_idx) in enumerate(station_indices))
 
         # For each segment l ∈ 1..n-1, count how many feasible legs span it
         # this is the number of feasible legs
         n_classes = zeros(Int, n - 1)
-        for (j_id, k_id) in legs
+        for (pickup_idx, dropoff_idx) in legs
             # this assumes unique mapping of station id to position
             # However, if we consider "loops" in the route, something like A -> B -> A
             # The current function is guaranteed to fail to capture such a dynamic.
-            pj = get(pos, j_id, 0)
-            pk = get(pos, k_id, 0)
+            pj = get(pos, pickup_idx, 0)
+            pk = get(pos, dropoff_idx, 0)
             # this feels abit fishy at the moment, what if we have multiple indexes per stop id
             (pj == 0 || pk == 0 || pj >= pk) && continue
             # iterate and increase the number of covered legs
@@ -78,10 +78,10 @@ function derive_balanced_alpha(
         end
 
         # Alpha for each feasible leg
-        for (j_id, k_id) in legs
+        for (pickup_idx, dropoff_idx) in legs
             # likewise here, we run into the issue of duplication
-            pj = get(pos, j_id, 0)
-            pk = get(pos, k_id, 0)
+            pj = get(pos, pickup_idx, 0)
+            pk = get(pos, dropoff_idx, 0)
             (pj == 0 || pk == 0 || pj >= pk) && continue
 
             # we are limited by the maximum amount of maximum feasible legs 
@@ -89,7 +89,7 @@ function derive_balanced_alpha(
             max_n = maximum(n_classes[l] for l in pj:(pk - 1))
             max_n == 0 && continue
             # Thus we divide accordingly
-            alpha[(route.id, j_id, k_id)] = Float64(floor(Int, vehicle_capacity / max_n))
+            alpha[(route.id, pickup_idx, dropoff_idx)] = Float64(floor(Int, vehicle_capacity / max_n))
         end
     end
 
@@ -99,19 +99,18 @@ end
 
 """
     generate_routes_and_alpha(
-        data, valid_jk_pairs_global, array_idx_to_station_id;
+        data, valid_jk_pairs_global;
         vehicle_capacity, max_route_length, max_detour_time, max_detour_ratio
     ) -> (Vector{RouteData}, Dict{NTuple{3,Int}, Float64})
 
 Generate routes via DFS and derive balanced alpha values from route structure.
 
-`valid_jk_pairs_global` should be the union of all valid (j_idx, k_idx) pairs across all
-scenarios and time buckets, expressed as array indices into `array_idx_to_station_id`.
+`valid_jk_pairs_global` should be the union of all valid (pickup_idx, dropoff_idx) pairs
+across all scenarios and time buckets.
 """
 function generate_routes_and_alpha(
     data                    :: StationSelectionData,
-    valid_jk_pairs_global   :: Set{Tuple{Int, Int}},
-    array_idx_to_station_id :: Vector{Int};
+    valid_jk_pairs_global   :: Set{Tuple{Int, Int}};
     vehicle_capacity  :: Int     = 18,
     max_route_length  :: Int     = 3,
     max_detour_time   :: Float64 = 1200.0,
@@ -124,7 +123,6 @@ function generate_routes_and_alpha(
 
     routes = generate_simple_routes(
         valid_jk_pairs_global,
-        array_idx_to_station_id,
         data;
         max_route_length = max_route_length,
         max_detour_time  = max_detour_time,
@@ -132,7 +130,7 @@ function generate_routes_and_alpha(
         stop_dwell_time  = stop_dwell_time
     )
 
-    n_direct   = count(r -> length(r.station_ids) == 2, routes)
+    n_direct   = count(r -> length(r.station_indices) == 2, routes)
     n_multileg = length(routes) - n_direct
     println("  Generated $(length(routes)) routes: $n_direct direct, $n_multileg multi-leg")
     flush(stdout)

@@ -77,15 +77,15 @@
     end
 
     @testset "Walking and routing cost accessors" begin
-        stations = DataFrame(id = [1, 2], lon = [0.0, 0.0], lat = [0.0, 0.0])
+        stations = DataFrame(id = [10, 20], lon = [0.0, 0.0], lat = [0.0, 0.0])
         requests = DataFrame(
             id = [1],
-            start_station_id = [1],
-            end_station_id = [2],
+            start_station_id = [10],
+            end_station_id = [20],
             request_time = [DateTime(2024, 1, 1)]
         )
-        walking_costs = Dict{Tuple{Int,Int}, Float64}((1, 2) => 100.0, (2, 1) => 100.0, (1, 1) => 0.0, (2, 2) => 0.0)
-        routing_costs = Dict{Tuple{Int,Int}, Float64}((1, 2) => 10.0, (2, 1) => 10.0, (1, 1) => 0.0, (2, 2) => 0.0)
+        walking_costs = Dict{Tuple{Int,Int}, Float64}((10, 20) => 100.0, (20, 10) => 100.0, (10, 10) => 0.0, (20, 20) => 0.0)
+        routing_costs = Dict{Tuple{Int,Int}, Float64}((10, 20) => 10.0, (20, 10) => 10.0, (10, 10) => 0.0, (20, 20) => 0.0)
 
         data = StationSelection.create_station_selection_data(
             stations, requests, walking_costs;
@@ -94,6 +94,10 @@
 
         @test StationSelection.get_walking_cost(data, 1, 2) == 100.0
         @test StationSelection.get_routing_cost(data, 1, 2) == 10.0
+        @test StationSelection.get_walking_cost_by_id(data, 10, 20) == 100.0
+        @test StationSelection.get_routing_cost_by_id(data, 10, 20) == 10.0
+        @test data.scenarios[1].requests.origin_idx == [1]
+        @test data.scenarios[1].requests.dest_idx == [2]
 
         # Test error when routing costs not available
         data_no_routing = StationSelection.create_station_selection_data(stations, requests, walking_costs)
@@ -158,7 +162,9 @@
                 DateTime(2024, 1, 1, 8, 2, 0),   # time_id = 2, OD (2,1)
                 DateTime(2024, 1, 1, 8, 0, 45),  # time_id = 0, OD (1,2) - third occurrence
                 DateTime(2024, 1, 1, 8, 0, 15)   # time_id = 0, OD (1,3)
-            ]
+            ],
+            origin_idx = [1, 1, 2, 2, 1, 1],
+            dest_idx = [2, 2, 3, 1, 2, 3]
         )
 
         scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)
@@ -187,7 +193,9 @@
             id = [1, 2],
             start_station_id = [1, 2],
             end_station_id = [2, 3],
-            request_time = ["2024-01-01 08:00:00", "2024-01-01 08:05:00"]
+            request_time = ["2024-01-01 08:00:00", "2024-01-01 08:05:00"],
+            origin_idx = [1, 2],
+            dest_idx = [2, 3]
         )
 
         scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)

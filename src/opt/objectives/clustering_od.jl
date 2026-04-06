@@ -56,9 +56,9 @@ function set_clustering_od_objective!(
         @objective(m, Min,
             sum(
                 mapping.Q_s[s][(o, d)] * (
-                    get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
-                    get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
-                    in_vehicle_time_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
+                    get_walking_cost(data, o, j) +
+                    get_walking_cost(data, k, d) +
+                    in_vehicle_time_weight * get_routing_cost(data, j, k)
                 ) * x[s][od_idx][idx]
                 for s in 1:S
                 for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -69,9 +69,9 @@ function set_clustering_od_objective!(
         @objective(m, Min,
             sum(
                 mapping.Q_s[s][(o, d)] * (
-                    get_walking_cost(data, o, mapping.array_idx_to_station_id[j]) +
-                    get_walking_cost(data, mapping.array_idx_to_station_id[k], d) +
-                    in_vehicle_time_weight * get_routing_cost(data, mapping.array_idx_to_station_id[j], mapping.array_idx_to_station_id[k])
+                    get_walking_cost(data, o, j) +
+                    get_walking_cost(data, k, d) +
+                    in_vehicle_time_weight * get_routing_cost(data, j, k)
                 ) * x[s][od_idx][j, k]
                 for s in 1:S
                 for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -121,11 +121,7 @@ function set_clustering_od_flow_regularizer_objective!(
     f_flow = m[:f_flow]
     route_penalty = @expression(m,
         flow_regularization_weight * sum(
-            get_routing_cost(
-                data,
-                mapping.array_idx_to_station_id[j],
-                mapping.array_idx_to_station_id[k]
-            ) * v
+            get_routing_cost(data, j, k) * v
             for s in 1:S
             for ((j, k), v) in f_flow[s]
         )

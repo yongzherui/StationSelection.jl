@@ -46,8 +46,8 @@ function set_clustering_base_objective!(
 
     @objective(m, Min,
         sum(
-            mapping.request_counts[mapping.array_idx_to_station_id[i]] *
-            get_walking_cost(data, mapping.array_idx_to_station_id[i], mapping.array_idx_to_station_id[j]) *
+            mapping.request_counts[i] *
+            get_walking_cost(data, i, j) *
             x[i, j]
             for i in 1:n
             for j in 1:n

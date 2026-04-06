@@ -101,7 +101,7 @@ export create_vehicle_capacity_od_map
 export create_alpha_route_od_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
-export get_walking_cost, get_routing_cost, has_routing_costs
+export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_cost_by_id, has_routing_costs
 
 # Re-export helper functions for testing
 export create_station_id_mappings, create_scenario_label_mappings

@@ -13,11 +13,11 @@ export compute_beta_r_jkl
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-    compute_beta_r_jkl(route, j_idx, k_idx, l, array_idx_to_station_id) -> Bool
+    compute_beta_r_jkl(route, j_idx, k_idx, l) -> Bool
 
 Return true if leg (j_idx → k_idx) occupies segment l of route r.
 
-Segment l is the arc from `route.station_ids[l]` to `route.station_ids[l+1]`.
+Segment l is the arc from `route.station_indices[l]` to `route.station_indices[l+1]`.
 A passenger riding from j to k occupies segment l iff `pos_j ≤ l < pos_k`,
 where pos_j and pos_k are the 1-based positions of j and k in the station sequence.
 """
@@ -25,14 +25,11 @@ function compute_beta_r_jkl(
     route                   :: RouteData,
     j_idx                   :: Int,
     k_idx                   :: Int,
-    l                       :: Int,
-    array_idx_to_station_id :: Vector{Int}
+    l                       :: Int
 )::Bool
-    j_id  = array_idx_to_station_id[j_idx]
-    k_id  = array_idx_to_station_id[k_idx]
-    sids  = route.station_ids
-    pos_j = findfirst(==(j_id), sids)
-    pos_k = findfirst(==(k_id), sids)
+    station_indices = route.station_indices
+    pos_j = findfirst(==(j_idx), station_indices)
+    pos_k = findfirst(==(k_idx), station_indices)
     pos_j === nothing && return false
     pos_k === nothing && return false
     return pos_j <= l < pos_k
@@ -40,22 +37,19 @@ end
 
 
 """
-Check whether route serves leg (j_idx → k_idx): j_id and k_id must both appear in
-route.station_ids with j before k.
+Check whether route serves leg (j_idx → k_idx): both station indices must appear in
+route.station_indices with j before k.
 """
 function _route_serves_jk(
     route                   :: RouteData,
     j_idx                   :: Int,
-    k_idx                   :: Int,
-    array_idx_to_station_id :: Vector{Int}
+    k_idx                   :: Int
 )::Bool
-    j_id  = array_idx_to_station_id[j_idx]
-    k_id  = array_idx_to_station_id[k_idx]
-    sids  = route.station_ids
-    pos_j = findfirst(==(j_id), sids)
-    pos_k = findfirst(==(k_id), sids)
+    station_indices = route.station_indices
+    pos_j = findfirst(==(j_idx), station_indices)
+    pos_k = findfirst(==(k_idx), station_indices)
     pos_j !== nothing && pos_k !== nothing && pos_j < pos_k &&
-        (j_id, k_id) ∈ route.detour_feasible_legs
+        (j_idx, k_idx) ∈ route.detour_feasible_legs
 end
 
 
@@ -68,7 +62,7 @@ Add integer route-serving variables α^r_{jkts} ∈ Z+ for RouteVehicleCapacityM
 time window t of scenario s.
 
 Created for each (s, r_idx, j_idx, k_idx, t_id) where:
-- Route r serves leg (j→k): both j_id and k_id appear in route.station_ids with j before k
+- Route r serves leg (j→k): both station indices appear in route.station_indices with j before k
 - At least one OD pair in Omega_s_t[s][t_id] has (j_idx, k_idx) as a valid leg
 
 Stored as `m[:alpha_r_jkts]::Dict{NTuple{5,Int}, VariableRef}` keyed
@@ -105,7 +99,7 @@ function add_alpha_r_jkts_variables!(
             routes_t = get(mapping.routes_s[s], t_id, RouteData[])
             for (r_idx, route) in enumerate(routes_t)
                 for (j_idx, k_idx) in jk_set_t
-                    _route_serves_jk(route, j_idx, k_idx, mapping.array_idx_to_station_id) || continue
+                    _route_serves_jk(route, j_idx, k_idx) || continue
 
                     key5 = (s, r_idx, j_idx, k_idx, t_id)
                     alpha_r_jkts[key5] = @variable(m, integer = true, lower_bound = 0)
@@ -188,9 +182,7 @@ function _arm_warn_uncovered_jk(
                 for (j_idx, k_idx) in get_valid_jk_pairs(mapping, o, d)
                     (s, t_id, j_idx, k_idx) ∈ covered && continue
                     if n_uncovered < 5
-                        j_id = mapping.array_idx_to_station_id[j_idx]
-                        k_id = mapping.array_idx_to_station_id[k_idx]
-                        @warn "AlphaRouteModel: no alpha coverage for (s=$s, t_id=$t_id, j=$j_id, k=$k_id) — capacity constraint skipped for this leg"
+                        @warn "AlphaRouteModel: no alpha coverage for (s=$s, t_id=$t_id, pickup_idx=$j_idx, dropoff_idx=$k_idx) — capacity constraint skipped for this leg"
                     end
                     n_uncovered += 1
                 end
@@ -246,9 +238,7 @@ function add_theta_r_ts_variables!(
             routes_t = get(mapping.routes_s[s], t_id, RouteData[])
             for (r_idx, route) in enumerate(routes_t)
                 for (j_idx, k_idx) in jk_set
-                    j_id = mapping.array_idx_to_station_id[j_idx]
-                    k_id = mapping.array_idx_to_station_id[k_idx]
-                    alpha_val = get(alpha_profile, (route.id, j_id, k_id), 0.0)
+                    alpha_val = get(alpha_profile, (route.id, j_idx, k_idx), 0.0)
                     alpha_val > 0 || continue
                     arm_alpha_params[(s, t_id, r_idx, j_idx, k_idx)] = alpha_val
                     push!(srt_with_alpha, (s, t_id, r_idx))

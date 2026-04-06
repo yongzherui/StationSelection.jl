@@ -83,8 +83,8 @@ function annotate_orders_with_solution(
 
     for (s, scenario) in enumerate(data.scenarios)
         for row in eachrow(scenario.requests)
-            o = row.start_station_id
-            d = row.end_station_id
+            o = row.origin_idx
+            d = row.dest_idx
 
             # Find assignment for this order
             assignment = find_assignment_clustering(assignments, s, o, d)
@@ -94,15 +94,17 @@ function annotate_orders_with_solution(
                 continue
             end
 
-            j_id, k_id = assignment.pickup_id, assignment.dropoff_id
+            j_idx, k_idx = assignment.pickup_idx, assignment.dropoff_idx
+            j_id = mapping.array_idx_to_station_id[j_idx]
+            k_id = mapping.array_idx_to_station_id[k_idx]
 
             # Calculate walking distances
-            walking_pickup = get_walking_cost(data, o, j_id)
-            walking_dropoff = get_walking_cost(data, k_id, d)
+            walking_pickup = get_walking_cost(data, o, j_idx)
+            walking_dropoff = get_walking_cost(data, k_idx, d)
             walking_total = walking_pickup + walking_dropoff
 
             # Calculate direct in-vehicle time
-            ivt_direct = has_routing_costs(data) ? get_routing_cost(data, j_id, k_id) : 0.0
+            ivt_direct = has_routing_costs(data) ? get_routing_cost(data, j_idx, k_idx) : 0.0
 
             push!(all_rows, create_annotated_row_clustering(
                 row, s, j_id, k_id,
@@ -122,7 +124,7 @@ end
 
 """
 Extract assignments for ClusteringTwoStageODMap.
-Returns Dict[(s, o, d)] → (pickup_id, dropoff_id)
+Returns Dict[(s, o_idx, d_idx)] → (pickup_idx, dropoff_idx)
 """
 function extract_assignments_clustering(m::JuMP.Model, mapping::ClusteringTwoStageODMap)
     if !haskey(m.obj_dict, :x)
@@ -142,17 +144,13 @@ function extract_assignments_clustering(m::JuMP.Model, mapping::ClusteringTwoSta
                 idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
                 if !isnothing(idx)
                     j, k = valid_pairs[idx]
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-                    assignments[(s, o, d)] = (pickup_id=j_id, dropoff_id=k_id)
+                    assignments[(s, o, d)] = (pickup_idx=j, dropoff_idx=k)
                 end
             else
                 n = size(x_od, 1)
                 for j in 1:n, k in 1:n
                     if JuMP.value(x_od[j, k]) > 0.5
-                        j_id = mapping.array_idx_to_station_id[j]
-                        k_id = mapping.array_idx_to_station_id[k]
-                        assignments[(s, o, d)] = (pickup_id=j_id, dropoff_id=k_id)
+                        assignments[(s, o, d)] = (pickup_idx=j, dropoff_idx=k)
                         break
                     end
                 end
@@ -315,17 +313,13 @@ function calculate_vrd_from_assignments_clustering(
                 idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
                 if !isnothing(idx)
                     j, k = valid_pairs[idx]
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-                    total_distance += get_routing_cost(data, j_id, k_id) * q
+                    total_distance += get_routing_cost(data, j, k) * q
                 end
             else
                 n = size(x_od, 1)
                 for j in 1:n, k in 1:n
                     if JuMP.value(x_od[j, k]) > 0.5
-                        j_id = mapping.array_idx_to_station_id[j]
-                        k_id = mapping.array_idx_to_station_id[k]
-                        total_distance += get_routing_cost(data, j_id, k_id) * q
+                        total_distance += get_routing_cost(data, j, k) * q
                         break
                     end
                 end

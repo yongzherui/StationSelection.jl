@@ -134,9 +134,9 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
                     0
                 end
 
-                walk = get_walking_cost(data, o_id, j_id) + get_walking_cost(data, k_id, d_id)
+                walk = get_walking_cost_by_id(data, o_id, j_id) + get_walking_cost_by_id(data, k_id, d_id)
                 walking_cost     += walk * row.value * q
-                routing_cost_raw += get_routing_cost(data, j_id, k_id) * row.value * q
+                routing_cost_raw += get_routing_cost_by_id(data, j_id, k_id) * row.value * q
                 push!(activated_routes, (j_id, k_id, s))
             end
         end
@@ -154,12 +154,12 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
         routes = CSV.read(route_file, DataFrame)
         for row in eachrow(routes)
             row.value > 0.5 || continue
-            flow_activation_cost_raw += get_routing_cost(data, row.pickup_id, row.dropoff_id)
+            flow_activation_cost_raw += get_routing_cost_by_id(data, row.pickup_id, row.dropoff_id)
         end
     elseif !isempty(activated_routes)
         # Fallback: sum c_{jk} over distinct (j,k,s) triples from assignment variables
         for (j_id, k_id, _) in activated_routes
-            flow_activation_cost_raw += get_routing_cost(data, j_id, k_id)
+            flow_activation_cost_raw += get_routing_cost_by_id(data, j_id, k_id)
         end
     end
 
@@ -190,7 +190,7 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
         flows = CSV.read(flow_file, DataFrame)
         for row in eachrow(flows)
             row.value > 0.5 || continue
-            vehicle_flow_cost_raw += get_routing_cost(data, row.j_id, row.k_id) * row.value
+            vehicle_flow_cost_raw += get_routing_cost_by_id(data, row.j_id, row.k_id) * row.value
         end
     end
 
@@ -200,8 +200,8 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
         for row in eachrow(ss)
             row.value > 0.5 || continue
             # Savings = c(j,l) - c(k,l) when j detours via k to reach l
-            saving = get_routing_cost(data, row.j_id, row.l_id) -
-                     get_routing_cost(data, row.k_id, row.l_id)
+            saving = get_routing_cost_by_id(data, row.j_id, row.l_id) -
+                     get_routing_cost_by_id(data, row.k_id, row.l_id)
             saving > 0 && (same_source_savings_raw += saving * row.value)
         end
     end
@@ -212,8 +212,8 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
         for row in eachrow(sd)
             row.value > 0.5 || continue
             # Savings = c(j,l) - c(j,k) when vehicle continues from k to l
-            saving = get_routing_cost(data, row.j_id, row.l_id) -
-                     get_routing_cost(data, row.j_id, row.k_id)
+            saving = get_routing_cost_by_id(data, row.j_id, row.l_id) -
+                     get_routing_cost_by_id(data, row.j_id, row.k_id)
             saving > 0 && (same_dest_savings_raw += saving * row.value)
         end
     end

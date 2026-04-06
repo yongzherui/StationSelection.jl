@@ -530,13 +530,21 @@ function transform_orders_from_assignments(order_file::String,
         Dict{NTuple{4, Int}, Tuple{Int,Int}}() :
         Dict{NTuple{3, Int}, Tuple{Int,Int}}()
 
-    if route_model && !("t_id" in names(assignments_df))
-        error("assignment_variables.csv missing required column 't_id' for $method")
+    time_col = nothing
+    if route_model
+        assignment_cols = names(assignments_df)
+        if "t_id" in assignment_cols
+            time_col = :t_id
+        elseif "time_id" in assignment_cols
+            time_col = :time_id
+        else
+            error("assignment_variables.csv missing required column 'time_id' or 't_id' for $method")
+        end
     end
 
     for row in eachrow(assignments_df)
         key = route_model ?
-            (row.scenario, row.t_id, row.origin_id, row.dest_id) :
+            (row.scenario, row[time_col], row.origin_id, row.dest_id) :
             (row.scenario, row.origin_id, row.dest_id)
         assignment_lookup[key] = (row.pickup_id, row.dropoff_id)
     end

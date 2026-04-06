@@ -33,12 +33,12 @@ Parsed routes and alpha capacity profile loaded from CSV files.
 
 # Fields
 - `routes`: Vector of `RouteData` objects; each `RouteData.id` equals the CSV `route_id`.
-- `alpha_profile`: Dict mapping `(route_id, pickup_station_id, dropoff_station_id)` → Float64
-  alpha value for use as a warm-start hint.  Keys use station IDs (not array indices).
+- `alpha_profile`: Dict mapping `(route_id, pickup_idx, dropoff_idx)` → Float64
+  alpha value for use as a warm-start hint. CSV station IDs are converted at load time.
 """
 struct RouteIOData
     routes        :: Vector{RouteData}
-    alpha_profile :: Dict{NTuple{3, Int}, Float64}   # (route_id, pickup_sid, dropoff_sid)
+    alpha_profile :: Dict{NTuple{3, Int}, Float64}   # (route_id, pickup_idx, dropoff_idx)
 end
 
 
@@ -66,8 +66,6 @@ function load_routes_and_alpha(
     max_detour_ratio   :: Float64 = Inf
 ) :: RouteIOData
 
-    all_station_ids = Set(data.stations.id)
-
     # ── Load routes ───────────────────────────────────────────────────────────
     routes_df = CSV.read(routes_file, DataFrame)
     routes         = RouteData[]
@@ -76,41 +74,43 @@ function load_routes_and_alpha(
     for row in eachrow(routes_df)
         route_id = Int(row.route_id)
 
-        # Parse pipe-separated station IDs (strip whitespace around each token)
-        sids = [parse(Int, strip(s)) for s in split(string(row.station_ids), '|')]
+        # Parse pipe-separated station IDs (strip whitespace around each token),
+        # then convert to compact station indices for internal use.
+        station_ids = [parse(Int, strip(s)) for s in split(string(row.station_ids), '|')]
 
-        if length(sids) < 2
+        if length(station_ids) < 2
             @warn "Route $route_id has fewer than 2 stops — skipping"
             continue
         end
-        bad = filter(sid -> sid ∉ all_station_ids, sids)
+        bad = filter(sid -> !haskey(data.station_id_to_array_idx, sid), station_ids)
         if !isempty(bad)
             @warn "Route $route_id references unknown station IDs $bad — skipping"
             continue
         end
+        station_indices = [data.station_id_to_array_idx[sid] for sid in station_ids]
 
         travel_time = Float64(row.travel_time)
 
         # Compute detour_feasible_legs: same logic as generate_simple_routes DFS recorder
-        m   = length(sids)
+        m   = length(station_indices)
         seg = Vector{Float64}(undef, m - 1)
         for i in 1:(m - 1)
-            seg[i] = get_routing_cost(data, sids[i], sids[i + 1])
+            seg[i] = get_routing_cost(data, station_indices[i], station_indices[i + 1])
         end
         feasible_legs = Tuple{Int, Int}[]
         for i in 1:m
             cum = 0.0
             for j in (i + 1):m
                 cum   += seg[j - 1]
-                direct = get_routing_cost(data, sids[i], sids[j])
+                direct = get_routing_cost(data, station_indices[i], station_indices[j])
                 if (cum - direct <= max_detour_time) &&
                    (direct == 0.0 || cum / direct <= 1.0 + max_detour_ratio)
-                    push!(feasible_legs, (sids[i], sids[j]))
+                    push!(feasible_legs, (station_indices[i], station_indices[j]))
                 end
             end
         end
 
-        push!(routes, RouteData(route_id, sids, travel_time, feasible_legs))
+        push!(routes, RouteData(route_id, station_indices, travel_time, feasible_legs))
         push!(valid_route_ids, route_id)
     end
 
@@ -136,7 +136,11 @@ function load_routes_and_alpha(
                 n_skipped_alpha += 1
                 continue
             end
-            key = (rid, Int(row.pickup_id), Int(row.dropoff_id))
+            pickup_id = Int(row.pickup_id)
+            dropoff_id = Int(row.dropoff_id)
+            haskey(data.station_id_to_array_idx, pickup_id) || continue
+            haskey(data.station_id_to_array_idx, dropoff_id) || continue
+            key = (rid, data.station_id_to_array_idx[pickup_id], data.station_id_to_array_idx[dropoff_id])
             # Take maximum if the same key appears more than once
             alpha_profile[key] = max(get(alpha_profile, key, 0.0), Float64(row.value))
             n_loaded += 1

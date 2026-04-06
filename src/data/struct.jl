@@ -11,7 +11,7 @@ using Dates
 export ScenarioData, StationSelectionData
 export create_station_selection_data, create_scenario_data
 export n_scenarios, get_station_id, get_station_idx
-export get_walking_cost, get_routing_cost, has_routing_costs
+export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_cost_by_id, has_routing_costs
 export AbstractStationSelectionMap
 export AbstractClusteringMap
 
@@ -39,7 +39,9 @@ Encapsulates request data for a single scenario (time period).
 - `label::String`: Human-readable label for the scenario
 - `start_time::Union{DateTime, Nothing}`: Start of the scenario time window
 - `end_time::Union{DateTime, Nothing}`: End of the scenario time window
-- `requests::DataFrame`: Customer requests in this scenario
+- `requests::DataFrame`: Customer requests in this scenario. Model internals expect
+  indexed `:origin_idx` and `:dest_idx` columns; `create_station_selection_data`
+  adds them from raw station IDs.
 """
 struct ScenarioData
     label::String
@@ -75,18 +77,22 @@ can be reused across different optimization models.
 # Fields
 - `stations::DataFrame`: Station data with columns :id, :lon, :lat
 - `n_stations::Int`: Number of candidate stations
-- `walking_costs::Dict{Tuple{Int,Int}, Float64}`: Walking costs between locations
-- `routing_costs::Union{Dict{Tuple{Int,Int}, Float64}, Nothing}`: Vehicle routing costs (optional)
+- `station_id_to_array_idx::Dict{Int,Int}`: Station ID → compact internal index
+- `array_idx_to_station_id::Vector{Int}`: Compact internal index → station ID
+- `walking_costs::Matrix{Float64}`: Walking costs indexed by compact station index
+- `routing_costs::Union{Matrix{Float64}, Nothing}`: Vehicle routing costs indexed by compact station index
 - `scenarios::Vector{ScenarioData}`: Scenario data for optimization
 """
 struct StationSelectionData
     # Station information
     stations::DataFrame
     n_stations::Int
+    station_id_to_array_idx::Dict{Int, Int}
+    array_idx_to_station_id::Vector{Int}
 
-    # Cost matrices
-    walking_costs::Dict{Tuple{Int, Int}, Float64}
-    routing_costs::Union{Dict{Tuple{Int, Int}, Float64}, Nothing}
+    # Cost matrices indexed by station_idx
+    walking_costs::Matrix{Float64}
+    routing_costs::Union{Matrix{Float64}, Nothing}
 
     # Scenario data
     scenarios::Vector{ScenarioData}
@@ -129,13 +135,19 @@ function create_station_selection_data(
     @assert :request_time in propertynames(requests) "requests must have :request_time column"
 
     n_stations = nrow(stations)
+    station_ids = Vector{Int}(stations.id)
+    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
+    walking_costs_idx = _cost_dict_to_idx_matrix(walking_costs, array_idx_to_station_id)
+    routing_costs_idx = isnothing(routing_costs) ? nothing :
+        _cost_dict_to_idx_matrix(routing_costs, array_idx_to_station_id)
+    indexed_requests = _add_request_station_indices(requests, station_id_to_array_idx)
 
     # Create scenario data
     scenario_data = Vector{ScenarioData}()
 
     if isnothing(scenarios) || isempty(scenarios)
         # Single scenario with all requests
-        scenario = create_scenario_data(requests, "all_requests")
+        scenario = create_scenario_data(indexed_requests, "all_requests")
         push!(scenario_data, scenario)
     else
         # Split requests into scenarios based on time windows
@@ -144,8 +156,8 @@ function create_station_selection_data(
             end_dt = DateTime(end_str, "yyyy-mm-dd HH:MM:SS")
 
             # Filter requests for this time window
-            mask = (requests.request_time .>= start_dt) .& (requests.request_time .<= end_dt)
-            scenario_requests = requests[mask, :]
+            mask = (indexed_requests.request_time .>= start_dt) .& (indexed_requests.request_time .<= end_dt)
+            scenario_requests = indexed_requests[mask, :]
 
             # Skip empty scenarios
             if nrow(scenario_requests) > 0
@@ -164,10 +176,36 @@ function create_station_selection_data(
     return StationSelectionData(
         stations,
         n_stations,
-        walking_costs,
-        routing_costs,
+        station_id_to_array_idx,
+        array_idx_to_station_id,
+        walking_costs_idx,
+        routing_costs_idx,
         scenario_data
     )
+end
+
+function _cost_dict_to_idx_matrix(
+    costs_by_id::Dict{Tuple{Int, Int}, Float64},
+    array_idx_to_station_id::Vector{Int}
+)::Matrix{Float64}
+    n = length(array_idx_to_station_id)
+    costs = fill(Inf, n, n)
+    for from_idx in 1:n, to_idx in 1:n
+        from_id = array_idx_to_station_id[from_idx]
+        to_id = array_idx_to_station_id[to_idx]
+        costs[from_idx, to_idx] = get(costs_by_id, (from_id, to_id), Inf)
+    end
+    return costs
+end
+
+function _add_request_station_indices(
+    requests::DataFrame,
+    station_id_to_array_idx::Dict{Int, Int}
+)::DataFrame
+    indexed_requests = copy(requests)
+    indexed_requests.origin_idx = [station_id_to_array_idx[Int(id)] for id in indexed_requests.start_station_id]
+    indexed_requests.dest_idx = [station_id_to_array_idx[Int(id)] for id in indexed_requests.end_station_id]
+    return indexed_requests
 end
 
 # Convenience accessor functions
@@ -179,22 +217,39 @@ Return the number of scenarios in the problem data.
 n_scenarios(data::StationSelectionData) = length(data.scenarios)
 
 """
-    get_walking_cost(data::StationSelectionData, from_id::Int, to_id::Int) -> Float64
+    get_walking_cost(data::StationSelectionData, from_idx::Int, to_idx::Int) -> Float64
 
-Get walking cost between two stations by ID.
+Get walking cost between two stations by compact internal station index.
 """
-get_walking_cost(data::StationSelectionData, from_id::Int, to_id::Int) =
-    data.walking_costs[(from_id, to_id)]
+get_walking_cost(data::StationSelectionData, from_idx::Int, to_idx::Int) =
+    data.walking_costs[from_idx, to_idx]
 
 """
-    get_routing_cost(data::StationSelectionData, from_id::Int, to_id::Int) -> Float64
+    get_routing_cost(data::StationSelectionData, from_idx::Int, to_idx::Int) -> Float64
 
-Get routing cost between two stations by ID. Throws error if routing_costs is nothing.
+Get routing cost between two stations by compact internal station index.
+Throws error if routing_costs is nothing.
 """
-function get_routing_cost(data::StationSelectionData, from_id::Int, to_id::Int)
+function get_routing_cost(data::StationSelectionData, from_idx::Int, to_idx::Int)
     isnothing(data.routing_costs) && error("Routing costs not available")
-    return data.routing_costs[(from_id, to_id)]
+    return data.routing_costs[from_idx, to_idx]
 end
+
+"""
+    get_walking_cost_by_id(data::StationSelectionData, from_id::Int, to_id::Int) -> Float64
+
+Boundary helper for walking costs keyed by raw station ID.
+"""
+get_walking_cost_by_id(data::StationSelectionData, from_id::Int, to_id::Int) =
+    get_walking_cost(data, data.station_id_to_array_idx[from_id], data.station_id_to_array_idx[to_id])
+
+"""
+    get_routing_cost_by_id(data::StationSelectionData, from_id::Int, to_id::Int) -> Float64
+
+Boundary helper for routing costs keyed by raw station ID.
+"""
+get_routing_cost_by_id(data::StationSelectionData, from_id::Int, to_id::Int) =
+    get_routing_cost(data, data.station_id_to_array_idx[from_id], data.station_id_to_array_idx[to_id])
 
 """
     has_routing_costs(data::StationSelectionData) -> Bool
@@ -267,7 +322,7 @@ Group requests by time window and count OD pair demand.
 For each request, the time window index is:
     t = floor((request_time - scenario.start_time) / time_window_sec)
 
-Returns: `time_id → (origin_id, dest_id) → count`.
+Returns: `time_id → (origin_idx, dest_idx) → count`.
 
 Requires `scenario.start_time` to be set.
 """
@@ -278,11 +333,12 @@ function compute_time_to_od_count_mapping(
     isnothing(scenario.start_time) && error(
         "Scenario '$(scenario.label)' must have a start_time to compute time window mappings"
     )
+    _require_indexed_request_columns(scenario.requests)
     time_to_od = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
 
     for row in eachrow(scenario.requests)
-        o = row.start_station_id
-        d = row.end_station_id
+        o = row.origin_idx
+        d = row.dest_idx
 
         req_time = row.request_time isa AbstractString ?
             DateTime(row.request_time, "yyyy-mm-dd HH:MM:SS") :
@@ -299,4 +355,10 @@ function compute_time_to_od_count_mapping(
     end
 
     return time_to_od
+end
+
+function _require_indexed_request_columns(requests::DataFrame)
+    (:origin_idx in propertynames(requests) && :dest_idx in propertynames(requests)) ||
+        error("Scenario requests must include :origin_idx and :dest_idx. Use create_station_selection_data to build indexed scenarios.")
+    return nothing
 end

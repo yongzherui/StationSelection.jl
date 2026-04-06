@@ -4,7 +4,7 @@ Exhaustive DFS-based route generation for RouteVehicleCapacityModel.
 Generates all demand-justified routes up to `max_route_length` stops using a
 coverage/salvageability pruning rule.
 
-Each generated route's `detour_feasible_legs` field records the (j,k) pairs whose
+Each generated route's `detour_feasible_legs` field records the station-index pairs whose
 in-vehicle detour satisfies the detour constraints. The MILP uses this to suppress
 `alpha_r_jkts` variables for infeasible legs.
 """
@@ -15,7 +15,6 @@ export generate_simple_routes
 """
     generate_simple_routes(
         valid_jk_pairs          :: Set{Tuple{Int,Int}},
-        array_idx_to_station_id :: Vector{Int},
         data                    :: StationSelectionData;
         max_route_length        :: Int     = 4,
         max_detour_time         :: Float64 = Inf,
@@ -25,14 +24,14 @@ export generate_simple_routes
 Generate all demand-justified routes via exhaustive DFS with coverage pruning.
 
 `valid_jk_pairs` is the allowed-assignment set A_s for a single (scenario, time-bucket):
-each (j_idx, k_idx) means station j_idx can be a pickup and k_idx a dropoff for some
+each (pickup_idx, dropoff_idx) means station pickup_idx can be a pickup and dropoff_idx a dropoff for some
 request in this bucket.
 
-For each recorded route, `detour_feasible_legs` contains every (j_id, k_id) leg whose
+For each recorded route, `detour_feasible_legs` contains every (pickup_idx, dropoff_idx) leg whose
 in-vehicle detour satisfies `max_detour_time` and `max_detour_ratio`; infeasible legs
 are omitted.
 
-Routes are deduplicated by station-ID sequence. The returned vector is sorted by
+Routes are deduplicated by station-index sequence. The returned vector is sorted by
 internal route id (creation order).
 
 # Algorithm
@@ -49,7 +48,6 @@ internal route id (creation order).
 """
 function generate_simple_routes(
     valid_jk_pairs          :: Set{Tuple{Int,Int}},
-    array_idx_to_station_id :: Vector{Int},
     data                    :: StationSelectionData;
     max_route_length        :: Int     = 4,
     max_detour_time         :: Float64 = Inf,
@@ -72,7 +70,7 @@ function generate_simple_routes(
     v_s = sort!(collect(active_set))                            # V_s sorted for determinism
     p_s = [j for j in v_s if haskey(pickup_partners, j)]       # P_s (valid start stations)
 
-    # Dedup by station-ID sequence; id assigned in creation order
+    # Dedup by station-index sequence; id assigned in creation order
     routes_map = Dict{Vector{Int}, RouteData}()
     next_id    = Ref(0)
 
@@ -84,15 +82,12 @@ function generate_simple_routes(
     # !haskey(routes_map, sids) check.
     for (j_idx, k_idx) in valid_jk_pairs
         j_idx == k_idx && continue   # skip trivial self-assignment
-        j_id = array_idx_to_station_id[j_idx]
-        k_id = array_idx_to_station_id[k_idx]
-        j_id == k_id && continue     # same physical station — skip
-        sids = [j_id, k_id]
-        haskey(routes_map, sids) && continue
-        tt = get_routing_cost(data, j_id, k_id)
+        route_indices = [j_idx, k_idx]
+        haskey(routes_map, route_indices) && continue
+        tt = get_routing_cost(data, j_idx, k_idx)
         isinf(tt) && continue        # stations not connected in road network
         next_id[] += 1
-        routes_map[sids] = RouteData(next_id[], sids, tt, [(j_id, k_id)])
+        routes_map[route_indices] = RouteData(next_id[], route_indices, tt, [(j_idx, k_idx)])
     end
 
     # DFS state (mutated in-place with backtracking)
@@ -115,12 +110,12 @@ function generate_simple_routes(
 
         # Record route when fully covered and length ≥ 2
         if m >= 2 && length(covered) == m
-            sids = [array_idx_to_station_id[route[i]] for i in 1:m]
-            if !haskey(routes_map, sids)
+            route_indices = copy(route)
+            if !haskey(routes_map, route_indices)
                 # Precompute consecutive segment costs
                 seg = Vector{Float64}(undef, m - 1)
                 for i in 1:(m - 1)
-                    seg[i] = get_routing_cost(data, sids[i], sids[i + 1])
+                    seg[i] = get_routing_cost(data, route_indices[i], route_indices[i + 1])
                 end
                 n_intermediate = m - 2
                 tt = sum(seg; init = 0.0) + n_intermediate * stop_dwell_time
@@ -130,15 +125,15 @@ function generate_simple_routes(
                     cum = 0.0
                     for j in (i + 1):m
                         cum += seg[j - 1]
-                        direct = get_routing_cost(data, sids[i], sids[j])
+                        direct = get_routing_cost(data, route_indices[i], route_indices[j])
                         if (cum - direct <= max_detour_time) &&
                            (direct == 0.0 || cum / direct <= 1.0 + max_detour_ratio)
-                            push!(feasible_legs, (sids[i], sids[j]))
+                            push!(feasible_legs, (route_indices[i], route_indices[j]))
                         end
                     end
                 end
                 next_id[] += 1
-                routes_map[sids] = RouteData(next_id[], sids, tt, feasible_legs)
+                routes_map[route_indices] = RouteData(next_id[], route_indices, tt, feasible_legs)
             end
         end
 

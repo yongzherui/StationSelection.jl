@@ -52,9 +52,6 @@ function create_map(
     data  :: StationSelectionData
 )::AlphaRouteODMap
 
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
-
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
@@ -75,7 +72,6 @@ function create_map(
 
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs, data,
-        station_id_to_array_idx, array_idx_to_station_id,
         model.max_walking_distance
     )
 
@@ -84,8 +80,8 @@ function create_map(
     alpha_profile = Dict{NTuple{3, Int}, Float64}()
 
     return AlphaRouteODMap(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
+        data.station_id_to_array_idx,
+        data.array_idx_to_station_id,
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
@@ -146,9 +142,7 @@ function build_model(
                 isempty(x_od) && continue
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-                    cost = get_walking_cost(data, o, j_id) + get_walking_cost(data, k_id, d)
+                    cost = get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
                     add_to_expression!(obj, cost, x_od[pair_idx])
                 end
             end
@@ -298,20 +292,17 @@ function _derive_theta_hints_arm(
 
     for ((s, t_id, j_idx, k_idx), demand) in demand_jkts
         demand <= 0 && continue
-        j_sid = main_mapping.array_idx_to_station_id[j_idx]
-        k_sid = main_mapping.array_idx_to_station_id[k_idx]
-
         routes_t = get(
             get(main_mapping.routes_s, s, Dict{Int, Vector{RouteData}}()),
             t_id, RouteData[]
         )
 
-        # Find the direct 2-stop route [j_sid, k_sid]
+        # Find the direct 2-stop route [j_idx, k_idx]
         r_idx = 0
         for (ri, route) in enumerate(routes_t)
-            if length(route.station_ids) == 2 &&
-               route.station_ids[1] == j_sid &&
-               route.station_ids[2] == k_sid
+            if length(route.station_indices) == 2 &&
+               route.station_indices[1] == j_idx &&
+               route.station_indices[2] == k_idx
                 r_idx = ri
                 break
             end
@@ -323,7 +314,7 @@ function _derive_theta_hints_arm(
         end
 
         route     = routes_t[r_idx]
-        alpha_val = get(main_mapping.alpha_profile, (route.id, j_sid, k_sid), 0.0)
+        alpha_val = get(main_mapping.alpha_profile, (route.id, j_idx, k_idx), 0.0)
         alpha_val <= 0 && continue
 
         min_theta = ceil(demand / alpha_val)
@@ -380,9 +371,6 @@ function _check_covering_constraints_arm(
             od_dict = get(x_vals[s], t_id, nothing)
 
             for (j_idx, k_idx) in jk_set
-                j_sid = main_mapping.array_idx_to_station_id[j_idx]
-                k_sid = main_mapping.array_idx_to_station_id[k_idx]
-
                 # x sum: Σ_{od using (j,k)} x hint
                 x_sum = 0.0
                 if !isnothing(od_dict)
@@ -400,7 +388,7 @@ function _check_covering_constraints_arm(
                 # α·θ sum: Σ_r α^r_{jk} · θ^r_{ts}
                 at_sum = 0.0
                 for (r_idx, route) in enumerate(routes_t)
-                    alpha_val = get(main_mapping.alpha_profile, (route.id, j_sid, k_sid), 0.0)
+                    alpha_val = get(main_mapping.alpha_profile, (route.id, j_idx, k_idx), 0.0)
                     alpha_val > 0 || continue
                     theta_val = get(theta_hints, (s, t_id, r_idx), 0.0)
                     at_sum += alpha_val * theta_val

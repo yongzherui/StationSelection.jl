@@ -52,9 +52,6 @@ function create_map(
     data  :: StationSelectionData
 )::VehicleCapacityODMap
 
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
-
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
@@ -83,7 +80,6 @@ function create_map(
 
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs, data,
-        station_id_to_array_idx, array_idx_to_station_id,
         model.max_walking_distance
     )
 
@@ -91,8 +87,8 @@ function create_map(
     routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
 
     return VehicleCapacityODMap(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
+        data.station_id_to_array_idx,
+        data.array_idx_to_station_id,
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
@@ -152,9 +148,7 @@ function build_model(
                 isempty(x_od) && continue
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    j_id = mapping.array_idx_to_station_id[j]
-                    k_id = mapping.array_idx_to_station_id[k]
-                    cost = get_walking_cost(data, o, j_id) + get_walking_cost(data, k_id, d)
+                    cost = get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
                     add_to_expression!(obj, cost, x_od[pair_idx])
                 end
             end
@@ -451,7 +445,7 @@ function _check_lazy_constraints_on_hints(
     for s in 1:S
         for (t_id, routes_t) in get(main_mapping.routes_s, s, Dict{Int,Vector{RouteData}}())
             for (r_idx, route) in enumerate(routes_t)
-                n_segs = length(route.station_ids) - 1
+                n_segs = length(route.station_indices) - 1
                 n_segs <= 0 && continue
 
                 theta_val = get(theta_hints, (s, t_id, r_idx), 0.0)
@@ -462,8 +456,7 @@ function _check_lazy_constraints_on_hints(
                 for ((s2, r2, j_idx, k_idx, t2), alpha_val) in alpha_hints
                     (s2 == s && r2 == r_idx && t2 == t_id && alpha_val > 0) || continue
                     for l in 1:n_segs
-                        compute_beta_r_jkl(route, j_idx, k_idx, l,
-                                           main_mapping.array_idx_to_station_id) || continue
+                        compute_beta_r_jkl(route, j_idx, k_idx, l) || continue
                         seg_load[l] += alpha_val
                     end
                 end
@@ -536,7 +529,7 @@ function _derive_alpha_theta_hints(
         best_r    = 0
         best_time = Inf
         for (r_idx, route) in enumerate(routes_t)
-            _route_serves_jk(route, j_idx, k_idx, main_mapping.array_idx_to_station_id) || continue
+            _route_serves_jk(route, j_idx, k_idx) || continue
             if route.travel_time < best_time
                 best_time = route.travel_time
                 best_r    = r_idx
@@ -553,9 +546,7 @@ function _derive_alpha_theta_hints(
         profile = main_mapping.alpha_profile_hint
         if !isnothing(profile) && !isempty(profile)
             route    = routes_t[best_r]
-            j_id     = main_mapping.array_idx_to_station_id[j_idx]
-            k_id     = main_mapping.array_idx_to_station_id[k_idx]
-            hint_val = get(profile, (route.id, j_id, k_id), nothing)
+            hint_val = get(profile, (route.id, j_idx, k_idx), nothing)
             if !isnothing(hint_val)
                 alpha_val = hint_val
             end
@@ -573,10 +564,9 @@ function _derive_alpha_theta_hints(
         routes_t = get(get(main_mapping.routes_s, s, Dict{Int, Vector{RouteData}}()), t_id, RouteData[])
         r_idx > length(routes_t) && continue
         route  = routes_t[r_idx]
-        n_segs = length(route.station_ids) - 1
+        n_segs = length(route.station_indices) - 1
         for l in 1:n_segs
-            compute_beta_r_jkl(route, j_idx, k_idx, l,
-                                main_mapping.array_idx_to_station_id) || continue
+            compute_beta_r_jkl(route, j_idx, k_idx, l) || continue
             seg_key = (s, t_id, r_idx, l)
             seg_load[seg_key] = get(seg_load, seg_key, 0.0) + alpha_val
         end

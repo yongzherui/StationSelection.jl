@@ -77,7 +77,7 @@ function add_route_capacity_constraints!(
     for s in 1:S
         for (t_id, routes_t) in mapping.routes_s[s]
             for (r_idx, route) in enumerate(routes_t)
-                n_segs = length(route.station_ids) - 1
+                n_segs = length(route.station_indices) - 1
                 n_segs <= 0 && continue
 
                 theta_var = get(theta_r_ts, (s, t_id, r_idx), nothing)
@@ -90,10 +90,7 @@ function add_route_capacity_constraints!(
                 for l in 1:n_segs
                     lhs = AffExpr(0.0)
                     for (j_idx, k_idx) in jk_list
-                        compute_beta_r_jkl(
-                            route, j_idx, k_idx, l,
-                            mapping.array_idx_to_station_id
-                        ) || continue
+                        compute_beta_r_jkl(route, j_idx, k_idx, l) || continue
                         alpha_var = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
                         alpha_var === nothing && continue
                         add_to_expression!(lhs, 1.0, alpha_var)
@@ -211,7 +208,7 @@ function add_route_capacity_lazy_constraints!(
         for s in 1:S
             for (t_id, routes_t) in mapping.routes_s[s]
                 for (r_idx, route) in enumerate(routes_t)
-                    n_segs = length(route.station_ids) - 1
+                    n_segs = length(route.station_indices) - 1
                     n_segs <= 0 && continue
 
                     theta_var = get(theta_r_ts, (s, t_id, r_idx), nothing)
@@ -224,8 +221,7 @@ function add_route_capacity_lazy_constraints!(
                     for l in 1:n_segs
                         lhs_val = 0.0
                         for (j_idx, k_idx) in jk_list
-                            compute_beta_r_jkl(route, j_idx, k_idx, l,
-                                               mapping.array_idx_to_station_id) || continue
+                            compute_beta_r_jkl(route, j_idx, k_idx, l) || continue
                             avar = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
                             avar === nothing && continue
                             lhs_val += callback_value(cb_data, avar)
@@ -234,8 +230,7 @@ function add_route_capacity_lazy_constraints!(
 
                         lhs = AffExpr(0.0)
                         for (j_idx, k_idx) in jk_list
-                            compute_beta_r_jkl(route, j_idx, k_idx, l,
-                                               mapping.array_idx_to_station_id) || continue
+                            compute_beta_r_jkl(route, j_idx, k_idx, l) || continue
                             avar = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
                             avar === nothing && continue
                             add_to_expression!(lhs, 1.0, avar)

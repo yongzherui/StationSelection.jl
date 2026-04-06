@@ -21,8 +21,8 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `scenarios::Vector{ScenarioData}`: Reference to scenario data
 - `scenario_label_to_array_idx::Dict{String, Int}`: Scenario label → array index
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
-- `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD pairs with positive demand
-- `Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}`: Demand count q_{od,s} per OD pair per scenario
+- `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD index pairs with positive demand
+- `Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}`: Demand count q_{od,s} per OD index pair per scenario
 - `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
@@ -48,35 +48,30 @@ end
 
 """
     compute_valid_jk_pairs(
-        all_od_pairs, data, station_id_to_array_idx, array_idx_to_station_id, max_walking_distance
+        all_od_pairs, data, max_walking_distance
     ) -> Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int}}}
 
-For each OD pair (o,d), compute which station pairs (j_idx, k_idx) satisfy both:
-- walking_cost(o → j_id) ≤ max_walking_distance
-- walking_cost(k_id → d) ≤ max_walking_distance
+For each OD index pair (origin_idx,dest_idx), compute which station index pairs
+(pickup_idx, dropoff_idx) satisfy both walking distance limits.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
-    station_id_to_array_idx::Dict{Int, Int},
-    array_idx_to_station_id::Vector{Int},
     max_walking_distance::Float64
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
-    n = length(array_idx_to_station_id)
+    n = data.n_stations
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
 
     for (o, d) in all_od_pairs
         pairs = Tuple{Int, Int}[]
         for j in 1:n
-            j_id = array_idx_to_station_id[j]
-            get_walking_cost(data, o, j_id) <= max_walking_distance || continue
+            get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
                 # we need to skip if they are the same, this results in no meaningful assignment
                 # because it means we ask the request to walk at most <= 2 * max_walking_distance
                 # and they will complete their trip.
                 j == k && continue
-                k_id = array_idx_to_station_id[k]
-                get_walking_cost(data, k_id, d) <= max_walking_distance || continue
+                get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end
         end
@@ -96,14 +91,15 @@ Compute OD pair demand counts for a single scenario (aggregated across all times
 - `scenario_data::ScenarioData`: Scenario containing requests
 
 # Returns
-- Dict mapping (origin, destination) → count
+- Dict mapping (origin_idx, dest_idx) → count
 """
 function compute_scenario_od_count(scenario_data::ScenarioData)::Dict{Tuple{Int, Int}, Int}
     od_count = Dict{Tuple{Int, Int}, Int}()
+    _require_indexed_request_columns(scenario_data.requests)
 
     for row in eachrow(scenario_data.requests)
-        o = row.start_station_id
-        d = row.end_station_id
+        o = row.origin_idx
+        d = row.dest_idx
         od_pair = (o, d)
         od_count[od_pair] = get(od_count, od_pair, 0) + 1
     end
@@ -124,10 +120,6 @@ function create_clustering_two_stage_od_map(
     model::ClusteringTwoStageODModel,
     data::StationSelectionData
 )::ClusteringTwoStageODMap
-
-    # Create station ID mappings
-    station_ids = Vector{Int}(data.stations.id)
-    station_id_to_array_idx, array_idx_to_station_id = create_station_id_mappings(station_ids)
 
     # Create scenario label mappings
     scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)
@@ -153,15 +145,13 @@ function create_clustering_two_stage_od_map(
         valid_jk_pairs = compute_valid_jk_pairs(
             all_od_pairs,
             data,
-            station_id_to_array_idx,
-            array_idx_to_station_id,
             model.max_walking_distance
         )
     end
 
     return ClusteringTwoStageODMap(
-        station_id_to_array_idx,
-        array_idx_to_station_id,
+        data.station_id_to_array_idx,
+        data.array_idx_to_station_id,
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
