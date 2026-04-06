@@ -15,20 +15,24 @@ using Statistics
 # Data loading - core data structures
 include("data/struct.jl")
 
-# Utils
-include("utils/coords.jl")
-include("utils/results.jl")
-include("utils/costs.jl")
-include("utils/scenarios.jl")
-include("utils/export.jl")
-include("utils/logging.jl")
-include("utils/candidate_stations.jl")
-include("utils/transform_orders.jl")
-include("utils/transform_stations.jl")
-include("utils/route_data.jl")
-include("utils/generate_routes_from_orders.jl")
-include("utils/route_io.jl")
-include("utils/generate_alpha_routes.jl")
+# Core utilities
+include("utils/core/coords.jl")
+include("utils/core/results.jl")
+include("utils/core/costs.jl")
+include("utils/core/export.jl")
+include("utils/core/logging.jl")
+
+# Data preparation utilities
+include("utils/data/scenarios.jl")
+include("utils/data/candidate_stations.jl")
+include("utils/data/transform_orders.jl")
+include("utils/data/transform_stations.jl")
+
+# Route utilities
+include("utils/routes/route_data.jl")
+include("utils/routes/generate_routes_from_orders.jl")
+include("utils/routes/route_io.jl")
+include("utils/routes/generate_alpha_routes.jl")
 include("data/stations.jl")
 include("data/requests.jl")
 
@@ -67,16 +71,16 @@ include("opt/models/route_vehicle_capacity_warm_start.jl")
 include("opt/models/alpha_route_warm_start.jl")
 
 # Variable export (depends on OptResult and all mapping types)
-include("utils/export_variables.jl")
+include("utils/analysis/export_variables.jl")
 
 # Analysis helpers for exported variables (does not depend on OptResult)
-include("utils/solution_analysis_from_exported_variables.jl")
+include("utils/analysis/solution_analysis_from_exported_variables.jl")
 
 # Objective decomposition (post-hoc attribution from exported CSVs)
-include("utils/objective_decomposition.jl")
+include("utils/analysis/objective_decomposition.jl")
 
 # Solution analysis (depends on OptResult, mapping types, and StationSelectionData)
-include("utils/solution_analysis.jl")
+include("utils/analysis/solution_analysis.jl")
 
 # Re-export key types and functions
 

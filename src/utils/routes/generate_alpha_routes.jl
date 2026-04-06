@@ -61,11 +61,17 @@ function derive_balanced_alpha(
         pos = Dict{Int, Int}(sid => i for (i, sid) in enumerate(sids))
 
         # For each segment l ∈ 1..n-1, count how many feasible legs span it
+        # this is the number of feasible legs
         n_classes = zeros(Int, n - 1)
         for (j_id, k_id) in legs
+            # this assumes unique mapping of station id to position
+            # However, if we consider "loops" in the route, something like A -> B -> A
+            # The current function is guaranteed to fail to capture such a dynamic.
             pj = get(pos, j_id, 0)
             pk = get(pos, k_id, 0)
+            # this feels abit fishy at the moment, what if we have multiple indexes per stop id
             (pj == 0 || pk == 0 || pj >= pk) && continue
+            # iterate and increase the number of covered legs
             for l in pj:(pk - 1)
                 n_classes[l] += 1
             end
@@ -73,11 +79,16 @@ function derive_balanced_alpha(
 
         # Alpha for each feasible leg
         for (j_id, k_id) in legs
+            # likewise here, we run into the issue of duplication
             pj = get(pos, j_id, 0)
             pk = get(pos, k_id, 0)
             (pj == 0 || pk == 0 || pj >= pk) && continue
+
+            # we are limited by the maximum amount of maximum feasible legs 
+            # across all legs that the j,k trip spans
             max_n = maximum(n_classes[l] for l in pj:(pk - 1))
             max_n == 0 && continue
+            # Thus we divide accordingly
             alpha[(route.id, j_id, k_id)] = Float64(floor(Int, vehicle_capacity / max_n))
         end
     end
@@ -103,9 +114,9 @@ function generate_routes_and_alpha(
     array_idx_to_station_id :: Vector{Int};
     vehicle_capacity  :: Int     = 18,
     max_route_length  :: Int     = 3,
-    max_detour_time   :: Float64 = Inf,
-    max_detour_ratio  :: Float64 = Inf,
-    stop_dwell_time   :: Float64 = 0.0
+    max_detour_time   :: Float64 = 1200.0,
+    max_detour_ratio  :: Float64 = 2.0,
+    stop_dwell_time   :: Float64 = 10.0
 ) :: Tuple{Vector{RouteData}, Dict{NTuple{3, Int}, Float64}}
 
     println("  Generating routes via DFS (max_route_length=$max_route_length)...")
