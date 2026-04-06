@@ -59,25 +59,17 @@ function create_map(
         create_scenario_label_mappings(data.scenarios)
 
     S            = n_scenarios(data)
-    Omega_s      = Dict{Int, Vector{Tuple{Int, Int}}}()
-    Q_s          = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
-    Omega_s_t    = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
     Q_s_t        = Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}()
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for s in 1:S
         scenario = data.scenarios[s]
-        od_count = compute_scenario_od_count(scenario)
-        Omega_s[s] = sort!(collect(keys(od_count)))
-        Q_s[s]     = od_count
-        union!(all_od_pairs, keys(od_count))
 
         time_to_od   = compute_time_to_od_count_mapping(scenario, model.time_window_sec)
-        Omega_s_t[s] = Dict{Int, Vector{Tuple{Int, Int}}}()
         Q_s_t[s]     = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
         for (t_id, od_cnt) in time_to_od
-            Omega_s_t[s][t_id] = sort!(collect(keys(od_cnt)))
-            Q_s_t[s][t_id]     = od_cnt
+            Q_s_t[s][t_id] = od_cnt
+            union!(all_od_pairs, keys(od_cnt))
         end
     end
 
@@ -97,9 +89,6 @@ function create_map(
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
-        Omega_s,
-        Q_s,
-        Omega_s_t,
         Q_s_t,
         valid_jk_pairs,
         model.max_walking_distance,
@@ -136,7 +125,10 @@ function build_model(
     variable_counts   = Dict{String, Int}()
     constraint_counts = Dict{String, Int}()
     extra_counts      = Dict{String, Int}(
-        "total_od_pairs" => sum(length(mapping.Omega_s[s]) for s in 1:S; init = 0)
+        "total_od_pairs" => sum(
+            sum(length(_time_od_pairs(mapping, s, t_id)) for t_id in _time_ids(mapping, s); init = 0)
+            for s in 1:S; init = 0
+        )
     )
 
     variable_counts["station_selection"]   = add_station_selection_variables!(m, data)
@@ -147,7 +139,8 @@ function build_model(
     x   = m[:x]
     obj = AffExpr(0.0)
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, (o, d)) in enumerate(od_pairs)
                 x_od = get(get(x[s], t_id, Dict{Int, Vector{VariableRef}}()), od_idx, VariableRef[])
                 isempty(x_od) && continue
@@ -282,7 +275,8 @@ function _derive_theta_hints_arm(
 
     for s in 1:S
         for (t_id, od_dict) in x_vals[s]
-            od_pairs = get(ws_mapping.Omega_s_t[s], t_id, Tuple{Int,Int}[])
+            od_pairs = haskey(ws_mapping.Q_s_t[s], t_id) ?
+                _time_od_pairs(ws_mapping, s, t_id) : Tuple{Int,Int}[]
             for (od_idx, pair_vals) in od_dict
                 od_idx > length(od_pairs) && continue
                 (o, d) = od_pairs[od_idx]
@@ -369,7 +363,8 @@ function _check_covering_constraints_arm(
     max_viol   = 0.0
 
     for s in 1:S
-        for (t_id, od_pairs) in main_mapping.Omega_s_t[s]
+        for t_id in _time_ids(main_mapping, s)
+            od_pairs = _time_od_pairs(main_mapping, s, t_id)
             routes_t = get(
                 get(main_mapping.routes_s, s, Dict{Int, Vector{RouteData}}()),
                 t_id, RouteData[]

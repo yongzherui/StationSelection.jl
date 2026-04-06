@@ -105,7 +105,8 @@ function add_assignment_variables!(
     x = [Dict{Int, Dict{Int, Vector{VariableRef}}}() for _ in 1:S]
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             x[s][t_id] = Dict{Int, Vector{VariableRef}}()
             for (od_idx, (o, d)) in enumerate(od_pairs)
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)

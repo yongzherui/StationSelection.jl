@@ -181,7 +181,8 @@ function _arm_warn_uncovered_jk(
 
     n_uncovered = 0
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (o, d) in od_pairs
                 get(mapping.Q_s_t[s][t_id], (o, d), 0) > 0 || continue
                 for (j_idx, k_idx) in get_valid_jk_pairs(mapping, o, d)
@@ -231,7 +232,8 @@ function add_theta_r_ts_variables!(
     srt_with_alpha   = Set{NTuple{3, Int}}()
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             # Collect valid (j_idx, k_idx) pairs for this bucket
             jk_set = Set{Tuple{Int, Int}}()
             for (o, d) in od_pairs

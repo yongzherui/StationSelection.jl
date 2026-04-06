@@ -35,7 +35,10 @@ function build_model(
         sum(length(v) for v in values(mapping.routes_s[s]); init = 0)
         for s in 1:S; init = 0
     )
-    total_od_pairs = sum(length(mapping.Omega_s[s]) for s in 1:S; init = 0)
+    total_od_pairs = sum(
+        sum(length(_time_od_pairs(mapping, s, t_id)) for t_id in _time_ids(mapping, s); init = 0)
+        for s in 1:S; init = 0
+    )
     extra_counts["n_routes"]       = n_routes
     extra_counts["total_od_pairs"] = total_od_pairs
 

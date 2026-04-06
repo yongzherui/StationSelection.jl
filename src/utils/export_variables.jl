@@ -371,7 +371,7 @@ function export_assignment_variables(
     rows = []
     for (s, x_s) in enumerate(x)
         for (t_id, x_t) in x_s
-            od_pairs = mapping.Omega_s_t[s][t_id]
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, x_od) in x_t
                 isempty(x_od) && continue
                 o, d = od_pairs[od_idx]
@@ -529,7 +529,7 @@ function export_assignment_variables(
 
     for (s, x_s) in enumerate(x)
         for (t_id, x_t) in x_s
-            od_pairs = mapping.Omega_s_t[s][t_id]
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, x_od) in x_t
                 isempty(x_od) && continue
                 o, d = od_pairs[od_idx]

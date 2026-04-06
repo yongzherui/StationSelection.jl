@@ -162,7 +162,8 @@ function add_assignment_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, (o, d)) in enumerate(od_pairs)
                 x_od = get(x[s][t_id], od_idx, VariableRef[])
                 isempty(x_od) && continue
@@ -196,7 +197,8 @@ function add_assignment_to_active_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, (o, d)) in enumerate(od_pairs)
                 demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
                 demand == 0 && continue

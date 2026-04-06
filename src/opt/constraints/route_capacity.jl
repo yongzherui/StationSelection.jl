@@ -279,7 +279,8 @@ function add_route_capacity_constraints!(
     arm_alpha_params = m[:arm_alpha_params]
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             # Collect active (j,k) legs in this bucket
             jk_set = Set{Tuple{Int, Int}}()
             for (o, d) in od_pairs
@@ -347,7 +348,8 @@ function add_route_capacity_lazy_constraints!(
     od_idx_by_st = Dict{Tuple{Int, Int}, Dict{Tuple{Int, Int}, Int}}()
 
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             jk_set    = Set{Tuple{Int, Int}}()
             od_lookup = Dict{Tuple{Int, Int}, Int}()
             for (od_idx, (o, d)) in enumerate(od_pairs)
@@ -365,7 +367,8 @@ function add_route_capacity_lazy_constraints!(
         callback_node_status(cb_data, m) == MOI.CALLBACK_NODE_STATUS_INTEGER || return
 
         for s in 1:S
-            for (t_id, od_pairs) in mapping.Omega_s_t[s]
+            for t_id in _time_ids(mapping, s)
+                od_pairs = _time_od_pairs(mapping, s, t_id)
                 od_lookup = get(od_idx_by_st, (s, t_id), Dict{Tuple{Int,Int},Int}())
                 routes_t  = get(mapping.routes_s[s], t_id, RouteData[])
 

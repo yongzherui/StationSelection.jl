@@ -36,7 +36,8 @@ function set_route_od_objective!(
 
     # ── Walking cost (x already counts passengers — no Q scaling) ─────────────
     for s in 1:S
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
+        for t_id in _time_ids(mapping, s)
+            od_pairs = _time_od_pairs(mapping, s, t_id)
             for (od_idx, (o, d)) in enumerate(od_pairs)
                 x_od = get(x[s][t_id], od_idx, VariableRef[])
                 isempty(x_od) && continue

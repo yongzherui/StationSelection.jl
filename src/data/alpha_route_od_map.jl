@@ -21,9 +21,6 @@ JuMP variables.
 - `scenarios`: Scenario reference
 - `scenario_label_to_array_idx`: Scenario label → index
 - `array_idx_to_scenario_label`: Index → scenario label
-- `Omega_s`: scenario → OD pairs (aggregated)
-- `Q_s`: scenario → (o,d) → demand (aggregated)
-- `Omega_s_t`: scenario → t_id → OD pairs
 - `Q_s_t`: scenario → t_id → (o,d) → demand
 - `valid_jk_pairs`: (o,d) → valid (j_idx,k_idx) pairs
 - `max_walking_distance`: Walking limit used to compute valid_jk_pairs
@@ -39,10 +36,6 @@ struct AlphaRouteODMap <: AbstractClusteringMap
     scenario_label_to_array_idx :: Dict{String, Int}
     array_idx_to_scenario_label :: Vector{String}
 
-    Omega_s   :: Dict{Int, Vector{Tuple{Int, Int}}}
-    Q_s       :: Dict{Int, Dict{Tuple{Int, Int}, Int}}
-
-    Omega_s_t :: Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}
     Q_s_t     :: Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
 
     valid_jk_pairs       :: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
@@ -69,11 +62,30 @@ get_valid_jk_pairs(mapping::AlphaRouteODMap, o::Int, d::Int) =
 
 
 """
+    _time_ids(mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}, s::Int)
+
+Return sorted time bucket IDs for time-indexed OD maps.
+"""
+_time_ids(mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}, s::Int) =
+    sort!(collect(keys(mapping.Q_s_t[s])))
+
+
+"""
+    _time_od_pairs(mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}, s::Int, t_id::Int)
+
+Return sorted OD pairs with positive demand in scenario `s` and time bucket `t_id`.
+For `AlphaRouteODMap`, this replaces the removed `Omega_s_t` field.
+"""
+_time_od_pairs(mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}, s::Int, t_id::Int) =
+    sort!(collect(keys(mapping.Q_s_t[s][t_id])))
+
+
+"""
     create_alpha_route_od_map(model::AlphaRouteModel, data) -> AlphaRouteODMap
 
 Build the OD mapping for AlphaRouteModel:
 1. Station and scenario index mappings
-2. Aggregated OD pairs and demand per scenario (both time-aggregated and time-indexed)
+2. Time-indexed OD demand per scenario
 3. Valid (j,k) pairs per OD pair (walking-filtered)
 4. Routes loaded from CSV and filtered per (scenario, time-bucket)
 5. Alpha profile loaded from CSV
@@ -90,27 +102,18 @@ function create_alpha_route_od_map(
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
-    # ── 2. Aggregated OD pairs per scenario ────────────────────────────────────
+    # ── 2. Time-indexed OD demand per scenario ────────────────────────────────
     S = n_scenarios(data)
-    Omega_s    = Dict{Int, Vector{Tuple{Int, Int}}}()
-    Q_s        = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
-    Omega_s_t  = Dict{Int, Dict{Int, Vector{Tuple{Int, Int}}}}()
     Q_s_t      = Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}()
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for s in 1:S
         scenario = data.scenarios[s]
-        od_count = compute_scenario_od_count(scenario)
-        Omega_s[s] = sort!(collect(keys(od_count)))
-        Q_s[s]     = od_count
-        union!(all_od_pairs, keys(od_count))
-
         time_to_od   = compute_time_to_od_count_mapping(scenario, model.time_window_sec)
-        Omega_s_t[s] = Dict{Int, Vector{Tuple{Int, Int}}}()
         Q_s_t[s]     = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
         for (t_id, od_cnt) in time_to_od
-            Omega_s_t[s][t_id] = sort!(collect(keys(od_cnt)))
-            Q_s_t[s][t_id]     = od_cnt
+            Q_s_t[s][t_id] = od_cnt
+            union!(all_od_pairs, keys(od_cnt))
         end
     end
 
@@ -189,10 +192,11 @@ function create_alpha_route_od_map(
     routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
     for s in 1:S
         routes_s[s] = Dict{Int, Vector{RouteData}}()
-        for t_id in sort(collect(keys(Q_s_t[s])))
+        for t_id in sort!(collect(keys(Q_s_t[s])))
             # Build (j_sid, k_sid) pairs for this bucket
             jk_sids = Set{Tuple{Int, Int}}()
-            for (o, d) in Omega_s_t[s][t_id]
+            od_pairs = sort!(collect(keys(Q_s_t[s][t_id])))
+            for (o, d) in od_pairs
                 for (j_idx, k_idx) in get(valid_jk_pairs, (o, d), Tuple{Int,Int}[])
                     push!(jk_sids, (array_idx_to_station_id[j_idx],
                                     array_idx_to_station_id[k_idx]))
@@ -200,7 +204,7 @@ function create_alpha_route_od_map(
             end
 
             n_requests = sum(values(Q_s_t[s][t_id]); init=0)
-            n_od       = length(Omega_s_t[s][t_id])
+            n_od       = length(od_pairs)
             print("  Scenario $s/$S, time bucket $t_id: $n_requests requests, $n_od OD pairs, $(length(jk_sids)) (j,k) pairs")
             flush(stdout)
 
@@ -234,9 +238,6 @@ function create_alpha_route_od_map(
         data.scenarios,
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
-        Omega_s,
-        Q_s,
-        Omega_s_t,
         Q_s_t,
         valid_jk_pairs,
         model.max_walking_distance,
