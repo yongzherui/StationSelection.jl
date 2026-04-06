@@ -49,7 +49,7 @@ No constraint (iii).  θ^r_{ts} ∈ Z+ remains a decision variable.
 - `use_lazy_constraints::Bool`: If true, the capacity constraint is submitted lazily
 - `vehicle_capacity::Int`: Vehicle capacity C (default 18)
 - `stop_dwell_time::Float64`: Extra seconds added to route travel_time per intermediate stop
-  (i.e. (n_stops-2) × stop_dwell_time). Makes multi-stop routes costlier; default 0.0
+  (i.e. (n_stops-2) × stop_dwell_time). Makes multi-stop routes costlier; default 10.0
 """
 struct AlphaRouteModel <: AbstractODModel
     k                           :: Int
@@ -107,12 +107,12 @@ struct AlphaRouteModel <: AbstractODModel
 
         mdt = Float64(max_detour_time)
         mdr = Float64(max_detour_ratio)
+        mwd = Float64(max_walking_distance)
+        sdt = Float64(stop_dwell_time)
         mdt >= 0.0 || throw(ArgumentError("max_detour_time must be non-negative"))
         mdr >= 0.0 || throw(ArgumentError("max_detour_ratio must be non-negative"))
-        Float64(max_walking_distance) >= 0 ||
-            throw(ArgumentError("max_walking_distance must be non-negative"))
-        Float64(stop_dwell_time) >= 0 ||
-            throw(ArgumentError("stop_dwell_time must be non-negative"))
+        mwd >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+        sdt >= 0 || throw(ArgumentError("stop_dwell_time must be non-negative"))
 
         new(k, l,
             Float64(route_regularization_weight),
@@ -121,11 +121,11 @@ struct AlphaRouteModel <: AbstractODModel
             routes_file,
             alpha_profile_file,
             max_route_length,
-            Float64(max_walking_distance),
+            mwd,
             mdt, mdr,
             time_window_sec,
             use_lazy_constraints,
             vehicle_capacity,
-            Float64(stop_dwell_time))
+            sdt)
     end
 end
