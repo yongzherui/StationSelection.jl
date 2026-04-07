@@ -13,7 +13,7 @@ using Logging
 using Statistics
 
 # Data loading - core data structures
-include("data/struct.jl")
+include("data/core/struct.jl")
 
 # Core utilities
 include("utils/core/coords.jl")
@@ -33,8 +33,8 @@ include("utils/routes/route_data.jl")
 include("utils/routes/generate_routes_from_orders.jl")
 include("utils/routes/route_io.jl")
 include("utils/routes/generate_alpha_routes.jl")
-include("data/stations.jl")
-include("data/requests.jl")
+include("data/io/stations.jl")
+include("data/io/requests.jl")
 
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
@@ -44,19 +44,19 @@ include("opt/models/route_vehicle_capacity_model.jl")
 include("opt/models/alpha_route_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
-include("data/clustering_od_map.jl")
+include("data/maps/clustering_od_map.jl")
 
 # Clustering base map (depends on ClusteringBaseModel)
-include("data/clustering_base_map.jl")
+include("data/maps/clustering_base_map.jl")
 
 # Vehicle capacity OD map for RouteVehicleCapacityModel (depends on RouteData)
-include("data/vehicle_capacity_od_map.jl")
+include("data/maps/vehicle_capacity_od_map.jl")
 
 # Alpha route OD map for AlphaRouteModel (depends on RouteData, route_io)
-include("data/alpha_route_od_map.jl")
+include("data/maps/alpha_route_od_map.jl")
 
 # Model-to-map dispatch
-include("data/create_map.jl")
+include("data/maps/create_map.jl")
 
 # Optimization components
 include("opt/variables.jl")
