@@ -27,7 +27,7 @@ export transform_orders,
 """
     parse_station_list(list_str::String) -> Vector{Int}
 
-Parse a string like "[1,2,3]" into a vector of integers.
+Parse a string like "[1,2,3]" or "[1 2 3]" into a vector of integers.
 
 # Arguments
 - `list_str`: String representation of station list (e.g., "[1,2,3]")
@@ -36,11 +36,51 @@ Parse a string like "[1,2,3]" into a vector of integers.
 - Vector{Int} of station IDs, or empty vector if invalid
 """
 function parse_station_list(list_str)
-    cleaned = replace(string(list_str), "[" => "", "]" => "")
+    cleaned = strip(replace(string(list_str), "[" => "", "]" => "", "," => " "))
     if isempty(cleaned) || cleaned == "missing"
         return Int[]
     end
-    return parse.(Int, split(cleaned, ","))
+    return parse.(Int, split(cleaned))
+end
+
+function _row_station_id(row, side::Symbol)::Int
+    columns = propertynames(row)
+    candidates = side == :origin ?
+        (:origin_station_id, :start_station_id, :origin_id) :
+        (:destination_station_id, :end_station_id, :target_id, :dest_station_id)
+
+    for col in candidates
+        if col in columns && !ismissing(row[col])
+            station_id = Int(row[col])
+            _warn_if_legacy_station_disagrees(row, side, station_id, col)
+            return station_id
+        end
+    end
+
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    legacy_col in columns || return 0
+    stations = parse_station_list(string(row[legacy_col]))
+    return isempty(stations) ? 0 : first(stations)
+end
+
+function _warn_if_legacy_station_disagrees(row, side::Symbol, station_id::Int, scalar_col::Symbol)
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    legacy_col in propertynames(row) || return
+    ismissing(row[legacy_col]) && return
+
+    stations = parse_station_list(string(row[legacy_col]))
+    isempty(stations) && return
+    legacy_id = first(stations)
+    if legacy_id != station_id
+        @warn "Scalar station column disagrees with legacy station list; using scalar column" side scalar_col station_id legacy_col legacy_id
+    end
+end
+
+_row_origin_station_id(row)::Int = _row_station_id(row, :origin)
+_row_destination_station_id(row)::Int = _row_station_id(row, :destination)
+
+function _row_value_or_missing(row, col::Symbol)
+    return col in propertynames(row) ? row[col] : missing
 end
 
 """
@@ -231,7 +271,7 @@ end
 Transform orders by assigning pickup and dropoff to selected stations.
 
 This function:
-1. Reads original orders with available pickup/dropoff stations
+1. Reads original orders with origin/destination station IDs
 2. Reads station selection results (with 'selected' column or timeframe columns)
 3. Optionally filters orders by date range
 4. For each order, finds the closest selected station for pickup and dropoff
@@ -240,8 +280,8 @@ This function:
 # Arguments
 - `order_file`: Path to order CSV file with columns:
   - order_id, pax_num, order_time
-  - available_pickup_station_list, available_pickup_walkingtime_list
-  - available_dropoff_station_list, available_dropoff_walkingtime_list
+  - origin_station_id
+  - destination_station_id
 - `cluster_file`: Path to station selection results CSV with columns:
   - id, lon, lat
   - 'selected' column (1/0) for default mode
@@ -348,13 +388,8 @@ function transform_orders(order_file::String,
             println("  Processing order $idx / $(nrow(orders_df))...")
         end
 
-        # Parse station lists
-        available_pickup_stations = parse_station_list(string(row.available_pickup_station_list))
-        available_dropoff_stations = parse_station_list(string(row.available_dropoff_station_list))
-
-        # Determine origin_id and target_id (first available station)
-        origin_id = length(available_pickup_stations) > 0 ? available_pickup_stations[1] : 0
-        target_id = length(available_dropoff_stations) > 0 ? available_dropoff_stations[1] : 0
+        origin_id = _row_origin_station_id(row)
+        target_id = _row_destination_station_id(row)
 
         # Determine which stations are selected for this order
         if use_timeframes
@@ -405,14 +440,10 @@ function transform_orders(order_file::String,
             order_id = row.order_id,
             pax_num = row.pax_num,
             order_time = row.order_time,
-            origin_id = origin_id,
-            target_id = target_id,
+            origin_station_id = origin_id,
+            destination_station_id = target_id,
             assigned_pickup_id = assigned_pickup_id,
-            assigned_dropoff_id = assigned_dropoff_id,
-            available_pickup_station_list = row.available_pickup_station_list,
-            available_pickup_walkingtime_list = row.available_pickup_walkingtime_list,
-            available_dropoff_station_list = row.available_dropoff_station_list,
-            available_dropoff_walkingtime_list = row.available_dropoff_walkingtime_list
+            assigned_dropoff_id = assigned_dropoff_id
         ))
     end
 
@@ -573,12 +604,8 @@ function transform_orders_from_assignments(order_file::String,
             println("  Processing order $idx / $(nrow(orders_df))...")
         end
 
-        # Parse station lists
-        available_pickup_stations = parse_station_list(string(row.available_pickup_station_list))
-        available_dropoff_stations = parse_station_list(string(row.available_dropoff_station_list))
-
-        origin_id = length(available_pickup_stations) > 0 ? available_pickup_stations[1] : 0
-        target_id = length(available_dropoff_stations) > 0 ? available_dropoff_stations[1] : 0
+        origin_id = _row_origin_station_id(row)
+        target_id = _row_destination_station_id(row)
 
         # Parse order time
         order_time = DateTime(row.order_time, "yyyy-mm-dd HH:MM:SS")
@@ -653,14 +680,10 @@ function transform_orders_from_assignments(order_file::String,
             order_id = row.order_id,
             pax_num = row.pax_num,
             order_time = row.order_time,
-            origin_id = origin_id,
-            target_id = target_id,
+            origin_station_id = origin_id,
+            destination_station_id = target_id,
             assigned_pickup_id = assigned_pickup_id,
-            assigned_dropoff_id = assigned_dropoff_id,
-            available_pickup_station_list = row.available_pickup_station_list,
-            available_pickup_walkingtime_list = row.available_pickup_walkingtime_list,
-            available_dropoff_station_list = row.available_dropoff_station_list,
-            available_dropoff_walkingtime_list = row.available_dropoff_walkingtime_list
+            assigned_dropoff_id = assigned_dropoff_id
         ))
     end
 
@@ -759,7 +782,7 @@ Quick Transform for (date, time_window) pairs not covered by original selection 
 time-of-day to an original scenario).
 
 For each order whose `order_time` falls within an uncovered range, assigns greedily using
-the segment network directly (not the pre-computed available_pickup_station_list):
+the segment network directly from the order origin and destination station IDs:
 
     j*(p) = z*/y* station with minimum seg_time from origin reachable within max_walking_distance,
     k*(p) = z*/y* station with minimum seg_time from target reachable within max_walking_distance,
@@ -842,10 +865,8 @@ function transform_orders_quick_extend(
         range_match === nothing && continue
         s_idx = uncovered_ranges[range_match][3]
 
-        available_pickup  = parse_station_list(string(row.available_pickup_station_list))
-        available_dropoff = parse_station_list(string(row.available_dropoff_station_list))
-        origin_id = isempty(available_pickup)  ? 0 : available_pickup[1]
-        target_id = isempty(available_dropoff) ? 0 : available_dropoff[1]
+        origin_id = _row_origin_station_id(row)
+        target_id = _row_destination_station_id(row)
 
         z_s = get(z_star, s_idx, Set{Int}())
 
@@ -881,14 +902,10 @@ function transform_orders_quick_extend(
             order_id   = row.order_id,
             pax_num    = row.pax_num,
             order_time = row.order_time,
-            origin_id  = origin_id,
-            target_id  = target_id,
+            origin_station_id = origin_id,
+            destination_station_id = target_id,
             assigned_pickup_id  = assigned_pickup_id,
-            assigned_dropoff_id = assigned_dropoff_id,
-            available_pickup_station_list      = row.available_pickup_station_list,
-            available_pickup_walkingtime_list  = row.available_pickup_walkingtime_list,
-            available_dropoff_station_list     = row.available_dropoff_station_list,
-            available_dropoff_walkingtime_list = row.available_dropoff_walkingtime_list
+            assigned_dropoff_id = assigned_dropoff_id
         ))
     end
 

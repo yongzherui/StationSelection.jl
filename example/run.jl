@@ -78,8 +78,8 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         station_counts = combine(
             groupby(
                 vcat(
-                    select(requests, :start_station_id => :station_id),
-                    select(requests, :end_station_id => :station_id)
+                    select(requests, :origin_station_id => :station_id),
+                    select(requests, :destination_station_id => :station_id)
                 ),
                 :station_id
             ),
@@ -90,8 +90,8 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         stations = stations[in.(stations.id, Ref(top_station_ids)), :]
         station_ids = Set(stations.id)
         requests = requests[
-            in.(requests.start_station_id, Ref(station_ids)) .&
-            in.(requests.end_station_id, Ref(station_ids)),
+            in.(requests.origin_station_id, Ref(station_ids)) .&
+            in.(requests.destination_station_id, Ref(station_ids)),
             :
         ]
     end

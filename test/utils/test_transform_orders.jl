@@ -10,10 +10,8 @@ using CSV
             order_id = [1, 2],
             pax_num = [1, 1],
             order_time = ["2024-01-01 08:01:59", "2024-01-01 08:02:00"],
-            available_pickup_station_list = ["[1]", "[1]"],
-            available_pickup_walkingtime_list = ["[0]", "[0]"],
-            available_dropoff_station_list = ["[3]", "[3]"],
-            available_dropoff_walkingtime_list = ["[0]", "[0]"]
+            origin_station_id = [1, 1],
+            destination_station_id = [3, 3]
         )
         cluster_df = DataFrame(
             id = [1, 2, 3],

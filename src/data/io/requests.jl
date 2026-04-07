@@ -13,15 +13,20 @@ Read customer requests from a CSV file and return a DataFrame.
 - `end_time::Union{DateTime, String, Nothing}`: Filter requests before this time
 
 # Returns
-DataFrame with columns: id, start_station_id, end_station_id, request_time
+DataFrame with columns: id, origin_station_id, destination_station_id, start_station_id,
+end_station_id, request_time. The start/end columns are compatibility aliases for
+the optimization data contract.
 
 # Input CSV Schema
 | Field Name                          | Description                                            |
 |------------------------------------ |--------------------------------------------------------|
 | order_id                            | Unique order ID                                        |
 | order_time                          | Order creation time                                    |
-| available_pickup_station_list       | List of available pickup stations (e.g., "[136]")      |
-| available_dropoff_station_list      | List of available drop-off stations (e.g., "[22]")     |
+| origin_station_id                   | Origin station ID                                      |
+| destination_station_id              | Destination station ID                                 |
+
+Legacy CSVs with `available_pickup_station_list` and
+`available_dropoff_station_list` are still accepted as a fallback.
 """
 function read_customer_requests(
     file_path::String;
@@ -30,16 +35,14 @@ function read_customer_requests(
 )
     df = CSV.File(file_path) |> DataFrame
 
-    # Parse station lists - they are in the form "[1]" or "[1, 2, 3]"
-    # We take the first element of each list
-    df.available_pickup_station_list = parse.(Int, replace.(string.(df.available_pickup_station_list), r"[\[\]]" => ""))
-    df.available_dropoff_station_list = parse.(Int, replace.(string.(df.available_dropoff_station_list), r"[\[\]]" => ""))
+    df.origin_station_id = _request_station_id.(eachrow(df), Ref(:origin))
+    df.destination_station_id = _request_station_id.(eachrow(df), Ref(:destination))
 
-    df.start_station_id = df.available_pickup_station_list
-    df.end_station_id = df.available_dropoff_station_list
+    df.start_station_id = df.origin_station_id
+    df.end_station_id = df.destination_station_id
 
     # Select and rename columns
-    df = select(df, [:order_id, :start_station_id, :end_station_id, :order_time])
+    df = select(df, [:order_id, :origin_station_id, :destination_station_id, :start_station_id, :end_station_id, :order_time])
     rename!(df, Dict(:order_id => :id, :order_time => :request_time))
 
     # Parse request times
@@ -57,4 +60,44 @@ function read_customer_requests(
     end
 
     return df
+end
+
+function _request_station_id(row, side::Symbol)::Int
+    columns = propertynames(row)
+    candidates = side == :origin ?
+        (:origin_station_id, :start_station_id, :origin_id) :
+        (:destination_station_id, :end_station_id, :target_id, :dest_station_id)
+
+    for col in candidates
+        if col in columns && !ismissing(row[col])
+            station_id = Int(row[col])
+            _warn_if_request_legacy_station_disagrees(row, side, station_id, col)
+            return station_id
+        end
+    end
+
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    legacy_col in columns || error("request CSV missing $(side) station column")
+    values = parse_station_list(string(row[legacy_col]))
+    isempty(values) && error("request $(side) station column is empty")
+    return first(values)
+end
+
+function _warn_if_request_legacy_station_disagrees(row, side::Symbol, station_id::Int, scalar_col::Symbol)
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    legacy_col in propertynames(row) || return
+    ismissing(row[legacy_col]) && return
+
+    values = parse_station_list(string(row[legacy_col]))
+    isempty(values) && return
+    legacy_id = first(values)
+    if legacy_id != station_id
+        @warn "Scalar station column disagrees with legacy station list; using scalar column" side scalar_col station_id legacy_col legacy_id
+    end
+end
+
+function parse_station_list(list_str::AbstractString)::Vector{Int}
+    cleaned = strip(replace(list_str, "[" => "", "]" => "", "," => " "))
+    isempty(cleaned) && return Int[]
+    return parse.(Int, split(cleaned))
 end

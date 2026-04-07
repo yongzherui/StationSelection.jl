@@ -24,8 +24,8 @@ function select_top_used_candidate_stations(
     station_counts = combine(
         groupby(
             vcat(
-                select(orders, :start_station_id => :station_id),
-                select(orders, :end_station_id => :station_id)
+                select(orders, :origin_station_id => :station_id),
+                select(orders, :destination_station_id => :station_id)
             ),
             :station_id
         ),
@@ -48,8 +48,8 @@ function select_top_used_candidate_stations(
     stations_filtered = stations[in.(stations.id, Ref(top_station_ids)), :]
     station_ids = Set(stations_filtered.id)
     orders_filtered = orders[
-        in.(orders.start_station_id, Ref(station_ids)) .&
-        in.(orders.end_station_id, Ref(station_ids)),
+        in.(orders.origin_station_id, Ref(station_ids)) .&
+        in.(orders.destination_station_id, Ref(station_ids)),
         :
     ]
 

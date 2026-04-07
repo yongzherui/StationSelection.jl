@@ -118,7 +118,7 @@ function build_od_counts_from_data(data::StationSelectionData)
     for scenario in data.scenarios
         d = Dict{Tuple{Int, Int}, Int}()
         for row in eachrow(scenario.requests)
-            key = (row.start_station_id, row.end_station_id)
+            key = (row.origin_station_id, row.destination_station_id)
             d[key] = get(d, key, 0) + 1
         end
         push!(counts, d)

@@ -111,7 +111,10 @@ Create a StationSelectionData struct from raw inputs.
 
 # Arguments
 - `stations::DataFrame`: Must have columns :id, :lon, :lat
-- `requests::DataFrame`: Must have columns :start_station_id, :end_station_id, :request_time
+- `requests::DataFrame`: Must have origin/destination station columns and :request_time.
+  Preferred columns are :origin_station_id and :destination_station_id. Legacy
+  :start_station_id/:end_station_id and single-item available station lists are
+  accepted as compatibility fallbacks.
 - `walking_costs::Dict{Tuple{Int,Int}, Float64}`: Pairwise walking costs
 - `routing_costs::Union{Dict, Nothing}`: Optional vehicle routing costs
 - `scenarios::Union{Vector{Tuple{String,String}}, Nothing}`: Optional time windows for scenarios
@@ -130,8 +133,6 @@ function create_station_selection_data(
     @assert :id in propertynames(stations) "stations must have :id column"
     @assert :lon in propertynames(stations) "stations must have :lon column"
     @assert :lat in propertynames(stations) "stations must have :lat column"
-    @assert :start_station_id in propertynames(requests) "requests must have :start_station_id column"
-    @assert :end_station_id in propertynames(requests) "requests must have :end_station_id column"
     @assert :request_time in propertynames(requests) "requests must have :request_time column"
 
     n_stations = nrow(stations)
@@ -203,9 +204,65 @@ function _add_request_station_indices(
     station_id_to_array_idx::Dict{Int, Int}
 )::DataFrame
     indexed_requests = copy(requests)
-    indexed_requests.origin_idx = [station_id_to_array_idx[Int(id)] for id in indexed_requests.start_station_id]
-    indexed_requests.dest_idx = [station_id_to_array_idx[Int(id)] for id in indexed_requests.end_station_id]
+    origin_ids = _request_station_ids(indexed_requests, :origin)
+    destination_ids = _request_station_ids(indexed_requests, :destination)
+    indexed_requests.origin_station_id = origin_ids
+    indexed_requests.destination_station_id = destination_ids
+    indexed_requests.start_station_id = origin_ids
+    indexed_requests.end_station_id = destination_ids
+    indexed_requests.origin_idx = [station_id_to_array_idx[Int(id)] for id in origin_ids]
+    indexed_requests.dest_idx = [station_id_to_array_idx[Int(id)] for id in destination_ids]
     return indexed_requests
+end
+
+function _request_station_ids(requests::DataFrame, side::Symbol)::Vector{Int}
+    names_set = Set(propertynames(requests))
+    candidates = side == :origin ?
+        (:origin_station_id, :start_station_id, :origin_id) :
+        (:destination_station_id, :end_station_id, :target_id, :dest_station_id)
+
+    for col in candidates
+        if col in names_set
+            station_ids = Int.(requests[!, col])
+            _warn_if_legacy_station_column_disagrees(requests, side, station_ids, col)
+            return station_ids
+        end
+    end
+
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    if legacy_col in names_set
+        return [_first_legacy_station_id(value, side) for value in requests[!, legacy_col]]
+    end
+
+    label = side == :origin ? "origin" : "destination"
+    error("requests must include a $label station column")
+end
+
+function _first_legacy_station_id(value, side::Symbol)::Int
+    values = parse_station_list(string(value))
+    isempty(values) && error("request $(side) station column is empty")
+    return first(values)
+end
+
+function _warn_if_legacy_station_column_disagrees(
+    requests::DataFrame,
+    side::Symbol,
+    station_ids::Vector{Int},
+    scalar_col::Symbol
+)
+    legacy_col = side == :origin ? :available_pickup_station_list : :available_dropoff_station_list
+    legacy_col in propertynames(requests) || return
+
+    for (row_idx, value) in enumerate(requests[!, legacy_col])
+        ismissing(value) && continue
+        values = parse_station_list(string(value))
+        isempty(values) && continue
+        legacy_id = first(values)
+        station_id = station_ids[row_idx]
+        if legacy_id != station_id
+            @warn "Scalar station column disagrees with legacy station list; using scalar column" side row_idx scalar_col station_id legacy_col legacy_id
+        end
+    end
 end
 
 # Convenience accessor functions
