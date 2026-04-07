@@ -8,7 +8,7 @@ from station selection results.
 using CSV
 using DataFrames
 
-export prepare_station_data, prepare_vehicle_data
+export prepare_station_data, prepare_vehicle_data, prepare_segment_data
 
 """
     prepare_station_data(base_station_file::String,
@@ -133,4 +133,28 @@ function prepare_vehicle_data(base_vehicle_file::String,
     ]
 
     return vehicle_df
+end
+
+"""
+    prepare_segment_data(base_segment_file::String,
+                         selection_result_file::String) -> DataFrame
+
+Filter segment data to only segments between candidate stations.
+
+Reads the base segment CSV and the station selection results, and returns only rows
+where both `from_station` and `to_station` are in the candidate station set.
+
+# Arguments
+- `base_segment_file`: Path to base segment CSV with columns from_station, to_station, ...
+- `selection_result_file`: Path to selection results CSV with an `id` column
+
+# Returns
+- DataFrame containing only segments between candidate stations
+"""
+function prepare_segment_data(base_segment_file::String,
+                              selection_result_file::String)
+    seg_df = CSV.read(base_segment_file, DataFrame)
+    selection_df = CSV.read(selection_result_file, DataFrame)
+    candidate_ids = Set(selection_df.id)
+    filter(r -> r.from_station ∈ candidate_ids && r.to_station ∈ candidate_ids, seg_df)
 end
