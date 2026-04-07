@@ -32,9 +32,7 @@ function build_model(
 
     variable_counts["station_selection"] = add_station_selection_variables!(m, data)
     variable_counts["scenario_activation"] = add_scenario_activation_variables!(m, data)
-    variable_counts["assignment"] = add_assignment_variables!(
-        m, data, mapping; variable_reduction=model.variable_reduction
-    )
+    variable_counts["assignment"] = add_assignment_variables!(m, data, mapping)
     if !isnothing(model.flow_regularization_weight)
         variable_counts["flow_activation"] = add_flow_variables!(m, data, mapping)
     end
@@ -48,8 +46,7 @@ function build_model(
             m,
             data,
             mapping;
-            in_vehicle_time_weight=model.in_vehicle_time_weight,
-            variable_reduction=model.variable_reduction
+            in_vehicle_time_weight=model.in_vehicle_time_weight
         )
     else
         set_clustering_od_flow_regularizer_objective!(
@@ -57,8 +54,7 @@ function build_model(
             data,
             mapping;
             in_vehicle_time_weight=model.in_vehicle_time_weight,
-            flow_regularization_weight=model.flow_regularization_weight,
-            variable_reduction=model.variable_reduction
+            flow_regularization_weight=model.flow_regularization_weight
         )
     end
 
@@ -71,23 +67,11 @@ function build_model(
 
     constraint_counts["activation_linking"] = add_activation_linking_constraints!(m, data)
 
-    constraint_counts["assignment"] = add_assignment_constraints!(
-        m, data, mapping; variable_reduction=model.variable_reduction
-    )
-    constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(
-        m, data, mapping; variable_reduction=model.variable_reduction, tight_constraints=model.tight_constraints
-    )
-
-    if model.use_walking_distance_limit && !model.variable_reduction
-        constraint_counts["walking_limit_origin_dest"] = add_assignment_walking_limit_constraints!(
-            m, data, mapping, model.max_walking_distance
-        )
-    end
+    constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(m, data, mapping)
 
     if !isnothing(model.flow_regularization_weight)
-        constraint_counts["flow_activation"] = add_flow_activation_constraints!(
-            m, data, mapping; variable_reduction=model.variable_reduction
-        )
+        constraint_counts["flow_activation"] = add_flow_activation_constraints!(m, data, mapping)
     end
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)

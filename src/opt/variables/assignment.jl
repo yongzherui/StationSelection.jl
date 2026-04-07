@@ -22,48 +22,35 @@ export add_assignment_variables!
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringTwoStageODMap;
-        variable_reduction::Bool=true
     )
 
-Add assignment variables x[s][od_idx][j,k] for ClusteringTwoStageODModel.
+Add assignment variables x[s][od_idx][pair_idx] for ClusteringTwoStageODModel.
 
-x[s][od_idx][j,k] = 1 if OD pair od_idx in scenario s is assigned to use
-stations j (pickup) and k (dropoff).
+x[s][od_idx][pair_idx] is the integer passenger count from OD pair od_idx in
+scenario s assigned to the corresponding valid pickup/dropoff pair.
 
-Structure: scenario → OD index → (pickup, dropoff) matrix (dense) or vector (sparse)
+Structure: scenario → OD index → sparse vector over valid (pickup, dropoff) pairs.
 No time dimension - OD pairs are aggregated across time within each scenario.
-When `variable_reduction=true` and a walking limit is enabled, sparse variables are used.
 """
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringTwoStageODMap;
-        variable_reduction::Bool=true
+        mapping::ClusteringTwoStageODMap
     )
     before = JuMP.num_variables(m)
-    n = data.n_stations
     S = n_scenarios(data)
-    x = [Dict{Int, Matrix{VariableRef}}() for _ in 1:S]
+    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
 
-    use_sparse = variable_reduction && has_walking_distance_limit(mapping)
-    if use_sparse
-        x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
-        for s in 1:S
-            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                n_pairs = length(valid_pairs)
-                if n_pairs > 0
-                    x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
-                else
-                    x[s][od_idx] = VariableRef[]
-                end
-            end
-        end
-    else
-        for s in 1:S
-            num_od_pairs = length(mapping.Omega_s[s])
-            for od_idx in 1:num_od_pairs
-                x[s][od_idx] = @variable(m, [1:n, 1:n], Bin)
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            n_pairs = length(valid_pairs)
+            demand = get(mapping.Q_s[s], (o, d), 0)
+            if n_pairs > 0 && demand > 0
+                x[s][od_idx] = @variable(m, [1:n_pairs],
+                    integer = true, lower_bound = 0, upper_bound = demand)
+            else
+                x[s][od_idx] = VariableRef[]
             end
         end
     end

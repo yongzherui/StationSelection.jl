@@ -198,7 +198,7 @@ end
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String) -> Int
 
 Export assignment variables for ClusteringTwoStageODModel.
-Structure: x[s][od_idx] → Vector (sparse) or Matrix (dense)
+Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String)
     if !haskey(m.obj_dict, :x)
@@ -213,42 +213,22 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
         od_pairs = mapping.Omega_s[s]
         for (od_idx, x_od) in x_s
             o, d = od_pairs[od_idx]
-            if x_od isa Vector
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                for (pair_idx, var) in enumerate(x_od)
-                    val = JuMP.value(var)
-                    if val > 0.5
-                        j, k = valid_pairs[pair_idx]
-                        push!(rows, (
-                            scenario = s,
-                            od_idx = od_idx,
-                            origin_id = array_idx_to_station_id[o],
-                            dest_id = array_idx_to_station_id[d],
-                            pickup_idx = j,
-                            dropoff_idx = k,
-                            pickup_id = array_idx_to_station_id[j],
-                            dropoff_id = array_idx_to_station_id[k],
-                            value = val
-                        ))
-                    end
-                end
-            else
-                n = size(x_od, 1)
-                for j in 1:n, k in 1:n
-                    val = JuMP.value(x_od[j, k])
-                    if val > 0.5
-                        push!(rows, (
-                            scenario = s,
-                            od_idx = od_idx,
-                            origin_id = array_idx_to_station_id[o],
-                            dest_id = array_idx_to_station_id[d],
-                            pickup_idx = j,
-                            dropoff_idx = k,
-                            pickup_id = array_idx_to_station_id[j],
-                            dropoff_id = array_idx_to_station_id[k],
-                            value = val
-                        ))
-                    end
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (pair_idx, var) in enumerate(x_od)
+                val = JuMP.value(var)
+                if val > 0.5
+                    j, k = valid_pairs[pair_idx]
+                    push!(rows, (
+                        scenario = s,
+                        od_idx = od_idx,
+                        origin_id = array_idx_to_station_id[o],
+                        dest_id = array_idx_to_station_id[d],
+                        pickup_idx = j,
+                        dropoff_idx = k,
+                        pickup_id = array_idx_to_station_id[j],
+                        dropoff_id = array_idx_to_station_id[k],
+                        value = round(Int, val)
+                    ))
                 end
             end
         end

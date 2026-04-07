@@ -123,8 +123,9 @@ end
 # =============================================================================
 
 """
-Extract assignments for ClusteringTwoStageODMap.
-Returns Dict[(s, o_idx, d_idx)] → (pickup_idx, dropoff_idx)
+Extract a representative positive assignment for each ClusteringTwoStageODMap OD pair.
+When demand is split across station pairs, this returns the first positive pair for
+order-level annotation.
 """
 function extract_assignments_clustering(m::JuMP.Model, mapping::ClusteringTwoStageODMap)
     if !haskey(m.obj_dict, :x)
@@ -139,21 +140,11 @@ function extract_assignments_clustering(m::JuMP.Model, mapping::ClusteringTwoSta
         for (od_idx, x_od) in x_s
             o, d = od_pairs[od_idx]
 
-            if x_od isa Vector
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
-                if !isnothing(idx)
-                    j, k = valid_pairs[idx]
-                    assignments[(s, o, d)] = (pickup_idx=j, dropoff_idx=k)
-                end
-            else
-                n = size(x_od, 1)
-                for j in 1:n, k in 1:n
-                    if JuMP.value(x_od[j, k]) > 0.5
-                        assignments[(s, o, d)] = (pickup_idx=j, dropoff_idx=k)
-                        break
-                    end
-                end
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
+            if !isnothing(idx)
+                j, k = valid_pairs[idx]
+                assignments[(s, o, d)] = (pickup_idx=j, dropoff_idx=k)
             end
         end
     end
@@ -305,24 +296,11 @@ function calculate_vrd_from_assignments_clustering(
         for (od_idx, x_od) in x_s
             o, d = od_pairs[od_idx]
 
-            # Get demand count (Q_s uses OD tuple as key)
-            q = get(mapping.Q_s[s], (o, d), 1)
-
-            if x_od isa Vector
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
-                if !isnothing(idx)
-                    j, k = valid_pairs[idx]
-                    total_distance += get_routing_cost(data, j, k) * q
-                end
-            else
-                n = size(x_od, 1)
-                for j in 1:n, k in 1:n
-                    if JuMP.value(x_od[j, k]) > 0.5
-                        total_distance += get_routing_cost(data, j, k) * q
-                        break
-                    end
-                end
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (idx, (j, k)) in enumerate(valid_pairs)
+                val = JuMP.value(x_od[idx])
+                val > 0.5 || continue
+                total_distance += get_routing_cost(data, j, k) * val
             end
         end
     end

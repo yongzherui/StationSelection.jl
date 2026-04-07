@@ -1,10 +1,10 @@
 """
 Flow activation constraint creation functions.
 
-Links f_flow variables to assignment variables x, ensuring
+Links binary f_flow variables to integer assignment variables x, ensuring
 f_flow[s][(j,k)] = 1 iff any OD pair uses route (j,k) in scenario s.
 
-Both a lower bound (f_flow ≥ x for each OD pair) and an upper bound
+Both a lower bound (x ≤ demand * f_flow for each OD pair) and an upper bound
 (f_flow ≤ Σ x over all OD pairs sharing that route) are added, so that
 f_flow tracks x exactly regardless of the flow_regularization_weight.
 
@@ -17,20 +17,18 @@ using JuMP
 export add_flow_activation_constraints!
 
 """
-    add_flow_activation_constraints!(m, data, mapping::ClusteringTwoStageODMap; variable_reduction) -> Int
+    add_flow_activation_constraints!(m, data, mapping::ClusteringTwoStageODMap) -> Int
 
 Links f_flow to x with both lower and upper bounds:
-    f_flow[s][(j,k)] ≥ x[s][od_idx][idx]            (one per OD pair, sparse x only)
+    x[s][od_idx][idx] ≤ Q_s[s][(o,d)] * f_flow[s][(j,k)]
     f_flow[s][(j,k)] ≤ Σ_{od} x[s][od][idx]         (one per (s,j,k))
 
-Requires variable_reduction=true (sparse x only).
 Used by: ClusteringTwoStageODModel (when flow_regularization_weight is set)
 """
 function add_flow_activation_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringTwoStageODMap;
-        variable_reduction::Bool=true
+        mapping::ClusteringTwoStageODMap
     )::Int
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -41,10 +39,12 @@ function add_flow_activation_constraints!(
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = get(mapping.Q_s[s], (o, d), 0)
+            demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)
                 x_var = x[s][od_idx][idx]
-                @constraint(m, f_flow[s][(j, k)] >= x_var)
+                @constraint(m, x_var <= demand * f_flow[s][(j, k)])
                 push!(get!(x_terms, (s, j, k), VariableRef[]), x_var)
             end
         end

@@ -153,16 +153,7 @@ function calculate_exported_walking_distance(
         val = row.value
         walking_pickup = get_walking_cost_by_id(data, row.origin_id, row.pickup_id)
         walking_dropoff = get_walking_cost_by_id(data, row.dropoff_id, row.dest_id)
-        q = 1
-        if !isnothing(od_counts_by_scenario) && :scenario in cols_sym
-            s = row.scenario
-            if s <= length(od_counts_by_scenario)
-                q = get(od_counts_by_scenario[s], (row.origin_id, row.dest_id), 0)
-            else
-                q = 0
-            end
-        end
-        total += (walking_pickup + walking_dropoff) * val * q
+        total += (walking_pickup + walking_dropoff) * val
     end
     return total
 end
@@ -245,16 +236,7 @@ function calculate_exported_vehicle_routing_distance(
 
     total = 0.0
     for row in eachrow(assign)
-        q = 1
-        if !isnothing(od_counts_by_scenario) && :scenario in cols_sym
-            s = row.scenario
-            if s <= length(od_counts_by_scenario)
-                q = get(od_counts_by_scenario[s], (row.origin_id, row.dest_id), 0)
-            else
-                q = 0
-            end
-        end
-        total += get_routing_cost_by_id(data, row.pickup_id, row.dropoff_id) * row.value * q
+        total += get_routing_cost_by_id(data, row.pickup_id, row.dropoff_id) * row.value
     end
     return total
 end

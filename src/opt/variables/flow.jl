@@ -16,10 +16,8 @@ export add_flow_variables!
     add_flow_variables!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageODMap) -> Int
 
 Add sparse per-scenario route-activation variables:
-    f_flow[s][(j,k)] ∈ [0,1]
+    f_flow[s][(j,k)] ∈ {0,1}
 for each (j,k) in the union of valid_pairs across all OD pairs in scenario s.
-
-Continuous relaxation is exact: minimisation + f_flow ≥ x forces values to {0,1}.
 
 Used by: ClusteringTwoStageODModel (when flow_regularization_weight is set)
 """
@@ -40,7 +38,7 @@ function add_flow_variables!(
             end
         end
         for (j, k) in active_pairs
-            f_flow[s][(j, k)] = @variable(m, lower_bound=0, upper_bound=1)
+            f_flow[s][(j, k)] = @variable(m, binary = true)
             total += 1
         end
     end

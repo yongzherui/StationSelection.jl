@@ -23,7 +23,7 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
 - `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD index pairs with positive demand
 - `Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}`: Demand count q_{od,s} per OD index pair per scenario
-- `max_walking_distance::Union{Float64, Nothing}`: Maximum walking distance constraint (optional)
+- `max_walking_distance::Float64`: Maximum walking distance constraint
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
 struct ClusteringTwoStageODMap <: AbstractClusteringMap
@@ -41,7 +41,7 @@ struct ClusteringTwoStageODMap <: AbstractClusteringMap
     Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}
 
     # Walking distance constraint
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 end
 
@@ -139,15 +139,11 @@ function create_clustering_two_stage_od_map(
         union!(all_od_pairs, Omega_s[scenario_id])
     end
 
-    max_walking_distance = model.use_walking_distance_limit ? model.max_walking_distance : nothing
-    valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
-    if model.use_walking_distance_limit
-        valid_jk_pairs = compute_valid_jk_pairs(
-            all_od_pairs,
-            data,
-            model.max_walking_distance
-        )
-    end
+    valid_jk_pairs = compute_valid_jk_pairs(
+        all_od_pairs,
+        data,
+        model.max_walking_distance
+    )
 
     return ClusteringTwoStageODMap(
         data.station_id_to_array_idx,
@@ -157,7 +153,7 @@ function create_clustering_two_stage_od_map(
         array_idx_to_scenario_label,
         Omega_s,
         Q_s,
-        max_walking_distance,
+        model.max_walking_distance,
         valid_jk_pairs
     )
 end
@@ -167,18 +163,13 @@ end
 
 Check if the mapping has valid (j, k) pairs computed based on walking distance limits.
 """
-has_walking_distance_limit(mapping::ClusteringTwoStageODMap) = !isnothing(mapping.max_walking_distance)
+has_walking_distance_limit(mapping::ClusteringTwoStageODMap) = true
 
 """
     get_valid_jk_pairs(mapping::ClusteringTwoStageODMap, o::Int, d::Int) -> Vector{Tuple{Int, Int}}
 
-Get the valid (j, k) station pairs for an OD pair. Returns all pairs if no walking limit is set.
+Get the valid (j, k) station pairs for an OD pair.
 """
 function get_valid_jk_pairs(mapping::ClusteringTwoStageODMap, o::Int, d::Int)
-    if has_walking_distance_limit(mapping)
-        return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
-    else
-        n = length(mapping.array_idx_to_station_id)
-        return [(j, k) for j in 1:n for k in 1:n]
-    end
+    return get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
 end

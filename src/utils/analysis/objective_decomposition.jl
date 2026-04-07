@@ -106,7 +106,7 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
 
     export_dir = joinpath(run_dir, "variable_exports")
 
-    # Step 2: Per-scenario OD counts (demand multiplier q)
+    # Step 2: Per-scenario OD counts for legacy/export formats that do not store demand counts in x values.
     od_counts = build_od_counts_from_data(data)
 
     # Step 3: Assignment variables → walking cost, routing cost, activated routes
@@ -128,7 +128,9 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
                 k_id = row.dropoff_id
                 s    = has_scenario_col ? row.scenario : 1
 
-                q = if s <= length(od_counts)
+                q = if model_type == "ClusteringTwoStageODModel"
+                    1
+                elseif s <= length(od_counts)
                     get(od_counts[s], (o_id, d_id), 0)
                 else
                     0
