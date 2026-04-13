@@ -208,7 +208,8 @@ function create_vehicle_capacity_od_map(
                     jk_set, data;
                     max_route_length = model.max_stations_visited,
                     max_detour_time  = model.max_detour_time,
-                    max_detour_ratio = model.max_detour_ratio
+                    max_detour_ratio = model.max_detour_ratio,
+                    stop_dwell_time  = model.stop_dwell_time,
                 )
                 println("    → $(length(routes_s[s][t_id])) routes generated")
                 flush(stdout)

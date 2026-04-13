@@ -4,7 +4,7 @@ Objective function for RouteFleetLimitModel.
     min Σ_s [
         Σ_{p,j,k} c^walk_{pjk} x_{pjks}              [walking]
       + μ Σ_{r,t} (τ^r + ρ) θ^r_{ts}                 [deployment]
-      + μ Σ_{r,j,k,t} d^r_{jk} α^r_{jkts}            [per-passenger delay]
+      + μ·w_delay Σ_{r,j,k,t} d^r_{jk} α^r_{jkts}    [per-passenger delay]
       + λ Σ_{j,k,t} v_{jkts}                          [unmet demand]
     ]
 
@@ -16,7 +16,7 @@ export set_fleet_limit_objective!
 
 """
     set_fleet_limit_objective!(m, data, mapping::FleetLimitODMap;
-                               route_regularization_weight, repositioning_time,
+                               route_regularization_weight, delay_weight, repositioning_time,
                                unmet_demand_penalty)
 
 Set the minimisation objective for RouteFleetLimitModel.
@@ -24,7 +24,7 @@ Set the minimisation objective for RouteFleetLimitModel.
 Four cost components:
 1. Walking cost: identical to RouteVehicleCapacityModel.
 2. Route deployment: μ × (τ^r + ρ) × θ^r_{ts} — identical to RouteVehicleCapacityModel.
-3. Per-passenger delay: μ × d^r_{jk} × α^r_{jkts} (only for legs with d>0).
+3. Per-passenger delay: μ × w_delay × d^r_{jk} × α^r_{jkts} (only for legs with d>0).
 4. Unmet demand: λ × v_{jkts}.
 """
 function set_fleet_limit_objective!(
@@ -32,6 +32,7 @@ function set_fleet_limit_objective!(
     data    :: StationSelectionData,
     mapping :: FleetLimitODMap;
     route_regularization_weight :: Float64 = 1.0,
+    delay_weight                :: Float64 = 1.0,
     repositioning_time          :: Float64 = 20.0,
     unmet_demand_penalty        :: Float64 = 10000.0
 )
@@ -64,11 +65,11 @@ function set_fleet_limit_objective!(
             theta_var)
     end
 
-    # ── 3. Per-passenger delay: μ Σ d^r_{jk} α^r_{jkts} ─────────────────────
+    # ── 3. Per-passenger delay: μ·w_delay Σ d^r_{jk} α^r_{jkts} ─────────────
     for ((s, r_idx, j_idx, k_idx, t_id), alpha_var) in m[:alpha_r_jkts]
         d_coeff = get(mapping.delay_coeff, (s, t_id, r_idx, j_idx, k_idx), 0.0)
         d_coeff > 0 || continue
-        add_to_expression!(obj, route_regularization_weight * d_coeff, alpha_var)
+        add_to_expression!(obj, route_regularization_weight * delay_weight * d_coeff, alpha_var)
     end
 
     # ── 4. Unmet demand: λ Σ v_{jkts} ────────────────────────────────────────

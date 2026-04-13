@@ -67,6 +67,7 @@ function create_fleet_limit_od_map(
         max_detour_ratio            = model.max_detour_ratio,
         time_window_sec             = model.time_window_sec,
         max_stations_visited        = model.max_stations_visited,
+        stop_dwell_time             = model.stop_dwell_time,
         routes_file                 = model.routes_file,
     )
     inner = create_vehicle_capacity_od_map(proxy, data)
@@ -74,7 +75,7 @@ function create_fleet_limit_od_map(
     # Precompute delay coefficients d^r_{jk} for every detour-feasible leg
     println("  Precomputing per-passenger delay coefficients...")
     flush(stdout)
-    delay_coeff = _compute_delay_coefficients(inner, data)
+    delay_coeff = _compute_delay_coefficients(inner, data, model.stop_dwell_time)
     println("  → $(length(delay_coeff)) (s,t,r,j,k) delay entries")
     flush(stdout)
 
@@ -83,19 +84,21 @@ end
 
 
 """
-    _compute_delay_coefficients(mapping, data) -> Dict{NTuple{5,Int}, Float64}
+    _compute_delay_coefficients(mapping, data, stop_dwell_time) -> Dict{NTuple{5,Int}, Float64}
 
 For each (s, t_id, r_idx) route and each detour-feasible leg (j_idx, k_idx),
 compute:
 
-    d^r_{jk} = (in-vehicle time from j to k along route r) − direct(j, k)
+    d^r_{jk} = (in-vehicle time from j to k along route r
+                + intermediate dwell between j and k) − direct(j, k)
 
 Returns a dict keyed by (s, t_id, r_idx, j_idx, k_idx) with non-negative values.
 Entries where the direct time is unavailable or delay ≤ 0 are omitted.
 """
 function _compute_delay_coefficients(
     mapping :: VehicleCapacityODMap,
-    data    :: StationSelectionData
+    data    :: StationSelectionData,
+    stop_dwell_time :: Float64
 )::Dict{NTuple{5, Int}, Float64}
 
     delay_coeff = Dict{NTuple{5, Int}, Float64}()
@@ -123,7 +126,9 @@ function _compute_delay_coefficients(
                     (isnothing(pos_j) || isnothing(pos_k)) && continue
                     pos_j >= pos_k && continue
 
-                    in_vehicle = sum(seg[i] for i in pos_j:(pos_k - 1))
+                    n_intermediate = pos_k - pos_j - 1
+                    in_vehicle = sum(seg[i] for i in pos_j:(pos_k - 1)) +
+                                 n_intermediate * stop_dwell_time
                     direct     = get_routing_cost(data, j_idx, k_idx)
                     delay      = in_vehicle - direct
                     delay > 0 || continue   # no delay — skip (zero contribution)

@@ -3,8 +3,8 @@ RouteFleetLimitModel — fleet-bounded route model with per-passenger delay cost
 
 Extends RouteVehicleCapacityModel with:
   - Fleet-size constraint: Σ_r θ^r_{ts} ≤ F  ∀ t, s
-  - Per-passenger delay cost in objective, penalised by μ:
-      μ · d^r_{jk} · α^r_{jkts}
+  - Per-passenger delay cost in objective, penalised by μ · w_delay:
+      μ · w_delay · d^r_{jk} · α^r_{jkts}
   - Unmet demand variable v_{jkts} ∈ ℤ₊; route-linking becomes equality:
       Σ x = v + Σ_r α
   - Unmet demand penalty: λ · Σ v_{jkts}
@@ -24,7 +24,7 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 
 # Key differences from RouteVehicleCapacityModel
 - `fleet_size`: maximum routes active per time bucket per scenario (Σ_r θ^r_{ts} ≤ F).
-- Per-passenger delay is penalised by `route_regularization_weight` (μ).
+- Per-passenger delay is penalised by `route_regularization_weight * delay_weight`.
 - `unmet_demand_penalty` (λ): penalty per unserved passenger-leg.
 - Route-linking constraint is now equality with slack variable v_{jkts}.
 
@@ -33,6 +33,7 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 - `l::Int`: Stations to build (first stage)
 - `fleet_size::Int`: F — max routes active per (time bucket, scenario)
 - `route_regularization_weight::Float64`: μ — penalty on route activation and route-served delay
+- `delay_weight::Float64`: relative multiplier on the per-passenger delay term
 - `repositioning_time::Float64`: ρ — constant repositioning overhead (seconds)
 - `unmet_demand_penalty::Float64`: λ — penalty per unmet passenger-leg
 - `vehicle_capacity::Int`: Cap_r — vehicle capacity for segment constraints
@@ -42,6 +43,8 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 - `max_detour_ratio::Float64`: max ratio `in_vehicle/direct - 1`
 - `time_window_sec::Int`: width of time bucket (seconds); default 3600
 - `max_stations_visited::Int`: max stops per generated route
+- `stop_dwell_time::Float64`: extra seconds added per intermediate stop in route travel
+  and per-passenger delay; default 10.0
 - `routes_file::Union{String,Nothing}`: load routes from CSV instead of DFS
 """
 struct RouteFleetLimitModel <: AbstractODModel
@@ -49,6 +52,7 @@ struct RouteFleetLimitModel <: AbstractODModel
     l::Int
     fleet_size::Int
     route_regularization_weight::Float64
+    delay_weight::Float64
     repositioning_time::Float64
     unmet_demand_penalty::Float64
     vehicle_capacity::Int
@@ -58,6 +62,7 @@ struct RouteFleetLimitModel <: AbstractODModel
     max_detour_ratio::Float64
     time_window_sec::Int
     max_stations_visited::Int
+    stop_dwell_time::Float64
     routes_file::Union{String, Nothing}
 
     function RouteFleetLimitModel(
@@ -65,6 +70,7 @@ struct RouteFleetLimitModel <: AbstractODModel
             l::Int;
             fleet_size::Int,
             route_regularization_weight::Number = 1.0,
+            delay_weight::Number = 1.0,
             repositioning_time::Number = 20.0,
             unmet_demand_penalty::Number = 10000.0,
             vehicle_capacity::Int = 18,
@@ -74,6 +80,7 @@ struct RouteFleetLimitModel <: AbstractODModel
             max_detour_ratio::Number = 2.0,
             time_window_sec::Int = 3600,
             max_stations_visited::Int = typemax(Int),
+            stop_dwell_time::Number = 10.0,
             routes_file::Union{String, Nothing} = nothing
         )
 
@@ -82,6 +89,8 @@ struct RouteFleetLimitModel <: AbstractODModel
         fleet_size > 0 || throw(ArgumentError("fleet_size must be positive"))
         route_regularization_weight >= 0 ||
             throw(ArgumentError("route_regularization_weight must be non-negative"))
+        delay_weight >= 0 ||
+            throw(ArgumentError("delay_weight must be non-negative"))
         unmet_demand_penalty >= 0 ||
             throw(ArgumentError("unmet_demand_penalty must be non-negative"))
         vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
@@ -94,17 +103,20 @@ struct RouteFleetLimitModel <: AbstractODModel
         mdt  = Float64(max_detour_time)
         mdr  = Float64(max_detour_ratio)
         mrtt = isnothing(max_route_travel_time) ? nothing : Float64(max_route_travel_time)
+        sdt  = Float64(stop_dwell_time)
 
         mdt >= 0.0 || throw(ArgumentError("max_detour_time must be non-negative"))
         mdr >= 0.0 || throw(ArgumentError("max_detour_ratio must be non-negative"))
+        sdt >= 0.0 || throw(ArgumentError("stop_dwell_time must be non-negative"))
         max_walking_distance >= 0 ||
             throw(ArgumentError("max_walking_distance must be non-negative"))
 
         new(k, l, fleet_size,
-            Float64(route_regularization_weight), Float64(repositioning_time),
+            Float64(route_regularization_weight), Float64(delay_weight),
+            Float64(repositioning_time),
             Float64(unmet_demand_penalty),
             vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr,
-            time_window_sec, max_stations_visited, routes_file)
+            time_window_sec, max_stations_visited, sdt, routes_file)
     end
 end
