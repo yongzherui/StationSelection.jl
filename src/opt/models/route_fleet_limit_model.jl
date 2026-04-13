@@ -3,7 +3,8 @@ RouteFleetLimitModel — fleet-bounded route model with per-passenger delay cost
 
 Extends RouteVehicleCapacityModel with:
   - Fleet-size constraint: Σ_r θ^r_{ts} ≤ F  ∀ t, s
-  - Per-passenger delay cost in objective: γ · d^r_{jk} · α^r_{jkts}
+  - Per-passenger delay cost in objective, penalised by μ:
+      μ · d^r_{jk} · α^r_{jkts}
   - Unmet demand variable v_{jkts} ∈ ℤ₊; route-linking becomes equality:
       Σ x = v + Σ_r α
   - Unmet demand penalty: λ · Σ v_{jkts}
@@ -23,7 +24,7 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 
 # Key differences from RouteVehicleCapacityModel
 - `fleet_size`: maximum routes active per time bucket per scenario (Σ_r θ^r_{ts} ≤ F).
-- `delay_weight` (γ): weight on per-passenger delay term in the objective.
+- Per-passenger delay is penalised by `route_regularization_weight` (μ).
 - `unmet_demand_penalty` (λ): penalty per unserved passenger-leg.
 - Route-linking constraint is now equality with slack variable v_{jkts}.
 
@@ -31,9 +32,8 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 - `k::Int`: Stations to activate per scenario (second stage)
 - `l::Int`: Stations to build (first stage)
 - `fleet_size::Int`: F — max routes active per (time bucket, scenario)
-- `route_regularization_weight::Float64`: μ — penalty per unit route travel time activated
+- `route_regularization_weight::Float64`: μ — penalty on route activation and route-served delay
 - `repositioning_time::Float64`: ρ — constant repositioning overhead (seconds)
-- `delay_weight::Float64`: γ — per-unit delay penalty on α variables
 - `unmet_demand_penalty::Float64`: λ — penalty per unmet passenger-leg
 - `vehicle_capacity::Int`: Cap_r — vehicle capacity for segment constraints
 - `max_route_travel_time::Union{Float64,Nothing}`: route filter upper bound
@@ -50,7 +50,6 @@ struct RouteFleetLimitModel <: AbstractODModel
     fleet_size::Int
     route_regularization_weight::Float64
     repositioning_time::Float64
-    delay_weight::Float64
     unmet_demand_penalty::Float64
     vehicle_capacity::Int
     max_route_travel_time::Union{Float64, Nothing}
@@ -67,7 +66,6 @@ struct RouteFleetLimitModel <: AbstractODModel
             fleet_size::Int,
             route_regularization_weight::Number = 1.0,
             repositioning_time::Number = 20.0,
-            delay_weight::Number = 1.0,
             unmet_demand_penalty::Number = 10000.0,
             vehicle_capacity::Int = 18,
             max_route_travel_time::Union{Number, Nothing} = nothing,
@@ -84,8 +82,6 @@ struct RouteFleetLimitModel <: AbstractODModel
         fleet_size > 0 || throw(ArgumentError("fleet_size must be positive"))
         route_regularization_weight >= 0 ||
             throw(ArgumentError("route_regularization_weight must be non-negative"))
-        delay_weight >= 0 ||
-            throw(ArgumentError("delay_weight must be non-negative"))
         unmet_demand_penalty >= 0 ||
             throw(ArgumentError("unmet_demand_penalty must be non-negative"))
         vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
@@ -106,7 +102,7 @@ struct RouteFleetLimitModel <: AbstractODModel
 
         new(k, l, fleet_size,
             Float64(route_regularization_weight), Float64(repositioning_time),
-            Float64(delay_weight), Float64(unmet_demand_penalty),
+            Float64(unmet_demand_penalty),
             vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr,
             time_window_sec, max_stations_visited, routes_file)

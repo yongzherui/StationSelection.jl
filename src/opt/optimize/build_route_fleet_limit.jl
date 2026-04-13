@@ -5,7 +5,7 @@
 Build the MILP for RouteFleetLimitModel.
 
 Extends RouteVehicleCapacityModel with:
-  - Per-passenger delay cost γ · d^r_{jk} · α^r_{jkts} in the objective
+  - Per-passenger delay cost μ · d^r_{jk} · α^r_{jkts} in the objective
   - Unmet demand variable v_{jkts} ∈ ℤ₊
   - Route-linking as equality: Σx = v + Σ_r α
   - Fleet-size constraint: Σ_r θ^r_{ts} ≤ F  ∀ t, s
@@ -65,7 +65,6 @@ function build_model(
     set_fleet_limit_objective!(m, data, mapping;
         route_regularization_weight = model.route_regularization_weight,
         repositioning_time          = model.repositioning_time,
-        delay_weight                = model.delay_weight,
         unmet_demand_penalty        = model.unmet_demand_penalty)
 
     # ==========================================================================
