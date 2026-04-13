@@ -617,6 +617,126 @@ function _arm_export_theta_r_ts(
 end
 
 
+
+# =============================================================================
+# FleetLimitODMap exports (RouteFleetLimitModel)
+# =============================================================================
+
+"""
+    export_station_mapping(mapping::FleetLimitODMap, export_dir)
+
+Delegate to inner VehicleCapacityODMap.
+"""
+function export_station_mapping(mapping::FleetLimitODMap, export_dir::String)
+    export_station_mapping(mapping.inner, export_dir)
+end
+
+"""
+    export_scenario_info(mapping::FleetLimitODMap, export_dir)
+
+Delegate to inner VehicleCapacityODMap.
+"""
+function export_scenario_info(mapping::FleetLimitODMap, export_dir::String)
+    export_scenario_info(mapping.inner, export_dir)
+end
+
+"""
+    export_station_selection(m, mapping::FleetLimitODMap, export_dir) -> Int
+
+Delegate to base AbstractStationSelectionMap method (uses mapping.array_idx_to_station_id).
+"""
+function export_station_selection(m::JuMP.Model, mapping::FleetLimitODMap, export_dir::String)
+    export_station_selection(m, mapping.inner, export_dir)
+end
+
+"""
+    export_scenario_activation(m, mapping::FleetLimitODMap, export_dir) -> Int
+
+Delegate to base AbstractStationSelectionMap method.
+"""
+function export_scenario_activation(m::JuMP.Model, mapping::FleetLimitODMap, export_dir::String)
+    export_scenario_activation(m, mapping.inner, export_dir)
+end
+
+"""
+    export_assignment_variables(m, mapping::FleetLimitODMap, export_dir) -> Int
+
+Export assignment variables for RouteFleetLimitModel (same structure as VehicleCapacityODMap).
+"""
+function export_assignment_variables(
+    m::JuMP.Model,
+    mapping::FleetLimitODMap,
+    export_dir::String
+)
+    export_assignment_variables(m, mapping.inner, export_dir)
+end
+
+"""
+    export_model_specific_variables(result, mapping::FleetLimitODMap, export_dir, metadata)
+
+Export RouteFleetLimitModel-specific variables: theta_r_ts.csv, alpha_r_jkts.csv, v_jkts.csv.
+"""
+function export_model_specific_variables(
+    result     :: OptResult,
+    mapping    :: FleetLimitODMap,
+    export_dir :: String,
+    metadata   :: Dict
+)
+    metadata["model_type"] = "RouteFleetLimitModel"
+    metadata["fleet_size"] = mapping.fleet_size
+    metadata["n_routes"]   = sum(
+        sum(length(v) for v in values(rs); init = 0)
+        for rs in values(mapping.inner.routes_s); init = 0
+    )
+
+    n_theta = _export_theta_r_ts(result.model, mapping.inner, export_dir)
+    n_alpha = _export_alpha_r_jkts(result.model, mapping.inner, export_dir)
+    n_v     = _export_v_jkts(result.model, mapping.inner, export_dir)
+
+    metadata["n_theta_r_ts_nonzero"]   = n_theta
+    metadata["n_alpha_r_jkts_nonzero"] = n_alpha
+    metadata["n_v_jkts_nonzero"]       = n_v
+end
+
+
+"""
+    _export_v_jkts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+
+Export unmet demand variables v_{jkts} to `v_jkts.csv`.
+Key: (s, j_idx, k_idx, t_id). Columns: scenario, t_id, pickup_id, dropoff_id, value.
+Only rows with value > 0 are written.
+"""
+function _export_v_jkts(
+    m          :: JuMP.Model,
+    mapping    :: VehicleCapacityODMap,
+    export_dir :: String
+)
+    if !haskey(m.obj_dict, :v_jkts)
+        println("    ✓ v_jkts.csv (0 rows — v_jkts not present)")
+        return 0
+    end
+
+    id_map = mapping.array_idx_to_station_id
+    rows   = []
+    for ((s, j_idx, k_idx, t_id), var) in m[:v_jkts]
+        val = JuMP.value(var)
+        val > 0 || continue
+        push!(rows, (
+            scenario   = s,
+            t_id       = t_id,
+            pickup_id  = id_map[j_idx],
+            dropoff_id = id_map[k_idx],
+            value      = round(Int, val)
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "v_jkts.csv"), df)
+    println("    ✓ v_jkts.csv ($(nrow(df)) unmet demand rows)")
+    return nrow(df)
+end
+
+
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 

@@ -54,3 +54,15 @@ function create_map(
     )::AlphaRouteODMap
     return create_alpha_route_od_map(model, data)
 end
+
+"""
+    create_map(model::RouteFleetLimitModel, data::StationSelectionData)
+
+Create a FleetLimitODMap for RouteFleetLimitModel.
+"""
+function create_map(
+        model::RouteFleetLimitModel,
+        data::StationSelectionData
+    )::FleetLimitODMap
+    return create_fleet_limit_od_map(model, data)
+end

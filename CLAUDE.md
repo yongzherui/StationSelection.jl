@@ -27,6 +27,7 @@ AbstractStationSelectionModel
 | `TwoStageRouteWithTimeModel`        | Two-stage; time-indexed OD; pre-generated routes; vehicle capacity link  | y, z, x[s][t][od], θ[s,r]    |
 | `RouteAlphaCapacityModel`   | Two-stage; aggregated OD (no time index); non-temporal BFS; α = actual passengers | y, z, x[s][od], θ[s,r] |
 | `RouteVehicleCapacityModel` | Two-stage; aggregated OD (no time index); non-temporal BFS; α = C (vehicle capacity) | y, z, x[s][od], θ[s,r] |
+| `RouteFleetLimitModel`      | Extends RouteVehicleCapacityModel: fleet-size constraint (Σθ≤F), per-passenger delay cost (γ·d^r_{jk}·α), unmet demand v | y, z, x[s][t][od], θ, α, v[j,k,t,s] |
 
 ## Decision Variables
 
