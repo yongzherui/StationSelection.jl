@@ -472,17 +472,17 @@ Orders without a matching assignment fall back to closest selected station.
 
 Lookup key:
 - `(scenario, origin_id, dest_id)` for `ClusteringTwoStageODModel`
-- `(scenario, t_id, origin_id, dest_id)` for `RouteVehicleCapacityModel`
+- `(scenario, t_id, origin_id, dest_id)` for time-indexed route models
 
 # Arguments
 - `order_file`: Path to order CSV
 - `selection_run_dir`: Path to the selection run directory (contains `variable_exports/`)
 - `cluster_file`: Path to station selection results CSV (for fallback)
-- `method`: `"ClusteringTwoStageODModel"`
+- `method`: e.g. `"ClusteringTwoStageODModel"` or `"RouteFleetLimitModel"`
 - `start_date`: Optional start date filter
 - `end_date`: Optional end date filter
 - `use_timeframes`: Whether to use timeframe columns for fallback
-- `time_window_sec`: Required for `TwoStageRouteWithTimeModel`; ignored otherwise
+- `time_window_sec`: Required for time-indexed route models; ignored otherwise
 
 # Returns
 - DataFrame with same schema as `transform_orders`
@@ -551,9 +551,8 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     # 6. Build assignment lookup dict
-    # TwoStageRouteWithTimeModel and RouteVehicleCapacityModel both use a
-    # time-indexed (4-key) lookup keyed (scenario, time_id, origin_id, dest_id)
-    route_model = method in ("TwoStageRouteWithTimeModel", "RouteVehicleCapacityModel")
+    # Time-indexed route models use a (scenario, time_id, origin_id, dest_id) key.
+    route_model = method in ("TwoStageRouteWithTimeModel", "RouteVehicleCapacityModel", "RouteFleetLimitModel")
     route_model && isnothing(time_window_sec) &&
         error("transform_orders_from_assignments requires time_window_sec for $method")
 
