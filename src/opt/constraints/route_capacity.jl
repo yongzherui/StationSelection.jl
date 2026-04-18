@@ -10,12 +10,9 @@ export add_route_capacity_lazy_constraints!
 """
     add_route_capacity_constraints!(m, data, mapping::VehicleCapacityODMap) -> Int
 
-Add the two covering constraints for RouteVehicleCapacityModel (new formulation).
+Add the two covering constraints for RouteVehicleCapacityModel.
 
-d_{jkts} is not a decision variable; it is inlined as the expression
-`Σ_{od: (j,k) valid} x[s][t][od][pair]` directly in constraint (ii):
-
-    (ii)  Σ_{od: (j,k) valid} x[s][t][od][pair]  ≤  Σ_r α^r_{jkts}
+    (ii)  Σ_{od: (j,k) valid} x[s][t][od][pair]  =  Σ_r α^r_{jkts}
                                                                      ∀ j,k,t,s
 
     (iii) Σ_{j,k: β^r_{jkl}=1} α^r_{jkts}  ≤  Cap_r · θ^r_{ts}
@@ -68,7 +65,7 @@ function add_route_capacity_constraints!(
                     add_to_expression!(rhs, 1.0, x_od[pair_idx])
                 end
 
-                @constraint(m, rhs <= lhs)
+                @constraint(m, rhs == lhs)
             end
         end
     end
@@ -111,9 +108,7 @@ end
 
 Register a lazy-constraint callback for constraints (ii) and (iii).
 
-d_{jkts} is inlined as an expression. Both constraints are submitted lazily:
-
-    (ii)  Σ_{od: (j,k) valid} x[s][t][od][pair]  ≤  Σ_r α^r_{jkts}          (lazy)
+    (ii)  Σ_{od: (j,k) valid} x[s][t][od][pair]  =  Σ_r α^r_{jkts}          (lazy)
     (iii) Σ_{j,k: β^r_{jkl}=1} α^r_{jkts} ≤ Cap_r · θ^r_{ts}                (lazy)
 
 Returns 0 (no explicit constraints added upfront).
@@ -178,9 +173,9 @@ function add_route_capacity_lazy_constraints!(
                         x_sum += callback_value(cb_data, x_od[pair_idx])
                     end
 
-                    x_sum <= alpha_sum + 1e-6 && continue
+                    abs(x_sum - alpha_sum) <= 1e-6 && continue
 
-                    # Violated — submit constraint (ii)
+                    # Violated — build and submit equality constraint (ii)
                     lhs_expr = AffExpr(0.0)
                     for r_idx in 1:length(routes_t)
                         avar = get(alpha_r_jkts, (s, r_idx, j_idx, k_idx, t_id), nothing)
@@ -199,7 +194,7 @@ function add_route_capacity_lazy_constraints!(
                         add_to_expression!(rhs_expr, 1.0, x_od[pair_idx])
                     end
                     MOI.submit(m, MOI.LazyConstraint(cb_data),
-                               @build_constraint(rhs_expr <= lhs_expr))
+                               @build_constraint(rhs_expr == lhs_expr))
                 end
             end
         end

@@ -212,7 +212,7 @@ function _check_fixed_start_feasibility(
         use_lazy_constraints        = false,
         max_stations_visited        = model.max_stations_visited,
         routes_file                 = model.routes_file,
-        alpha_profile_file          = model.alpha_profile_file
+        alpha_profile_file          = model.alpha_profile_file,
     )
     fixed_build = build_model(explicit_model, data; optimizer_env=optimizer_env)
     fixed_m = fixed_build.model
@@ -380,7 +380,7 @@ end
 Manually evaluate the two lazy constraints against the warm start hint values and print
 any violations. Called before `optimize!` to diagnose why a warm start may be rejected.
 
-Constraint (ii):  Σ_{od using (j,k)} x[s][t][od][pair]  ≤  Σ_r α^r_{jkts}
+Constraint (ii):  Σ_{od using (j,k)} x[s][t][od][pair]  =  Σ_r α^r_{jkts}
 Constraint (iii): Σ_{(j,k): β^r_{jkl}=1} α^r_{jkts}    ≤  Cap_r · θ^r_{ts}
 """
 function _check_lazy_constraints_on_hints(
@@ -432,7 +432,7 @@ function _check_lazy_constraints_on_hints(
                     alpha_sum += get(alpha_hints, (s, r_idx, j_idx, k_idx, t_id), 0.0)
                 end
 
-                viol = x_sum - alpha_sum
+                viol = abs(x_sum - alpha_sum)
                 if viol > atol
                     viol_ii_count += 1
                     max_viol_ii    = max(max_viol_ii, viol)

@@ -54,9 +54,11 @@ end
 
 
 """
-    add_alpha_r_jkts_variables!(m, data, mapping::VehicleCapacityODMap) -> Int
+    add_alpha_r_jkts_variables!(m, data, mapping::VehicleCapacityODMap;
+                                integer_alpha=true, upper_bound=nothing) -> Int
 
-Add integer route-serving variables α^r_{jkts} ∈ Z+ for RouteVehicleCapacityModel.
+Add route-serving variables α^r_{jkts} for RouteVehicleCapacityModel (and models that
+share its mapping type, e.g. RouteFleetLimitModel).
 
 `α^r_{jkts}` represents the amount of class-(j,k) demand served by route r in
 time window t of scenario s.
@@ -64,6 +66,16 @@ time window t of scenario s.
 Created for each (s, r_idx, j_idx, k_idx, t_id) where:
 - Route r serves leg (j→k): both station indices appear in route.station_indices with j before k
 - At least one OD pair in Omega_s_t[s][t_id] has (j_idx, k_idx) as a valid leg
+
+# Keyword arguments
+- `integer_alpha::Bool` (default `true`): if `false`, α is declared as a continuous
+  variable (Z relaxed to ℝ₊). Relaxing to continuous eliminates integer branching on α
+  and can significantly reduce solve time for RouteVehicleCapacityModel, where α
+  symmetry is the main source of slowness.
+- `upper_bound::Union{Int,Nothing}` (default `nothing`): if set, each α variable is
+  bounded above by this value. Setting `upper_bound = vehicle_capacity` tightens the LP
+  relaxation at no modelling cost (a single route deployment cannot serve more than C
+  passengers per leg).
 
 Stored as `m[:alpha_r_jkts]::Dict{NTuple{5,Int}, VariableRef}` keyed
 `(s, r_idx, j_idx, k_idx, t_id)`.
@@ -74,9 +86,11 @@ mapping `(s, r_idx, t_id) → [(j_idx, k_idx), ...]` for efficient constraint bu
 Returns the number of variables added.
 """
 function add_alpha_r_jkts_variables!(
-    m::Model,
-    data::StationSelectionData,
-    mapping::VehicleCapacityODMap
+    m       :: Model,
+    data    :: StationSelectionData,
+    mapping :: VehicleCapacityODMap;
+    integer_alpha :: Bool            = true,
+    upper_bound   :: Union{Int, Nothing} = nothing
 )::Int
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
@@ -102,7 +116,10 @@ function add_alpha_r_jkts_variables!(
                     _route_serves_jk(route, j_idx, k_idx) || continue
 
                     key5 = (s, r_idx, j_idx, k_idx, t_id)
-                    alpha_r_jkts[key5] = @variable(m, integer = true, lower_bound = 0)
+                    v = @variable(m, lower_bound = 0)
+                    isnothing(upper_bound) || set_upper_bound(v, Float64(upper_bound))
+                    integer_alpha && set_integer(v)
+                    alpha_r_jkts[key5] = v
 
                     srt_key = (s, r_idx, t_id)
                     push!(get!(alpha_r_jkts_by_srt, srt_key, Tuple{Int,Int}[]),

@@ -23,11 +23,10 @@ constraints (new formulation from March 17 journal note).
 Introduces per-route, per-class passenger variables θ^r_{jkts} and explicit segment
 capacity constraints using β^r_{jktm}. Route activation uses γ_s^r ∈ {0,1}.
 
-Covering constraints (replacing the single α-based constraint):
+Covering constraints:
 
-    (i)  α_{jkts} = Σ_{p: t(p)=t} Q_{s,t}[(o,d)] · x[s][od][pair]   (inlined)
-    (ii) α_{jkts} ≤ Σ_r θ^r_{jkts}                                   ∀ j,k,t,s
-    (iii) Σ_{j,k,t} β^r_{jktm} θ^r_{jkts} ≤ Cap_r · γ_s^r           ∀ r,m,s
+    (ii)  Σ_{od:(j,k)} x[s][t][od][pair]  =  Σ_r α^r_{jkts}          ∀ j,k,t,s
+    (iii) Σ_{j,k: β^r_{jkl}=1} α^r_{jkts} ≤ Cap_r · θ^r_{ts}        ∀ r,l,s
 
 # Fields
 - `k::Int`: Stations to activate per scenario (second stage)
@@ -49,8 +48,6 @@ Covering constraints (replacing the single α-based constraint):
 - `alpha_profile_file::Union{String,Nothing}`: Path to `alpha_profile.csv` (route_id,
   pickup_id, dropoff_id, value). Alpha values are used as warm-start hints for α variables.
   Requires `routes_file` to be set.
-- `alpha_regularization_weight::Float64`: μ_α — penalty per unit α_{r,jkts}; set to a small
-  value (e.g. 0.01) to break symmetry and improve convergence. Default 0.0 (disabled).
 """
 struct RouteVehicleCapacityModel <: AbstractODModel
     k::Int
@@ -66,9 +63,8 @@ struct RouteVehicleCapacityModel <: AbstractODModel
     use_lazy_constraints::Bool
     max_stations_visited::Int
     stop_dwell_time::Float64
-    routes_file                :: Union{String, Nothing}
-    alpha_profile_file         :: Union{String, Nothing}
-    alpha_regularization_weight :: Float64
+    routes_file        :: Union{String, Nothing}
+    alpha_profile_file :: Union{String, Nothing}
 
     function RouteVehicleCapacityModel(
             k::Int,
@@ -84,17 +80,14 @@ struct RouteVehicleCapacityModel <: AbstractODModel
             use_lazy_constraints::Bool = false,
             max_stations_visited::Int = typemax(Int),
             stop_dwell_time::Number = 10.0,
-            routes_file                :: Union{String, Nothing} = nothing,
-            alpha_profile_file         :: Union{String, Nothing} = nothing,
-            alpha_regularization_weight :: Number = 0.0
+            routes_file        :: Union{String, Nothing} = nothing,
+            alpha_profile_file :: Union{String, Nothing} = nothing,
         )
 
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         route_regularization_weight >= 0 ||
             throw(ArgumentError("route_regularization_weight must be non-negative"))
-        alpha_regularization_weight >= 0 ||
-            throw(ArgumentError("alpha_regularization_weight must be non-negative"))
         vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
         max_stations_visited >= 1 ||
@@ -119,7 +112,6 @@ struct RouteVehicleCapacityModel <: AbstractODModel
 
         new(k, l, Float64(route_regularization_weight), Float64(repositioning_time), vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr, time_window_sec, use_lazy_constraints,
-            max_stations_visited, sdt, routes_file, alpha_profile_file,
-            Float64(alpha_regularization_weight))
+            max_stations_visited, sdt, routes_file, alpha_profile_file)
     end
 end

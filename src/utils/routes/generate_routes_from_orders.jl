@@ -52,7 +52,7 @@ function generate_simple_routes(
     max_route_length        :: Int     = 4,
     max_detour_time         :: Float64 = Inf,
     max_detour_ratio        :: Float64 = Inf,
-    stop_dwell_time         :: Float64 = 0.0
+    stop_dwell_time         :: Float64 = 10.0
 ) :: Vector{RouteData}
 
     isempty(valid_jk_pairs) && return RouteData[]
