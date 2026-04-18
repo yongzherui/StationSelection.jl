@@ -57,8 +57,9 @@ function build_model(
     # ==========================================================================
 
     set_route_od_objective!(m, data, mapping;
-        route_regularization_weight = model.route_regularization_weight,
-        repositioning_time          = model.repositioning_time)
+        route_regularization_weight  = model.route_regularization_weight,
+        repositioning_time           = model.repositioning_time,
+        alpha_regularization_weight  = model.alpha_regularization_weight)
 
     # ==========================================================================
     # Constraints

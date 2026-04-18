@@ -49,6 +49,8 @@ Covering constraints (replacing the single α-based constraint):
 - `alpha_profile_file::Union{String,Nothing}`: Path to `alpha_profile.csv` (route_id,
   pickup_id, dropoff_id, value). Alpha values are used as warm-start hints for α variables.
   Requires `routes_file` to be set.
+- `alpha_regularization_weight::Float64`: μ_α — penalty per unit α_{r,jkts}; set to a small
+  value (e.g. 0.01) to break symmetry and improve convergence. Default 0.0 (disabled).
 """
 struct RouteVehicleCapacityModel <: AbstractODModel
     k::Int
@@ -64,8 +66,9 @@ struct RouteVehicleCapacityModel <: AbstractODModel
     use_lazy_constraints::Bool
     max_stations_visited::Int
     stop_dwell_time::Float64
-    routes_file        :: Union{String, Nothing}
-    alpha_profile_file :: Union{String, Nothing}
+    routes_file                :: Union{String, Nothing}
+    alpha_profile_file         :: Union{String, Nothing}
+    alpha_regularization_weight :: Float64
 
     function RouteVehicleCapacityModel(
             k::Int,
@@ -81,14 +84,17 @@ struct RouteVehicleCapacityModel <: AbstractODModel
             use_lazy_constraints::Bool = false,
             max_stations_visited::Int = typemax(Int),
             stop_dwell_time::Number = 10.0,
-            routes_file        :: Union{String, Nothing} = nothing,
-            alpha_profile_file :: Union{String, Nothing} = nothing
+            routes_file                :: Union{String, Nothing} = nothing,
+            alpha_profile_file         :: Union{String, Nothing} = nothing,
+            alpha_regularization_weight :: Number = 0.0
         )
 
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
         route_regularization_weight >= 0 ||
             throw(ArgumentError("route_regularization_weight must be non-negative"))
+        alpha_regularization_weight >= 0 ||
+            throw(ArgumentError("alpha_regularization_weight must be non-negative"))
         vehicle_capacity > 0 || throw(ArgumentError("vehicle_capacity must be positive"))
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
         max_stations_visited >= 1 ||
@@ -113,6 +119,7 @@ struct RouteVehicleCapacityModel <: AbstractODModel
 
         new(k, l, Float64(route_regularization_weight), Float64(repositioning_time), vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr, time_window_sec, use_lazy_constraints,
-            max_stations_visited, sdt, routes_file, alpha_profile_file)
+            max_stations_visited, sdt, routes_file, alpha_profile_file,
+            Float64(alpha_regularization_weight))
     end
 end
