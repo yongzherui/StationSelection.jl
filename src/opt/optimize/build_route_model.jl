@@ -50,8 +50,7 @@ function build_model(
     variable_counts["scenario_activation"] = add_scenario_activation_variables!(m, data)
     variable_counts["assignment"]          = add_assignment_variables!(m, data, mapping)
     variable_counts["alpha_r_jkts"]       = add_alpha_r_jkts_variables!(m, data, mapping;
-        integer_alpha = false,
-        upper_bound   = model.vehicle_capacity)
+        integer_alpha = false)
     variable_counts["theta_r_ts"]         = add_theta_r_ts_variables!(m, data, mapping)
 
     # ==========================================================================

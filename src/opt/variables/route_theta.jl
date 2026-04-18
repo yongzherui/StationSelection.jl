@@ -73,9 +73,9 @@ Created for each (s, r_idx, j_idx, k_idx, t_id) where:
   and can significantly reduce solve time for RouteVehicleCapacityModel, where α
   symmetry is the main source of slowness.
 - `upper_bound::Union{Int,Nothing}` (default `nothing`): if set, each α variable is
-  bounded above by this value. Setting `upper_bound = vehicle_capacity` tightens the LP
-  relaxation at no modelling cost (a single route deployment cannot serve more than C
-  passengers per leg).
+  bounded above by this value. NOTE: do NOT set this to `vehicle_capacity` — α represents
+  total passengers across all deployments (θ > 1 allows α > C), so a fixed bound of C
+  causes infeasibility when demand exceeds C for a (j,k) pair with only one covering route.
 
 Stored as `m[:alpha_r_jkts]::Dict{NTuple{5,Int}, VariableRef}` keyed
 `(s, r_idx, j_idx, k_idx, t_id)`.
