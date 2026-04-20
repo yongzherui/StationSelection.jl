@@ -177,7 +177,7 @@ Set `use_fleet_search=false` to fall back to the direct `build_model + optimize!
 # Fleet-search-specific keyword arguments
 - `use_fleet_search::Bool=true`
 - `fleet_search_start::Int=1`: initial fleet size F
-- `fleet_search_max::Union{Int,Nothing}=nothing`: hard cap on F
+- `fleet_search_max::Union{Int,Nothing}=10000`: hard cap on F
 - `fleet_size_increment::Int=1`: F increment per iteration
 - `unmet_demand_penalty::Float64=1e9`: penalty for unserved demand (must be >> route cost)
 """
@@ -193,11 +193,17 @@ function run_opt(
         mip_gap::Union{Float64, Nothing}=nothing,
         use_fleet_search::Bool=true,
         fleet_search_start::Int=1,
-        fleet_search_max::Union{Int, Nothing}=20,
+        fleet_search_max::Union{Int, Nothing}=10000,
         fleet_size_increment::Int=1,
         unmet_demand_penalty::Float64=1e9
     )
-    if use_fleet_search && do_optimize
+    rrw_threshold = 0.05
+    use_fleet_search_effective = use_fleet_search && model.route_regularization_weight > rrw_threshold
+    if use_fleet_search && !use_fleet_search_effective
+        println("  [fleet search] skipped: route_regularization_weight=$(model.route_regularization_weight) ≤ $(rrw_threshold), using direct solve")
+        flush(stdout)
+    end
+    if use_fleet_search_effective && do_optimize
         return run_opt_fleet_search(model, data;
             optimizer_env        = optimizer_env,
             silent               = silent,
@@ -208,7 +214,7 @@ function run_opt(
             unmet_demand_penalty = unmet_demand_penalty,
             show_counts          = show_counts,
         )
-    else
+    else  # direct solve (low rrw, use_fleet_search=false, or do_optimize=false)
         return _run_opt_impl(model, data;
             optimizer_env     = optimizer_env,
             silent            = silent,
