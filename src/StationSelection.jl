@@ -131,7 +131,7 @@ export AlphaRouteModel
 export RouteFleetLimitModel
 
 # Re-export optimization functions
-export run_opt, build_model
+export run_opt, run_opt_fleet_search, build_model
 export get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!

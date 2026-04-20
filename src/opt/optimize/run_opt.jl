@@ -22,7 +22,7 @@ Construct and solve a station selection optimization model.
 # Returns
 - `OptResult`
 """
-function run_opt(
+function _run_opt_impl(
         model::AbstractStationSelectionModel,
         data::StationSelectionData;
         optimizer_env=nothing,
@@ -132,6 +132,95 @@ function run_opt(
         )
     )
 end
+
+"""
+    run_opt(model::AbstractStationSelectionModel, data; ...) -> OptResult
+
+Generic dispatch: build and solve directly.
+"""
+function run_opt(
+        model::AbstractStationSelectionModel,
+        data::StationSelectionData;
+        optimizer_env=nothing,
+        silent::Bool=false,
+        show_counts::Bool=false,
+        do_optimize::Bool=true,
+        warm_start::Bool=false,
+        check_feasibility::Bool=true,
+        mip_gap::Union{Float64, Nothing}=nothing
+    )
+    return _run_opt_impl(model, data;
+        optimizer_env=optimizer_env,
+        silent=silent,
+        show_counts=show_counts,
+        do_optimize=do_optimize,
+        warm_start=warm_start,
+        check_feasibility=check_feasibility,
+        mip_gap=mip_gap
+    )
+end
+
+
+"""
+    run_opt(model::RouteVehicleCapacityModel, data; use_fleet_search=true, ...) -> OptResult
+
+Specialized dispatch for `RouteVehicleCapacityModel`.
+
+When `use_fleet_search=true` (default), delegates to `run_opt_fleet_search`, which
+solves a sequence of `RouteFleetLimitModel` instances (delay_weight=0) with
+increasing fleet size until the fleet constraint is strictly non-binding across all
+time windows and scenarios. This typically converges faster than solving the
+unconstrained model directly.
+
+Set `use_fleet_search=false` to fall back to the direct `build_model + optimize!` path.
+
+# Fleet-search-specific keyword arguments
+- `use_fleet_search::Bool=true`
+- `fleet_search_start::Int=1`: initial fleet size F
+- `fleet_search_max::Union{Int,Nothing}=nothing`: hard cap on F
+- `fleet_size_increment::Int=1`: F increment per iteration
+- `unmet_demand_penalty::Float64=1e9`: penalty for unserved demand (must be >> route cost)
+"""
+function run_opt(
+        model::RouteVehicleCapacityModel,
+        data::StationSelectionData;
+        optimizer_env=nothing,
+        silent::Bool=false,
+        show_counts::Bool=false,
+        do_optimize::Bool=true,
+        warm_start::Bool=false,
+        check_feasibility::Bool=true,
+        mip_gap::Union{Float64, Nothing}=nothing,
+        use_fleet_search::Bool=true,
+        fleet_search_start::Int=1,
+        fleet_search_max::Union{Int, Nothing}=20,
+        fleet_size_increment::Int=1,
+        unmet_demand_penalty::Float64=1e9
+    )
+    if use_fleet_search && do_optimize
+        return run_opt_fleet_search(model, data;
+            optimizer_env        = optimizer_env,
+            silent               = silent,
+            mip_gap              = mip_gap,
+            fleet_search_start   = fleet_search_start,
+            fleet_search_max     = fleet_search_max,
+            fleet_size_increment = fleet_size_increment,
+            unmet_demand_penalty = unmet_demand_penalty,
+            show_counts          = show_counts,
+        )
+    else
+        return _run_opt_impl(model, data;
+            optimizer_env     = optimizer_env,
+            silent            = silent,
+            show_counts       = show_counts,
+            do_optimize       = do_optimize,
+            warm_start        = warm_start,
+            check_feasibility = check_feasibility,
+            mip_gap           = mip_gap,
+        )
+    end
+end
+
 
 function get_warm_start_solution(
         model::AbstractStationSelectionModel,
