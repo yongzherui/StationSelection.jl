@@ -53,7 +53,8 @@ function run_opt_fleet_search(
     end
 
     # ── 1. Build FleetLimitODMap once (expensive: DFS route generation) ────────
-    @info "[fleet search] building route map (once)"
+    println("  [fleet search] building route map (once, DFS)...")
+    flush(stdout)
     map_start = now()
 
     proxy_fleet_model = RouteFleetLimitModel(
@@ -75,7 +76,6 @@ function run_opt_fleet_search(
     )
     base_mapping = create_fleet_limit_od_map(proxy_fleet_model, data)
     map_time_sec = Dates.value(now() - map_start) / 1000
-    @info "[fleet search] route map built" map_time_sec=map_time_sec
 
     # ── 2. Compute upper bound on F ────────────────────────────────────────────
     # Safe upper bound: total number of routes across all (s, t_id).
@@ -96,6 +96,9 @@ function run_opt_fleet_search(
         end
     end
 
+    println("  [fleet search] route map built in $(round(map_time_sec; digits=1))s  |  routes=$(total_routes)  (s,t) pairs=$(length(st_pairs))  F_max=$(F_max)")
+    flush(stdout)
+
     # ── 4. Fleet size search loop ──────────────────────────────────────────────
     F = fleet_search_start
     iteration = 0
@@ -105,7 +108,8 @@ function run_opt_fleet_search(
 
     while F <= F_max
         iteration += 1
-        @info "[fleet search] iteration" F=F F_max=F_max iteration=iteration
+        println("  [fleet search] iteration=$(iteration)  F=$(F)/$(F_max)")
+        flush(stdout)
 
         # Re-use inner map and delay_coeff; only fleet_size changes (cheap)
         mapping_F = FleetLimitODMap(base_mapping.inner, F, base_mapping.delay_coeff)
@@ -148,10 +152,12 @@ function run_opt_fleet_search(
         optimize!(m)
 
         term_status = JuMP.termination_status(m)
-        @info "[fleet search] solved" F=F term_status=string(term_status)
+        println("  [fleet search] F=$(F) solved: $(term_status)")
+        flush(stdout)
 
         if term_status != MOI.OPTIMAL
-            @warn "[fleet search] non-optimal at F=$F: $term_status — increasing F"
+            println("  [fleet search] WARNING: non-optimal at F=$(F): $(term_status) — increasing F")
+            flush(stdout)
             F += fleet_size_increment
             continue
         end
@@ -174,21 +180,24 @@ function run_opt_fleet_search(
         fleet_nonbinding = max_theta < F - 0.5
         demand_served    = max_v < 0.5   # integer v, so effectively v=0 everywhere
 
-        @info "[fleet search] binding check" F=F max_theta=round(max_theta;digits=1) max_v=round(max_v;digits=2) fleet_nonbinding=fleet_nonbinding demand_served=demand_served
+        println("  [fleet search] F=$(F): max_theta=$(round(max_theta;digits=1))  max_v=$(round(max_v;digits=2))  nonbinding=$(fleet_nonbinding)  demand_served=$(demand_served)")
+        flush(stdout)
 
         last_build_result = build_result
         last_m            = m
         last_term_status  = term_status
 
         if fleet_nonbinding && demand_served
-            @info "[fleet search] converged: fleet non-binding and demand fully served" F=F
+            println("  [fleet search] converged at F=$(F): fleet non-binding and demand fully served")
+            flush(stdout)
             break
         end
 
         if fleet_nonbinding && !demand_served
             # Fleet is not the bottleneck, but demand is still unmet — the original
             # RouteVehicleCapacityModel would also be infeasible for this instance.
-            @warn "[fleet search] fleet non-binding at F=$F but unmet demand persists (max_v=$(round(max_v;digits=2))). Original model likely infeasible."
+            println("  [fleet search] WARNING: fleet non-binding at F=$(F) but unmet demand persists (max_v=$(round(max_v;digits=2))). Original model likely infeasible.")
+            flush(stdout)
             break
         end
 
@@ -197,7 +206,8 @@ function run_opt_fleet_search(
 
     # ── 5. Handle non-convergence ──────────────────────────────────────────────
     if isnothing(last_build_result) || last_term_status != MOI.OPTIMAL
-        @warn "[fleet search] did not converge within F_max=$F_max"
+        println("  [fleet search] WARNING: did not converge within F_max=$(F_max)")
+        flush(stdout)
         runtime_sec = Dates.value(now() - start_time) / 1000
         # Return a dummy OptResult signalling failure; last_m may be nothing
         empty_m = isnothing(last_m) ? Model() : last_m
