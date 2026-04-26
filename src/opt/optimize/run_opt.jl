@@ -149,6 +149,24 @@ function run_opt(
         check_feasibility::Bool=true,
         mip_gap::Union{Float64, Nothing}=nothing
     )
+    if do_optimize
+        feasibility_issue = check_model_feasibility(model, data)
+        if !isnothing(feasibility_issue)
+            @warn "run_opt: pre-solve feasibility check failed" reason=feasibility_issue
+            return OptResult(
+                MOI.INFEASIBLE,
+                nothing,
+                nothing,
+                0.0,
+                JuMP.Model(),
+                EmptyStationSelectionMap(),
+                nothing,
+                nothing,
+                nothing,
+                Dict{String, Any}("feasibility_issue" => feasibility_issue)
+            )
+        end
+    end
     return _run_opt_impl(model, data;
         optimizer_env=optimizer_env,
         silent=silent,
@@ -204,6 +222,22 @@ function run_opt(
         flush(stdout)
     end
     if use_fleet_search_effective && do_optimize
+        feasibility_issue = check_model_feasibility(model, data)
+        if !isnothing(feasibility_issue)
+            @warn "run_opt: pre-solve feasibility check failed — skipping fleet search" reason=feasibility_issue
+            return OptResult(
+                MOI.INFEASIBLE,
+                nothing,
+                nothing,
+                0.0,
+                JuMP.Model(),
+                EmptyStationSelectionMap(),
+                nothing,
+                nothing,
+                nothing,
+                Dict{String, Any}("feasibility_issue" => feasibility_issue)
+            )
+        end
         return run_opt_fleet_search(model, data;
             optimizer_env        = optimizer_env,
             silent               = silent,
