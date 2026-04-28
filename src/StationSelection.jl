@@ -24,6 +24,7 @@ include("utils/core/logging.jl")
 
 # Data preparation utilities
 include("utils/data/scenarios.jl")
+include("utils/data/demand_bounds.jl")
 include("utils/data/candidate_stations.jl")
 include("utils/data/transform_orders.jl")
 include("utils/data/transform_stations.jl")
@@ -39,6 +40,7 @@ include("data/io/requests.jl")
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
+include("opt/models/robust_total_demand_cap.jl")
 include("opt/models/clustering_base.jl")
 include("opt/models/route_vehicle_capacity_model.jl")
 include("opt/models/alpha_route_model.jl")
@@ -46,6 +48,9 @@ include("opt/models/route_fleet_limit_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/maps/clustering_od_map.jl")
+
+# Robust OD map (depends on RobustTotalDemandCapModel and clustering_od_map for compute_valid_jk_pairs)
+include("data/maps/robust_od_map.jl")
 
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/maps/clustering_base_map.jl")
@@ -96,6 +101,7 @@ export read_candidate_stations, read_customer_requests
 export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
+export RobustTotalDemandCapMap
 export VehicleCapacityODMap
 export AlphaRouteODMap
 export FleetLimitODMap
@@ -123,6 +129,7 @@ export AbstractStationSelectionModel
 export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
+export RobustTotalDemandCapModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel
 export RouteVehicleCapacityWarmStartModel
@@ -135,11 +142,14 @@ export run_opt, run_opt_fleet_search, build_model
 export get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
+export add_robust_assignment_variables!, add_robust_dual_variables!
 export add_flow_variables!
 export add_alpha_r_jkts_variables!, add_theta_r_ts_variables!
 export add_v_jkts_variables!
 export compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
+export add_robust_assignment_constraints!, add_robust_assignment_to_active_constraints!
+export add_robust_recourse_cost_constraints!, add_robust_dual_constraints!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_flow_activation_constraints!
@@ -147,6 +157,7 @@ export add_route_capacity_constraints!
 export add_route_capacity_lazy_constraints!
 export add_fleet_limit_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
+export set_robust_total_demand_cap_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_route_od_objective!
 export set_fleet_limit_objective!
@@ -157,6 +168,8 @@ export generate_scenarios
 export generate_scenarios_from_ranges
 export generate_scenarios_by_datetimes
 export generate_scenarios_by_profile
+export compute_demand_bounds
+export group_scenarios_by_period
 export export_results
 export export_variables
 export load_exported_assignment_variables

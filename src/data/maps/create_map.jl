@@ -8,6 +8,18 @@ struct based on the model type.
 export create_map
 
 """
+    create_map(model::RobustTotalDemandCapModel, data::StationSelectionData)
+
+Create a RobustTotalDemandCapMap for RobustTotalDemandCapModel.
+"""
+function create_map(
+        model::RobustTotalDemandCapModel,
+        data::StationSelectionData
+    )::RobustTotalDemandCapMap
+    return create_robust_total_demand_cap_map(model, data)
+end
+
+"""
     create_map(model::ClusteringTwoStageODModel, data::StationSelectionData)
 
 Create a ClusteringTwoStageODMap for ClusteringTwoStageODModel.

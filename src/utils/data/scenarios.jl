@@ -125,6 +125,7 @@ Supported profiles:
 - `:midday` (10:00-14:00)
 - `:evening` (16:00-20:00)
 - `:night` (20:00-23:59:59)
+- `:four_period` (06:00-10:00, 10:00-15:00, 15:00-20:00, 20:00-23:59:59)
 """
 function generate_scenarios_by_profile(start_date::Date, end_date::Date;
                                        profile::Symbol=:full_day,
@@ -210,6 +211,9 @@ function _profile_windows(profile::Symbol)
         return [(16, 0, 20, 0, 0)]
     elseif profile == :night
         return [(20, 0, 23, 59, 59)]
+    elseif profile == :four_period
+        # Morning (06-10), afternoon (10-15), evening (15-20), night (20-24)
+        return [(6, 0, 9, 59, 59), (10, 0, 14, 59, 59), (15, 0, 19, 59, 59), (20, 0, 23, 59, 59)]
     else
         throw(ArgumentError("Unknown profile: $profile"))
     end

@@ -15,6 +15,7 @@ This file includes:
 
 include("variables/base.jl")
 include("variables/assignment.jl")
+include("variables/robust.jl")
 include("variables/flow.jl")
 include("variables/route_theta.jl")
 include("variables/v_jkts.jl")

@@ -1,4 +1,5 @@
 include("optimize/build_clustering_two_stage_od.jl")
+include("optimize/build_robust_total_demand_cap.jl")
 include("optimize/build_clustering_base.jl")
 include("optimize/build_route_model.jl")
 include("optimize/build_alpha_route.jl")
