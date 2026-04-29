@@ -55,10 +55,27 @@ end
 
 Build the robust OD map.
 
-Omega_s is derived from q_hat: any OD pair for which q̂_ods > 0 in scenario s
-is included (i.e., pairs that ever appear in the historical data for that period).
+The model stores demand bounds indexed by *period* (1-4, one per time-of-day
+window).  `data.scenarios` has one entry per (date × period) instance —
+potentially hundreds of scenarios.  This function maps each scenario to its
+period via `start_time`, then expands the period-indexed model bounds to
+scenario-indexed ones so the rest of the build pipeline can iterate `1:S`.
+
+Omega_s[s] = active OD pairs in scenario s (those with q̂ > 0 for that period).
 valid_jk_pairs uses the same walking-distance filter as ClusteringTwoStageODMap.
 """
+
+# Period windows matching demand_bounds.jl's _PERIOD_WINDOWS.
+const _ROBUST_PERIOD_WINDOWS = [(6, 10), (10, 15), (15, 20), (20, 24)]
+
+function _period_from_scenario(sc::ScenarioData)::Int
+    h = isnothing(sc.start_time) ? -1 : Dates.hour(sc.start_time)
+    for (idx, (lo, hi)) in enumerate(_ROBUST_PERIOD_WINDOWS)
+        lo <= h < hi && return idx
+    end
+    return 1  # fallback: use morning bounds for any unclassified scenario
+end
+
 function create_robust_total_demand_cap_map(
         model::RobustTotalDemandCapModel,
         data::StationSelectionData
@@ -69,19 +86,33 @@ function create_robust_total_demand_cap_map(
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
-    # Build Omega_s from q_hat: include all (o,d) with q_hat > 0 in that scenario
-    Omega_s = Dict{Int, Vector{Tuple{Int,Int}}}()
+    # Map each scenario index → period (1-4) using start_time.
+    # model.q_hat, q_low, B are all period-indexed (keys 1-4).
+    scenario_to_period = [_period_from_scenario(data.scenarios[s]) for s in 1:S]
+
+    # Build scenario-indexed Omega_s, q_low_map, q_hat_map, B_vec
+    Omega_s     = Dict{Int, Vector{Tuple{Int,Int}}}()
+    q_low_map   = Dict{Int, Dict{Tuple{Int,Int}, Float64}}()
+    q_hat_map   = Dict{Int, Dict{Tuple{Int,Int}, Float64}}()
+    B_vec       = Vector{Float64}(undef, S)
     all_od_pairs = Set{Tuple{Int,Int}}()
 
     for s in 1:S
-        q_hat_s = get(model.q_hat, s, Dict{Tuple{Int,Int}, Float64}())
-        active = [(o, d) for ((o, d), v) in q_hat_s if v > 0.0]
-        # Also include pairs that appear in q_low (even if q_hat = 0)
-        q_low_s = get(model.q_low, s, Dict{Tuple{Int,Int}, Float64}())
-        for od in keys(q_low_s)
-            od in active || push!(active, od)
+        p = scenario_to_period[s]
+
+        q_hat_p = get(model.q_hat, p, Dict{Tuple{Int,Int}, Float64}())
+        q_low_p = get(model.q_low, p, Dict{Tuple{Int,Int}, Float64}())
+
+        active = [(o, d) for ((o, d), v) in q_hat_p if v > 0.0]
+        for od in keys(q_low_p)
+            od ∉ active && push!(active, od)
         end
-        Omega_s[s] = active
+
+        Omega_s[s]   = active
+        q_low_map[s] = q_low_p
+        q_hat_map[s] = q_hat_p
+        B_vec[s]     = p <= length(model.B) ? model.B[p] : 0.0
+
         union!(all_od_pairs, active)
     end
 
@@ -98,9 +129,9 @@ function create_robust_total_demand_cap_map(
         Omega_s,
         model.max_walking_distance,
         valid_jk_pairs,
-        model.q_low,
-        model.q_hat,
-        model.B,
+        q_low_map,
+        q_hat_map,
+        B_vec,
     )
 end
 

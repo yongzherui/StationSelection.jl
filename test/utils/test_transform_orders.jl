@@ -176,4 +176,89 @@ using CSV
             @test occursin("No exact route assignment found", sprint(showerror, err))
         end
     end
+
+    @testset "month backtest transform writes daily files and period stats" begin
+        mktempdir() do tmpdir
+            order_df = DataFrame(
+                order_id = [1, 2, 3, 4],
+                pax_num = [1, 1, 1, 1],
+                order_time = [
+                    "2024-01-01 08:05:00",
+                    "2024-01-01 10:05:00",
+                    "2024-01-02 08:05:00",
+                    "2024-01-02 10:05:00",
+                ],
+                origin_station_id = [1, 1, 1, 1],
+                destination_station_id = [3, 3, 3, 3],
+            )
+            cluster_df = DataFrame(
+                id = [1, 2, 3],
+                lon = [0.0, 1.0, 2.0],
+                lat = [0.0, 0.0, 0.0],
+                selected = [1, 1, 1],
+            )
+            scenario_df = DataFrame(
+                scenario_idx = [1, 2, 3, 4],
+                label = ["d1_morning", "d1_afternoon", "d2_morning", "d2_afternoon"],
+                start_time = [
+                    "2024-01-01T08:00:00",
+                    "2024-01-01T10:00:00",
+                    "2024-01-02T08:00:00",
+                    "2024-01-02T10:00:00",
+                ],
+                end_time = [
+                    "2024-01-01T08:59:59",
+                    "2024-01-01T10:59:59",
+                    "2024-01-02T08:59:59",
+                    "2024-01-02T10:59:59",
+                ],
+            )
+            assignments_df = DataFrame(
+                scenario = [1, 2, 3],
+                od_idx = [1, 1, 1],
+                origin_id = [1, 1, 1],
+                dest_id = [3, 3, 3],
+                pickup_id = [2, 3, 1],
+                dropoff_id = [3, 2, 2],
+                value = [1.0, 1.0, 1.0],
+            )
+
+            order_file = joinpath(tmpdir, "orders.csv")
+            cluster_file = joinpath(tmpdir, "cluster.csv")
+            run_dir = joinpath(tmpdir, "selection_run")
+            export_dir = joinpath(run_dir, "variable_exports")
+            output_dir = joinpath(tmpdir, "backtest")
+            mkpath(export_dir)
+
+            CSV.write(order_file, order_df)
+            CSV.write(cluster_file, cluster_df)
+            CSV.write(joinpath(export_dir, "scenario_info.csv"), scenario_df)
+            CSV.write(joinpath(export_dir, "assignment_variables.csv"), assignments_df)
+
+            transformed_df, stats, manifest_df = transform_orders_for_month_backtest(
+                order_file,
+                run_dir,
+                cluster_file,
+                "ClusteringTwoStageODModel";
+                output_dir=output_dir,
+                start_date=DateTime("2024-01-01 00:00:00", "yyyy-mm-dd HH:MM:SS"),
+                end_date=DateTime("2024-01-02 23:59:59", "yyyy-mm-dd HH:MM:SS"),
+                scenario_profile=:four_period,
+            )
+
+            @test transformed_df.assigned_pickup_id == [2, 3, 1, 1]
+            @test transformed_df.assigned_dropoff_id == [3, 2, 2, 3]
+            @test stats["n_x_assigned"] == 3
+            @test stats["n_fallback"] == 1
+            @test stats["n_daily_files"] == 2
+            @test stats["x_assigned_by_period"]["1"] == 2
+            @test stats["x_assigned_by_period"]["2"] == 1
+            @test stats["fallback_by_period"]["2"] == 1
+            @test nrow(manifest_df) == 2
+            @test all(isfile.(manifest_df.orders_file))
+            @test isfile(joinpath(output_dir, "assignment_stats.json"))
+            @test isfile(joinpath(output_dir, "orders_transformed_month.csv"))
+            @test isfile(joinpath(output_dir, "daily_manifest.csv"))
+        end
+    end
 end

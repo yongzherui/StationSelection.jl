@@ -14,10 +14,13 @@ using CSV
 using DataFrames
 using Distances
 using Dates
+using JSON
 
 export transform_orders,
        transform_orders_from_assignments,
+       transform_orders_for_month_backtest,
        transform_orders_quick_extend,
+       split_transformed_orders_by_day,
        remap_order_times_stacked,
        parse_station_list,
        precompute_distances,
@@ -188,6 +191,52 @@ function parse_exported_datetime(value, field_name::String, scenario_idx::Int)::
         "scenario_info.csv has empty $field_name for scenario $scenario_idx"
     )
     return DateTime(value_str)
+end
+
+function _period_of_datetime(order_time::DateTime, profile::Symbol)::Union{Int, Nothing}
+    h = hour(order_time)
+    if profile == :four_period
+        if 6 <= h < 10
+            return 1
+        elseif 10 <= h < 15
+            return 2
+        elseif 15 <= h < 20
+            return 3
+        elseif 20 <= h < 24
+            return 4
+        end
+    elseif profile == :full_day
+        return 1
+    elseif profile == :commute
+        if 7 <= h < 10
+            return 1
+        elseif 16 <= h < 19
+            return 2
+        end
+    elseif profile == :morning
+        return 6 <= h < 10 ? 1 : nothing
+    elseif profile == :midday
+        return 10 <= h < 14 ? 1 : nothing
+    elseif profile == :evening
+        return 16 <= h < 20 ? 1 : nothing
+    elseif profile == :night
+        return 20 <= h < 24 ? 1 : nothing
+    end
+    return nothing
+end
+
+_json_int_dict(values::AbstractDict{Int, <:Any}) = Dict(string(k) => v for (k, v) in sort(collect(values); by=first))
+
+function _ensure_assignment_columns!(df::DataFrame,
+                                     origin_ids::Vector{Int},
+                                     dest_ids::Vector{Int},
+                                     pickup_ids::Vector{Int},
+                                     dropoff_ids::Vector{Int})
+    df.origin_station_id = origin_ids
+    df.destination_station_id = dest_ids
+    df.assigned_pickup_id = pickup_ids
+    df.assigned_dropoff_id = dropoff_ids
+    return df
 end
 
 """
@@ -494,7 +543,8 @@ function transform_orders_from_assignments(order_file::String,
                                             start_date::Union{DateTime, Nothing}=nothing,
                                             end_date::Union{DateTime, Nothing}=nothing,
                                             use_timeframes::Bool=false,
-                                            time_window_sec::Union{Int, Nothing}=nothing)
+                                            time_window_sec::Union{Int, Nothing}=nothing,
+                                            scenario_profile::Symbol=:four_period)
 
     println("Reading input files...")
 
@@ -591,12 +641,21 @@ function transform_orders_from_assignments(order_file::String,
 
     # 8. Process each order
     println("\nProcessing orders...")
-    transformed_orders = []
+    output_df = copy(orders_df)
+    origin_ids = Int[]
+    dest_ids = Int[]
+    assigned_pickup_ids = Int[]
+    assigned_dropoff_ids = Int[]
     n_assigned = 0
     n_fallback = 0
     n_pickup_differs = 0
     n_dropoff_differs = 0
     n_either_differs = 0
+    n_missing_scenario = 0
+    n_missing_station_id = 0
+    orders_by_period = Dict{Int, Int}()
+    x_assigned_by_period = Dict{Int, Int}()
+    fallback_by_period = Dict{Int, Int}()
 
     for (idx, row) in enumerate(eachrow(orders_df))
         if idx % 1000 == 0
@@ -605,9 +664,15 @@ function transform_orders_from_assignments(order_file::String,
 
         origin_id = _row_origin_station_id(row)
         target_id = _row_destination_station_id(row)
+        push!(origin_ids, origin_id)
+        push!(dest_ids, target_id)
 
         # Parse order time
         order_time = DateTime(row.order_time, "yyyy-mm-dd HH:MM:SS")
+        period_idx = _period_of_datetime(order_time, scenario_profile)
+        if !isnothing(period_idx)
+            orders_by_period[period_idx] = get(orders_by_period, period_idx, 0) + 1
+        end
 
         # Find matching scenario
         matched_scenario = find_matching_scenario(order_time, scenario_ranges)
@@ -639,6 +704,8 @@ function transform_orders_from_assignments(order_file::String,
                 "No matching scenario found for route assignment on order $(row.order_id) at $(row.order_time)"
             )
         end
+        matched_scenario === nothing && (n_missing_scenario += 1)
+        (origin_id == 0 || target_id == 0) && (n_missing_station_id += 1)
 
         # Fallback: closest selected station
         if !found_assignment
@@ -651,8 +718,14 @@ function transform_orders_from_assignments(order_file::String,
             assigned_dropoff_id = find_closest_selected_station(
                 target_id, selected_ids, distance_matrix)
             n_fallback += 1
+            if !isnothing(period_idx)
+                fallback_by_period[period_idx] = get(fallback_by_period, period_idx, 0) + 1
+            end
         else
             n_assigned += 1
+            if !isnothing(period_idx)
+                x_assigned_by_period[period_idx] = get(x_assigned_by_period, period_idx, 0) + 1
+            end
 
             # Compare x-assignment against what closest-station would have given
             selected_ids = get_selected_station_ids(
@@ -675,18 +748,11 @@ function transform_orders_from_assignments(order_file::String,
             end
         end
 
-        push!(transformed_orders, (
-            order_id = row.order_id,
-            pax_num = row.pax_num,
-            order_time = row.order_time,
-            origin_station_id = origin_id,
-            destination_station_id = target_id,
-            assigned_pickup_id = assigned_pickup_id,
-            assigned_dropoff_id = assigned_dropoff_id
-        ))
+        push!(assigned_pickup_ids, assigned_pickup_id)
+        push!(assigned_dropoff_ids, assigned_dropoff_id)
     end
 
-    output_df = DataFrame(transformed_orders)
+    _ensure_assignment_columns!(output_df, origin_ids, dest_ids, assigned_pickup_ids, assigned_dropoff_ids)
 
     println("✓ Successfully transformed $(nrow(output_df)) orders")
     println("\nSummary:")
@@ -703,9 +769,16 @@ function transform_orders_from_assignments(order_file::String,
         "n_pickup_differs_from_closest" => n_pickup_differs,
         "n_dropoff_differs_from_closest" => n_dropoff_differs,
         "n_either_differs_from_closest" => n_either_differs,
+        "n_missing_scenario" => n_missing_scenario,
+        "n_missing_station_id" => n_missing_station_id,
+        "n_total_orders" => nrow(output_df),
+        "assignment_coverage" => nrow(output_df) > 0 ? n_assigned / nrow(output_df) : 0.0,
         "pct_pickup_differs" => n_assigned > 0 ? round(100.0 * n_pickup_differs / n_assigned, digits=1) : 0.0,
         "pct_dropoff_differs" => n_assigned > 0 ? round(100.0 * n_dropoff_differs / n_assigned, digits=1) : 0.0,
         "pct_either_differs" => n_assigned > 0 ? round(100.0 * n_either_differs / n_assigned, digits=1) : 0.0,
+        "orders_by_period" => _json_int_dict(orders_by_period),
+        "x_assigned_by_period" => _json_int_dict(x_assigned_by_period),
+        "fallback_by_period" => _json_int_dict(fallback_by_period),
     )
 
     if n_assigned > 0
@@ -716,6 +789,107 @@ function transform_orders_from_assignments(order_file::String,
     end
 
     return output_df, assignment_stats
+end
+
+"""
+    split_transformed_orders_by_day(df::DataFrame, output_dir::String;
+        start_date=nothing, end_date=nothing) -> DataFrame
+
+Write one transformed order CSV per calendar day and return a manifest.
+"""
+function split_transformed_orders_by_day(df::DataFrame,
+                                         output_dir::String;
+                                         start_date::Union{DateTime, Nothing}=nothing,
+                                         end_date::Union{DateTime, Nothing}=nothing)::DataFrame
+    mkpath(output_dir)
+    order_dates = if isempty(df)
+        Date[]
+    else
+        Date.(DateTime.(string.(df.order_time), "yyyy-mm-dd HH:MM:SS"))
+    end
+
+    unique_dates = if !isnothing(start_date) && !isnothing(end_date)
+        collect(Date(start_date):Day(1):Date(end_date))
+    else
+        sort(unique(order_dates))
+    end
+    isempty(unique_dates) && return DataFrame(
+        day_index=Int[], date=String[], order_count=Int[], orders_file=String[]
+    )
+
+    rows = NamedTuple[]
+    for (day_index, day) in enumerate(unique_dates)
+        mask = order_dates .== day
+        day_df = df[mask, :]
+        day_file = joinpath(output_dir, "orders_$(Dates.format(day, "yyyy-mm-dd")).csv")
+        CSV.write(day_file, day_df)
+        push!(rows, (
+            day_index = day_index,
+            date = string(day),
+            order_count = nrow(day_df),
+            orders_file = day_file,
+        ))
+    end
+
+    return DataFrame(rows)
+end
+
+"""
+    transform_orders_for_month_backtest(order_file, selection_run_dir, cluster_file, method;
+        output_dir, start_date, end_date, scenario_profile, use_timeframes, time_window_sec)
+        -> (DataFrame, Dict, DataFrame)
+
+Transform a full backtest month using solved assignments, write the month-level
+CSV plus one transformed file per day, and return the transformed orders, stats,
+and daily manifest.
+"""
+function transform_orders_for_month_backtest(order_file::String,
+                                             selection_run_dir::String,
+                                             cluster_file::String,
+                                             method::String;
+                                             output_dir::String,
+                                             start_date::Union{DateTime, Nothing}=nothing,
+                                             end_date::Union{DateTime, Nothing}=nothing,
+                                             scenario_profile::Symbol=:four_period,
+                                             use_timeframes::Bool=false,
+                                             time_window_sec::Union{Int, Nothing}=nothing)
+    mkpath(output_dir)
+
+    transformed_df, stats = transform_orders_from_assignments(
+        order_file,
+        selection_run_dir,
+        cluster_file,
+        method;
+        start_date=start_date,
+        end_date=end_date,
+        use_timeframes=use_timeframes,
+        time_window_sec=time_window_sec,
+        scenario_profile=scenario_profile,
+    )
+
+    month_file = joinpath(output_dir, "orders_transformed_month.csv")
+    CSV.write(month_file, transformed_df)
+
+    daily_dir = joinpath(output_dir, "daily_orders")
+    manifest_df = split_transformed_orders_by_day(
+        transformed_df,
+        daily_dir;
+        start_date=start_date,
+        end_date=end_date,
+    )
+    manifest_file = joinpath(output_dir, "daily_manifest.csv")
+    CSV.write(manifest_file, manifest_df)
+
+    stats["month_order_file"] = month_file
+    stats["daily_manifest_file"] = manifest_file
+    stats["n_daily_files"] = nrow(manifest_df)
+    stats["days"] = manifest_df.date
+
+    open(joinpath(output_dir, "assignment_stats.json"), "w") do io
+        JSON.print(io, stats, 2)
+    end
+
+    return transformed_df, stats, manifest_df
 end
 
 

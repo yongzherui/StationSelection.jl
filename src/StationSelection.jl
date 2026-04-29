@@ -188,6 +188,8 @@ export calculate_model_vehicle_routing_distance
 # Re-export transform_orders functions
 export transform_orders
 export transform_orders_from_assignments
+export transform_orders_for_month_backtest
+export split_transformed_orders_by_day
 export remap_order_times_stacked
 export parse_station_list
 export precompute_distances
@@ -195,6 +197,6 @@ export find_closest_selected_station
 export get_timeframe_column
 
 # Re-export transform_stations functions
-export prepare_station_data, prepare_vehicle_data
+export prepare_station_data, prepare_vehicle_data, prepare_segment_data
 
 end # module

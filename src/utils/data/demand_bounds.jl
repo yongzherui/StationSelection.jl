@@ -54,31 +54,34 @@ end
 """
     compute_demand_bounds(
         scenario_groups::Dict{Int, Vector{ScenarioData}};
-        q_low_quantile::Float64  = 0.10,
         q_high_quantile::Float64 = 0.90,
         Q_cap_quantile::Float64  = 0.90,
     ) -> (q_low, q_hat, B, Q_cap)
 
 Calibrate demand bounds from historical scenario observations grouped by period.
 
+Lower bounds are fixed at zero for all OD pairs.  This is motivated by the
+sparsity of the demand data: most OD pairs appear on fewer than 10% of days,
+so a quantile-based lower bound would be zero anyway for the vast majority of
+pairs.  More importantly, setting q̲ = 0 is the conservative choice: it lets
+the adversary concentrate the full budget on the most costly corridors rather
+than being forced to spread some demand onto cheap pairs.
+
 # Arguments
 - `scenario_groups`: output of `group_scenarios_by_period`
-- `q_low_quantile`: lower quantile for per-OD demand (default 10th percentile)
 - `q_high_quantile`: upper quantile for per-OD demand (default 90th percentile)
 - `Q_cap_quantile`: quantile for the total-demand cap Q̄_s (default 90th percentile)
 
 # Returns
-- `q_low ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̲_ods
-- `q_hat ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̂_ods = q̄_ods − q̲_ods
-- `B     ::Vector{Float64}` — B_s = Q̄_s − Σ_{od} q̲_ods
+- `q_low ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̲_ods = 0 for all (od, s)
+- `q_hat ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̂_ods = q̄_ods (since q̲ = 0)
+- `B     ::Vector{Float64}` — B_s = Q̄_s (since Σ q̲ = 0)
 - `Q_cap ::Vector{Float64}` — Q̄_s (for reference/serialisation)
 
 OD pairs that never appear in period s are omitted from q_low[s] and q_hat[s].
-B[s] is guaranteed ≥ 0 (enforced by clamping).
 """
 function compute_demand_bounds(
         scenario_groups::Dict{Int, Vector{ScenarioData}};
-        q_low_quantile::Float64  = 0.10,
         q_high_quantile::Float64 = 0.90,
         Q_cap_quantile::Float64  = 0.90,
     )
@@ -119,10 +122,9 @@ function compute_demand_bounds(
             # Pad with zeros for days where this OD pair had no demand
             n_zeros = max(0, n_obs - length(hist))
             full_hist = vcat(fill(0.0, n_zeros), hist)
-            lo = quantile(full_hist, q_low_quantile)
             hi = quantile(full_hist, q_high_quantile)
-            q_low_s[od]  = lo
-            q_hat_s[od]  = max(0.0, hi - lo)
+            q_low_s[od] = 0.0
+            q_hat_s[od] = hi   # q̂ = q̄ − q̲ = q̄ since q̲ = 0
         end
 
         q_low[s] = q_low_s
@@ -135,9 +137,8 @@ function compute_demand_bounds(
             Q_cap[s] = quantile(total_demand_hist, Q_cap_quantile)
         end
 
-        # Budget B_s = Q_cap - Σ q_low; clamp to ≥ 0
-        sum_q_low = sum(values(q_low_s); init=0.0)
-        B[s] = max(0.0, Q_cap[s] - sum_q_low)
+        # B_s = Q_cap since Σ q_low = 0
+        B[s] = Q_cap[s]
     end
 
     return q_low, q_hat, B, Q_cap
