@@ -216,4 +216,6 @@ end
             @test_throws ArgumentError ClusteringBaseModel(-1)  # k must be positive
         end
     end
+
+    include("test_robust_total_demand_cap_cutting_plane.jl")
 end

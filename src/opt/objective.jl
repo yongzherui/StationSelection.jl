@@ -12,6 +12,7 @@ Uses multiple dispatch for different model/mapping types.
 include("objectives/clustering_od.jl")
 include("objectives/nominal_od.jl")
 include("objectives/robust_od.jl")
+include("objectives/robust_od_cutting_plane.jl")
 include("objectives/clustering_base.jl")
 include("objectives/route_od.jl")
 include("objectives/route_fleet_limit.jl")

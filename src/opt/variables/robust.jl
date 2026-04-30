@@ -6,6 +6,7 @@ using JuMP
 
 export add_robust_assignment_variables!
 export add_robust_dual_variables!
+export add_robust_eta_variables!
 
 """
     add_robust_assignment_variables!(m, data, mapping::RobustTotalDemandCapMap)
@@ -81,5 +82,22 @@ function add_robust_dual_variables!(
     end
     m[:beta] = beta
 
+    return JuMP.num_variables(m) - before
+end
+
+
+"""
+    add_robust_eta_variables!(m, data)
+
+Add epigraph variables eta[s] ≥ 0 for cutting-plane robust solves.
+"""
+function add_robust_eta_variables!(
+        m::Model,
+        data::StationSelectionData
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    eta = @variable(m, [1:S], lower_bound=0.0)
+    m[:eta] = eta
     return JuMP.num_variables(m) - before
 end

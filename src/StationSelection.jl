@@ -150,6 +150,7 @@ export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_nominal_assignment_variables!
 export add_robust_assignment_variables!, add_robust_dual_variables!
+export add_robust_eta_variables!
 export add_flow_variables!
 export add_alpha_r_jkts_variables!, add_theta_r_ts_variables!
 export add_v_jkts_variables!
@@ -168,6 +169,7 @@ export set_clustering_od_objective!, set_clustering_od_flow_regularizer_objectiv
 export set_nominal_od_objective!
 export set_clustering_base_objective!
 export set_robust_total_demand_cap_objective!
+export set_robust_total_demand_cap_cp_objective!
 export set_route_od_objective!
 export set_fleet_limit_objective!
 

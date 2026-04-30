@@ -139,6 +139,67 @@ end
 Generic dispatch: build and solve directly.
 """
 function run_opt(
+        model::RobustTotalDemandCapModel,
+        data::StationSelectionData;
+        optimizer_env=nothing,
+        silent::Bool=false,
+        show_counts::Bool=false,
+        do_optimize::Bool=true,
+        warm_start::Bool=false,
+        check_feasibility::Bool=true,
+        mip_gap::Union{Float64, Nothing}=nothing,
+        cutting_plane_max_iters::Int=100,
+        cutting_plane_tol::Float64=1e-6
+    )
+    if do_optimize
+        feasibility_issue = check_model_feasibility(model, data)
+        if !isnothing(feasibility_issue)
+            @warn "run_opt: pre-solve feasibility check failed" reason=feasibility_issue
+            return OptResult(
+                MOI.INFEASIBLE,
+                nothing,
+                nothing,
+                0.0,
+                JuMP.Model(),
+                EmptyStationSelectionMap(),
+                nothing,
+                nothing,
+                nothing,
+                Dict{String, Any}("feasibility_issue" => feasibility_issue)
+            )
+        end
+    end
+
+    if warm_start
+        @warn "run_opt: warm_start ignored for RobustTotalDemandCapModel cutting-plane/exact solve path"
+    end
+
+    if model.solve_mode == :cutting_plane
+        return _run_robust_total_demand_cap_cutting_plane(
+            model, data;
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=show_counts,
+            do_optimize=do_optimize,
+            mip_gap=mip_gap,
+            cutting_plane_max_iters=cutting_plane_max_iters,
+            cutting_plane_tol=cutting_plane_tol,
+        )
+    end
+
+    return _run_opt_impl(model, data;
+        optimizer_env=optimizer_env,
+        silent=silent,
+        show_counts=show_counts,
+        do_optimize=do_optimize,
+        warm_start=false,
+        check_feasibility=check_feasibility,
+        mip_gap=mip_gap
+    )
+end
+
+
+function run_opt(
         model::AbstractStationSelectionModel,
         data::StationSelectionData;
         optimizer_env=nothing,
