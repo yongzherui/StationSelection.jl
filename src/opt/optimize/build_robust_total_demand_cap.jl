@@ -47,12 +47,10 @@ function build_model(
     constraint_counts["station_limit"]              = add_station_limit_constraint!(m, data, model.l; equality=true)
     constraint_counts["scenario_activation_limit"]  = add_scenario_activation_limit_constraints!(m, data, model.k)
     constraint_counts["activation_linking"]         = add_activation_linking_constraints!(m, data)
-    constraint_counts["assignment"]                 = add_robust_assignment_constraints!(m, data, mapping)
-    constraint_counts["assignment_to_active"]       = add_robust_assignment_to_active_constraints!(m, data, mapping)
-    constraint_counts["recourse_cost"]              = add_robust_recourse_cost_constraints!(
-                                                          m, data, mapping;
-                                                          in_vehicle_time_weight=model.in_vehicle_time_weight)
-    constraint_counts["robust_dual"]                = add_robust_dual_constraints!(m, data, mapping)
+    constraint_counts["assignment"]          = add_robust_assignment_constraints!(m, data, mapping)
+    constraint_counts["assignment_to_active"] = add_robust_assignment_to_active_constraints!(m, data, mapping)
+    constraint_counts["robust_dual"]         = add_robust_dual_constraints!(m, data, mapping;
+                                                  in_vehicle_time_weight=model.in_vehicle_time_weight)
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
 

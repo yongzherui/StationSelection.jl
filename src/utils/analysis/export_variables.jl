@@ -45,6 +45,11 @@ Creates a `variable_exports/` subdirectory in `output_dir` containing:
 - `output_dir::String`: Directory where `variable_exports/` will be created
 """
 function export_variables(result::OptResult, output_dir::String)
+    if result.mapping isa EmptyStationSelectionMap
+        @warn "export_variables: skipping — result has EmptyStationSelectionMap (model returned early without solving)"
+        return
+    end
+
     export_dir = joinpath(output_dir, "variable_exports")
     mkpath(export_dir)
 
@@ -243,6 +248,118 @@ end
 
 
 """
+    export_assignment_variables(m::JuMP.Model, mapping::NominalTwoStageODMap, export_dir::String) -> Int
+
+Export assignment variables for NominalTwoStageODModel.
+Same x[s][od_idx] → Vector{VariableRef} structure as ClusteringTwoStageODMap; binary values.
+"""
+function export_assignment_variables(m::JuMP.Model, mapping::NominalTwoStageODMap, export_dir::String)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    n_fractional = 0
+    for (s, x_s) in enumerate(x)
+        od_pairs = mapping.Omega_s[s]
+        for (od_idx, x_od) in x_s
+            o, d = od_pairs[od_idx]
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (pair_idx, var) in enumerate(x_od)
+                val = JuMP.value(var)
+                if abs(val - round(val)) > 1e-4
+                    n_fractional += 1
+                end
+                if val > 0.5
+                    j, k = valid_pairs[pair_idx]
+                    push!(rows, (
+                        scenario = s,
+                        od_idx = od_idx,
+                        origin_id = array_idx_to_station_id[o],
+                        dest_id = array_idx_to_station_id[d],
+                        pickup_idx = j,
+                        dropoff_idx = k,
+                        pickup_id = array_idx_to_station_id[j],
+                        dropoff_id = array_idx_to_station_id[k],
+                        value = round(Int, val)
+                    ))
+                end
+            end
+        end
+    end
+
+    if n_fractional > 0
+        @warn "NominalTwoStageODModel: $n_fractional x variable(s) are fractional (likely tied costs). Assignments written using val > 0.5 threshold."
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+
+    return nrow(df)
+end
+
+
+"""
+    export_assignment_variables(m::JuMP.Model, mapping::RobustTotalDemandCapMap, export_dir::String) -> Int
+
+Export assignment variables for RobustTotalDemandCapModel.
+Same x[s][od_idx] → Vector{VariableRef} structure; binary values.
+"""
+function export_assignment_variables(m::JuMP.Model, mapping::RobustTotalDemandCapMap, export_dir::String)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    n_fractional = 0
+    for (s, x_s) in enumerate(x)
+        od_pairs = mapping.Omega_s[s]
+        for (od_idx, x_od) in x_s
+            o, d = od_pairs[od_idx]
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            for (pair_idx, var) in enumerate(x_od)
+                val = JuMP.value(var)
+                if abs(val - round(val)) > 1e-4
+                    n_fractional += 1
+                end
+                if val > 0.5
+                    j, k = valid_pairs[pair_idx]
+                    push!(rows, (
+                        scenario = s,
+                        od_idx = od_idx,
+                        origin_id = array_idx_to_station_id[o],
+                        dest_id = array_idx_to_station_id[d],
+                        pickup_idx = j,
+                        dropoff_idx = k,
+                        pickup_id = array_idx_to_station_id[j],
+                        dropoff_id = array_idx_to_station_id[k],
+                        value = round(Int, val)
+                    ))
+                end
+            end
+        end
+    end
+
+    if n_fractional > 0
+        @warn "RobustTotalDemandCapModel: $n_fractional x variable(s) are fractional (likely tied costs). Assignments written using val > 0.5 threshold."
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+
+    return nrow(df)
+end
+
+
+"""
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String) -> Int
 
 Export assignment variables for ClusteringBaseModel.
@@ -305,6 +422,41 @@ function export_model_specific_variables(
     # Export route activations when flow regularizer is present (no-op otherwise)
     n_flow_activations = export_flow_activation_variables(m, mapping, export_dir)
     metadata["n_flow_activations"] = n_flow_activations
+end
+
+
+"""
+    export_model_specific_variables(result::OptResult, mapping::NominalTwoStageODMap, export_dir::String, metadata::Dict)
+
+Export NominalTwoStageODModel specific metadata.
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::NominalTwoStageODMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"] = "NominalTwoStageODModel"
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_od_scenario_pairs"] = sum(length(od_pairs) for (_, od_pairs) in mapping.Omega_s)
+end
+
+
+"""
+    export_model_specific_variables(result::OptResult, mapping::RobustTotalDemandCapMap, export_dir::String, metadata::Dict)
+
+Export RobustTotalDemandCapModel specific metadata.
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::RobustTotalDemandCapMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"] = "RobustTotalDemandCapModel"
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_od_scenario_pairs"] = sum(length(od_pairs) for (_, od_pairs) in mapping.Omega_s)
+    metadata["demand_budgets"] = mapping.B
 end
 
 

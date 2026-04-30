@@ -48,6 +48,7 @@ struct ScenarioData
     start_time::Union{DateTime, Nothing}
     end_time::Union{DateTime, Nothing}
     requests::DataFrame
+    n_days::Int   # number of calendar days spanned; used to average demand (default 1)
 end
 
 """
@@ -60,9 +61,10 @@ function create_scenario_data(
     requests::DataFrame,
     label::String;
     start_time::Union{DateTime, Nothing}=nothing,
-    end_time::Union{DateTime, Nothing}=nothing
+    end_time::Union{DateTime, Nothing}=nothing,
+    n_days::Int=1
 )::ScenarioData
-    return ScenarioData(label, start_time, end_time, requests)
+    return ScenarioData(label, start_time, end_time, requests, n_days)
 end
 
 
@@ -163,11 +165,15 @@ function create_station_selection_data(
             # Skip empty scenarios
             if nrow(scenario_requests) > 0
                 label = "$(start_str)_$(end_str)"
+                # n_days: calendar days spanned. Single-day windows → 1 (no averaging).
+                # Month-spanning ranges from create_period_aggregated_data → averaging denominator.
+                n_days = Dates.value(Date(end_dt) - Date(start_dt)) + 1
                 scenario = create_scenario_data(
                     scenario_requests,
                     label;
                     start_time=start_dt,
-                    end_time=end_dt
+                    end_time=end_dt,
+                    n_days=n_days
                 )
                 push!(scenario_data, scenario)
             end
@@ -194,7 +200,7 @@ function _cost_dict_to_idx_matrix(
     for from_idx in 1:n, to_idx in 1:n
         from_id = array_idx_to_station_id[from_idx]
         to_id = array_idx_to_station_id[to_idx]
-        costs[from_idx, to_idx] = get(costs_by_id, (from_id, to_id), Inf)
+        costs[from_idx, to_idx] = from_idx == to_idx ? 0.0 : get(costs_by_id, (from_id, to_id), Inf)
     end
     return costs
 end

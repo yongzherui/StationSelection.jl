@@ -54,10 +54,10 @@ function prepare_station_data(base_station_file::String,
         error("No selected stations found in $selection_result_file")
     end
 
-    # Join base_df with selection_df based on station_id and id
+    # Join base_df with selection_df on station_id
     # Keep only stations present in selection results (candidate set)
-    station_df = innerjoin(base_df, selection_df[:, [:id, :selected]],
-                           on = :station_id => :id)
+    station_df = innerjoin(base_df, selection_df[:, [:station_id, :selected]],
+                           on = :station_id)
 
     # Create is_station column from selected
     station_df.is_station = station_df.selected .== 1.0
@@ -146,7 +146,7 @@ where both `from_station` and `to_station` are in the candidate station set.
 
 # Arguments
 - `base_segment_file`: Path to base segment CSV with columns from_station, to_station, ...
-- `selection_result_file`: Path to selection results CSV with an `id` column
+- `selection_result_file`: Path to selection results CSV with a `station_id` column
 
 # Returns
 - DataFrame containing only segments between candidate stations
@@ -155,6 +155,6 @@ function prepare_segment_data(base_segment_file::String,
                               selection_result_file::String)
     seg_df = CSV.read(base_segment_file, DataFrame)
     selection_df = CSV.read(selection_result_file, DataFrame)
-    candidate_ids = Set(selection_df.id)
+    candidate_ids = Set(selection_df.station_id)
     filter(r -> r.from_station ∈ candidate_ids && r.to_station ∈ candidate_ids, seg_df)
 end

@@ -13,11 +13,12 @@ export set_robust_total_demand_cap_objective!
         mapping::RobustTotalDemandCapMap
     )
 
-Set the robust minimisation objective:
+Set the robust minimisation objective (dual of the demand uncertainty problem):
 
-    min  Σ_{s,od} q̲_ods · t_ods
-       + Σ_s      B_s   · α_s
-       + Σ_{s,od} q̂_ods · β_ods
+    min  Σ_s B_s · α_s  +  Σ_{s,od} q̂_ods · β_ods
+
+α_s is the budget dual; β_ods is the per-OD upper-bound dual.
+The assignment cost enters through the dual constraint α + β ≥ cost·x (no t variable).
 """
 function set_robust_total_demand_cap_objective!(
         m::Model,
@@ -25,21 +26,11 @@ function set_robust_total_demand_cap_objective!(
         mapping::RobustTotalDemandCapMap
     )
     S     = n_scenarios(data)
-    t     = m[:t]
     alpha = m[:alpha]
     beta  = m[:beta]
 
     @objective(m, Min,
-        # Lower-bound demand cost
-        sum(
-            get(mapping.q_low[s], (o, d), 0.0) * t[s][od_idx]
-            for s in 1:S
-            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            if haskey(t[s], od_idx)
-        )
-        # Budget penalty
-        + sum(mapping.B[s] * alpha[s] for s in 1:S)
-        # Per-OD dual penalty
+        sum(mapping.B[s] * alpha[s] for s in 1:S)
         + sum(
             get(mapping.q_hat[s], (o, d), 0.0) * beta[s][od_idx]
             for s in 1:S

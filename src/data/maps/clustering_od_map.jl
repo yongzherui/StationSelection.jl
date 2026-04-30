@@ -67,10 +67,6 @@ function compute_valid_jk_pairs(
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
-                # we need to skip if they are the same, this results in no meaningful assignment
-                # because it means we ask the request to walk at most <= 2 * max_walking_distance
-                # and they will complete their trip.
-                j == k && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end

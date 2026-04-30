@@ -32,6 +32,18 @@ function create_map(
 end
 
 """
+    create_map(model::NominalTwoStageODModel, data::StationSelectionData)
+
+Create a NominalTwoStageODMap for NominalTwoStageODModel.
+"""
+function create_map(
+        model::NominalTwoStageODModel,
+        data::StationSelectionData
+    )::NominalTwoStageODMap
+    return create_nominal_two_stage_od_map(model, data)
+end
+
+"""
     create_map(model::ClusteringBaseModel, data::StationSelectionData)
 
 Create a ClusteringBaseModelMap for ClusteringBaseModel.

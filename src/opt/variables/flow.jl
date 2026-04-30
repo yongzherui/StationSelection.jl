@@ -13,7 +13,7 @@ export add_flow_variables!
 
 
 """
-    add_flow_variables!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageODMap) -> Int
+    add_flow_variables!(m::Model, data::StationSelectionData, mapping::Union{ClusteringTwoStageODMap, NominalTwoStageODMap}) -> Int
 
 Add sparse per-scenario route-activation variables:
     f_flow[s][(j,k)] ∈ {0,1}
@@ -24,7 +24,7 @@ Used by: ClusteringTwoStageODModel (when flow_regularization_weight is set)
 function add_flow_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::ClusteringTwoStageODMap
+        mapping::Union{ClusteringTwoStageODMap, NominalTwoStageODMap}
     )::Int
     S = n_scenarios(data)
     total = 0

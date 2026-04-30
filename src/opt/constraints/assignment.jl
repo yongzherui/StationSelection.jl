@@ -51,6 +51,7 @@ function add_assignment_constraints!(
 end
 
 
+
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
@@ -115,6 +116,7 @@ function add_assignment_to_active_constraints!(
 
     return _total_num_constraints(m) - before
 end
+
 
 
 # ============================================================================

@@ -52,3 +52,11 @@ function check_model_feasibility(
     end
     return nothing
 end
+
+function check_model_feasibility(::NominalTwoStageODModel, ::StationSelectionData)
+    return nothing
+end
+
+function check_model_feasibility(::RobustTotalDemandCapModel, ::StationSelectionData)
+    return nothing
+end
