@@ -187,6 +187,8 @@ function _run_robust_total_demand_cap_cutting_plane(
     converged = false
     final_term_status = MOI.OPTIMIZE_NOT_CALLED
     iteration_log = Vector{Dict{String, Any}}()
+    cut_log = Vector{Dict{String, Any}}()
+    prev_master_objective = nothing
 
     for iter in 1:cutting_plane_max_iters
         iteration = iter
@@ -201,6 +203,16 @@ function _run_robust_total_demand_cap_cutting_plane(
         eta = m[:eta]
         pending_cuts = Tuple{Int, Dict{Int, Float64}, Float64, Float64}[]
         worst_case_by_scenario = Dict{Int, Float64}()
+        master_objective = JuMP.objective_value(m)
+        objective_delta = isnothing(prev_master_objective) ? nothing : master_objective - prev_master_objective
+
+        if isnothing(objective_delta)
+            println("  [cutting plane] iter=$(iter) master_obj=$(round(master_objective; digits=6))")
+        else
+            println("  [cutting plane] iter=$(iter) master_obj=$(round(master_objective; digits=6)) delta=$(round(objective_delta; digits=6))")
+        end
+        flush(stdout)
+        @info "run_opt: cutting-plane objective progress" iteration=iter master_objective=master_objective objective_delta=objective_delta
 
         for s in 1:n_scenarios(data)
             scores = _compute_current_od_assignment_costs(
@@ -217,10 +229,12 @@ function _run_robust_total_demand_cap_cutting_plane(
 
         push!(iteration_log, Dict{String, Any}(
             "iteration" => iter,
-            "master_objective" => JuMP.objective_value(m),
+            "master_objective" => master_objective,
+            "objective_delta" => objective_delta,
             "violated_scenarios" => length(pending_cuts),
             "worst_case_by_scenario" => worst_case_by_scenario,
         ))
+        prev_master_objective = master_objective
 
         if isempty(pending_cuts)
             converged = true
@@ -232,7 +246,28 @@ function _run_robust_total_demand_cap_cutting_plane(
             break
         end
 
-        for (s, q_wc, _, _) in pending_cuts
+        for (s, q_wc, worst_case_value, eta_val) in pending_cuts
+            violation = worst_case_value - eta_val
+            q_support = [
+                Dict(
+                    "od_pair" => mapping.Omega_s[s][od_idx],
+                    "q_value" => q_val,
+                )
+                for (od_idx, q_val) in sort(collect(q_wc), by=first)
+            ]
+            cut_event = Dict{String, Any}(
+                "iteration" => iter,
+                "scenario" => s,
+                "worst_case_value" => worst_case_value,
+                "eta_value" => eta_val,
+                "violation" => violation,
+                "support_size" => length(q_wc),
+                "q_support" => q_support,
+            )
+            push!(cut_log, cut_event)
+            println("  [cutting plane] add cut iter=$(iter) scenario=$(s) worst_case=$(round(worst_case_value; digits=6)) eta=$(round(eta_val; digits=6)) violation=$(round(violation; digits=6)) support=$(length(q_wc))")
+            flush(stdout)
+            @info "run_opt: cutting-plane cut added" iteration=iter scenario=s worst_case_value=worst_case_value eta_value=eta_val violation=violation support_size=length(q_wc)
             _add_robust_cutting_plane_cut!(
                 m, data, mapping, s, q_wc;
                 in_vehicle_time_weight=model.in_vehicle_time_weight
@@ -271,6 +306,7 @@ function _run_robust_total_demand_cap_cutting_plane(
             "cutting_plane_converged" => converged,
             "initial_cuts_added" => initial_cuts_added,
             "iteration_log" => iteration_log,
+            "cut_log" => cut_log,
             "solve_mode" => "cutting_plane",
         ),
     )
