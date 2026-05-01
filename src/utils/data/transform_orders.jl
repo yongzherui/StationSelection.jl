@@ -271,6 +271,11 @@ function precompute_distances(stations::DataFrame)
     return distances
 end
 
+function precompute_walking_costs(stations::DataFrame; walking_speed::Float64=1.4)
+    distances_m = precompute_distances(stations)
+    return Dict(key => value / walking_speed for (key, value) in distances_m)
+end
+
 """
     find_closest_selected_station(candidate_station_id::Int,
                                   selected_station_ids::Vector{Int},
@@ -308,6 +313,40 @@ function find_closest_selected_station(candidate_station_id::Int,
     end
 
     return closest_selected_id
+end
+
+function find_best_feasible_station_pair(origin_id::Int,
+                                         dest_id::Int,
+                                         candidate_station_ids::Vector{Int},
+                                         walking_costs::Dict{Tuple{Int,Int}, Float64},
+                                         routing_costs::Dict{Tuple{Int,Int}, Float64},
+                                         max_walking_distance::Float64,
+                                         in_vehicle_time_weight::Float64)::Tuple{Int, Int}
+    if origin_id == 0 || dest_id == 0 || isempty(candidate_station_ids)
+        return 0, 0
+    end
+
+    best_cost = Inf
+    best_pair = (0, 0)
+
+    for pickup_id in candidate_station_ids
+        walk_pickup = get(walking_costs, (origin_id, pickup_id), Inf)
+        walk_pickup <= max_walking_distance || continue
+        for dropoff_id in candidate_station_ids
+            walk_dropoff = get(walking_costs, (dropoff_id, dest_id), Inf)
+            walk_dropoff <= max_walking_distance || continue
+            route_cost = get(routing_costs, (pickup_id, dropoff_id), Inf)
+            isfinite(route_cost) || continue
+
+            total_cost = walk_pickup + walk_dropoff + in_vehicle_time_weight * route_cost
+            if total_cost < best_cost
+                best_cost = total_cost
+                best_pair = (pickup_id, dropoff_id)
+            end
+        end
+    end
+
+    return best_pair
 end
 
 """
@@ -544,7 +583,10 @@ function transform_orders_from_assignments(order_file::String,
                                             end_date::Union{DateTime, Nothing}=nothing,
                                             use_timeframes::Bool=false,
                                             time_window_sec::Union{Int, Nothing}=nothing,
-                                            scenario_profile::Symbol=:four_period)
+                                            scenario_profile::Symbol=:four_period,
+                                            segment_file::Union{String, Nothing}=nothing,
+                                            max_walking_distance::Float64=Inf,
+                                            in_vehicle_time_weight::Float64=1.0)
 
     println("Reading input files...")
 
@@ -635,6 +677,14 @@ function transform_orders_from_assignments(order_file::String,
     distance_matrix = precompute_distances(stations_df)
     println("✓ Computed $(length(distance_matrix)) pairwise distances")
 
+    fallback_walking_costs = nothing
+    fallback_routing_costs = nothing
+    if !isnothing(segment_file)
+        fallback_walking_costs = precompute_walking_costs(stations_df)
+        fallback_routing_costs = read_routing_costs_from_segments(segment_file, stations_df)
+        println("✓ Loaded fallback walking/routing costs for joint feasible (j,k) assignment")
+    end
+
     # Identify timeframe columns for fallback
     all_columns = names(stations_df)
     timeframe_columns = filter(col -> occursin(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}_\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", col), all_columns)
@@ -712,11 +762,22 @@ function transform_orders_from_assignments(order_file::String,
             selected_ids = get_selected_station_ids(
                 order_time, stations_df, all_columns, timeframe_columns, use_timeframes
             )
-
-            assigned_pickup_id = find_closest_selected_station(
-                origin_id, selected_ids, distance_matrix)
-            assigned_dropoff_id = find_closest_selected_station(
-                target_id, selected_ids, distance_matrix)
+            if !isnothing(fallback_walking_costs) && !isnothing(fallback_routing_costs)
+                assigned_pickup_id, assigned_dropoff_id = find_best_feasible_station_pair(
+                    origin_id,
+                    target_id,
+                    selected_ids,
+                    fallback_walking_costs,
+                    fallback_routing_costs,
+                    max_walking_distance,
+                    in_vehicle_time_weight,
+                )
+            else
+                assigned_pickup_id = find_closest_selected_station(
+                    origin_id, selected_ids, distance_matrix)
+                assigned_dropoff_id = find_closest_selected_station(
+                    target_id, selected_ids, distance_matrix)
+            end
             n_fallback += 1
             if !isnothing(period_idx)
                 fallback_by_period[period_idx] = get(fallback_by_period, period_idx, 0) + 1
@@ -852,7 +913,10 @@ function transform_orders_for_month_backtest(order_file::String,
                                              end_date::Union{DateTime, Nothing}=nothing,
                                              scenario_profile::Symbol=:four_period,
                                              use_timeframes::Bool=false,
-                                             time_window_sec::Union{Int, Nothing}=nothing)
+                                             time_window_sec::Union{Int, Nothing}=nothing,
+                                             segment_file::Union{String, Nothing}=nothing,
+                                             max_walking_distance::Float64=Inf,
+                                             in_vehicle_time_weight::Float64=1.0)
     mkpath(output_dir)
 
     transformed_df, stats = transform_orders_from_assignments(
@@ -865,6 +929,9 @@ function transform_orders_for_month_backtest(order_file::String,
         use_timeframes=use_timeframes,
         time_window_sec=time_window_sec,
         scenario_profile=scenario_profile,
+        segment_file=segment_file,
+        max_walking_distance=max_walking_distance,
+        in_vehicle_time_weight=in_vehicle_time_weight,
     )
 
     month_file = joinpath(output_dir, "orders_transformed_month.csv")
@@ -954,14 +1021,14 @@ Quick Transform for (date, time_window) pairs not covered by original selection 
 `scenario_idx` identifies which z* active-station set to use for that window (matched by
 time-of-day to an original scenario).
 
-For each order whose `order_time` falls within an uncovered range, assigns greedily using
-the segment network directly from the order origin and destination station IDs:
+For each order whose `order_time` falls within an uncovered range, assign the
+minimum-cost walking-feasible `(j,k)` pair:
 
-    j*(p) = z*/y* station with minimum seg_time from origin reachable within max_walking_distance,
-    k*(p) = z*/y* station with minimum seg_time from target reachable within max_walking_distance,
+    argmin walk(o→j) + walk(k→d) + λ·route(j→k)
 
-where Z*_s = active stations for `scenario_idx`. Falls back to Y* (built stations,
-selected==1 in cluster_file) when Z*_s has no reachable station.
+subject to both walking legs being within `max_walking_distance`. The active set
+Z*_s is used first, and the routine falls back to Y* (built stations) only when
+no feasible active pair exists.
 
 Reads from `selection_run_dir/variable_exports/`:
   - `scenario_activation.csv`  — z*_{js} (active stations per scenario)
@@ -972,7 +1039,8 @@ function transform_orders_quick_extend(
     cluster_file         :: String,
     uncovered_ranges     :: Vector{Tuple{DateTime, DateTime, Int}},
     segment_file         :: String,
-    max_walking_distance :: Float64
+    max_walking_distance :: Float64;
+    in_vehicle_time_weight::Float64 = 1.0
 )
     isempty(uncovered_ranges) && return DataFrame()
 
@@ -998,35 +1066,8 @@ function transform_orders_quick_extend(
     y_star = Set{Int}(r.id for r in eachrow(stations_df)
                       if hasproperty(r, :selected) && r.selected >= 0.5)
 
-    # Build walking reachability from segment.csv:
-    # walk_reach[from_id] = [(to_id, seg_time), ...] for seg_time <= max_walking_distance
-    # Also include self (seg_time = 0) so a passenger already at a selected station is valid.
-    seg_df = CSV.read(segment_file, DataFrame)
-    walk_reach = Dict{Int, Vector{Tuple{Int, Float64}}}()
-    for r in eachrow(seg_df)
-        r.seg_time <= max_walking_distance || continue
-        push!(get!(walk_reach, r.from_station, Tuple{Int,Float64}[]), (r.to_station, Float64(r.seg_time)))
-    end
-    # Add self-loops (seg_time = 0) for every station that appears
-    all_station_ids = unique(stations_df.id)
-    for sid in all_station_ids
-        push!(get!(walk_reach, sid, Tuple{Int,Float64}[]), (sid, 0.0))
-    end
-
-    # Helper: given an origin station and a candidate set, return the candidate with
-    # minimum seg_time reachable from origin within max_walking_distance.
-    function closest_reachable(origin::Int, candidates::Set{Int})
-        best_id   = 0
-        best_time = Inf
-        for (sid, t) in get(walk_reach, origin, Tuple{Int,Float64}[])
-            sid ∈ candidates || continue
-            if t < best_time
-                best_time = t
-                best_id   = sid
-            end
-        end
-        return best_id
-    end
+    walking_costs = precompute_walking_costs(stations_df)
+    routing_costs = read_routing_costs_from_segments(segment_file, stations_df)
 
     transformed_orders = []
     n_z = 0; n_y = 0; n_dropped = 0
@@ -1043,22 +1084,27 @@ function transform_orders_quick_extend(
 
         z_s = get(z_star, s_idx, Set{Int}())
 
-        # Step 1: try z* — active stations for this scenario's time-of-day window.
-        # Walk from origin_id / target_id through segment network; pick minimum seg_time
-        # station in z* that is reachable within max_walking_distance.
-        assigned_pickup_id  = closest_reachable(origin_id, z_s)
-        assigned_dropoff_id = closest_reachable(target_id, z_s)
+        assigned_pickup_id, assigned_dropoff_id = find_best_feasible_station_pair(
+            origin_id,
+            target_id,
+            collect(z_s),
+            walking_costs,
+            routing_costs,
+            max_walking_distance,
+            in_vehicle_time_weight,
+        )
 
-        # Step 2: fall back to y* — ALL built stations — only when z* yields nothing.
-        # Each side is tried independently: if pickup found in z* it stays, only the
-        # missing side falls back.
-        using_z_pickup  = assigned_pickup_id  != 0
-        using_z_dropoff = assigned_dropoff_id != 0
-        if !using_z_pickup
-            assigned_pickup_id  = closest_reachable(origin_id, y_star)
-        end
-        if !using_z_dropoff
-            assigned_dropoff_id = closest_reachable(target_id, y_star)
+        used_z_star = assigned_pickup_id != 0 && assigned_dropoff_id != 0
+        if !used_z_star
+            assigned_pickup_id, assigned_dropoff_id = find_best_feasible_station_pair(
+                origin_id,
+                target_id,
+                collect(y_star),
+                walking_costs,
+                routing_costs,
+                max_walking_distance,
+                in_vehicle_time_weight,
+            )
         end
 
         # Step 3: if still unassigned after y* fallback, drop the order entirely.
@@ -1068,7 +1114,6 @@ function transform_orders_quick_extend(
             continue
         end
 
-        used_z_star = using_z_pickup && using_z_dropoff
         used_z_star ? (n_z += 1) : (n_y += 1)
 
         push!(transformed_orders, (

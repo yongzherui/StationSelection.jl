@@ -24,6 +24,9 @@ over a simplex, so x is integer at optimality. The optimal alpha creates no
 incentive for fractional x (splitting x only raises cost, requiring higher beta).
 Degeneracy (tied costs) can still produce fractional solutions with equal
 objective value; the export warns if this occurs.
+
+All active robust OD pairs are required to have at least one valid walking-feasible
+`(j,k)` pair. `create_map` fails fast if this is violated.
 """
 function add_robust_assignment_variables!(
         m::Model,
@@ -38,11 +41,8 @@ function add_robust_assignment_variables!(
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             n_pairs = length(valid_pairs)
-            if n_pairs > 0
-                x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
-            else
-                x[s][od_idx] = VariableRef[]
-            end
+            n_pairs > 0 || error("Robust assignment variable build encountered OD with no valid pairs: scenario=$s, od_idx=$od_idx, o=$o, d=$d")
+            x[s][od_idx] = @variable(m, [1:n_pairs], Bin)
         end
     end
 
@@ -75,8 +75,6 @@ function add_robust_dual_variables!(
     beta = [Dict{Int, VariableRef}() for _ in 1:S]
     for s in 1:S
         for (od_idx, _) in enumerate(mapping.Omega_s[s])
-            x_od = get(m[:x][s], od_idx, VariableRef[])
-            isempty(x_od) && continue
             beta[s][od_idx] = @variable(m, lower_bound=0.0)
         end
     end

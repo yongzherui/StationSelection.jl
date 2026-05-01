@@ -20,7 +20,7 @@ export add_robust_dual_constraints!
 """
     add_robust_assignment_constraints!(m, data, mapping::RobustTotalDemandCapMap)
 
-Σ_{j,k} x[s][od_idx][pair] = 1  ∀(od_idx, s) with valid pairs.
+Σ_{j,k} x[s][od_idx][pair] = 1  ∀(od_idx, s).
 
 The RHS is 1 (not demand count) because x is a recourse witness.
 """
@@ -35,9 +35,7 @@ function add_robust_assignment_constraints!(
 
     for s in 1:S
         for (od_idx, _) in enumerate(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
-            @constraint(m, sum(x_od) == 1.0)
+            @constraint(m, sum(x[s][od_idx]) == 1.0)
         end
     end
 
@@ -62,12 +60,10 @@ function add_robust_assignment_to_active_constraints!(
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                @constraint(m, x_od[pair_idx] <= z[j, s])
-                @constraint(m, x_od[pair_idx] <= z[k, s])
+                @constraint(m, x[s][od_idx][pair_idx] <= z[j, s])
+                @constraint(m, x[s][od_idx][pair_idx] <= z[k, s])
             end
         end
     end
@@ -100,15 +96,13 @@ function add_robust_dual_constraints!(
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
             haskey(beta[s], od_idx) || continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             cost_expr = @expression(m,
                 sum(
                     (get_walking_cost(data, o, j) +
                      get_walking_cost(data, k, d) +
-                     in_vehicle_time_weight * get_routing_cost(data, j, k)) * x_od[pair_idx]
+                     in_vehicle_time_weight * get_routing_cost(data, j, k)) * x[s][od_idx][pair_idx]
                     for (pair_idx, (j, k)) in enumerate(valid_pairs)
                 )
             )

@@ -93,11 +93,29 @@ function create_robust_total_demand_cap_map(
     q_hat_map   = Dict{Int, Dict{Tuple{Int,Int}, Float64}}()
     B_vec       = Vector{Float64}(undef, S)
     all_od_pairs = Set{Tuple{Int,Int}}()
+    n = data.n_stations
 
     for s in 1:S
         p = scenario_to_period[s]
 
         q_hat_p = get(model.q_hat, p, Dict{Tuple{Int,Int}, Float64}())
+        missing_q_hat = Tuple{Int, Int}[]
+        for o in 1:n
+            for d in 1:n
+                o == d && continue
+                haskey(q_hat_p, (o, d)) || push!(missing_q_hat, (o, d))
+            end
+        end
+        if !isempty(missing_q_hat)
+            preview = join(
+                ["(o=$(o), d=$(d))" for (o, d) in missing_q_hat[1:min(end, 10)]],
+                ", ",
+            )
+            error(
+                "RobustTotalDemandCapModel is missing q_hat entries for scenario period=$p. " *
+                "Missing count=$(length(missing_q_hat)). Examples: $preview"
+            )
+        end
         active = [(o, d) for ((o, d), v) in q_hat_p if v > 0.0]
 
         Omega_s[s]   = active
@@ -110,6 +128,25 @@ function create_robust_total_demand_cap_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs, data, model.max_walking_distance
     )
+
+    uncovered = Tuple{Int, Int, Int}[]
+    for s in 1:S
+        for (o, d) in Omega_s[s]
+            isempty(get(valid_jk_pairs, (o, d), Tuple{Int,Int}[])) || continue
+            push!(uncovered, (s, o, d))
+        end
+    end
+    if !isempty(uncovered)
+        preview = join(
+            ["(scenario=$(s), o=$(o), d=$(d))" for (s, o, d) in uncovered[1:min(end, 10)]],
+            ", ",
+        )
+        error(
+            "RobustTotalDemandCapModel has active OD pairs with no walking-feasible (j,k) pairs " *
+            "under max_walking_distance=$(model.max_walking_distance). " *
+            "Uncovered count=$(length(uncovered)). Examples: $preview"
+        )
+    end
 
     return RobustTotalDemandCapMap(
         data.station_id_to_array_idx,
