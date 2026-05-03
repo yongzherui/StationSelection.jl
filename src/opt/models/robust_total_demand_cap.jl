@@ -22,7 +22,7 @@ Two-stage robust station selection with per-scenario total-demand cap.
 - `max_walking_distance`: walking-time filter for valid (j,k) pairs (seconds)
 - `q_hat`: per-OD demand upper bounds q̄_ods; `q_hat[s][(o,d)]`
 - `B`: per-scenario total-demand budgets B_s; `B[s]`
-- `solve_mode`: `:cutting_plane` (default) or `:exact_dual`
+- `solve_mode`: `:exact_dual` (default) or `:cutting_plane`
 
 Demand-bound data is pre-calibrated externally (see `compute_demand_bounds`).
 The scenario indices in q_hat/B must align with the ScenarioData order
@@ -54,7 +54,7 @@ struct RobustTotalDemandCapModel <: AbstractODModel
             max_walking_distance::Number   = 300.0,
             q_hat::Dict{Int, Dict{Tuple{Int,Int}, Float64}},
             B::Vector{Float64},
-            solve_mode::Symbol = :cutting_plane,
+            solve_mode::Symbol = :exact_dual,
         )
         k > 0 || throw(ArgumentError("k must be positive"))
         l >= k || throw(ArgumentError("l must be >= k"))
