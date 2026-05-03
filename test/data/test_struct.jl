@@ -130,9 +130,9 @@
         )
 
         scenarios = [
-            StationSelection.ScenarioData("morning", DateTime(2024, 1, 1, 6), DateTime(2024, 1, 1, 12), requests),
-            StationSelection.ScenarioData("afternoon", DateTime(2024, 1, 1, 12), DateTime(2024, 1, 1, 18), requests),
-            StationSelection.ScenarioData("evening", DateTime(2024, 1, 1, 18), DateTime(2024, 1, 1, 24), requests)
+            StationSelection.create_scenario_data(requests, "morning"; start_time=DateTime(2024, 1, 1, 6), end_time=DateTime(2024, 1, 1, 12)),
+            StationSelection.create_scenario_data(requests, "afternoon"; start_time=DateTime(2024, 1, 1, 12), end_time=DateTime(2024, 1, 1, 18)),
+            StationSelection.create_scenario_data(requests, "evening"; start_time=DateTime(2024, 1, 1, 18), end_time=DateTime(2024, 1, 2, 0))
         ]
 
         label_to_idx, idx_to_label = StationSelection.create_scenario_label_mappings(scenarios)
@@ -167,7 +167,12 @@
             dest_idx = [2, 2, 3, 1, 2, 3]
         )
 
-        scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)
+        scenario = StationSelection.create_scenario_data(
+            requests,
+            "test";
+            start_time=start_time,
+            end_time=DateTime(2024, 1, 1, 9, 0, 0),
+        )
         time_window = 60  # 60 seconds
 
         time_to_od_count = StationSelection.compute_time_to_od_count_mapping(scenario, time_window)
@@ -198,7 +203,12 @@
             dest_idx = [2, 3]
         )
 
-        scenario = StationSelection.ScenarioData("test", start_time, DateTime(2024, 1, 1, 9, 0, 0), requests)
+        scenario = StationSelection.create_scenario_data(
+            requests,
+            "test";
+            start_time=start_time,
+            end_time=DateTime(2024, 1, 1, 9, 0, 0),
+        )
         time_window = 300  # 5 minutes
 
         time_to_od_count = StationSelection.compute_time_to_od_count_mapping(scenario, time_window)
@@ -209,6 +219,59 @@
         @test haskey(time_to_od_count[1], (2, 3))
         @test time_to_od_count[0][(1, 2)] == 1
         @test time_to_od_count[1][(2, 3)] == 1
+    end
+
+    @testset "Smoothed nominal OD map" begin
+        stations = DataFrame(
+            id = [1, 2, 3],
+            lon = [0.0, 1.0, 2.0],
+            lat = [0.0, 1.0, 2.0]
+        )
+        requests = DataFrame(
+            id = 1:5,
+            start_station_id = [1, 1, 1, 1, 2],
+            end_station_id = [2, 2, 3, 2, 3],
+            request_time = [
+                DateTime(2024, 1, 1, 8, 0, 0),
+                DateTime(2024, 1, 1, 8, 5, 0),
+                DateTime(2024, 1, 1, 8, 10, 0),
+                DateTime(2024, 1, 2, 8, 0, 0),
+                DateTime(2024, 1, 2, 8, 5, 0),
+            ]
+        )
+        walking_costs = Dict{Tuple{Int,Int}, Float64}(
+            (1, 1) => 0.0, (2, 2) => 0.0, (3, 3) => 0.0,
+            (1, 2) => 100.0, (2, 1) => 100.0,
+            (1, 3) => 100.0, (3, 1) => 100.0,
+            (2, 3) => 100.0, (3, 2) => 100.0
+        )
+        scenario_ranges = [("2024-01-01 00:00:00", "2024-01-02 23:59:59")]
+        data = StationSelection.create_station_selection_data(
+            stations,
+            requests,
+            walking_costs;
+            scenarios=scenario_ranges,
+        )
+
+        model = StationSelection.SmoothedNominalTwoStageODModel(
+            1,
+            2;
+            max_walking_distance=150.0,
+            smoothing_tau=2.0,
+            pseudo_demand_fraction=0.1,
+            gravity_uniform_mix=0.2,
+        )
+        mapping = StationSelection.create_map(model, data)
+
+        @test mapping isa StationSelection.NominalTwoStageODMap
+        @test length(mapping.Omega_s[1]) == 6
+        @test Set(mapping.Omega_s[1]) == Set([(1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2)])
+        @test all(get(mapping.Q_s[1], od, 0.0) > 0.0 for od in mapping.Omega_s[1])
+
+        # Frequently observed OD pairs should still dominate sparse or unseen ones.
+        @test mapping.Q_s[1][(1, 2)] > mapping.Q_s[1][(1, 3)] > mapping.Q_s[1][(3, 1)]
+        @test mapping.Q_s[1][(1, 2)] < 1.5
+        @test mapping.Q_s[1][(3, 1)] < 0.1
     end
 
 end

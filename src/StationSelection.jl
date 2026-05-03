@@ -135,6 +135,7 @@ export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
 export NominalTwoStageODModel
+export SmoothedNominalTwoStageODModel
 export RobustTotalDemandCapModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel

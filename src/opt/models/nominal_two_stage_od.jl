@@ -7,6 +7,7 @@ enters as an objective coefficient rather than a variable upper bound.
 """
 
 export NominalTwoStageODModel
+export SmoothedNominalTwoStageODModel
 
 """
     NominalTwoStageODModel <: AbstractODModel
@@ -54,5 +55,59 @@ struct NominalTwoStageODModel <: AbstractODModel
         max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
 
         new(k, l, Float64(in_vehicle_time_weight), Float64(max_walking_distance))
+    end
+end
+
+
+"""
+    SmoothedNominalTwoStageODModel <: AbstractODModel
+
+Two-stage nominal station selection model with smoothed OD demand.
+
+This variant assigns positive mean demand to every walk-feasible OD pair in each
+scenario by shrinking sparse empirical means toward a gravity-style prior:
+
+    q_{ods} = n/(n+τ) * q̄_{ods} + τ/(n+τ) * q̃_{ods}
+
+where q̄ is the empirical mean daily demand, n is the number of historical days
+in which the OD pair was active in that scenario, and q̃ is a strictly positive
+gravity prior with a small uniform mixture.
+"""
+struct SmoothedNominalTwoStageODModel <: AbstractODModel
+    k::Int
+    l::Int
+    in_vehicle_time_weight::Float64
+    max_walking_distance::Float64
+    smoothing_tau::Float64
+    pseudo_demand_fraction::Float64
+    gravity_uniform_mix::Float64
+
+    function SmoothedNominalTwoStageODModel(
+            k::Int,
+            l::Int;
+            in_vehicle_time_weight::Number=1.0,
+            max_walking_distance::Union{Number, Nothing}=300,
+            smoothing_tau::Number=5.0,
+            pseudo_demand_fraction::Number=0.02,
+            gravity_uniform_mix::Number=0.05,
+        )
+        k > 0 || throw(ArgumentError("k must be positive"))
+        l >= k || throw(ArgumentError("l must be >= k"))
+        in_vehicle_time_weight >= 0 || throw(ArgumentError("in_vehicle_time_weight must be non-negative"))
+        isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided"))
+        max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+        smoothing_tau > 0 || throw(ArgumentError("smoothing_tau must be positive"))
+        0 <= pseudo_demand_fraction || throw(ArgumentError("pseudo_demand_fraction must be non-negative"))
+        0 <= gravity_uniform_mix <= 1 || throw(ArgumentError("gravity_uniform_mix must lie in [0,1]"))
+
+        new(
+            k,
+            l,
+            Float64(in_vehicle_time_weight),
+            Float64(max_walking_distance),
+            Float64(smoothing_tau),
+            Float64(pseudo_demand_fraction),
+            Float64(gravity_uniform_mix),
+        )
     end
 end

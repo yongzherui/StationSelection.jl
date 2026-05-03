@@ -19,7 +19,7 @@ Two-stage robust station selection with per-scenario total-demand cap.
 - `k`: active stations per scenario (second stage)
 - `l`: stations to build (first stage)
 - `in_vehicle_time_weight`: weight λ on in-vehicle routing cost c_{jk}
-- `max_walking_distance`: walking-distance filter for valid (j,k) pairs (metres)
+- `max_walking_distance`: walking-time filter for valid (j,k) pairs (seconds)
 - `q_hat`: per-OD demand upper bounds q̄_ods; `q_hat[s][(o,d)]`
 - `B`: per-scenario total-demand budgets B_s; `B[s]`
 - `solve_mode`: `:cutting_plane` (default) or `:exact_dual`

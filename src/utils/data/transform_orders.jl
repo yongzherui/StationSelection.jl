@@ -335,7 +335,7 @@ function find_best_feasible_station_pair(origin_id::Int,
         for dropoff_id in candidate_station_ids
             walk_dropoff = get(walking_costs, (dropoff_id, dest_id), Inf)
             walk_dropoff <= max_walking_distance || continue
-            route_cost = get(routing_costs, (pickup_id, dropoff_id), Inf)
+            route_cost = pickup_id == dropoff_id ? 0.0 : get(routing_costs, (pickup_id, dropoff_id), Inf)
             isfinite(route_cost) || continue
 
             total_cost = walk_pickup + walk_dropoff + in_vehicle_time_weight * route_cost
