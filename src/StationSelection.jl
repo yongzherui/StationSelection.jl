@@ -136,6 +136,7 @@ export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
 export NominalTwoStageODModel
 export SmoothedNominalTwoStageODModel
+export NominalFeasibleModel
 export RobustTotalDemandCapModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel
@@ -162,6 +163,7 @@ export add_robust_assignment_constraints!, add_robust_assignment_to_active_const
 export add_robust_dual_constraints!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
+export add_feasibility_coverage_constraints!
 export add_flow_activation_constraints!
 export add_route_capacity_constraints!
 export add_route_capacity_lazy_constraints!

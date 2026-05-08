@@ -8,6 +8,7 @@ enters as an objective coefficient rather than a variable upper bound.
 
 export NominalTwoStageODModel
 export SmoothedNominalTwoStageODModel
+export NominalFeasibleModel
 
 """
     NominalTwoStageODModel <: AbstractODModel
@@ -73,6 +74,42 @@ where q̄ is the empirical mean daily demand, n is the number of historical days
 in which the OD pair was active in that scenario, and q̃ is a strictly positive
 gravity prior with a small uniform mixture.
 """
+"""
+    NominalFeasibleModel <: AbstractODModel
+
+Two-stage nominal station selection model with per-station feasibility coverage constraints.
+
+Identical to NominalTwoStageODModel but adds n×S coverage constraints ensuring that for
+every station location j, at least one active station within walking distance is selected
+in each scenario:
+
+    ∑_{k ∈ N_j} z[k,s] ≥ 1   ∀ j ∈ J, s ∈ S
+
+where N_j = {k ∈ J : w(j,k) ≤ max_walking_distance}.  Since w(j,j) = 0, j ∈ N_j always.
+"""
+struct NominalFeasibleModel <: AbstractODModel
+    k::Int
+    l::Int
+    in_vehicle_time_weight::Float64
+    max_walking_distance::Float64
+
+    function NominalFeasibleModel(
+            k::Int,
+            l::Int;
+            in_vehicle_time_weight::Number=1.0,
+            max_walking_distance::Union{Number, Nothing}=300,
+        )
+        k > 0 || throw(ArgumentError("k must be positive"))
+        l >= k || throw(ArgumentError("l must be >= k"))
+        in_vehicle_time_weight >= 0 || throw(ArgumentError("in_vehicle_time_weight must be non-negative"))
+        isnothing(max_walking_distance) && throw(ArgumentError("max_walking_distance must be provided"))
+        max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+
+        new(k, l, Float64(in_vehicle_time_weight), Float64(max_walking_distance))
+    end
+end
+
+
 struct SmoothedNominalTwoStageODModel <: AbstractODModel
     k::Int
     l::Int
