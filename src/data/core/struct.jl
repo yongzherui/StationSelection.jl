@@ -144,6 +144,7 @@ function create_station_selection_data(
     routing_costs_idx = isnothing(routing_costs) ? nothing :
         _cost_dict_to_idx_matrix(routing_costs, array_idx_to_station_id)
     indexed_requests = _add_request_station_indices(requests, station_id_to_array_idx)
+    indexed_requests = filter(row -> row.origin_idx != row.dest_idx, indexed_requests)
 
     # Create scenario data
     scenario_data = Vector{ScenarioData}()

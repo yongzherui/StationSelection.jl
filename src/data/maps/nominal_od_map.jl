@@ -223,6 +223,18 @@ function create_nominal_two_stage_od_map(
     )
 end
 
+function create_nominal_two_stage_od_map(
+    model::NominalFeasibleModel,
+    data::StationSelectionData
+)::NominalTwoStageODMap
+    proxy = NominalTwoStageODModel(
+        model.k, model.l;
+        in_vehicle_time_weight=model.in_vehicle_time_weight,
+        max_walking_distance=model.max_walking_distance,
+    )
+    return create_nominal_two_stage_od_map(proxy, data)
+end
+
 has_walking_distance_limit(::NominalTwoStageODMap) = true
 
 function get_valid_jk_pairs(mapping::NominalTwoStageODMap, o::Int, d::Int)

@@ -61,20 +61,6 @@ end
 
 
 """
-    SmoothedNominalTwoStageODModel <: AbstractODModel
-
-Two-stage nominal station selection model with smoothed OD demand.
-
-This variant assigns positive mean demand to every walk-feasible OD pair in each
-scenario by shrinking sparse empirical means toward a gravity-style prior:
-
-    q_{ods} = n/(n+τ) * q̄_{ods} + τ/(n+τ) * q̃_{ods}
-
-where q̄ is the empirical mean daily demand, n is the number of historical days
-in which the OD pair was active in that scenario, and q̃ is a strictly positive
-gravity prior with a small uniform mixture.
-"""
-"""
     NominalFeasibleModel <: AbstractODModel
 
 Two-stage nominal station selection model with per-station feasibility coverage constraints.
@@ -110,6 +96,20 @@ struct NominalFeasibleModel <: AbstractODModel
 end
 
 
+"""
+    SmoothedNominalTwoStageODModel <: AbstractODModel
+
+Two-stage nominal station selection model with smoothed OD demand.
+
+This variant assigns positive mean demand to every walk-feasible OD pair in each
+scenario by shrinking sparse empirical means toward a gravity-style prior:
+
+    q_{ods} = n/(n+τ) * q̄_{ods} + τ/(n+τ) * q̃_{ods}
+
+where q̄ is the empirical mean daily demand, n is the number of historical days
+in which the OD pair was active in that scenario, and q̃ is a strictly positive
+gravity prior with a small uniform mixture.
+"""
 struct SmoothedNominalTwoStageODModel <: AbstractODModel
     k::Int
     l::Int
