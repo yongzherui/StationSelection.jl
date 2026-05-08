@@ -5,7 +5,6 @@ Computes per-OD lower bounds, range widths, and per-scenario budget parameters
 from a collection of historical ScenarioData instances grouped by time-of-day period.
 """
 
-using Statistics
 using Dates
 
 export compute_demand_bounds
@@ -53,6 +52,16 @@ function _hour_to_period(h::Int)::Union{Int, Nothing}
     return nothing
 end
 
+# Nearest-rank (empirical) quantile: returns sorted_data[ceil(τ * n)].
+# Always selects an actual observed value, so the result is integer-valued
+# whenever the input data consists of integer counts.
+function _empirical_quantile(sorted_data::Vector{Float64}, τ::Float64)::Float64
+    n = length(sorted_data)
+    n == 0 && return 0.0
+    idx = clamp(ceil(Int, τ * n), 1, n)
+    return sorted_data[idx]
+end
+
 
 """
     compute_demand_bounds(
@@ -63,23 +72,27 @@ end
 
 Calibrate demand bounds from historical scenario observations grouped by period.
 
-Lower bounds are fixed at zero for all OD pairs.  This is motivated by the
-sparsity of the demand data: most OD pairs appear on fewer than 10% of days,
-so a quantile-based lower bound would be zero anyway for the vast majority of
-pairs.  More importantly, setting q̲ = 0 is the conservative choice: it lets
-the adversary concentrate the full budget on the most costly corridors rather
-than being forced to spread some demand onto cheap pairs.
+Per-OD upper bounds and the total-demand cap are computed using the empirical
+(nearest-rank) quantile: for n observations sorted in ascending order, quantile τ
+returns the value at index ceil(τ × n).  This always selects an actual data point
+rather than interpolating between adjacent values, so the result is an integer
+whenever the raw demand counts are integers.  This preserves the integrality
+argument required for the LP relaxation of the robust counterpart.
+
+Lower bounds are fixed at zero for all OD pairs.  Setting q̲ = 0 is the
+conservative choice: it lets the adversary concentrate the full budget on the most
+costly corridors rather than being forced to spread demand onto cheap pairs.
 
 # Arguments
-- `scenario_groups`: output of `group_scenarios_by_period`
-- `q_high_quantile`: upper quantile for per-OD demand (default 90th percentile)
-- `Q_cap_quantile`: quantile for the total-demand cap Q̄_s (default 90th percentile)
+- `scenario_groups`:  output of `group_scenarios_by_period`
+- `q_high_quantile`:  empirical quantile for per-OD upper bounds (default 0.90)
+- `Q_cap_quantile`:   empirical quantile for total-demand cap Q̄_s (default 0.90)
 
 # Returns
 - `q_low ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̲_ods = 0 for all (od, s)
-- `q_hat ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̂_ods = q̄_ods (since q̲ = 0)
+- `q_hat ::Dict{Int, Dict{Tuple{Int,Int}, Float64}}` — q̂_ods empirical quantile
 - `B     ::Vector{Float64}` — B_s = Q̄_s (since Σ q̲ = 0)
-- `Q_cap ::Vector{Float64}` — Q̄_s (for reference/serialisation)
+- `Q_cap ::Vector{Float64}` — Q̄_s = empirical quantile of total daily demand
 
 OD pairs that never appear in period s are omitted from q_low[s] and q_hat[s].
 """
@@ -116,16 +129,19 @@ function compute_demand_bounds(
             push!(total_demand_hist, Float64(sum(values(od_count))))
         end
 
-        # Per-OD quantiles (missing observations treated as 0)
+        # Per-OD upper bounds: empirical quantile over zero-padded daily counts.
+        # Days without demand for a given OD pair are included as zeros so the
+        # quantile accounts for how often the pair has no demand.  Zero results
+        # are replaced by the flat floor in impute_od_bounds.
         n_obs = length(instances)
         q_low_s = Dict{Tuple{Int,Int}, Float64}()
         q_hat_s = Dict{Tuple{Int,Int}, Float64}()
 
         for (od, hist) in od_demand_hist
-            # Pad with zeros for days where this OD pair had no demand
             n_zeros = max(0, n_obs - length(hist))
-            full_hist = vcat(fill(0.0, n_zeros), hist)
-            hi = quantile(full_hist, q_high_quantile)
+            full_hist = sort(vcat(fill(0.0, n_zeros), hist))
+            hi = _empirical_quantile(full_hist, q_high_quantile)
+            @assert isinteger(hi) "Expected integer q̂, got $hi for OD $od"
             q_low_s[od] = 0.0
             q_hat_s[od] = hi   # q̂ = q̄ − q̲ = q̄ since q̲ = 0
         end
@@ -133,12 +149,14 @@ function compute_demand_bounds(
         q_low[s] = q_low_s
         q_hat[s] = q_hat_s
 
-        # Total-demand cap
+        # Total-demand cap: empirical quantile over daily totals
         if isempty(total_demand_hist)
             Q_cap[s] = 0.0
         else
-            Q_cap[s] = quantile(total_demand_hist, Q_cap_quantile)
+            Q_cap[s] = _empirical_quantile(sort(total_demand_hist), Q_cap_quantile)
         end
+        @assert Q_cap[s] > 0        "Q_cap = 0 for period $s — no demand in calibration window"
+        @assert isinteger(Q_cap[s]) "Q_cap non-integer: $(Q_cap[s]) for period $s"
 
         # B_s = Q_cap since Σ q_low = 0
         B[s] = Q_cap[s]
@@ -157,22 +175,15 @@ end
 
 Impute upper-bound estimates for OD pairs absent from calibration data.
 
-For each period, applies rank-1 gravity factorization (Option B):
+Uses a flat floor: all missing or zero-valued (o,d) pairs are assigned
+`ceil(effective_floor)`, where `effective_floor` is the minimum positive q̂
+entry across all periods (the smallest data-anchored upper bound), or 1.0 if
+no positive entries exist anywhere.  An explicit `floor_value` overrides this.
 
-    q̂_gravity(o,d) = O(o) × D(d) / Q
-
-where O(o) = Σ_d q̂(o,d), D(d) = Σ_o q̂(o,d), Q = Σ_{o,d} q̂(o,d) are
-computed from the existing positive q̂ entries.
-
-Falls back to `floor_value` when gravity is zero (cold origin or destination).
-If `floor_value` is not supplied, uses the minimum positive q̂ entry across all
-periods (the smallest data-anchored upper bound), or 1.0 if no positive entries
-exist anywhere.
-
-All imputed values are rounded up to the nearest positive integer (ceiling ≥ 1)
-so that no OD pair is assigned a fractional or sub-unit upper bound.
-Existing positive values are preserved unchanged.  Only (o,d) pairs whose
-current q̂ is zero or absent are touched.
+All imputed values are rounded up to the nearest positive integer (ceiling ≥ 1).
+Since max-based calibration produces integer q̂ values, the floor is itself a
+positive integer and the ceiling is a no-op for well-formed inputs.
+Existing positive values are preserved unchanged.
 """
 function impute_od_bounds(
     q_hat::Dict{Int, Dict{Tuple{Int,Int}, Float64}},
@@ -191,29 +202,16 @@ function impute_od_bounds(
     end
 
     _ceil_positive(v::Float64) = Float64(max(1, ceil(Int, v)))
+    imputed_value = _ceil_positive(effective_floor)
 
     result = Dict{Int, Dict{Tuple{Int,Int}, Float64}}()
 
     for (p, od_dict) in q_hat
-        origin_totals = Dict{Int, Float64}()
-        dest_totals   = Dict{Int, Float64}()
-        Q = 0.0
-
-        for ((o, d), v) in od_dict
-            v > 0 || continue
-            origin_totals[o] = get(origin_totals, o, 0.0) + v
-            dest_totals[d]   = get(dest_totals,   d, 0.0) + v
-            Q += v
-        end
-
         new_dict = copy(od_dict)
 
         for (o, d) in all_od_pairs
             get(new_dict, (o, d), 0.0) > 0 && continue
-            O = get(origin_totals, o, 0.0)
-            D = get(dest_totals,   d, 0.0)
-            gravity = (Q > 0 && O > 0 && D > 0) ? O * D / Q : 0.0
-            new_dict[(o, d)] = _ceil_positive(max(gravity, effective_floor))
+            new_dict[(o, d)] = imputed_value
         end
 
         result[p] = new_dict
@@ -241,11 +239,15 @@ Calibrate demand bounds from historical data for use in RobustTotalDemandCapMode
 Generates one ScenarioData per (date × period) instance over [start_date, end_date]
 using generate_scenarios_by_profile (so each ScenarioData contains exactly one
 day's requests in one time-of-day window), groups by period, then computes
-quantile-based per-OD bounds and total-demand caps via compute_demand_bounds.
+empirical-quantile-based per-OD bounds and total-demand caps.
+
+Per-OD upper bounds and Q_cap are computed via the nearest-rank quantile
+(ceil(τ × n)-th order statistic), which always returns an integer for integer-
+valued demand counts.  Missing OD pairs are imputed with a flat floor equal to
+the minimum positive observed bound across all periods.
 
 This is the canonical entry point for producing the q_low/q_hat/B parameters
-that RobustTotalDemandCapModel requires. The result is typically serialised to a
-JSON file and loaded at optimization time.
+that RobustTotalDemandCapModel requires.
 """
 function calibrate_demand_bounds(
     stations::DataFrame,
@@ -274,6 +276,14 @@ function calibrate_demand_bounds(
     n = data.n_stations
     all_od_pairs = Set{Tuple{Int,Int}}((o, d) for o in 1:n for d in 1:n if o != d)
     q_hat = impute_od_bounds(q_hat, all_od_pairs)
+
+    # Verify every OD pair in every period has a strictly positive integer bound.
+    for (s, od_dict) in q_hat
+        for (od, v) in od_dict
+            @assert v > 0       "q̂ = 0 after imputation for OD $od in period $s"
+            @assert isinteger(v) "q̂ non-integer after imputation: $v for OD $od in period $s"
+        end
+    end
 
     return q_low, q_hat, B, Q_cap
 end
