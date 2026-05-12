@@ -104,6 +104,40 @@ using CSV
         end
     end
 
+    @testset "AlphaRouteModel matches exact time buckets" begin
+        mktempdir() do tmpdir
+            order_file, cluster_file, selection_run_dir = write_common_inputs(tmpdir)
+
+            assignments_df = DataFrame(
+                scenario = [1, 1],
+                t_id = [0, 1],
+                od_idx = [1, 1],
+                origin_id = [1, 1],
+                dest_id = [3, 3],
+                pickup_id = [2, 3],
+                dropoff_id = [3, 2],
+                value = [1.0, 1.0]
+            )
+            CSV.write(
+                joinpath(selection_run_dir, "variable_exports", "assignment_variables.csv"),
+                assignments_df
+            )
+
+            transformed_df, stats = transform_orders_from_assignments(
+                order_file,
+                selection_run_dir,
+                cluster_file,
+                "AlphaRouteModel";
+                time_window_sec = 120
+            )
+
+            @test transformed_df.assigned_pickup_id == [2, 3]
+            @test transformed_df.assigned_dropoff_id == [3, 2]
+            @test stats["n_x_assigned"] == 2
+            @test stats["n_fallback"] == 0
+        end
+    end
+
     @testset "TwoStageRouteWithTimeModel requires time_id export" begin
         mktempdir() do tmpdir
             order_file, cluster_file, selection_run_dir = write_common_inputs(tmpdir)
