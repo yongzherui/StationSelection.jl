@@ -40,6 +40,7 @@ const MOI = JuMP.MOI
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
         include("utils/test_transform_orders.jl")
+        include("utils/test_fixed_station_operational_assignment.jl")
     end
 
     @testset "Data Structures" begin

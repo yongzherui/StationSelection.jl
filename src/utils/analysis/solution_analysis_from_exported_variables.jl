@@ -83,21 +83,32 @@ function build_station_selection_data_from_config(config::Dict, project_root::St
     segment_file = joinpath(project_root, data_cfg["segment_file"])
 
     stations = read_candidate_stations(station_file)
-    orders = read_customer_requests(
-        order_file;
-        start_time="$(params["start_date"]) 00:00:00",
-        end_time="$(params["end_date"]) 23:59:59"
-    )
+    if haskey(params, "scenario_ranges")
+        ranges = params["scenario_ranges"]
+        min_start = minimum(DateTime(r["start"], "yyyy-mm-dd HH:MM:SS") for r in ranges)
+        max_end = maximum(DateTime(r["end"], "yyyy-mm-dd HH:MM:SS") for r in ranges)
+        orders = read_customer_requests(
+            order_file;
+            start_time=Dates.format(min_start, "yyyy-mm-dd HH:MM:SS"),
+            end_time=Dates.format(max_end, "yyyy-mm-dd HH:MM:SS")
+        )
+        scenarios = [(string(r["start"]), string(r["end"])) for r in ranges]
+    else
+        orders = read_customer_requests(
+            order_file;
+            start_time="$(params["start_date"]) 00:00:00",
+            end_time="$(params["end_date"]) 23:59:59"
+        )
+        scenarios = generate_scenarios(
+            Date(params["start_date"], "yyyy-mm-dd"),
+            Date(params["end_date"], "yyyy-mm-dd");
+            segment_hours=get(params, "time_window_hours", 4),
+            weekly_cycle=get(params, "weekly_cycle", false)
+        )
+    end
 
     walking_costs = compute_station_pairwise_costs(stations)
     routing_costs = read_routing_costs_from_segments(segment_file, stations)
-
-    scenarios = generate_scenarios(
-        Date(params["start_date"], "yyyy-mm-dd"),
-        Date(params["end_date"], "yyyy-mm-dd");
-        segment_hours=get(params, "time_window_hours", 4),
-        weekly_cycle=get(params, "weekly_cycle", false)
-    )
 
     return create_station_selection_data(
         stations,

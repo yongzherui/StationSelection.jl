@@ -84,6 +84,9 @@ include("utils/analysis/export_variables.jl")
 # Analysis helpers for exported variables (does not depend on OptResult)
 include("utils/analysis/solution_analysis_from_exported_variables.jl")
 
+# Fixed-station operational assignment for transformation-time rerouting
+include("utils/analysis/fixed_station_operational_assignment.jl")
+
 # Objective decomposition (post-hoc attribution from exported CSVs)
 include("utils/analysis/objective_decomposition.jl")
 
@@ -170,6 +173,9 @@ export export_results
 export export_variables
 export load_exported_assignment_variables
 export build_station_selection_data_from_config
+export FixedStationDecisions
+export load_fixed_station_decisions
+export solve_fixed_station_operational_assignment
 export build_od_counts_from_data
 export calculate_exported_walking_distance
 export calculate_exported_vehicle_routing_distance
