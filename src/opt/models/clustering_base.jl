@@ -20,6 +20,9 @@ origins and destinations to their nearest selected station.
 
 # Fields
 - `k::Int`: Number of stations to select
+- `max_walking_distance::Union{Float64, Nothing}`: Optional assignment-radius
+  limit. When provided, station i may only be assigned to station j if walking
+  cost d(i,j) is within this threshold.
 
 # Decision Variables
 - `y[j]`: Binary, 1 if station j is selected as a medoid
@@ -27,9 +30,11 @@ origins and destinations to their nearest selected station.
 
 # Objective
 Minimize total weighted walking cost:
-    min Σᵢⱼ qᵢ · d(i,j) · x[i,j]
+    min Σᵢ Σ_{j ∈ Aᵢ} qᵢ · d(i,j) · x[i,j]
 
-where qᵢ is the request count at station location i.
+where qᵢ is the request count at station location i. Here Aᵢ is the set of
+admissible cluster centers for demand point i; with a walking limit it is
+{j : d(i,j) ≤ mwd}, otherwise all candidate stations.
 
 # Constraints
 - Each station location assigned to exactly one medoid
@@ -37,10 +42,17 @@ where qᵢ is the request count at station location i.
 - Select exactly k stations
 """
 struct ClusteringBaseModel <: AbstractSingleScenarioModel
-    k::Int  # Number of stations to select
+    k::Int
+    max_walking_distance::Union{Float64, Nothing}
 
-    function ClusteringBaseModel(k::Int)
+    function ClusteringBaseModel(
+            k::Int;
+            max_walking_distance::Union{Number, Nothing}=nothing
+        )
         k > 0 || throw(ArgumentError("k must be positive"))
-        new(k)
+        if !isnothing(max_walking_distance)
+            max_walking_distance >= 0 || throw(ArgumentError("max_walking_distance must be non-negative"))
+        end
+        new(k, isnothing(max_walking_distance) ? nothing : Float64(max_walking_distance))
     end
 end

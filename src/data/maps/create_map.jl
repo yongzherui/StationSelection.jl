@@ -20,6 +20,18 @@ function create_map(
 end
 
 """
+    create_map(model::ClusteringTwoStageStationModel, data::StationSelectionData)
+
+Create a ClusteringTwoStageStationMap for ClusteringTwoStageStationModel.
+"""
+function create_map(
+        model::ClusteringTwoStageStationModel,
+        data::StationSelectionData
+    )::ClusteringTwoStageStationMap
+    return create_clustering_two_stage_station_map(model, data)
+end
+
+"""
     create_map(model::ClusteringBaseModel, data::StationSelectionData)
 
 Create a ClusteringBaseModelMap for ClusteringBaseModel.

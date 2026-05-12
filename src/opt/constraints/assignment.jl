@@ -55,7 +55,7 @@ end
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Each station location must be assigned to exactly one medoid (ClusteringBaseModel).
-    Σⱼ x[i,j] = 1  ∀i
+    Σ_{j ∈ Aᵢ} x[i,j] = 1  ∀i
 
 Used by: ClusteringBaseModel
 """
@@ -65,10 +65,35 @@ function add_assignment_constraints!(
         mapping::ClusteringBaseModelMap
     )
     before = _total_num_constraints(m)
-    n = mapping.n_stations
     x = m[:x]
 
-    @constraint(m, [i=1:n], sum(x[i, j] for j in 1:n) == 1)
+    for i in 1:mapping.n_stations
+        @constraint(m, sum(x[i]) == 1)
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+"""
+    add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageStationMap)
+
+Each demanded station i must be assigned to exactly one active cluster center j
+in each scenario where it has positive endpoint count.
+"""
+function add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageStationMap
+    )
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    x = m[:x]
+
+    for s in 1:S
+        for (i_idx, _) in enumerate(mapping.I_s[s])
+            @constraint(m, sum(x[s][i_idx]) == 1)
+        end
+    end
 
     return _total_num_constraints(m) - before
 end
@@ -109,6 +134,34 @@ function add_assignment_to_active_constraints!(
             for (idx, (j, k)) in enumerate(valid_pairs)
                 @constraint(m, x[s][od_idx][idx] <= demand * z[j, s])
                 @constraint(m, x[s][od_idx][idx] <= demand * z[k, s])
+            end
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
+"""
+    add_assignment_to_active_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageStationMap)
+
+Assignments require the chosen cluster center to be active in the scenario.
+    x_{ijs} ≤ z_{js}
+"""
+function add_assignment_to_active_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageStationMap
+    )
+    before = _total_num_constraints(m)
+    S = n_scenarios(data)
+    z = m[:z]
+    x = m[:x]
+
+    for s in 1:S
+        for (i_idx, i) in enumerate(mapping.I_s[s])
+            valid_js = get_valid_j_assignments(mapping, i)
+            for (j_idx, j) in enumerate(valid_js)
+                @constraint(m, x[s][i_idx][j_idx] <= z[j, s])
             end
         end
     end
@@ -202,7 +255,7 @@ end
     add_assignment_to_selected_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
 Assignment can only be made to selected stations (ClusteringBaseModel).
-    x[i,j] ≤ y[j]  ∀i, j
+    x[i,j] ≤ y[j]  ∀i, j ∈ Aᵢ
 
 Used by: ClusteringBaseModel
 """
@@ -212,11 +265,15 @@ function add_assignment_to_selected_constraints!(
         mapping::ClusteringBaseModelMap
     )
     before = _total_num_constraints(m)
-    n = mapping.n_stations
     y = m[:y]
     x = m[:x]
 
-    @constraint(m, [i=1:n, j=1:n], x[i, j] <= y[j])
+    for i in 1:mapping.n_stations
+        valid_js = get_valid_j_assignments(mapping, i)
+        for (j_idx, j) in enumerate(valid_js)
+            @constraint(m, x[i][j_idx] <= y[j])
+        end
+    end
 
     return _total_num_constraints(m) - before
 end

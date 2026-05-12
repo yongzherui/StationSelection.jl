@@ -246,7 +246,7 @@ end
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String) -> Int
 
 Export assignment variables for ClusteringBaseModel.
-Structure: x[i,j] matrix (station-to-station assignment)
+Structure: x[i] → Vector over admissible cluster centers j.
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String)
     if !haskey(m.obj_dict, :x)
@@ -254,20 +254,69 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModel
     end
 
     x = m[:x]
-    n = mapping.n_stations
     array_idx_to_station_id = mapping.array_idx_to_station_id
 
     rows = []
-    for i in 1:n, j in 1:n
-        val = JuMP.value(x[i, j])
-        if val > 0.5
-            push!(rows, (
-                station_idx = i,
-                station_id = array_idx_to_station_id[i],
-                medoid_idx = j,
-                medoid_id = array_idx_to_station_id[j],
-                value = val
-            ))
+    for i in 1:mapping.n_stations
+        valid_js = get_valid_j_assignments(mapping, i)
+        for (j_idx, var) in enumerate(x[i])
+            val = JuMP.value(var)
+            if val > 0.5
+                j = valid_js[j_idx]
+                push!(rows, (
+                    station_idx = i,
+                    station_id = array_idx_to_station_id[i],
+                    medoid_idx = j,
+                    medoid_id = array_idx_to_station_id[j],
+                    request_count = mapping.request_counts[i],
+                    value = val
+                ))
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+
+    return nrow(df)
+end
+
+"""
+    export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String) -> Int
+
+Export assignment variables for ClusteringTwoStageStationModel.
+Structure: x[s][i_idx] → Vector over admissible cluster centers j.
+"""
+function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    for (s, x_s) in enumerate(x)
+        demand_points = mapping.I_s[s]
+        for (i_idx, x_i) in x_s
+            i = demand_points[i_idx]
+            valid_js = get_valid_j_assignments(mapping, i)
+            for (j_idx, var) in enumerate(x_i)
+                val = JuMP.value(var)
+                if val > 0.5
+                    j = valid_js[j_idx]
+                    push!(rows, (
+                        scenario = s,
+                        demand_station_idx = i,
+                        demand_station_id = array_idx_to_station_id[i],
+                        assigned_station_idx = j,
+                        assigned_station_id = array_idx_to_station_id[j],
+                        endpoint_count = mapping.q_s[s][i],
+                        value = val
+                    ))
+                end
+            end
         end
     end
 
@@ -321,6 +370,24 @@ function export_model_specific_variables(
 )
     metadata["model_type"] = "ClusteringBaseModel"
     metadata["n_stations"] = mapping.n_stations
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+end
+
+"""
+    export_model_specific_variables(result::OptResult, mapping::ClusteringTwoStageStationMap, export_dir::String, metadata::Dict)
+
+Export ClusteringTwoStageStationModel specific metadata.
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::ClusteringTwoStageStationMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"] = "ClusteringTwoStageStationModel"
+    metadata["n_stations"] = mapping.n_stations
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_endpoint_groups"] = sum(length(v) for v in values(mapping.I_s))
 end
 
 

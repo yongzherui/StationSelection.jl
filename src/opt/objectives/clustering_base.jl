@@ -20,7 +20,7 @@ export set_clustering_base_objective!
 Set the minimization objective for ClusteringBaseModel.
 
 Objective:
-    min Σᵢⱼ qᵢ · d(i,j) · x[i,j]
+    min Σᵢ Σ_{j ∈ Aᵢ} qᵢ · d(i,j) · x[i,j]
 
 Where:
 - qᵢ = request_counts[i] = total pickup + dropoff requests at station location i
@@ -41,16 +41,15 @@ function set_clustering_base_objective!(
         mapping::ClusteringBaseModelMap
     )
 
-    n = mapping.n_stations
     x = m[:x]
 
     @objective(m, Min,
         sum(
             mapping.request_counts[i] *
             get_walking_cost(data, i, j) *
-            x[i, j]
-            for i in 1:n
-            for j in 1:n
+            x[i][j_idx]
+            for i in 1:mapping.n_stations
+            for (j_idx, j) in enumerate(get_valid_j_assignments(mapping, i))
         )
     )
 

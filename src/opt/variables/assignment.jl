@@ -65,6 +65,42 @@ end
 # ============================================================================
 
 # ============================================================================
+# ClusteringTwoStageStationMap (ClusteringTwoStageStationModel)
+# ============================================================================
+
+"""
+    add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageStationMap)
+
+Add binary assignment variables x[s][i_idx][j_idx] for ClusteringTwoStageStationModel.
+
+For each scenario s and each demanded station i in that scenario, one binary
+variable is created per admissible cluster center j.
+"""
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageStationMap
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+
+    for s in 1:S
+        for (i_idx, i) in enumerate(mapping.I_s[s])
+            valid_js = get_valid_j_assignments(mapping, i)
+            if !isempty(valid_js)
+                x[s][i_idx] = @variable(m, [1:length(valid_js)], Bin)
+            else
+                x[s][i_idx] = VariableRef[]
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
+# ============================================================================
 # VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
 # ============================================================================
 
@@ -121,12 +157,10 @@ end
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Add assignment variables x[i,j] for ClusteringBaseModel.
+Add sparse assignment variables x[i][j_idx] for ClusteringBaseModel.
 
-x[i,j] = 1 if station location i is assigned to medoid station j.
-
-Structure: Simple n×n matrix (station-to-station assignment)
-No scenario, time, or OD dimensions - all aggregated.
+For each station location i, one binary variable is created per admissible
+cluster center j.
 """
 function add_assignment_variables!(
         m::Model,
@@ -134,8 +168,17 @@ function add_assignment_variables!(
         mapping::ClusteringBaseModelMap
     )
     before = JuMP.num_variables(m)
-    n = mapping.n_stations
-    @variable(m, x[1:n, 1:n], Bin)
+    x = Dict{Int, Vector{VariableRef}}()
+
+    for i in 1:mapping.n_stations
+        valid_js = get_valid_j_assignments(mapping, i)
+        if !isempty(valid_js)
+            x[i] = @variable(m, [1:length(valid_js)], Bin)
+        else
+            x[i] = VariableRef[]
+        end
+    end
+
     m[:x] = x
     return JuMP.num_variables(m) - before
 end

@@ -39,6 +39,7 @@ include("data/io/requests.jl")
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
+include("opt/models/clustering_two_stage_station.jl")
 include("opt/models/clustering_base.jl")
 include("opt/models/route_vehicle_capacity_model.jl")
 include("opt/models/alpha_route_model.jl")
@@ -46,6 +47,9 @@ include("opt/models/route_fleet_limit_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/maps/clustering_od_map.jl")
+
+# Clustering station map (depends on ClusteringTwoStageStationModel)
+include("data/maps/clustering_two_stage_station_map.jl")
 
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/maps/clustering_base_map.jl")
@@ -96,11 +100,13 @@ export read_candidate_stations, read_customer_requests
 export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
+export ClusteringTwoStageStationMap
 export VehicleCapacityODMap
 export AlphaRouteODMap
 export FleetLimitODMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
+export create_clustering_two_stage_station_map
 export create_clustering_base_model_map
 export create_vehicle_capacity_od_map
 export create_alpha_route_od_map
@@ -113,6 +119,7 @@ export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_c
 export create_station_id_mappings, create_scenario_label_mappings
 export compute_time_to_od_count_mapping
 export has_walking_distance_limit, get_valid_jk_pairs
+export get_valid_j_assignments
 
 # Re-export route utilities
 export RouteData, generate_simple_routes
@@ -123,6 +130,7 @@ export AbstractStationSelectionModel
 export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
+export ClusteringTwoStageStationModel
 export ClusteringBaseModel
 export RouteVehicleCapacityModel
 export RouteVehicleCapacityWarmStartModel
@@ -148,6 +156,7 @@ export add_route_capacity_lazy_constraints!
 export add_fleet_limit_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
+export set_clustering_two_stage_station_objective!
 export set_route_od_objective!
 export set_fleet_limit_objective!
 
