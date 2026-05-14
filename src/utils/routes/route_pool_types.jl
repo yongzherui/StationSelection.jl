@@ -183,7 +183,7 @@ struct AlphaRouteRunnerConfig
     )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         min_theta_to_keep >= 0.0 || throw(ArgumentError("min_theta_to_keep must be non-negative"))
-        objective_improvement_tol >= 0.0 || throw(ArgumentError("objective_improvement_tol must be non-negative"))
+        # objective_improvement_tol may be negative to disable objective-based convergence
         route_pool_change_tol >= 0.0 || throw(ArgumentError("route_pool_change_tol must be non-negative"))
         route_pool_target_size > 0 || throw(ArgumentError("route_pool_target_size must be positive"))
         route_pool_bucket_x_multiplier >= 1.0 || throw(ArgumentError("route_pool_bucket_x_multiplier must be at least 1.0"))
