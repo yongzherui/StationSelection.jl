@@ -89,13 +89,13 @@ function generate_iterative_routes(
 end
 
 """
-    generate_routes_by_insertion(seed_routes, valid_jk_pairs, data; config, ...) -> Vector{RouteData}
+    generate_routes_by_insertion(seed_routes, valid_jk_pairs, data; config, ...) -> NamedTuple
 
 Extend an existing route pool by applying insertion/mutation strategies up to
 `config.max_route_length`, seeding from `seed_routes` rather than direct 2-stop routes.
 
-Returns only newly discovered routes (not the seeds), so the caller can merge them
-into the pool without redundant deduplication of already-known routes.
+Returns `(routes, n_iters, n_new)` where `routes` contains only newly discovered routes
+(not the seeds), so the caller can merge them without redundant deduplication.
 """
 function generate_routes_by_insertion(
     seed_routes    :: Vector{RouteData},
@@ -105,8 +105,8 @@ function generate_routes_by_insertion(
     max_detour_time  :: Float64,
     max_detour_ratio :: Float64,
     stop_dwell_time  :: Float64,
-)::Vector{RouteData}
-    isempty(valid_jk_pairs) && return RouteData[]
+)
+    isempty(valid_jk_pairs) && return (routes=RouteData[], n_iters=0, n_new=0)
 
     routes_by_key = Dict{Tuple, RouteData}()
     seed_keys     = Set{Tuple}()
@@ -134,6 +134,7 @@ function generate_routes_by_insertion(
     )
 
     n_new = 0  # count only routes added beyond the seed set
+    n_iters_ran = 0
     for iter in 1:config.max_iterations
         n_new >= config.max_routes_total && break
         current_routes = sort!(collect(values(routes_by_key)),
@@ -163,8 +164,13 @@ function generate_routes_by_insertion(
             (added_this_iter >= config.max_new_routes_per_iter ||
              n_new >= config.max_routes_total) && break
         end
+        n_iters_ran += 1
         added_this_iter == 0 && break
     end
 
-    return RouteData[r for (k, r) in routes_by_key if k ∉ seed_keys]
+    return (
+        routes  = RouteData[r for (k, r) in routes_by_key if k ∉ seed_keys],
+        n_iters = n_iters_ran,
+        n_new   = n_new,
+    )
 end

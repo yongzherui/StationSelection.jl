@@ -134,6 +134,8 @@ function run_alpha_route_iterative(
             it.removed_count,
             it.state_change_ratio,
             it.objective_improvement,
+            it.objective_delta,
+            it.relative_objective_improvement,
         ) for it in iterative_result.iterations
     ]
 

@@ -228,13 +228,27 @@ function enrich_alpha_profiles!(
     config::AlphaEnrichmentConfig,
     vehicle_capacity::Int,
 )
-    config.enabled || return (skipped=true, added=0, n_pressured_legs=0, n_binding_legs=0)
+    config.enabled || return (
+        skipped=true,
+        added=0,
+        n_pressured_legs=0,
+        n_binding_legs=0,
+        n_buckets_with_pressure=0,
+        n_candidate_routes=0,
+    )
 
     mapping = result.mapping
     isa(mapping, AlphaRouteODMap) ||
-        return (skipped=true, added=0, n_pressured_legs=0, n_binding_legs=0)
+        return (
+            skipped=true,
+            added=0,
+            n_pressured_legs=0,
+            n_binding_legs=0,
+            n_buckets_with_pressure=0,
+            n_candidate_routes=0,
+        )
 
-    @info "enrich_alpha_profiles!: starting" pressure_threshold=config.pressure_threshold binding_threshold=config.binding_threshold alpha_scale_factor=config.alpha_scale_factor max_new_profiles=config.max_new_profiles_per_iteration max_profiles_per_sequence=config.max_profiles_per_route_sequence min_profile_diff=config.min_profile_difference
+    @debug "enrich_alpha_profiles!: starting" pressure_threshold=config.pressure_threshold binding_threshold=config.binding_threshold alpha_scale_factor=config.alpha_scale_factor max_new_profiles=config.max_new_profiles_per_iteration max_profiles_per_sequence=config.max_profiles_per_route_sequence min_profile_diff=config.min_profile_difference
 
     diagnostics = compute_alpha_pressure_diagnostics(result, config)
 
@@ -243,16 +257,25 @@ function enrich_alpha_profiles!(
 
     any(v >= config.pressure_threshold for v in values(diagnostics.max_binding_ratio)) ||
         begin
-            @info "enrich_alpha_profiles!: skipped (no pressured legs)" n_jk_pairs_checked=length(diagnostics.max_binding_ratio)
-            return (skipped=true, added=0, n_pressured_legs=0, n_binding_legs=n_binding_pre)
+            @debug "enrich_alpha_profiles!: skipped (no pressured legs)" n_jk_pairs_checked=length(diagnostics.max_binding_ratio)
+            return (
+                skipped=true,
+                added=0,
+                n_pressured_legs=0,
+                n_binding_legs=n_binding_pre,
+                n_buckets_with_pressure=0,
+                n_candidate_routes=0,
+            )
         end
 
     n_pressured = n_pressured_pre
     n_binding   = n_binding_pre
-    @info "enrich_alpha_profiles!: diagnostics" n_jk_pairs_checked=length(diagnostics.max_binding_ratio) n_pressured_legs=n_pressured n_binding_legs=n_binding
+    @debug "enrich_alpha_profiles!: diagnostics" n_jk_pairs_checked=length(diagnostics.max_binding_ratio) n_pressured_legs=n_pressured n_binding_legs=n_binding
 
     theta_r_ts = get(result.model.obj_dict, :theta_r_ts, Dict{NTuple{3,Int}, VariableRef}())
     total_added = 0
+    buckets_with_pressure = 0
+    candidate_routes = 0
 
     for bucket_key in _sorted_bucket_route_pool_keys(global_state)
         total_added >= config.max_new_profiles_per_iteration && break
@@ -274,11 +297,13 @@ function enrich_alpha_profiles!(
         end
 
         isempty(selected_routes) && continue
+        buckets_with_pressure += 1
 
         sort!(selected_routes, by=r -> -maximum(
             get(diagnostics.pressure_score, leg, 0.0) for leg in r.detour_feasible_legs
         ))
         candidates = selected_routes[1:min(config.max_candidate_routes_for_enrichment, length(selected_routes))]
+        candidate_routes += length(candidates)
 
         for route in candidates
             total_added >= config.max_new_profiles_per_iteration && break
@@ -305,6 +330,13 @@ function enrich_alpha_profiles!(
         end
     end
 
-    @info "enrich_alpha_profiles!: done" added=total_added n_pressured_legs=n_pressured n_binding_legs=n_binding
-    return (skipped=false, added=total_added, n_pressured_legs=n_pressured, n_binding_legs=n_binding)
+    @debug "enrich_alpha_profiles!: done" added=total_added n_pressured_legs=n_pressured n_binding_legs=n_binding n_buckets_with_pressure=buckets_with_pressure n_candidate_routes=candidate_routes
+    return (
+        skipped=false,
+        added=total_added,
+        n_pressured_legs=n_pressured,
+        n_binding_legs=n_binding,
+        n_buckets_with_pressure=buckets_with_pressure,
+        n_candidate_routes=candidate_routes,
+    )
 end

@@ -146,6 +146,12 @@ function run_iterative_solve(
         update_info = update_iteration_state!(strategy, model, data, state, result, iteration)
         state_size_after = iteration_state_size(strategy, state)
         objective_improvement = isnothing(prev_objective) ? nothing : abs(prev_objective - result.objective_value)
+        objective_delta = isnothing(prev_objective) ? nothing : result.objective_value - prev_objective
+        relative_objective_improvement = if isnothing(prev_objective) || iszero(prev_objective)
+            nothing
+        else
+            (prev_objective - result.objective_value) / abs(prev_objective)
+        end
         state_change_ratio = (get(update_info, :added_count, 0) + get(update_info, :removed_count, 0)) / max(state_size_before, 1)
         metadata = build_iteration_metadata(strategy, model, data, state, result, update_info, iteration)
 
@@ -158,6 +164,8 @@ function run_iterative_solve(
             get(update_info, :removed_count, 0),
             state_change_ratio,
             objective_improvement,
+            objective_delta,
+            relative_objective_improvement,
             metadata,
         ))
 

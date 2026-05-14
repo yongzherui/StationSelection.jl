@@ -44,6 +44,22 @@ function initialize_iteration_state(
             "($total_direct_routes across all buckets)"
         ))
     end
+
+    initial_pool_size = iteration_state_size(strategy, state)
+    if strategy.config.route_pool_target_size <= initial_pool_size
+        @warn "route_pool_target_size=$(strategy.config.route_pool_target_size) is at or below the initial pool size ($initial_pool_size); pruning will cut routes immediately and block expansion — consider increasing route_pool_target_size"
+    elseif strategy.config.route_pool_target_size < 2 * initial_pool_size
+        @warn "route_pool_target_size=$(strategy.config.route_pool_target_size) is less than 2× the initial pool size ($initial_pool_size); expansion headroom may be limited"
+    end
+
+    n_constrained_buckets = count(
+        b -> _effective_bucket_target_size(b, strategy.config.route_pool_bucket_x_multiplier) < length(b.routes_by_id),
+        values(state.bucket_states)
+    )
+    if n_constrained_buckets > 0
+        @warn "route_pool_bucket_x_multiplier=$(strategy.config.route_pool_bucket_x_multiplier) induces per-bucket caps below initial size for $n_constrained_buckets/$(length(state.bucket_states)) buckets"
+    end
+
     return state
 end
 
@@ -92,12 +108,16 @@ function update_iteration_state!(
     iteration::Int
 )
     pool_before = sum(length(b.routes_by_id) for b in values(state.bucket_states))
-    @info "update_iteration_state!: starting iteration $iteration" pool_size=pool_before n_buckets=_bucket_count(state) prune_enabled=strategy.config.prune_enabled expand_enabled=strategy.config.expand_enabled enrichment_enabled=strategy.config.enrichment.enabled
+    @info "alpha_route iteration start" iteration=iteration pool_before=pool_before prune_enabled=strategy.config.prune_enabled expand_enabled=strategy.config.expand_enabled enrichment_enabled=strategy.config.enrichment.enabled
 
     usage_by_bucket = _route_usage_by_bucket(result)
     total_active = 0
     total_removed = 0
+    total_pruned_buckets = 0
     total_added = 0
+    exp_added = 0
+    exp_buckets = 0
+    exp_alpha = 0
 
     # Pass 1: prune
     for bucket_key in _sorted_bucket_route_pool_keys(state)
@@ -106,24 +126,28 @@ function update_iteration_state!(
         total_active += count(v -> v > strategy.config.min_theta_to_keep, values(bucket_usage))
         bucket_target_size = _effective_bucket_target_size(bucket_state, strategy.config.route_pool_bucket_x_multiplier)
 
-        total_removed += strategy.config.prune_enabled ?
-            _prune_route_pool!(
+        if strategy.config.prune_enabled
+            removed = _prune_route_pool!(
                 bucket_state,
                 bucket_usage,
                 strategy.config.min_theta_to_keep,
                 bucket_target_size,
                 strategy.config.random_retention_seed
-            ) : 0
+            )
+            total_removed += removed
+            total_pruned_buckets += removed > 0 ? 1 : 0
+        end
     end
 
-    total_removed += strategy.config.prune_enabled ?
-        _enforce_global_total_route_cap!(
+    if strategy.config.prune_enabled
+        total_removed += _enforce_global_total_route_cap!(
             state,
             usage_by_bucket,
             strategy.config.min_theta_to_keep,
             strategy.config.route_pool_target_size,
             strategy.config.random_retention_seed
-        ) : 0
+        )
+    end
 
     # Enrich alpha profiles after pruning, before expansion
     enrichment_info = enrich_alpha_profiles!(
@@ -135,9 +159,10 @@ function update_iteration_state!(
     if strategy.config.expand_enabled && !isempty(strategy.config.route_length_schedule)
         schedule_idx = min(iteration + 1, length(strategy.config.route_length_schedule))
         target_length = strategy.config.route_length_schedule[schedule_idx]
+        exp_iters = 0; exp_seeds = 0
         for bucket_key in _sorted_bucket_route_pool_keys(state)
             bucket_state = state.bucket_states[bucket_key]
-            total_added += _expand_route_pool!(
+            exp = _expand_route_pool!(
                 state,
                 bucket_state,
                 data,
@@ -148,11 +173,18 @@ function update_iteration_state!(
                 max_detour_ratio=model.max_detour_ratio,
                 stop_dwell_time=model.stop_dwell_time
             )
+            exp_added   += exp.added
+            exp_iters   += exp.n_iters
+            exp_seeds   += exp.n_seeds
+            exp_alpha   += exp.n_alpha
+            exp_buckets += exp.n_seeds > 0 ? 1 : 0
         end
+        total_added += exp_added
+        @debug "alpha_route iteration expansion" iteration=iteration target_length=target_length expanded_buckets=exp_buckets routes_added=exp_added alpha_entries_added=exp_alpha total_seeds=exp_seeds total_insertion_iters=exp_iters
     end
 
     pool_after = sum(length(b.routes_by_id) for b in values(state.bucket_states))
-    @info "update_iteration_state!: done iteration $iteration" pool_before=pool_before pool_after=pool_after pruned=total_removed enriched=enrichment_info.added expanded=total_added - enrichment_info.added active=total_active n_pressured_legs=get(enrichment_info, :n_pressured_legs, 0) n_binding_legs=get(enrichment_info, :n_binding_legs, 0)
+    @info "alpha_route iteration summary" iteration=iteration pool_before=pool_before pool_after=pool_after pruned_routes=total_removed pruned_buckets=total_pruned_buckets enriched_profiles=enrichment_info.added enriched_buckets=get(enrichment_info, :n_buckets_with_pressure, 0) expanded_routes=exp_added expanded_buckets=exp_buckets active_routes=total_active n_pressured_legs=get(enrichment_info, :n_pressured_legs, 0) n_binding_legs=get(enrichment_info, :n_binding_legs, 0)
 
     return (
         added_count=total_added,
@@ -161,6 +193,8 @@ function update_iteration_state!(
         bucket_count=_bucket_count(state),
         enrichment_added=enrichment_info.added,
         enrichment_skipped=enrichment_info.skipped,
+        enrichment_buckets=get(enrichment_info, :n_buckets_with_pressure, 0),
+        enrichment_candidates=get(enrichment_info, :n_candidate_routes, 0),
     )
 end
 
@@ -230,6 +264,8 @@ function finalize_iterative_result!(
                 "removed_route_count" => it.removed_count,
                 "pool_change_ratio" => it.state_change_ratio,
                 "objective_improvement" => it.objective_improvement,
+                "objective_delta" => it.objective_delta,
+                "relative_objective_improvement" => it.relative_objective_improvement,
             ) for it in history
         ],
         "convergence_reason" => convergence_reason,

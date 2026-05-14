@@ -90,9 +90,9 @@ function _enforce_global_total_route_cap!(
     min_theta_to_keep::Float64,
     total_target_size::Int,
     retention_seed::Int
-)::Int
+)::NamedTuple{(:removed, :buckets_touched), Tuple{Int, Int}}
     total_routes = sum(length(bucket.routes_by_id) for bucket in values(global_state.bucket_states))
-    total_routes <= total_target_size && return 0
+    total_routes <= total_target_size && return (removed=0, buckets_touched=0)
 
     removable = Tuple{Int, Int, Int}[]
     mandatory_count = 0
@@ -105,12 +105,13 @@ function _enforce_global_total_route_cap!(
         end
     end
 
-    mandatory_count >= total_target_size && return 0
+    mandatory_count >= total_target_size && return (removed=0, buckets_touched=0)
     n_to_remove = min(total_routes - total_target_size, length(removable))
-    n_to_remove <= 0 && return 0
+    n_to_remove <= 0 && return (removed=0, buckets_touched=0)
 
     ordered = sort(removable; by=x -> hash((retention_seed, x[1], x[2], x[3])))
     removed = 0
+    touched_buckets = Set{Tuple{Int, Int}}()
     for (s, t_id, route_id) in ordered[1:n_to_remove]
         bucket_state = global_state.bucket_states[(s, t_id)]
         route = bucket_state.routes_by_id[route_id]
@@ -122,9 +123,10 @@ function _enforce_global_total_route_cap!(
         for key in [key for key in keys(bucket_state.alpha_profile) if key[1] == route_id]
             delete!(bucket_state.alpha_profile, key)
         end
+        push!(touched_buckets, (s, t_id))
         removed += 1
     end
-    return removed
+    return (removed=removed, buckets_touched=length(touched_buckets))
 end
 
 function _expand_route_pool!(
@@ -137,15 +139,16 @@ function _expand_route_pool!(
     max_detour_time::Float64,
     max_detour_ratio::Float64,
     stop_dwell_time::Float64
-)::Int
-    target_max_route_length > bucket_state.current_generated_max_route_length || return 0
+)
+    target_max_route_length > bucket_state.current_generated_max_route_length ||
+        return (added=0, n_iters=0, n_seeds=0, n_alpha=0)
 
     seed_routes = collect(values(bucket_state.routes_by_id))
     exp_config  = isnothing(iterative_config) ?
         default_iterative_route_generation_config(target_max_route_length) :
         _with_max_route_length(iterative_config, target_max_route_length)
 
-    new_routes = generate_routes_by_insertion(
+    ins_result = generate_routes_by_insertion(
         seed_routes,
         bucket_state.valid_jk_pairs,
         data;
@@ -154,8 +157,10 @@ function _expand_route_pool!(
         max_detour_ratio=max_detour_ratio,
         stop_dwell_time=stop_dwell_time,
     )
-    alpha = derive_balanced_alpha(new_routes, vehicle_capacity)
-    added = _merge_route_variants!(global_state, bucket_state, new_routes, alpha, :expanded_insertion)
+    alpha           = derive_balanced_alpha(ins_result.routes, vehicle_capacity)
+    alpha_before    = length(bucket_state.alpha_profile)
+    added           = _merge_route_variants!(global_state, bucket_state, ins_result.routes, alpha, :expanded_insertion)
+    n_alpha_added   = length(bucket_state.alpha_profile) - alpha_before
     bucket_state.current_generated_max_route_length = max(bucket_state.current_generated_max_route_length, target_max_route_length)
-    return added
+    return (added=added, n_iters=ins_result.n_iters, n_seeds=length(seed_routes), n_alpha=n_alpha_added)
 end

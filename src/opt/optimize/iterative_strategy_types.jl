@@ -18,6 +18,8 @@ struct IterativeSolveIterationSummary
     removed_count::Int
     state_change_ratio::Float64
     objective_improvement::Union{Nothing, Float64}
+    objective_delta::Union{Nothing, Float64}
+    relative_objective_improvement::Union{Nothing, Float64}
     metadata::Dict{String, Any}
 end
 

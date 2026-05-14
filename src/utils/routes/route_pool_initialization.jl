@@ -184,8 +184,9 @@ function initialize_route_pool(
     n_buckets = sum(length(by_t) for by_t in values(Q_s_t))
     @info "initialize_route_pool: starting" mode=init_spec.mode n_buckets=n_buckets vehicle_capacity=vehicle_capacity route_generation_method=route_generation_method initial_max_route_length=initial_generated_max_route_length
 
-    global_state = AlphaRouteBucketPoolsState(Dict{Tuple{Int, Int}, RoutePoolState}(), 1)
-    bucket_info  = _bucket_key_route_pools(Q_s_t, valid_jk_pairs)
+    global_state      = AlphaRouteBucketPoolsState(Dict{Tuple{Int, Int}, RoutePoolState}(), 1)
+    bucket_info       = _bucket_key_route_pools(Q_s_t, valid_jk_pairs)
+    n_generated_total = 0
 
     rio = nothing
     if init_spec.mode in (:file, :combined)
@@ -223,6 +224,7 @@ function initialize_route_pool(
             )
             n_generated = _merge_route_variants!(global_state, bucket_state, routes, alpha, :generated)
             bucket_state.current_generated_max_route_length = initial_generated_max_route_length
+            n_generated_total += n_generated
         end
 
         @debug "initialize_route_pool: bucket" s=s t_id=t_id n_jk_pairs=length(jk_set) n_direct=n_direct n_file=n_file n_generated=n_generated total=length(bucket_state.routes_by_id)
@@ -231,7 +233,7 @@ function initialize_route_pool(
 
     n_routes_total = sum(length(b.routes_by_id) for b in values(global_state.bucket_states))
     n_alpha_total  = sum(length(b.alpha_profile) for b in values(global_state.bucket_states))
-    @info "initialize_route_pool: done" n_buckets=length(global_state.bucket_states) n_routes_total=n_routes_total n_alpha_entries_total=n_alpha_total
+    @info "initialize_route_pool: done" n_buckets=length(global_state.bucket_states) n_routes_total=n_routes_total n_generated_total=n_generated_total n_alpha_entries_total=n_alpha_total
     return global_state
 end
 
