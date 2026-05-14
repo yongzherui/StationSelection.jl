@@ -140,13 +140,15 @@ function update_iteration_state!(
     end
 
     if strategy.config.prune_enabled
-        total_removed += _enforce_global_total_route_cap!(
+        cap_result = _enforce_global_total_route_cap!(
             state,
             usage_by_bucket,
             strategy.config.min_theta_to_keep,
             strategy.config.route_pool_target_size,
             strategy.config.random_retention_seed
         )
+        total_removed += cap_result.removed
+        total_pruned_buckets += cap_result.buckets_touched
     end
 
     # Enrich alpha profiles after pruning, before expansion
