@@ -15,14 +15,17 @@ No constraint (iii).
 function build_model(
         model :: AlphaRouteModel,
         data  :: StationSelectionData;
-        optimizer_env = nothing
+        optimizer_env = nothing,
+        route_pool_state::Union{RoutePoolState, Nothing}=nothing
     )::BuildResult
 
     if isnothing(optimizer_env)
         optimizer_env = Gurobi.Env()
     end
 
-    mapping = create_map(model, data)   # AlphaRouteODMap
+    mapping = isnothing(route_pool_state) ?
+        create_map(model, data) :
+        create_alpha_route_od_map(model, data, route_pool_state)
 
     S = length(data.scenarios)
     m = Model(() -> Gurobi.Optimizer(optimizer_env))

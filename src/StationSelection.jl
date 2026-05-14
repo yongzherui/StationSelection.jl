@@ -33,6 +33,9 @@ include("utils/routes/route_data.jl")
 include("utils/routes/generate_routes_from_orders.jl")
 include("utils/routes/route_io.jl")
 include("utils/routes/generate_alpha_routes.jl")
+include("utils/routes/route_pool_types.jl")
+include("utils/routes/route_pool_initialization.jl")
+include("utils/routes/route_pool_iteration.jl")
 include("data/io/stations.jl")
 include("data/io/requests.jl")
 
@@ -127,6 +130,13 @@ export get_valid_j_assignments
 # Re-export route utilities
 export RouteData, generate_simple_routes
 export RouteIOData, load_routes_and_alpha
+export RoutePoolInitSpec, RoutePoolState, AlphaRouteRunnerConfig
+export AlphaRouteIterationSummary, AlphaRouteRunnerResult
+export initialize_route_pool, export_route_pool_state
+export run_alpha_route_iterative
+export AbstractSolveStrategy, AbstractIterativeSolveStrategy
+export DirectSolveStrategy, IterativeSolveIterationSummary, IterativeSolveResult
+export AlphaRouteIterativeStrategy
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel

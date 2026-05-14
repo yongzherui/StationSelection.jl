@@ -147,8 +147,25 @@ function run_opt(
         do_optimize::Bool=true,
         warm_start::Bool=false,
         check_feasibility::Bool=true,
-        mip_gap::Union{Float64, Nothing}=nothing
+        mip_gap::Union{Float64, Nothing}=nothing,
+        solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
+        output_dir::Union{String, Nothing}=nothing
     )
+    if solve_strategy isa AbstractIterativeSolveStrategy
+        return run_iterative_solve(
+            solve_strategy,
+            model,
+            data;
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=show_counts,
+            do_optimize=do_optimize,
+            warm_start=warm_start,
+            check_feasibility=check_feasibility,
+            mip_gap=mip_gap,
+            output_dir=output_dir,
+        ).final_result
+    end
     if do_optimize
         feasibility_issue = check_model_feasibility(model, data)
         if !isnothing(feasibility_issue)
@@ -213,8 +230,11 @@ function run_opt(
         fleet_search_start::Int=1,
         fleet_search_max::Union{Int, Nothing}=10000,
         fleet_size_increment::Int=1,
-        unmet_demand_penalty::Float64=1e9
+        unmet_demand_penalty::Float64=1e9,
+        solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
+        output_dir::Union{String, Nothing}=nothing
     )
+    isnothing(solve_strategy) || throw(ArgumentError("solve_strategy is not supported for RouteVehicleCapacityModel"))
     rrw_threshold = 0.05
     use_fleet_search_effective = use_fleet_search && model.route_regularization_weight > rrw_threshold
     if use_fleet_search && !use_fleet_search_effective
