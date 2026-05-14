@@ -133,8 +133,9 @@ function generate_routes_by_insertion(
         stop_dwell_time=stop_dwell_time,
     )
 
+    n_new = 0  # count only routes added beyond the seed set
     for iter in 1:config.max_iterations
-        length(routes_by_key) >= config.max_routes_total && break
+        n_new >= config.max_routes_total && break
         current_routes = sort!(collect(values(routes_by_key)),
                                by=r -> (length(r.station_indices), r.station_indices))
         coverage_count = _route_coverage_count(current_routes)
@@ -155,11 +156,12 @@ function generate_routes_by_insertion(
                                                 cand.route.travel_time, cand.route.detour_feasible_legs)
                 next_id += 1
                 added_this_iter += 1
+                n_new += 1
                 (added_this_iter >= config.max_new_routes_per_iter ||
-                 length(routes_by_key) >= config.max_routes_total) && break
+                 n_new >= config.max_routes_total) && break
             end
             (added_this_iter >= config.max_new_routes_per_iter ||
-             length(routes_by_key) >= config.max_routes_total) && break
+             n_new >= config.max_routes_total) && break
         end
         added_this_iter == 0 && break
     end
