@@ -42,6 +42,9 @@ No constraint (iii).  θ^r_{ts} ∈ Z+ remains a decision variable.
 - `routes_file::Union{String,Nothing}`: Path to `routes_input.csv` (required when `generate_routes=false`)
 - `alpha_profile_file::Union{String,Nothing}`: Path to `alpha_profile.csv` (required when `generate_routes=false`)
 - `max_route_length::Int`: Max stops per route for DFS generation (default 3; ignored when `generate_routes=false`)
+- `route_generation_method::Symbol`: `:dfs` or `:iterative_insertion` for generated routes
+- `iterative_route_generation_config::Union{IterativeRouteGenerationConfig,Nothing}`:
+  optional richer route-generation config used when `route_generation_method=:iterative_insertion`
 - `max_walking_distance::Float64`: Walking distance limit for (j,k) pair pruning
 - `max_detour_time::Float64`: Max extra in-vehicle seconds vs direct trip (for detour_feasible_legs)
 - `max_detour_ratio::Float64`: Max ratio `in_vehicle/direct - 1`
@@ -60,6 +63,8 @@ struct AlphaRouteModel <: AbstractODModel
     routes_file                 :: Union{String, Nothing}
     alpha_profile_file          :: Union{String, Nothing}
     max_route_length            :: Int
+    route_generation_method     :: Symbol
+    iterative_route_generation_config :: Union{IterativeRouteGenerationConfig, Nothing}
     max_walking_distance        :: Float64
     max_detour_time             :: Float64
     max_detour_ratio            :: Float64
@@ -77,6 +82,8 @@ struct AlphaRouteModel <: AbstractODModel
             routes_file                 :: Union{String,Nothing} = nothing,
             alpha_profile_file          :: Union{String,Nothing} = nothing,
             max_route_length            :: Int                  = 3,
+            route_generation_method     :: Symbol               = :dfs,
+            iterative_route_generation_config :: Union{IterativeRouteGenerationConfig, Nothing} = nothing,
             max_walking_distance        :: Number               = 300,
             max_detour_time             :: Number               = 1200,
             max_detour_ratio            :: Number               = 2.0,
@@ -93,6 +100,8 @@ struct AlphaRouteModel <: AbstractODModel
         time_window_sec > 0             || throw(ArgumentError("time_window_sec must be positive"))
         vehicle_capacity > 0            || throw(ArgumentError("vehicle_capacity must be positive"))
         max_route_length > 0            || throw(ArgumentError("max_route_length must be positive"))
+        route_generation_method in (:dfs, :iterative_insertion) ||
+            throw(ArgumentError("route_generation_method must be :dfs or :iterative_insertion"))
 
         if !generate_routes
             isnothing(routes_file) &&
@@ -121,6 +130,8 @@ struct AlphaRouteModel <: AbstractODModel
             routes_file,
             alpha_profile_file,
             max_route_length,
+            route_generation_method,
+            iterative_route_generation_config,
             mwd,
             mdt, mdr,
             time_window_sec,

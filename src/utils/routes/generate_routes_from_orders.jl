@@ -75,19 +75,24 @@ function generate_simple_routes(
     next_id    = Ref(0)
 
     # ── Phase 0: seed one direct 2-stop route for every valid (j,k) pair ─────────
-    # This guarantees that every (j,k) demand bucket has at least one covering route,
-    # preventing the lazy capacity constraint from forcing x=0 for uncoverable pairs.
-    # A direct j→k route has zero detour, so its single leg is always detour-feasible.
-    # DFS-generated 2-stop routes that duplicate a seed are skipped via the existing
-    # !haskey(routes_map, sids) check.
     for (j_idx, k_idx) in valid_jk_pairs
         j_idx == k_idx && continue   # skip trivial self-assignment
         route_indices = [j_idx, k_idx]
         haskey(routes_map, route_indices) && continue
-        tt = get_routing_cost(data, j_idx, k_idx)
-        isinf(tt) && continue        # stations not connected in road network
+        route = evaluate_route_sequence(
+            route_indices,
+            data;
+            route_id=next_id[] + 1,
+            max_route_length=2,
+            max_detour_time=max_detour_time,
+            max_detour_ratio=max_detour_ratio,
+            stop_dwell_time=stop_dwell_time,
+            relevant_jk_pairs=valid_jk_pairs,
+            min_relevant_feasible_legs=1,
+        )
+        isnothing(route) && continue
         next_id[] += 1
-        routes_map[route_indices] = RouteData(next_id[], route_indices, tt, [(j_idx, k_idx)])
+        routes_map[route_indices] = route
     end
 
     # DFS state (mutated in-place with backtracking)
@@ -112,28 +117,21 @@ function generate_simple_routes(
         if m >= 2 && length(covered) == m
             route_indices = copy(route)
             if !haskey(routes_map, route_indices)
-                # Precompute consecutive segment costs
-                seg = Vector{Float64}(undef, m - 1)
-                for i in 1:(m - 1)
-                    seg[i] = get_routing_cost(data, route_indices[i], route_indices[i + 1])
+                route_data = evaluate_route_sequence(
+                    route_indices,
+                    data;
+                    route_id=next_id[] + 1,
+                    max_route_length=max_route_length,
+                    max_detour_time=max_detour_time,
+                    max_detour_ratio=max_detour_ratio,
+                    stop_dwell_time=stop_dwell_time,
+                    relevant_jk_pairs=valid_jk_pairs,
+                    min_relevant_feasible_legs=1,
+                )
+                isnothing(route_data) || begin
+                    next_id[] += 1
+                    routes_map[route_indices] = route_data
                 end
-                n_intermediate = m - 2
-                tt = sum(seg; init = 0.0) + n_intermediate * stop_dwell_time
-                # Build detour_feasible_legs: include (i,j) leg only if detour is feasible
-                feasible_legs = Tuple{Int,Int}[]
-                for i in 1:m
-                    cum = 0.0
-                    for j in (i + 1):m
-                        cum += seg[j - 1]
-                        direct = get_routing_cost(data, route_indices[i], route_indices[j])
-                        if (cum - direct <= max_detour_time) &&
-                           (direct == 0.0 || cum / direct <= 1.0 + max_detour_ratio)
-                            push!(feasible_legs, (route_indices[i], route_indices[j]))
-                        end
-                    end
-                end
-                next_id[] += 1
-                routes_map[route_indices] = RouteData(next_id[], route_indices, tt, feasible_legs)
             end
         end
 

@@ -113,21 +113,25 @@ function generate_routes_and_alpha(
     valid_jk_pairs_global   :: Set{Tuple{Int, Int}};
     vehicle_capacity  :: Int     = 18,
     max_route_length  :: Int     = 3,
+    route_generation_method::Symbol = :dfs,
+    iterative_config :: Union{Nothing, IterativeRouteGenerationConfig} = nothing,
     max_detour_time   :: Float64 = 1200.0,
     max_detour_ratio  :: Float64 = 2.0,
     stop_dwell_time   :: Float64 = 10.0
 ) :: Tuple{Vector{RouteData}, Dict{NTuple{3, Int}, Float64}}
 
-    println("  Generating routes via DFS (max_route_length=$max_route_length)...")
+    println("  Generating routes via $(route_generation_method) (max_route_length=$max_route_length)...")
     flush(stdout)
 
-    routes = generate_simple_routes(
+    routes = generate_routes_for_bucket(
         valid_jk_pairs_global,
         data;
-        max_route_length = max_route_length,
-        max_detour_time  = max_detour_time,
-        max_detour_ratio = max_detour_ratio,
-        stop_dwell_time  = stop_dwell_time
+        route_generation_method=route_generation_method,
+        iterative_config=iterative_config,
+        max_route_length=max_route_length,
+        max_detour_time=max_detour_time,
+        max_detour_ratio=max_detour_ratio,
+        stop_dwell_time=stop_dwell_time,
     )
 
     n_direct   = count(r -> length(r.station_indices) == 2, routes)
