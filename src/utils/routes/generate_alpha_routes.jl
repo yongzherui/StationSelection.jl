@@ -120,8 +120,7 @@ function generate_routes_and_alpha(
     stop_dwell_time   :: Float64 = 10.0
 ) :: Tuple{Vector{RouteData}, Dict{NTuple{3, Int}, Float64}}
 
-    println("  Generating routes via $(route_generation_method) (max_route_length=$max_route_length)...")
-    flush(stdout)
+    @info "generate_routes_and_alpha: generating routes" method=route_generation_method max_route_length=max_route_length n_pairs=length(valid_jk_pairs_global) max_detour_time=max_detour_time max_detour_ratio=max_detour_ratio
 
     routes = generate_routes_for_bucket(
         valid_jk_pairs_global,
@@ -136,15 +135,9 @@ function generate_routes_and_alpha(
 
     n_direct   = count(r -> length(r.station_indices) == 2, routes)
     n_multileg = length(routes) - n_direct
-    println("  Generated $(length(routes)) routes: $n_direct direct, $n_multileg multi-leg")
-    flush(stdout)
-
-    println("  Deriving balanced alpha values (C=$vehicle_capacity)...")
-    flush(stdout)
-
     alpha = derive_balanced_alpha(routes, vehicle_capacity)
-    println("  Derived $(length(alpha)) alpha entries")
-    flush(stdout)
+
+    @info "generate_routes_and_alpha: done" n_routes=length(routes) n_direct=n_direct n_multileg=n_multileg n_alpha_entries=length(alpha) vehicle_capacity=vehicle_capacity
 
     return routes, alpha
 end
