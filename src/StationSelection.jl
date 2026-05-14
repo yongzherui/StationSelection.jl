@@ -31,14 +31,17 @@ include("utils/data/transform_stations.jl")
 # Route utilities
 include("utils/routes/route_data.jl")
 include("utils/routes/route_evaluation.jl")
+include("utils/routes/route_pool_types.jl")             # includes IterativeRouteGenerationConfig
+include("utils/routes/iterative_route_strategies.jl")   # candidate generation helpers
 include("utils/routes/generate_routes_from_orders.jl")
 include("utils/routes/generate_iterative_routes.jl")
 include("utils/routes/route_generation_dispatch.jl")
 include("utils/routes/route_io.jl")
 include("utils/routes/generate_alpha_routes.jl")
-include("utils/routes/route_pool_types.jl")
 include("utils/routes/route_pool_initialization.jl")
 include("utils/routes/route_pool_iteration.jl")
+include("utils/routes/route_pool_enrichment.jl")
+include("utils/routes/route_pool_export.jl")
 include("data/io/stations.jl")
 include("data/io/requests.jl")
 
@@ -135,7 +138,7 @@ export RouteData, generate_simple_routes
 export IterativeRouteGenerationConfig, generate_iterative_routes
 export RouteIOData, load_routes_and_alpha
 export default_iterative_route_generation_config, generate_routes_for_bucket
-export RoutePoolInitSpec, RoutePoolState, AlphaRouteBucketPoolsState, AlphaRouteRunnerConfig
+export RoutePoolInitSpec, RoutePoolState, AlphaRouteBucketPoolsState, AlphaEnrichmentConfig, AlphaRouteRunnerConfig
 export AlphaRouteIterationSummary, AlphaRouteRunnerResult
 export initialize_route_pool, export_route_pool_state, export_alpha_route_bucket_pools_state
 export run_alpha_route_iterative

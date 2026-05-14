@@ -43,6 +43,7 @@ const MOI = JuMP.MOI
         include("utils/test_fixed_station_operational_assignment.jl")
         include("utils/test_alpha_route_runner.jl")
         include("utils/test_iterative_route_generation.jl")
+        include("utils/test_alpha_profile_enrichment.jl")
     end
 
     @testset "Data Structures" begin

@@ -1,9 +1,11 @@
 export RoutePoolInitSpec
 export RoutePoolState
 export AlphaRouteBucketPoolsState
+export AlphaEnrichmentConfig
 export AlphaRouteRunnerConfig
 export AlphaRouteIterationSummary
 export AlphaRouteRunnerResult
+export IterativeRouteGenerationConfig
 
 struct RoutePoolInitSpec
     mode::Symbol
@@ -40,9 +42,111 @@ mutable struct RoutePoolState
     current_generated_max_route_length::Int
 end
 
+struct IterativeRouteGenerationConfig
+    max_route_length::Int
+    max_iterations::Int
+    max_new_routes_per_iter::Int
+    max_routes_total::Int
+    arc_epsilon::Float64
+    top_b_insertions::Int
+    knn_replacement::Int
+    min_feasible_legs::Int
+    min_new_feasible_legs::Int
+    max_travel_time::Union{Nothing, Float64}
+    geometry_insertion_quota::Int
+    coverage_insertion_quota::Int
+    interior_replacement_quota::Int
+    endpoint_mutation_quota::Int
+    reverse_mutation_quota::Int
+    rng_seed::Int
+    verbose::Bool
+
+    function IterativeRouteGenerationConfig(;
+        max_route_length::Int=4,
+        max_iterations::Int=3,
+        max_new_routes_per_iter::Int=200,
+        max_routes_total::Int=5_000,
+        arc_epsilon::Float64=0.25,
+        top_b_insertions::Int=5,
+        knn_replacement::Int=3,
+        min_feasible_legs::Int=1,
+        min_new_feasible_legs::Int=1,
+        max_travel_time::Union{Nothing, Float64}=nothing,
+        geometry_insertion_quota::Int=75,
+        coverage_insertion_quota::Int=75,
+        interior_replacement_quota::Int=25,
+        endpoint_mutation_quota::Int=25,
+        reverse_mutation_quota::Int=25,
+        rng_seed::Int=1234,
+        verbose::Bool=false,
+    )
+        max_route_length >= 2 || throw(ArgumentError("max_route_length must be >= 2"))
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        max_new_routes_per_iter > 0 || throw(ArgumentError("max_new_routes_per_iter must be positive"))
+        max_routes_total > 0 || throw(ArgumentError("max_routes_total must be positive"))
+        arc_epsilon >= 0.0 || throw(ArgumentError("arc_epsilon must be non-negative"))
+        top_b_insertions > 0 || throw(ArgumentError("top_b_insertions must be positive"))
+        knn_replacement > 0 || throw(ArgumentError("knn_replacement must be positive"))
+        min_feasible_legs > 0 || throw(ArgumentError("min_feasible_legs must be positive"))
+        min_new_feasible_legs >= 0 || throw(ArgumentError("min_new_feasible_legs must be non-negative"))
+        isnothing(max_travel_time) || max_travel_time > 0.0 ||
+            throw(ArgumentError("max_travel_time must be positive when set"))
+        new(
+            max_route_length, max_iterations, max_new_routes_per_iter, max_routes_total,
+            arc_epsilon, top_b_insertions, knn_replacement, min_feasible_legs,
+            min_new_feasible_legs, max_travel_time, geometry_insertion_quota,
+            coverage_insertion_quota, interior_replacement_quota, endpoint_mutation_quota,
+            reverse_mutation_quota, rng_seed, verbose,
+        )
+    end
+end
+
 mutable struct AlphaRouteBucketPoolsState
     bucket_states::Dict{Tuple{Int, Int}, RoutePoolState}
     next_global_route_id::Int
+end
+
+struct AlphaEnrichmentConfig
+    enabled                             :: Bool
+    pressure_threshold                  :: Float64
+    binding_threshold                   :: Float64
+    alpha_scale_factor                  :: Float64
+    min_profile_difference              :: Int
+    max_profiles_per_route_sequence     :: Int
+    max_new_profiles_per_iteration      :: Int
+    max_candidate_routes_for_enrichment :: Int
+
+    function AlphaEnrichmentConfig(;
+        enabled                             :: Bool    = true,
+        pressure_threshold                  :: Float64 = 0.70,
+        binding_threshold                   :: Float64 = 0.95,
+        alpha_scale_factor                  :: Float64 = 1.5,
+        min_profile_difference              :: Int     = 2,
+        max_profiles_per_route_sequence     :: Int     = 3,
+        max_new_profiles_per_iteration      :: Int     = 30,
+        max_candidate_routes_for_enrichment :: Int     = 20,
+    )
+        pressure_threshold >= 0.0 && pressure_threshold < 1.0 ||
+            throw(ArgumentError("pressure_threshold must be in [0, 1)"))
+        binding_threshold > pressure_threshold && binding_threshold <= 1.0 ||
+            throw(ArgumentError("binding_threshold must be in (pressure_threshold, 1]"))
+        alpha_scale_factor >= 0.0 ||
+            throw(ArgumentError("alpha_scale_factor must be non-negative"))
+        min_profile_difference >= 0 ||
+            throw(ArgumentError("min_profile_difference must be non-negative"))
+        max_profiles_per_route_sequence >= 1 ||
+            throw(ArgumentError("max_profiles_per_route_sequence must be at least 1"))
+        new(
+            enabled,
+            pressure_threshold,
+            binding_threshold,
+            alpha_scale_factor,
+            min_profile_difference,
+            max_profiles_per_route_sequence,
+            max_new_profiles_per_iteration,
+            max_candidate_routes_for_enrichment,
+        )
+    end
 end
 
 struct AlphaRouteRunnerConfig
@@ -59,6 +163,7 @@ struct AlphaRouteRunnerConfig
     objective_improvement_tol::Float64
     route_pool_change_tol::Float64
     export_iteration_artifacts::Bool
+    enrichment::AlphaEnrichmentConfig
 
     function AlphaRouteRunnerConfig(
         init_spec::RoutePoolInitSpec;
@@ -73,7 +178,8 @@ struct AlphaRouteRunnerConfig
         random_retention_seed::Int=1234,
         objective_improvement_tol::Float64=1e-6,
         route_pool_change_tol::Float64=0.0,
-        export_iteration_artifacts::Bool=false
+        export_iteration_artifacts::Bool=false,
+        enrichment::AlphaEnrichmentConfig=AlphaEnrichmentConfig(enabled=false),
     )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         min_theta_to_keep >= 0.0 || throw(ArgumentError("min_theta_to_keep must be non-negative"))
@@ -99,6 +205,7 @@ struct AlphaRouteRunnerConfig
             objective_improvement_tol,
             route_pool_change_tol,
             export_iteration_artifacts,
+            enrichment,
         )
     end
 end

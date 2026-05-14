@@ -91,11 +91,15 @@ function update_iteration_state!(
     result::OptResult,
     iteration::Int
 )
+    pool_before = sum(length(b.routes_by_id) for b in values(state.bucket_states))
+    @info "update_iteration_state!: starting iteration $iteration" pool_size=pool_before n_buckets=_bucket_count(state) prune_enabled=strategy.config.prune_enabled expand_enabled=strategy.config.expand_enabled enrichment_enabled=strategy.config.enrichment.enabled
+
     usage_by_bucket = _route_usage_by_bucket(result)
     total_active = 0
     total_removed = 0
     total_added = 0
 
+    # Pass 1: prune
     for bucket_key in _sorted_bucket_route_pool_keys(state)
         bucket_state = state.bucket_states[bucket_key]
         bucket_usage = get(usage_by_bucket, bucket_key, Dict{Int, Float64}())
@@ -110,10 +114,29 @@ function update_iteration_state!(
                 bucket_target_size,
                 strategy.config.random_retention_seed
             ) : 0
+    end
 
-        if strategy.config.expand_enabled && !isempty(strategy.config.route_length_schedule)
-            schedule_idx = min(iteration + 1, length(strategy.config.route_length_schedule))
-            target_length = strategy.config.route_length_schedule[schedule_idx]
+    total_removed += strategy.config.prune_enabled ?
+        _enforce_global_total_route_cap!(
+            state,
+            usage_by_bucket,
+            strategy.config.min_theta_to_keep,
+            strategy.config.route_pool_target_size,
+            strategy.config.random_retention_seed
+        ) : 0
+
+    # Enrich alpha profiles after pruning, before expansion
+    enrichment_info = enrich_alpha_profiles!(
+        state, result, strategy.config.enrichment, model.vehicle_capacity,
+    )
+    total_added += enrichment_info.added
+
+    # Pass 2: expand
+    if strategy.config.expand_enabled && !isempty(strategy.config.route_length_schedule)
+        schedule_idx = min(iteration + 1, length(strategy.config.route_length_schedule))
+        target_length = strategy.config.route_length_schedule[schedule_idx]
+        for bucket_key in _sorted_bucket_route_pool_keys(state)
+            bucket_state = state.bucket_states[bucket_key]
             total_added += _expand_route_pool!(
                 state,
                 bucket_state,
@@ -129,20 +152,16 @@ function update_iteration_state!(
         end
     end
 
-    total_removed += strategy.config.prune_enabled ?
-        _enforce_global_total_route_cap!(
-            state,
-            usage_by_bucket,
-            strategy.config.min_theta_to_keep,
-            strategy.config.route_pool_target_size,
-            strategy.config.random_retention_seed
-        ) : 0
+    pool_after = sum(length(b.routes_by_id) for b in values(state.bucket_states))
+    @info "update_iteration_state!: done iteration $iteration" pool_before=pool_before pool_after=pool_after pruned=total_removed enriched=enrichment_info.added expanded=total_added - enrichment_info.added active=total_active n_pressured_legs=get(enrichment_info, :n_pressured_legs, 0) n_binding_legs=get(enrichment_info, :n_binding_legs, 0)
 
     return (
         added_count=total_added,
         removed_count=total_removed,
         active_route_count=total_active,
         bucket_count=_bucket_count(state),
+        enrichment_added=enrichment_info.added,
+        enrichment_skipped=enrichment_info.skipped,
     )
 end
 
