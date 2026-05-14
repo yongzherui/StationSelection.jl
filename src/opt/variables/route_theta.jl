@@ -273,8 +273,7 @@ function add_theta_r_ts_variables!(
     m[:arm_alpha_params] = arm_alpha_params
 
     n_theta = JuMP.num_variables(m) - before
-    println("  AlphaRouteModel: $(length(arm_alpha_params)) alpha param entries, $n_theta theta variables")
-    flush(stdout)
+    @info "add_theta_r_ts_variables!: done" n_alpha_params=length(arm_alpha_params) n_theta=n_theta
 
     # Warn about (j,k,t,s) pairs with demand but zero total alpha coverage
     _arm_warn_uncovered_jk(data, mapping, arm_alpha_params)

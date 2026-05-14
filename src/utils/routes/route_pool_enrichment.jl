@@ -254,9 +254,10 @@ function enrich_alpha_profiles!(
     theta_r_ts = get(result.model.obj_dict, :theta_r_ts, Dict{NTuple{3,Int}, VariableRef}())
     total_added = 0
 
-    for (bucket_key, bucket_state) in global_state.bucket_states
+    for bucket_key in _sorted_bucket_route_pool_keys(global_state)
         total_added >= config.max_new_profiles_per_iteration && break
 
+        bucket_state = global_state.bucket_states[bucket_key]
         s, t_id = bucket_key
         routes_t = get(get(mapping.routes_s, s, Dict{Int,Vector{RouteData}}()), t_id, RouteData[])
         isempty(routes_t) && continue
@@ -299,8 +300,8 @@ function enrich_alpha_profiles!(
             source_alpha = Dict{NTuple{3,Int}, Float64}(
                 (0, j, k) => v for ((j, k), v) in new_alpha
             )
-            _insert_route_variant!(global_state, bucket_state, temp_route, source_alpha, :alpha_enriched)
-            total_added += 1
+            _, was_inserted = _insert_route_variant!(global_state, bucket_state, temp_route, source_alpha, :alpha_enriched)
+            was_inserted && (total_added += 1)
         end
     end
 

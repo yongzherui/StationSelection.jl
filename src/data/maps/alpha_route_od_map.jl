@@ -69,11 +69,8 @@ function _bucket_route_pool_to_mapping(
     n_requests::Int,
     n_od::Int
 )::Vector{RouteData}
-    print("  Scenario $(bucket_state.scenario_idx), time bucket $(bucket_state.time_id): $n_requests requests, $n_od OD pairs, $(length(bucket_state.valid_jk_pairs)) (j,k) pairs")
-    flush(stdout)
     routes = _route_pool_sorted_routes(bucket_state)
-    println(" → $(length(routes)) routes")
-    flush(stdout)
+    @debug "_bucket_route_pool_to_mapping" scenario=bucket_state.scenario_idx time_id=bucket_state.time_id n_requests=n_requests n_od=n_od n_jk_pairs=length(bucket_state.valid_jk_pairs) n_routes=length(routes)
     return routes
 end
 
