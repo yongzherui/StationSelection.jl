@@ -1,4 +1,5 @@
 export generate_iterative_routes
+export generate_routes_by_insertion
 
 function generate_iterative_routes(
     valid_jk_pairs::Set{Tuple{Int, Int}},
@@ -85,4 +86,83 @@ function generate_iterative_routes(
     result = sort!(collect(values(routes_by_key)), by=r -> r.id)
     config.verbose && @info "generate_iterative_routes: done" n_routes=length(result) covered_pairs=_covered_valid_jk_pair_count(result, valid_jk_pairs) n_valid_pairs=length(valid_jk_pairs)
     return result
+end
+
+"""
+    generate_routes_by_insertion(seed_routes, valid_jk_pairs, data; config, ...) -> Vector{RouteData}
+
+Extend an existing route pool by applying insertion/mutation strategies up to
+`config.max_route_length`, seeding from `seed_routes` rather than direct 2-stop routes.
+
+Returns only newly discovered routes (not the seeds), so the caller can merge them
+into the pool without redundant deduplication of already-known routes.
+"""
+function generate_routes_by_insertion(
+    seed_routes    :: Vector{RouteData},
+    valid_jk_pairs :: Set{Tuple{Int, Int}},
+    data           :: StationSelectionData;
+    config           :: IterativeRouteGenerationConfig,
+    max_detour_time  :: Float64,
+    max_detour_ratio :: Float64,
+    stop_dwell_time  :: Float64,
+)::Vector{RouteData}
+    isempty(valid_jk_pairs) && return RouteData[]
+
+    routes_by_key = Dict{Tuple, RouteData}()
+    seed_keys     = Set{Tuple}()
+    next_id       = 1
+    for route in seed_routes
+        key = route_sequence_key(route.station_indices)
+        routes_by_key[key] = RouteData(next_id, route.station_indices,
+                                        route.travel_time, route.detour_feasible_legs)
+        push!(seed_keys, key)
+        next_id += 1
+    end
+
+    active_stations = _active_stations(valid_jk_pairs)
+    quotas = Dict(
+        :geometry => config.geometry_insertion_quota,
+        :coverage => config.coverage_insertion_quota,
+        :interior => config.interior_replacement_quota,
+        :endpoint => config.endpoint_mutation_quota,
+        :reverse  => config.reverse_mutation_quota,
+    )
+    iter_kw = (
+        max_detour_time=max_detour_time,
+        max_detour_ratio=max_detour_ratio,
+        stop_dwell_time=stop_dwell_time,
+    )
+
+    for iter in 1:config.max_iterations
+        length(routes_by_key) >= config.max_routes_total && break
+        current_routes = sort!(collect(values(routes_by_key)),
+                               by=r -> (length(r.station_indices), r.station_indices))
+        coverage_count = _route_coverage_count(current_routes)
+
+        geom_c       = _geometry_insertion_candidates(current_routes, active_stations, data, valid_jk_pairs, config; iter_kw...)
+        cov_c        = _coverage_balancing_candidates(current_routes, active_stations, data, valid_jk_pairs, coverage_count, config; iter_kw...)
+        int_c        = _interior_replacement_candidates(current_routes, active_stations, data, valid_jk_pairs, coverage_count, config; iter_kw...)
+        ep_c, rev_c  = _endpoint_and_reverse_candidates(current_routes, active_stations, data, valid_jk_pairs, coverage_count, config; iter_kw...)
+
+        candidate_groups = Dict(:geometry => geom_c, :coverage => cov_c,
+                                :interior => int_c, :endpoint => ep_c, :reverse => rev_c)
+        added_this_iter = 0
+        for strategy in (:geometry, :coverage, :interior, :endpoint, :reverse)
+            for cand in candidate_groups[strategy][1:min(quotas[strategy], length(candidate_groups[strategy]))]
+                key = route_sequence_key(cand.route.station_indices)
+                haskey(routes_by_key, key) && continue
+                routes_by_key[key] = RouteData(next_id, cand.route.station_indices,
+                                                cand.route.travel_time, cand.route.detour_feasible_legs)
+                next_id += 1
+                added_this_iter += 1
+                (added_this_iter >= config.max_new_routes_per_iter ||
+                 length(routes_by_key) >= config.max_routes_total) && break
+            end
+            (added_this_iter >= config.max_new_routes_per_iter ||
+             length(routes_by_key) >= config.max_routes_total) && break
+        end
+        added_this_iter == 0 && break
+    end
+
+    return RouteData[r for (k, r) in routes_by_key if k ∉ seed_keys]
 end

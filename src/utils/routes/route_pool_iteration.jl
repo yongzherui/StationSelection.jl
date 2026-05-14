@@ -133,7 +133,6 @@ function _expand_route_pool!(
     data::StationSelectionData,
     target_max_route_length::Int;
     vehicle_capacity::Int,
-    route_generation_method::Symbol=:dfs,
     iterative_config::Union{Nothing, IterativeRouteGenerationConfig}=nothing,
     max_detour_time::Float64,
     max_detour_ratio::Float64,
@@ -141,24 +140,22 @@ function _expand_route_pool!(
 )::Int
     target_max_route_length > bucket_state.current_generated_max_route_length || return 0
 
-    routes, alpha = generate_routes_and_alpha(
-        data,
-        bucket_state.valid_jk_pairs;
-        vehicle_capacity=vehicle_capacity,
-        max_route_length=target_max_route_length,
-        route_generation_method=route_generation_method,
-        iterative_config=iterative_config,
+    seed_routes = collect(values(bucket_state.routes_by_id))
+    exp_config  = isnothing(iterative_config) ?
+        default_iterative_route_generation_config(target_max_route_length) :
+        _with_max_route_length(iterative_config, target_max_route_length)
+
+    new_routes = generate_routes_by_insertion(
+        seed_routes,
+        bucket_state.valid_jk_pairs,
+        data;
+        config=exp_config,
         max_detour_time=max_detour_time,
         max_detour_ratio=max_detour_ratio,
-        stop_dwell_time=stop_dwell_time
+        stop_dwell_time=stop_dwell_time,
     )
-    added = _merge_route_variants!(
-        global_state,
-        bucket_state,
-        routes,
-        alpha,
-        :generated_iterative
-    )
+    alpha = derive_balanced_alpha(new_routes, vehicle_capacity)
+    added = _merge_route_variants!(global_state, bucket_state, new_routes, alpha, :expanded_insertion)
     bucket_state.current_generated_max_route_length = max(bucket_state.current_generated_max_route_length, target_max_route_length)
     return added
 end

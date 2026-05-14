@@ -143,7 +143,6 @@ function update_iteration_state!(
                 data,
                 target_length;
                 vehicle_capacity=model.vehicle_capacity,
-                route_generation_method=model.route_generation_method,
                 iterative_config=model.iterative_route_generation_config,
                 max_detour_time=model.max_detour_time,
                 max_detour_ratio=model.max_detour_ratio,
