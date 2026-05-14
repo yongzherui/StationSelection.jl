@@ -69,6 +69,8 @@ function create_fleet_limit_od_map(
         max_stations_visited        = model.max_stations_visited,
         stop_dwell_time             = model.stop_dwell_time,
         routes_file                 = model.routes_file,
+        route_generation_method     = model.route_generation_method,
+        iterative_route_generation_config = model.iterative_route_generation_config,
     )
     inner = create_vehicle_capacity_od_map(proxy, data)
 

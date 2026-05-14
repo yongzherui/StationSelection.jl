@@ -48,6 +48,9 @@ Covering constraints:
 - `alpha_profile_file::Union{String,Nothing}`: Path to `alpha_profile.csv` (route_id,
   pickup_id, dropoff_id, value). Alpha values are used as warm-start hints for α variables.
   Requires `routes_file` to be set.
+- `route_generation_method::Symbol`: `:dfs` or `:iterative_insertion` when generating routes
+- `iterative_route_generation_config::Union{IterativeRouteGenerationConfig,Nothing}`:
+  optional richer route-generation config used when `route_generation_method=:iterative_insertion`
 """
 struct RouteVehicleCapacityModel <: AbstractODModel
     k::Int
@@ -65,6 +68,8 @@ struct RouteVehicleCapacityModel <: AbstractODModel
     stop_dwell_time::Float64
     routes_file        :: Union{String, Nothing}
     alpha_profile_file :: Union{String, Nothing}
+    route_generation_method::Symbol
+    iterative_route_generation_config::Union{IterativeRouteGenerationConfig, Nothing}
 
     function RouteVehicleCapacityModel(
             k::Int,
@@ -82,6 +87,8 @@ struct RouteVehicleCapacityModel <: AbstractODModel
             stop_dwell_time::Number = 10.0,
             routes_file        :: Union{String, Nothing} = nothing,
             alpha_profile_file :: Union{String, Nothing} = nothing,
+            route_generation_method::Symbol = :dfs,
+            iterative_route_generation_config::Union{IterativeRouteGenerationConfig, Nothing} = nothing,
         )
 
         k > 0 || throw(ArgumentError("k must be positive"))
@@ -92,6 +99,8 @@ struct RouteVehicleCapacityModel <: AbstractODModel
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
         max_stations_visited >= 1 ||
             throw(ArgumentError("max_stations_visited must be >= 1"))
+        route_generation_method in (:dfs, :iterative_insertion) ||
+            throw(ArgumentError("route_generation_method must be :dfs or :iterative_insertion"))
         !isnothing(routes_file) && !isfile(routes_file) &&
             throw(ArgumentError("routes_file not found: $routes_file"))
         !isnothing(alpha_profile_file) && !isfile(alpha_profile_file) &&
@@ -112,6 +121,7 @@ struct RouteVehicleCapacityModel <: AbstractODModel
 
         new(k, l, Float64(route_regularization_weight), Float64(repositioning_time), vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr, time_window_sec, use_lazy_constraints,
-            max_stations_visited, sdt, routes_file, alpha_profile_file)
+            max_stations_visited, sdt, routes_file, alpha_profile_file,
+            route_generation_method, iterative_route_generation_config)
     end
 end

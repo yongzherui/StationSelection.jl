@@ -41,6 +41,17 @@ const MOI = JuMP.MOI
 
     @testset "combined initialization keeps same sequence variants with distinct alpha" begin
         data = make_alpha_test_data()
+        model = StationSelection.AlphaRouteModel(
+            2, 2;
+            generate_routes=true,
+            max_route_length=2,
+            max_walking_distance=1000.0,
+            max_detour_time=3600.0,
+            max_detour_ratio=10.0,
+            time_window_sec=3600,
+            vehicle_capacity=18,
+        )
+        base = StationSelection._build_alpha_route_base(model, data)
 
         mktempdir() do tmpdir
             routes_df = DataFrame(
@@ -66,33 +77,24 @@ const MOI = JuMP.MOI
             )
             state = StationSelection.initialize_route_pool(
                 init_spec,
-                data;
+                data,
+                base.Q_s_t,
+                base.valid_jk_pairs;
                 vehicle_capacity=18,
-                max_walking_distance=1000.0,
                 max_detour_time=3600.0,
                 max_detour_ratio=10.0,
                 stop_dwell_time=10.0,
                 initial_generated_max_route_length=2
             )
 
-            direct_variants = [r for r in values(state.routes_by_id) if r.station_indices == [1, 3]]
+            bucket_state = state.bucket_states[(1, 0)]
+            direct_variants = [r for r in values(bucket_state.routes_by_id) if r.station_indices == [1, 3]]
             @test length(direct_variants) >= 2
         end
     end
 
     @testset "injected route pool builds alpha map" begin
         data = make_alpha_test_data()
-        init_spec = StationSelection.RoutePoolInitSpec(:generated)
-        state = StationSelection.initialize_route_pool(
-            init_spec,
-            data;
-            vehicle_capacity=18,
-            max_walking_distance=1000.0,
-            max_detour_time=3600.0,
-            max_detour_ratio=10.0,
-            stop_dwell_time=10.0,
-            initial_generated_max_route_length=2
-        )
         model = StationSelection.AlphaRouteModel(
             2, 2;
             generate_routes=true,
@@ -103,11 +105,25 @@ const MOI = JuMP.MOI
             time_window_sec=3600,
             vehicle_capacity=18,
         )
+        base = StationSelection._build_alpha_route_base(model, data)
+        init_spec = StationSelection.RoutePoolInitSpec(:generated)
+        state = StationSelection.initialize_route_pool(
+            init_spec,
+            data,
+            base.Q_s_t,
+            base.valid_jk_pairs;
+            vehicle_capacity=18,
+            max_detour_time=3600.0,
+            max_detour_ratio=10.0,
+            stop_dwell_time=10.0,
+            initial_generated_max_route_length=2
+        )
         mapping = StationSelection.create_alpha_route_od_map(model, data, state)
         @test !isempty(mapping.routes_s[1][0])
         @test !isempty(mapping.alpha_profile)
-        @test !isempty(state.direct_seed_route_ids)
-        @test issubset(state.direct_seed_route_ids, state.protected_route_ids)
+        bucket_state = state.bucket_states[(1, 0)]
+        @test !isempty(bucket_state.direct_seed_route_ids)
+        @test issubset(bucket_state.direct_seed_route_ids, bucket_state.protected_route_ids)
     end
 
     gurobi_available = try

@@ -202,14 +202,17 @@ function create_vehicle_capacity_od_map(
                     continue
                 end
 
-                println("    running exhaustive DFS...")
+                println("    running $(model.route_generation_method) route generation...")
                 flush(stdout)
-                routes_s[s][t_id] = generate_simple_routes(
-                    jk_set, data;
-                    max_route_length = model.max_stations_visited,
-                    max_detour_time  = model.max_detour_time,
-                    max_detour_ratio = model.max_detour_ratio,
-                    stop_dwell_time  = model.stop_dwell_time,
+                routes_s[s][t_id] = generate_routes_for_bucket(
+                    jk_set,
+                    data;
+                    route_generation_method=model.route_generation_method,
+                    iterative_config=model.iterative_route_generation_config,
+                    max_route_length=model.max_stations_visited,
+                    max_detour_time=model.max_detour_time,
+                    max_detour_ratio=model.max_detour_ratio,
+                    stop_dwell_time=model.stop_dwell_time,
                 )
                 println("    → $(length(routes_s[s][t_id])) routes generated")
                 flush(stdout)

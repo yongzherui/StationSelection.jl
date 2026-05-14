@@ -46,6 +46,9 @@ per-passenger delay cost in the objective (April 1, 2026 formulation).
 - `stop_dwell_time::Float64`: extra seconds added per intermediate stop in route travel
   and per-passenger delay; default 10.0
 - `routes_file::Union{String,Nothing}`: load routes from CSV instead of DFS
+- `route_generation_method::Symbol`: `:dfs` or `:iterative_insertion` when generating routes
+- `iterative_route_generation_config::Union{IterativeRouteGenerationConfig,Nothing}`:
+  optional richer route-generation config used when `route_generation_method=:iterative_insertion`
 """
 struct RouteFleetLimitModel <: AbstractODModel
     k::Int
@@ -64,6 +67,8 @@ struct RouteFleetLimitModel <: AbstractODModel
     max_stations_visited::Int
     stop_dwell_time::Float64
     routes_file::Union{String, Nothing}
+    route_generation_method::Symbol
+    iterative_route_generation_config::Union{IterativeRouteGenerationConfig, Nothing}
 
     function RouteFleetLimitModel(
             k::Int,
@@ -81,7 +86,9 @@ struct RouteFleetLimitModel <: AbstractODModel
             time_window_sec::Int = 3600,
             max_stations_visited::Int = typemax(Int),
             stop_dwell_time::Number = 10.0,
-            routes_file::Union{String, Nothing} = nothing
+            routes_file::Union{String, Nothing} = nothing,
+            route_generation_method::Symbol = :dfs,
+            iterative_route_generation_config::Union{IterativeRouteGenerationConfig, Nothing} = nothing
         )
 
         k > 0 || throw(ArgumentError("k must be positive"))
@@ -97,6 +104,8 @@ struct RouteFleetLimitModel <: AbstractODModel
         time_window_sec > 0 || throw(ArgumentError("time_window_sec must be positive"))
         max_stations_visited >= 1 ||
             throw(ArgumentError("max_stations_visited must be >= 1"))
+        route_generation_method in (:dfs, :iterative_insertion) ||
+            throw(ArgumentError("route_generation_method must be :dfs or :iterative_insertion"))
         !isnothing(routes_file) && !isfile(routes_file) &&
             throw(ArgumentError("routes_file not found: $routes_file"))
 
@@ -117,6 +126,7 @@ struct RouteFleetLimitModel <: AbstractODModel
             Float64(unmet_demand_penalty),
             vehicle_capacity, mrtt,
             Float64(max_walking_distance), mdt, mdr,
-            time_window_sec, max_stations_visited, sdt, routes_file)
+            time_window_sec, max_stations_visited, sdt, routes_file,
+            route_generation_method, iterative_route_generation_config)
     end
 end

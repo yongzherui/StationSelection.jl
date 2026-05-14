@@ -16,7 +16,7 @@ function build_model(
         model :: AlphaRouteModel,
         data  :: StationSelectionData;
         optimizer_env = nothing,
-        route_pool_state::Union{RoutePoolState, Nothing}=nothing
+        route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing
     )::BuildResult
 
     if isnothing(optimizer_env)

@@ -1,7 +1,3 @@
-function _route_pool_sorted_routes(state::RoutePoolState)::Vector{RouteData}
-    return [state.routes_by_id[rid] for rid in sort!(collect(keys(state.routes_by_id)))]
-end
-
 function _route_pool_alpha_for_route(state::RoutePoolState, route_id::Int)
     return Dict(
         (rid, j_idx, k_idx) => value
@@ -10,8 +6,8 @@ function _route_pool_alpha_for_route(state::RoutePoolState, route_id::Int)
     )
 end
 
-function _route_usage_by_id(result::OptResult)::Dict{Int, Float64}
-    usage = Dict{Int, Float64}()
+function _route_usage_by_bucket(result::OptResult)::Dict{Tuple{Int, Int}, Dict{Int, Float64}}
+    usage = Dict{Tuple{Int, Int}, Dict{Int, Float64}}()
     theta_r_ts = get(result.model.obj_dict, :theta_r_ts, Dict{NTuple{3, Int}, VariableRef}())
     for ((s, t_id, r_idx), theta_var) in theta_r_ts
         theta_val = JuMP.value(theta_var)
@@ -19,38 +15,51 @@ function _route_usage_by_id(result::OptResult)::Dict{Int, Float64}
         routes_t = get(result.mapping.routes_s[s], t_id, RouteData[])
         r_idx <= length(routes_t) || continue
         route_id = routes_t[r_idx].id
-        usage[route_id] = get(usage, route_id, 0.0) + theta_val
+        bucket_usage = get!(usage, (s, t_id), Dict{Int, Float64}())
+        bucket_usage[route_id] = get(bucket_usage, route_id, 0.0) + theta_val
     end
     return usage
+end
+
+function _effective_bucket_target_size(bucket_state::RoutePoolState, bucket_x_multiplier::Float64)::Int
+    min_required = length(bucket_state.direct_seed_route_ids)
+    proportional_cap = ceil(Int, bucket_x_multiplier * bucket_state.x_candidate_count)
+    return max(min_required, proportional_cap)
+end
+
+function _mandatory_route_ids(
+    state::RoutePoolState,
+    usage_by_id::Dict{Int, Float64},
+    min_theta_to_keep::Float64
+)::Set{Int}
+    mandatory_ids = Set{Int}()
+    for route_id in keys(state.routes_by_id)
+        if route_id in state.protected_route_ids ||
+           get(usage_by_id, route_id, 0.0) > min_theta_to_keep
+            push!(mandatory_ids, route_id)
+        end
+    end
+    return mandatory_ids
 end
 
 function _prune_route_pool!(
     state::RoutePoolState,
     usage_by_id::Dict{Int, Float64},
     min_theta_to_keep::Float64,
-    target_pool_size::Union{Int, Nothing},
+    bucket_target_size::Int,
     retention_seed::Int
 )::Int
-    isnothing(target_pool_size) && return 0
-
-    mandatory_ids = Set{Int}()
-    for route_id in keys(state.routes_by_id)
-        route = state.routes_by_id[route_id]
-        if route_id in state.protected_route_ids ||
-           get(usage_by_id, route_id, 0.0) > min_theta_to_keep
-            push!(mandatory_ids, route_id)
-        end
-    end
-
+    effective_target = max(length(state.direct_seed_route_ids), bucket_target_size)
+    mandatory_ids = _mandatory_route_ids(state, usage_by_id, min_theta_to_keep)
     keep_ids = copy(mandatory_ids)
-    if length(state.routes_by_id) > target_pool_size
+    if length(state.routes_by_id) > effective_target
         inactive_candidates = [
             route_id for route_id in sort!(collect(keys(state.routes_by_id)))
             if route_id ∉ mandatory_ids
         ]
-        remaining_slots = max(target_pool_size - length(mandatory_ids), 0)
+        remaining_slots = max(effective_target - length(mandatory_ids), 0)
         if remaining_slots > 0 && !isempty(inactive_candidates)
-            ordered = sort(inactive_candidates; by=route_id -> hash((retention_seed, route_id)))
+            ordered = sort(inactive_candidates; by=route_id -> hash((retention_seed, state.scenario_idx, state.time_id, route_id)))
             for route_id in ordered[1:min(remaining_slots, length(ordered))]
                 push!(keep_ids, route_id)
             end
@@ -75,38 +84,81 @@ function _prune_route_pool!(
     return removed
 end
 
+function _enforce_global_total_route_cap!(
+    global_state::AlphaRouteBucketPoolsState,
+    usage_by_bucket::Dict{Tuple{Int, Int}, Dict{Int, Float64}},
+    min_theta_to_keep::Float64,
+    total_target_size::Int,
+    retention_seed::Int
+)::Int
+    total_routes = sum(length(bucket.routes_by_id) for bucket in values(global_state.bucket_states))
+    total_routes <= total_target_size && return 0
+
+    removable = Tuple{Int, Int, Int}[]
+    mandatory_count = 0
+    for (bucket_key, bucket_state) in global_state.bucket_states
+        mandatory_ids = _mandatory_route_ids(bucket_state, get(usage_by_bucket, bucket_key, Dict{Int, Float64}()), min_theta_to_keep)
+        mandatory_count += length(mandatory_ids)
+        for route_id in keys(bucket_state.routes_by_id)
+            route_id in mandatory_ids && continue
+            push!(removable, (bucket_key[1], bucket_key[2], route_id))
+        end
+    end
+
+    mandatory_count >= total_target_size && return 0
+    n_to_remove = min(total_routes - total_target_size, length(removable))
+    n_to_remove <= 0 && return 0
+
+    ordered = sort(removable; by=x -> hash((retention_seed, x[1], x[2], x[3])))
+    removed = 0
+    for (s, t_id, route_id) in ordered[1:n_to_remove]
+        bucket_state = global_state.bucket_states[(s, t_id)]
+        route = bucket_state.routes_by_id[route_id]
+        alpha_sig = _route_alpha_signature(route, _route_pool_alpha_for_route(bucket_state, route_id))
+        delete!(bucket_state.routes_by_id, route_id)
+        delete!(bucket_state.signature_to_route_id, alpha_sig)
+        push!(bucket_state.removed_route_ids, route_id)
+        delete!(bucket_state.provenance_by_route_id, route_id)
+        for key in [key for key in keys(bucket_state.alpha_profile) if key[1] == route_id]
+            delete!(bucket_state.alpha_profile, key)
+        end
+        removed += 1
+    end
+    return removed
+end
+
 function _expand_route_pool!(
-    state::RoutePoolState,
+    global_state::AlphaRouteBucketPoolsState,
+    bucket_state::RoutePoolState,
     data::StationSelectionData,
     target_max_route_length::Int;
     vehicle_capacity::Int,
-    max_walking_distance::Float64,
+    route_generation_method::Symbol=:dfs,
+    iterative_config::Union{Nothing, IterativeRouteGenerationConfig}=nothing,
     max_detour_time::Float64,
     max_detour_ratio::Float64,
     stop_dwell_time::Float64
 )::Int
-    target_max_route_length > state.current_generated_max_route_length || return 0
+    target_max_route_length > bucket_state.current_generated_max_route_length || return 0
 
-    init_spec = RoutePoolInitSpec(
-        :generated
-    )
-    generated_state = initialize_route_pool(
-        init_spec,
-        data;
+    routes, alpha = generate_routes_and_alpha(
+        data,
+        bucket_state.valid_jk_pairs;
         vehicle_capacity=vehicle_capacity,
-        max_walking_distance=max_walking_distance,
+        max_route_length=target_max_route_length,
+        route_generation_method=route_generation_method,
+        iterative_config=iterative_config,
         max_detour_time=max_detour_time,
         max_detour_ratio=max_detour_ratio,
-        stop_dwell_time=stop_dwell_time,
-        initial_generated_max_route_length=target_max_route_length
+        stop_dwell_time=stop_dwell_time
     )
-
     added = _merge_route_variants!(
-        state,
-        _route_pool_sorted_routes(generated_state),
-        generated_state.alpha_profile,
+        global_state,
+        bucket_state,
+        routes,
+        alpha,
         :generated_iterative
     )
-    state.current_generated_max_route_length = max(state.current_generated_max_route_length, target_max_route_length)
+    bucket_state.current_generated_max_route_length = max(bucket_state.current_generated_max_route_length, target_max_route_length)
     return added
 end

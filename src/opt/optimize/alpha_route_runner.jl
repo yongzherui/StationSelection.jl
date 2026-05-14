@@ -8,7 +8,7 @@ function _run_opt_alpha_single_impl(
     warm_start::Bool=false,
     check_feasibility::Bool=true,
     mip_gap::Union{Float64, Nothing}=nothing,
-    route_pool_state::Union{RoutePoolState, Nothing}=nothing
+    route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing
 )
     start_time = now()
 
@@ -155,7 +155,7 @@ function run_opt(
     warm_start::Bool=false,
     check_feasibility::Bool=true,
     mip_gap::Union{Float64, Nothing}=nothing,
-    route_pool_state::Union{RoutePoolState, Nothing}=nothing,
+    route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing,
     solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
     output_dir::Union{String, Nothing}=nothing
 )

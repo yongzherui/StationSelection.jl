@@ -1,8 +1,7 @@
 """
 OD mapping for AlphaRouteModel.
 
-Routes and fixed alpha values can be injected from a prepared route pool or
-constructed via the legacy one-shot initialization path.
+Routes and fixed alpha values are maintained per (scenario, time-bucket) pool.
 """
 
 export AlphaRouteODMap
@@ -11,20 +10,15 @@ export create_alpha_route_od_map
 struct AlphaRouteODMap <: AbstractClusteringMap
     station_id_to_array_idx     :: Dict{Int, Int}
     array_idx_to_station_id     :: Vector{Int}
-
     scenarios                   :: Vector{ScenarioData}
     scenario_label_to_array_idx :: Dict{String, Int}
     array_idx_to_scenario_label :: Vector{String}
-
-    Q_s_t     :: Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
-
-    valid_jk_pairs       :: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
-
-    max_walking_distance :: Float64
-    time_window_sec      :: Int
-
-    routes_s      :: Dict{Int, Dict{Int, Vector{RouteData}}}
-    alpha_profile :: Dict{NTuple{3, Int}, Float64}
+    Q_s_t                       :: Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}}
+    valid_jk_pairs              :: Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+    max_walking_distance        :: Float64
+    time_window_sec             :: Int
+    routes_s                    :: Dict{Int, Dict{Int, Vector{RouteData}}}
+    alpha_profile               :: Dict{NTuple{3, Int}, Float64}
 end
 
 has_walking_distance_limit(mapping::AlphaRouteODMap) = true
@@ -39,8 +33,8 @@ _time_od_pairs(mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}, s::Int, t_
     sort!(collect(keys(mapping.Q_s_t[s][t_id])))
 
 function _build_alpha_route_base(
-    model :: AlphaRouteModel,
-    data  :: StationSelectionData
+    model::AlphaRouteModel,
+    data::StationSelectionData
 )
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
@@ -59,10 +53,7 @@ function _build_alpha_route_base(
         end
     end
 
-    valid_jk_pairs = compute_valid_jk_pairs(
-        all_od_pairs, data,
-        model.max_walking_distance
-    )
+    valid_jk_pairs = compute_valid_jk_pairs(all_od_pairs, data, model.max_walking_distance)
 
     return (
         scenario_label_to_array_idx=scenario_label_to_array_idx,
@@ -73,62 +64,30 @@ function _build_alpha_route_base(
     )
 end
 
-function _filter_alpha_route_pool_by_bucket(
-    route_pool_state::RoutePoolState,
-    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
-    Q_s_t::Dict{Int, Dict{Int, Dict{Tuple{Int, Int}, Int}}},
-    S::Int
-)::Dict{Int, Dict{Int, Vector{RouteData}}}
-    route_alpha_jk = Dict{Int, Vector{Tuple{Int, Int}}}()
-    for (route_id, j_idx, k_idx) in keys(route_pool_state.alpha_profile)
-        push!(get!(route_alpha_jk, route_id, Tuple{Int, Int}[]), (j_idx, k_idx))
+function _bucket_route_pool_to_mapping(
+    bucket_state::RoutePoolState,
+    n_requests::Int,
+    n_od::Int
+)::Vector{RouteData}
+    print("  Scenario $(bucket_state.scenario_idx), time bucket $(bucket_state.time_id): $n_requests requests, $n_od OD pairs, $(length(bucket_state.valid_jk_pairs)) (j,k) pairs")
+    flush(stdout)
+    routes = _route_pool_sorted_routes(bucket_state)
+    println(" → $(length(routes)) routes")
+    flush(stdout)
+    return routes
+end
+
+function _collect_alpha_profile(global_state::AlphaRouteBucketPoolsState)
+    alpha_profile = Dict{NTuple{3, Int}, Float64}()
+    for bucket_state in values(global_state.bucket_states)
+        merge!(alpha_profile, bucket_state.alpha_profile)
     end
-
-    all_routes = _route_pool_sorted_routes(route_pool_state)
-    routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
-    for s in 1:S
-        routes_s[s] = Dict{Int, Vector{RouteData}}()
-        for t_id in sort!(collect(keys(Q_s_t[s])))
-            jk_set = Set{Tuple{Int, Int}}()
-            od_pairs = sort!(collect(keys(Q_s_t[s][t_id])))
-            for (o, d) in od_pairs
-                for (j_idx, k_idx) in get(valid_jk_pairs, (o, d), Tuple{Int,Int}[])
-                    push!(jk_set, (j_idx, k_idx))
-                end
-            end
-
-            n_requests = sum(values(Q_s_t[s][t_id]); init=0)
-            n_od = length(od_pairs)
-            print("  Scenario $s/$S, time bucket $t_id: $n_requests requests, $n_od OD pairs, $(length(jk_set)) (j,k) pairs")
-            flush(stdout)
-
-            if isempty(jk_set)
-                routes_s[s][t_id] = RouteData[]
-                println()
-                flush(stdout)
-                continue
-            end
-
-            bucket_routes = RouteData[]
-            for route in all_routes
-                alpha_jk = get(route_alpha_jk, route.id, Tuple{Int, Int}[])
-                min_covered = length(route.station_indices) == 2 ? 1 : 2
-                count(jk -> jk ∈ jk_set, alpha_jk) >= min_covered &&
-                    push!(bucket_routes, route)
-            end
-            routes_s[s][t_id] = bucket_routes
-            println(" → $(length(bucket_routes)) routes")
-            flush(stdout)
-        end
-    end
-    return routes_s
+    return alpha_profile
 end
 
 function _legacy_alpha_route_init_spec(model::AlphaRouteModel)::RoutePoolInitSpec
     if model.generate_routes
-        return RoutePoolInitSpec(
-            :generated
-        )
+        return RoutePoolInitSpec(:generated)
     end
     return RoutePoolInitSpec(
         :file,
@@ -138,17 +97,22 @@ function _legacy_alpha_route_init_spec(model::AlphaRouteModel)::RoutePoolInitSpe
 end
 
 function create_alpha_route_od_map(
-    model :: AlphaRouteModel,
-    data  :: StationSelectionData,
-    route_pool_state::RoutePoolState
+    model::AlphaRouteModel,
+    data::StationSelectionData,
+    bucket_pools::AlphaRouteBucketPoolsState
 )::AlphaRouteODMap
     base = _build_alpha_route_base(model, data)
-    routes_s = _filter_alpha_route_pool_by_bucket(
-        route_pool_state,
-        base.valid_jk_pairs,
-        base.Q_s_t,
-        base.S
-    )
+    routes_s = Dict{Int, Dict{Int, Vector{RouteData}}}()
+    for s in 1:base.S
+        routes_s[s] = Dict{Int, Vector{RouteData}}()
+        for t_id in sort!(collect(keys(base.Q_s_t[s])))
+            od_cnt = base.Q_s_t[s][t_id]
+            n_requests = sum(values(od_cnt); init=0)
+            n_od = length(od_cnt)
+            bucket_state = get(bucket_pools.bucket_states, (s, t_id), nothing)
+            routes_s[s][t_id] = isnothing(bucket_state) ? RouteData[] : _bucket_route_pool_to_mapping(bucket_state, n_requests, n_od)
+        end
+    end
 
     return AlphaRouteODMap(
         data.station_id_to_array_idx,
@@ -161,23 +125,27 @@ function create_alpha_route_od_map(
         model.max_walking_distance,
         model.time_window_sec,
         routes_s,
-        copy(route_pool_state.alpha_profile)
+        _collect_alpha_profile(bucket_pools)
     )
 end
 
 function create_alpha_route_od_map(
-    model :: AlphaRouteModel,
-    data  :: StationSelectionData
+    model::AlphaRouteModel,
+    data::StationSelectionData
 )::AlphaRouteODMap
-    route_pool_state = initialize_route_pool(
+    base = _build_alpha_route_base(model, data)
+    bucket_pools = initialize_route_pool(
         _legacy_alpha_route_init_spec(model),
-        data;
+        data,
+        base.Q_s_t,
+        base.valid_jk_pairs;
         vehicle_capacity=model.vehicle_capacity,
-        max_walking_distance=model.max_walking_distance,
+        route_generation_method=model.route_generation_method,
+        iterative_config=model.iterative_route_generation_config,
         max_detour_time=model.max_detour_time,
         max_detour_ratio=model.max_detour_ratio,
         stop_dwell_time=model.stop_dwell_time,
         initial_generated_max_route_length=model.generate_routes ? model.max_route_length : nothing
     )
-    return create_alpha_route_od_map(model, data, route_pool_state)
+    return create_alpha_route_od_map(model, data, bucket_pools)
 end

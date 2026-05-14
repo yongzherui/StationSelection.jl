@@ -91,24 +91,12 @@ function load_routes_and_alpha(
 
         travel_time = Float64(row.travel_time)
 
-        # Compute detour_feasible_legs: same logic as generate_simple_routes DFS recorder
-        m   = length(station_indices)
-        seg = Vector{Float64}(undef, m - 1)
-        for i in 1:(m - 1)
-            seg[i] = get_routing_cost(data, station_indices[i], station_indices[i + 1])
-        end
-        feasible_legs = Tuple{Int, Int}[]
-        for i in 1:m
-            cum = 0.0
-            for j in (i + 1):m
-                cum   += seg[j - 1]
-                direct = get_routing_cost(data, station_indices[i], station_indices[j])
-                if (cum - direct <= max_detour_time) &&
-                   (direct == 0.0 || cum / direct <= 1.0 + max_detour_ratio)
-                    push!(feasible_legs, (station_indices[i], station_indices[j]))
-                end
-            end
-        end
+        feasible_legs = compute_route_detour_feasible_legs(
+            station_indices,
+            data;
+            max_detour_time=max_detour_time,
+            max_detour_ratio=max_detour_ratio,
+        )
 
         push!(routes, RouteData(route_id, station_indices, travel_time, feasible_legs))
         push!(valid_route_ids, route_id)
@@ -129,6 +117,8 @@ function load_routes_and_alpha(
         alpha_df        = CSV.read(alpha_profile_file, DataFrame)
         n_loaded        = 0
         n_skipped_alpha = 0
+        n_invalid_alpha = 0
+        route_by_id = Dict(route.id => route for route in routes)
 
         for row in eachrow(alpha_df)
             rid = Int(row.route_id)
@@ -140,14 +130,21 @@ function load_routes_and_alpha(
             dropoff_id = Int(row.dropoff_id)
             haskey(data.station_id_to_array_idx, pickup_id) || continue
             haskey(data.station_id_to_array_idx, dropoff_id) || continue
-            key = (rid, data.station_id_to_array_idx[pickup_id], data.station_id_to_array_idx[dropoff_id])
+            pickup_idx = data.station_id_to_array_idx[pickup_id]
+            dropoff_idx = data.station_id_to_array_idx[dropoff_id]
+            route = route_by_id[rid]
+            if (pickup_idx, dropoff_idx) ∉ route.detour_feasible_legs
+                n_invalid_alpha += 1
+                continue
+            end
+            key = (rid, pickup_idx, dropoff_idx)
             # Take maximum if the same key appears more than once
             alpha_profile[key] = max(get(alpha_profile, key, 0.0), Float64(row.value))
             n_loaded += 1
         end
 
-        if n_skipped_alpha > 0
-            println("  Loaded $n_loaded alpha profile entries ($n_skipped_alpha skipped — route_id not in routes_input)")
+        if n_skipped_alpha > 0 || n_invalid_alpha > 0
+            println("  Loaded $n_loaded alpha profile entries ($n_skipped_alpha skipped — route_id not in routes_input, $n_invalid_alpha skipped — route does not structurally serve (j,k))")
         else
             println("  Loaded $n_loaded alpha profile entries")
         end
