@@ -5,6 +5,10 @@ using Printf
 
 const T0 = time()
 
+struct FlushingLogger <: AbstractLogger
+    inner::AbstractLogger
+end
+
 # Function to format log level
 function level_str(level::Logging.LogLevel)
     s = uppercase(string(level))
@@ -29,6 +33,27 @@ function add_elapsed_and_format(log)
     )
 end
 
+# Delegate logger behavior to the wrapped logger.
+Logging.min_enabled_level(logger::FlushingLogger) = Logging.min_enabled_level(logger.inner)
+Logging.shouldlog(logger::FlushingLogger, level, _module, group, id) =
+    Logging.shouldlog(logger.inner, level, _module, group, id)
+Logging.catch_exceptions(logger::FlushingLogger) = Logging.catch_exceptions(logger.inner)
+function Logging.handle_message(
+    logger::FlushingLogger,
+    level,
+    message,
+    _module,
+    group,
+    id,
+    file,
+    line;
+    kwargs...
+)
+    Logging.handle_message(logger.inner, level, message, _module, group, id, file, line; kwargs...)
+    flush(stderr)
+    flush(stdout)
+end
+
 # Create a ConsoleLogger
 base_console = ConsoleLogger()
 
@@ -36,4 +61,4 @@ base_console = ConsoleLogger()
 fancy_logger = TransformerLogger(add_elapsed_and_format, base_console)
 
 # Set the global logger
-global_logger(fancy_logger)
+global_logger(FlushingLogger(fancy_logger))
