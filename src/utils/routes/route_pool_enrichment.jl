@@ -248,7 +248,7 @@ function enrich_alpha_profiles!(
             n_candidate_routes=0,
         )
 
-    @debug "enrich_alpha_profiles!: starting" pressure_threshold=config.pressure_threshold binding_threshold=config.binding_threshold alpha_scale_factor=config.alpha_scale_factor max_new_profiles=config.max_new_profiles_per_iteration max_profiles_per_sequence=config.max_profiles_per_route_sequence min_profile_diff=config.min_profile_difference
+    @info "enrich_alpha_profiles!: starting" pressure_threshold=config.pressure_threshold binding_threshold=config.binding_threshold alpha_scale_factor=config.alpha_scale_factor max_new_profiles=config.max_new_profiles_per_iteration max_profiles_per_sequence=config.max_profiles_per_route_sequence min_profile_diff=config.min_profile_difference
 
     diagnostics = compute_alpha_pressure_diagnostics(result, config)
 
@@ -257,7 +257,7 @@ function enrich_alpha_profiles!(
 
     any(v >= config.pressure_threshold for v in values(diagnostics.max_binding_ratio)) ||
         begin
-            @debug "enrich_alpha_profiles!: skipped (no pressured legs)" n_jk_pairs_checked=length(diagnostics.max_binding_ratio)
+            @info "enrich_alpha_profiles!: skipped (no pressured legs)" n_jk_pairs_checked=length(diagnostics.max_binding_ratio)
             return (
                 skipped=true,
                 added=0,
@@ -270,7 +270,7 @@ function enrich_alpha_profiles!(
 
     n_pressured = n_pressured_pre
     n_binding   = n_binding_pre
-    @debug "enrich_alpha_profiles!: diagnostics" n_jk_pairs_checked=length(diagnostics.max_binding_ratio) n_pressured_legs=n_pressured n_binding_legs=n_binding
+    @info "enrich_alpha_profiles!: diagnostics" n_jk_pairs_checked=length(diagnostics.max_binding_ratio) n_pressured_legs=n_pressured n_binding_legs=n_binding
 
     theta_r_ts = get(result.model.obj_dict, :theta_r_ts, Dict{NTuple{3,Int}, VariableRef}())
     total_added = 0
@@ -330,7 +330,7 @@ function enrich_alpha_profiles!(
         end
     end
 
-    @debug "enrich_alpha_profiles!: done" added=total_added n_pressured_legs=n_pressured n_binding_legs=n_binding n_buckets_with_pressure=buckets_with_pressure n_candidate_routes=candidate_routes
+    @info "enrich_alpha_profiles!: done" added=total_added n_pressured_legs=n_pressured n_binding_legs=n_binding n_buckets_with_pressure=buckets_with_pressure n_candidate_routes=candidate_routes
     return (
         skipped=false,
         added=total_added,

@@ -120,7 +120,7 @@ function generate_routes_and_alpha(
     stop_dwell_time   :: Float64 = 10.0
 ) :: Tuple{Vector{RouteData}, Dict{NTuple{3, Int}, Float64}}
 
-    @debug "generate_routes_and_alpha: generating routes" method=route_generation_method max_route_length=max_route_length n_pairs=length(valid_jk_pairs_global) max_detour_time=max_detour_time max_detour_ratio=max_detour_ratio
+    @info "generate_routes_and_alpha: generating routes" method=route_generation_method max_route_length=max_route_length n_pairs=length(valid_jk_pairs_global) max_detour_time=max_detour_time max_detour_ratio=max_detour_ratio stop_dwell_time=stop_dwell_time
 
     routes = generate_routes_for_bucket(
         valid_jk_pairs_global,
@@ -137,7 +137,7 @@ function generate_routes_and_alpha(
     n_multileg = length(routes) - n_direct
     alpha = derive_balanced_alpha(routes, vehicle_capacity)
 
-    @debug "generate_routes_and_alpha: done" n_routes=length(routes) n_direct=n_direct n_multileg=n_multileg n_alpha_entries=length(alpha) vehicle_capacity=vehicle_capacity
+    @info "generate_routes_and_alpha: done" n_routes=length(routes) n_direct=n_direct n_multileg=n_multileg n_alpha_entries=length(alpha) vehicle_capacity=vehicle_capacity route_lengths=_histogram_pairs(length.(getfield.(routes, :station_indices)))
 
     return routes, alpha
 end

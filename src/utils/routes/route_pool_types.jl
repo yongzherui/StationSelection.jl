@@ -78,7 +78,7 @@ struct IterativeRouteGenerationConfig
         endpoint_mutation_quota::Int=25,
         reverse_mutation_quota::Int=25,
         rng_seed::Int=1234,
-        verbose::Bool=false,
+        verbose::Bool=true,
     )
         max_route_length >= 2 || throw(ArgumentError("max_route_length must be >= 2"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))

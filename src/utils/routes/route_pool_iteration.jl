@@ -141,7 +141,7 @@ function _expand_route_pool!(
     stop_dwell_time::Float64
 )
     target_max_route_length > bucket_state.current_generated_max_route_length ||
-        return (added=0, n_iters=0, n_seeds=0, n_alpha=0)
+        return (added=0, n_iters=0, n_seeds=0, n_alpha=0, added_by_strategy=(geometry=0, coverage=0, interior=0, endpoint=0, reverse=0))
 
     seed_routes = collect(values(bucket_state.routes_by_id))
     exp_config  = isnothing(iterative_config) ?
@@ -162,5 +162,5 @@ function _expand_route_pool!(
     added           = _merge_route_variants!(global_state, bucket_state, ins_result.routes, alpha, :expanded_insertion)
     n_alpha_added   = length(bucket_state.alpha_profile) - alpha_before
     bucket_state.current_generated_max_route_length = max(bucket_state.current_generated_max_route_length, target_max_route_length)
-    return (added=added, n_iters=ins_result.n_iters, n_seeds=length(seed_routes), n_alpha=n_alpha_added)
+    return (added=added, n_iters=ins_result.n_iters, n_seeds=length(seed_routes), n_alpha=n_alpha_added, added_by_strategy=ins_result.added_by_strategy)
 end

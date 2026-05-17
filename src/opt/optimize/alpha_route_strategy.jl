@@ -118,6 +118,7 @@ function update_iteration_state!(
     exp_added = 0
     exp_buckets = 0
     exp_alpha = 0
+    exp_by_strategy = Dict{Symbol, Int}(:geometry => 0, :coverage => 0, :interior => 0, :endpoint => 0, :reverse => 0)
 
     # Pass 1: prune
     for bucket_key in _sorted_bucket_route_pool_keys(state)
@@ -136,6 +137,7 @@ function update_iteration_state!(
             )
             total_removed += removed
             total_pruned_buckets += removed > 0 ? 1 : 0
+            removed > 0 && @debug "alpha_route bucket prune" bucket=bucket_key removed=removed bucket_target_size=bucket_target_size active_routes=count(v -> v > strategy.config.min_theta_to_keep, values(bucket_usage))
         end
     end
 
@@ -149,6 +151,7 @@ function update_iteration_state!(
         )
         total_removed += cap_result.removed
         total_pruned_buckets += cap_result.buckets_touched
+        cap_result.removed > 0 && @debug "alpha_route global prune" removed=cap_result.removed buckets_touched=cap_result.buckets_touched route_pool_target_size=strategy.config.route_pool_target_size
     end
 
     # Enrich alpha profiles after pruning, before expansion
@@ -180,13 +183,17 @@ function update_iteration_state!(
             exp_seeds   += exp.n_seeds
             exp_alpha   += exp.n_alpha
             exp_buckets += exp.n_seeds > 0 ? 1 : 0
+            for (k, v) in pairs(exp.added_by_strategy)
+                exp_by_strategy[k] = get(exp_by_strategy, k, 0) + v
+            end
+            exp.added > 0 && @debug "alpha_route bucket expansion" bucket=bucket_key target_length=target_length added=exp.added added_by_strategy=exp.added_by_strategy alpha_entries_added=exp.n_alpha n_seeds=exp.n_seeds n_insertion_iters=exp.n_iters
         end
         total_added += exp_added
-        @debug "alpha_route iteration expansion" iteration=iteration target_length=target_length expanded_buckets=exp_buckets routes_added=exp_added alpha_entries_added=exp_alpha total_seeds=exp_seeds total_insertion_iters=exp_iters
+        @info "alpha_route iteration expansion" iteration=iteration target_length=target_length expanded_buckets=exp_buckets routes_added=exp_added expanded_by_strategy=exp_by_strategy alpha_entries_added=exp_alpha total_seeds=exp_seeds total_insertion_iters=exp_iters
     end
 
     pool_after = sum(length(b.routes_by_id) for b in values(state.bucket_states))
-    @info "alpha_route iteration summary" iteration=iteration pool_before=pool_before pool_after=pool_after pruned_routes=total_removed pruned_buckets=total_pruned_buckets enriched_profiles=enrichment_info.added enriched_buckets=get(enrichment_info, :n_buckets_with_pressure, 0) expanded_routes=exp_added expanded_buckets=exp_buckets active_routes=total_active n_pressured_legs=get(enrichment_info, :n_pressured_legs, 0) n_binding_legs=get(enrichment_info, :n_binding_legs, 0)
+    @info "alpha_route iteration summary" iteration=iteration pool_before=pool_before pool_after=pool_after pruned_routes=total_removed pruned_buckets=total_pruned_buckets enriched_profiles=enrichment_info.added enriched_buckets=get(enrichment_info, :n_buckets_with_pressure, 0) expanded_routes=exp_added expanded_buckets=exp_buckets expanded_by_strategy=exp_by_strategy active_routes=total_active n_pressured_legs=get(enrichment_info, :n_pressured_legs, 0) n_binding_legs=get(enrichment_info, :n_binding_legs, 0)
 
     return (
         added_count=total_added,
@@ -197,6 +204,10 @@ function update_iteration_state!(
         enrichment_skipped=enrichment_info.skipped,
         enrichment_buckets=get(enrichment_info, :n_buckets_with_pressure, 0),
         enrichment_candidates=get(enrichment_info, :n_candidate_routes, 0),
+        expansion_added=exp_added,
+        expansion_buckets=exp_buckets,
+        expansion_by_strategy=exp_by_strategy,
+        expansion_alpha_entries=exp_alpha,
     )
 end
 
@@ -212,6 +223,13 @@ function build_iteration_metadata(
     return Dict{String, Any}(
         "active_route_count" => get(update_info, :active_route_count, 0),
         "bucket_count" => get(update_info, :bucket_count, _bucket_count(state)),
+        "enrichment_added" => get(update_info, :enrichment_added, 0),
+        "enrichment_buckets" => get(update_info, :enrichment_buckets, 0),
+        "enrichment_candidates" => get(update_info, :enrichment_candidates, 0),
+        "expansion_added" => get(update_info, :expansion_added, 0),
+        "expansion_buckets" => get(update_info, :expansion_buckets, 0),
+        "expansion_alpha_entries" => get(update_info, :expansion_alpha_entries, 0),
+        "expansion_by_strategy" => get(update_info, :expansion_by_strategy, Dict{Symbol, Int}()),
     )
 end
 

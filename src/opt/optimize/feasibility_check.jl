@@ -21,34 +21,16 @@ end
 """
     check_model_feasibility(model::AbstractODModel, data) -> Union{Nothing, String}
 
-Runs a `ClusteringTwoStageODModel` solve as a fast feasibility proxy before entering
-the main solve. If even this simpler model is infeasible, the more complex model will
-be too.
+Legacy feasibility hook for OD-style models.
 
-Skipped when the model is already a `ClusteringTwoStageODModel` (would be redundant).
+This is intentionally disabled for now because `ClusteringTwoStageODModel` is not a
+good proxy for the models we want to run. We will replace this with a dedicated
+`FeasibilityModel` in a follow-up change.
 """
 function check_model_feasibility(
         model::AbstractODModel,
         data::StationSelectionData
     )
-    model isa ClusteringTwoStageODModel && return nothing
-
-    feasibility_model = ClusteringTwoStageODModel(
-        model.k, model.l;
-        max_walking_distance   = model.max_walking_distance,
-        in_vehicle_time_weight = 1.0
-    )
-    @info "check_model_feasibility: running ClusteringTwoStageODModel proxy" k=model.k l=model.l
-    result = _run_opt_impl(
-        feasibility_model, data;
-        silent            = true,
-        do_optimize       = true,
-        warm_start        = false,
-        check_feasibility = false,
-        mip_gap           = nothing
-    )
-    if result.termination_status != MOI.OPTIMAL
-        return "ClusteringTwoStageODModel feasibility proxy returned $(result.termination_status)"
-    end
+    @info "check_model_feasibility: disabled" model=typeof(model) note="replace with dedicated FeasibilityModel"
     return nothing
 end

@@ -110,7 +110,7 @@ function _geometry_insertion_candidates(
                 max_detour_time=max_detour_time, max_detour_ratio=max_detour_ratio,
                 stop_dwell_time=stop_dwell_time, parent_legs=parent_legs)
             isnothing(result) && continue
-            push!(candidates, (route=result[1], score=-delta, strategy=:geometry))
+            push!(candidates, (route=result[1], score=-delta, strategy=:geometry, source_len=length(route.station_indices)))
         end
     end
     sort!(candidates, by=x -> (-x.score, _candidate_tiebreak(x.route.station_indices, config.rng_seed)))
@@ -141,7 +141,7 @@ function _coverage_balancing_candidates(
             new_legs = [leg for leg in result[1].detour_feasible_legs if leg ∉ parent_legs]
             score = sum(1.0 / (1.0 + get(coverage_count, leg, 0)) for leg in new_legs)
             score > 0.0 || continue
-            push!(candidates, (route=result[1], score=score, strategy=:coverage))
+            push!(candidates, (route=result[1], score=score, strategy=:coverage, source_len=length(route.station_indices)))
         end
     end
     sort!(candidates, by=x -> (-x.score, _candidate_tiebreak(x.route.station_indices, config.rng_seed)))
@@ -175,7 +175,7 @@ function _interior_replacement_candidates(
                 isnothing(result) && continue
                 score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
                     for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)
-                push!(candidates, (route=result[1], score=score, strategy=:interior))
+                push!(candidates, (route=result[1], score=score, strategy=:interior, source_len=length(route.station_indices)))
             end
         end
     end
@@ -211,7 +211,7 @@ function _endpoint_and_reverse_candidates(
                 isnothing(result) && continue
                 score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
                     for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)
-                push!(endpoint_candidates, (route=result[1], score=score, strategy=:endpoint))
+                push!(endpoint_candidates, (route=result[1], score=score, strategy=:endpoint, source_len=length(route.station_indices)))
             end
         end
 
@@ -223,7 +223,7 @@ function _endpoint_and_reverse_candidates(
         isnothing(result) && continue
         score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
             for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)
-        push!(reverse_candidates, (route=result[1], score=score, strategy=:reverse))
+        push!(reverse_candidates, (route=result[1], score=score, strategy=:reverse, source_len=length(route.station_indices)))
     end
     sort!(endpoint_candidates, by=x -> (-x.score, _candidate_tiebreak(x.route.station_indices, config.rng_seed)))
     sort!(reverse_candidates,  by=x -> (-x.score, _candidate_tiebreak(x.route.station_indices, config.rng_seed)))
@@ -236,4 +236,26 @@ function _covered_valid_jk_pair_count(routes::Vector{RouteData}, valid_jk_pairs:
         leg in valid_jk_pairs && push!(covered, leg)
     end
     return length(covered)
+end
+
+function _histogram_pairs(values::AbstractVector{Int})::Vector{Pair{Int, Int}}
+    hist = Dict{Int, Int}()
+    for value in values
+        hist[value] = get(hist, value, 0) + 1
+    end
+    return sort!(collect(hist); by=first)
+end
+
+function _route_length_histogram(routes::Vector{RouteData})::Vector{Pair{Int, Int}}
+    return _histogram_pairs(length.(getfield.(routes, :station_indices)))
+end
+
+function _candidate_source_length_histogram(candidates)::Vector{Pair{Int, Int}}
+    isempty(candidates) && return Pair{Int, Int}[]
+    return _histogram_pairs(Int[getproperty(c, :source_len) for c in candidates])
+end
+
+function _candidate_target_length_histogram(candidates)::Vector{Pair{Int, Int}}
+    isempty(candidates) && return Pair{Int, Int}[]
+    return _histogram_pairs(Int[length(getproperty(c, :route).station_indices) for c in candidates])
 end
