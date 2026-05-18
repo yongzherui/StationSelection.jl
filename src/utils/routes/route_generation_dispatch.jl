@@ -15,6 +15,7 @@ function _with_max_route_length(
         knn_replacement=config.knn_replacement,
         min_feasible_legs=config.min_feasible_legs,
         min_new_feasible_legs=config.min_new_feasible_legs,
+        mutation_min_new_feasible_legs=config.mutation_min_new_feasible_legs,
         max_travel_time=config.max_travel_time,
         geometry_insertion_quota=config.geometry_insertion_quota,
         coverage_insertion_quota=config.coverage_insertion_quota,

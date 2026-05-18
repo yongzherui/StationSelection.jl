@@ -182,7 +182,7 @@ function update_iteration_state!(
             exp_iters   += exp.n_iters
             exp_seeds   += exp.n_seeds
             exp_alpha   += exp.n_alpha
-            exp_buckets += exp.n_seeds > 0 ? 1 : 0
+            exp_buckets += exp.added > 0 ? 1 : 0
             for (k, v) in pairs(exp.added_by_strategy)
                 exp_by_strategy[k] = get(exp_by_strategy, k, 0) + v
             end

@@ -45,6 +45,7 @@ function _evaluate_candidate_route(
     max_detour_ratio::Float64,
     stop_dwell_time::Float64,
     parent_legs::Union{Nothing, Set{Tuple{Int, Int}}}=nothing,
+    min_new_feasible_legs::Int=config.min_new_feasible_legs,
 )::Union{Nothing, Tuple{RouteData, Int}}
     route = evaluate_route_sequence(
         station_indices, data;
@@ -59,7 +60,7 @@ function _evaluate_candidate_route(
     isnothing(route) && return nothing
     new_leg_count = isnothing(parent_legs) ? length(route.detour_feasible_legs) :
         count(leg -> leg ∉ parent_legs, route.detour_feasible_legs)
-    new_leg_count >= config.min_new_feasible_legs || return nothing
+    new_leg_count >= min_new_feasible_legs || return nothing
     return route, new_leg_count
 end
 
@@ -171,7 +172,8 @@ function _interior_replacement_candidates(
                 candidate_seq[pos] = replacement
                 result = _evaluate_candidate_route(candidate_seq, data, valid_jk_pairs, config;
                     max_detour_time=max_detour_time, max_detour_ratio=max_detour_ratio,
-                    stop_dwell_time=stop_dwell_time, parent_legs=parent_legs)
+                    stop_dwell_time=stop_dwell_time, parent_legs=parent_legs,
+                    min_new_feasible_legs=config.mutation_min_new_feasible_legs)
                 isnothing(result) && continue
                 score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
                     for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)
@@ -207,7 +209,8 @@ function _endpoint_and_reverse_candidates(
                 candidate_seq[pos] = replacement
                 result = _evaluate_candidate_route(candidate_seq, data, valid_jk_pairs, config;
                     max_detour_time=max_detour_time, max_detour_ratio=max_detour_ratio,
-                    stop_dwell_time=stop_dwell_time, parent_legs=parent_legs)
+                    stop_dwell_time=stop_dwell_time, parent_legs=parent_legs,
+                    min_new_feasible_legs=config.mutation_min_new_feasible_legs)
                 isnothing(result) && continue
                 score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
                     for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)
@@ -219,7 +222,8 @@ function _endpoint_and_reverse_candidates(
         reverse_seq == route.station_indices && continue
         result = _evaluate_candidate_route(reverse_seq, data, valid_jk_pairs, config;
             max_detour_time=max_detour_time, max_detour_ratio=max_detour_ratio,
-            stop_dwell_time=stop_dwell_time, parent_legs=parent_legs)
+            stop_dwell_time=stop_dwell_time, parent_legs=parent_legs,
+            min_new_feasible_legs=config.mutation_min_new_feasible_legs)
         isnothing(result) && continue
         score = sum((1.0 / (1.0 + get(coverage_count, leg, 0))
             for leg in result[1].detour_feasible_legs if leg ∉ parent_legs); init=0.0)

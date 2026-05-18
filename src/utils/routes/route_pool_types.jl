@@ -52,6 +52,7 @@ struct IterativeRouteGenerationConfig
     knn_replacement::Int
     min_feasible_legs::Int
     min_new_feasible_legs::Int
+    mutation_min_new_feasible_legs::Int
     max_travel_time::Union{Nothing, Float64}
     geometry_insertion_quota::Int
     coverage_insertion_quota::Int
@@ -67,16 +68,17 @@ struct IterativeRouteGenerationConfig
         max_new_routes_per_iter::Int=200,
         max_routes_total::Int=5_000,
         arc_epsilon::Float64=0.25,
-        top_b_insertions::Int=5,
-        knn_replacement::Int=3,
+        top_b_insertions::Int=8,
+        knn_replacement::Int=5,
         min_feasible_legs::Int=1,
         min_new_feasible_legs::Int=1,
+        mutation_min_new_feasible_legs::Int=0,
         max_travel_time::Union{Nothing, Float64}=nothing,
         geometry_insertion_quota::Int=75,
         coverage_insertion_quota::Int=75,
-        interior_replacement_quota::Int=25,
-        endpoint_mutation_quota::Int=25,
-        reverse_mutation_quota::Int=25,
+        interior_replacement_quota::Int=50,
+        endpoint_mutation_quota::Int=50,
+        reverse_mutation_quota::Int=50,
         rng_seed::Int=1234,
         verbose::Bool=true,
     )
@@ -89,12 +91,13 @@ struct IterativeRouteGenerationConfig
         knn_replacement > 0 || throw(ArgumentError("knn_replacement must be positive"))
         min_feasible_legs > 0 || throw(ArgumentError("min_feasible_legs must be positive"))
         min_new_feasible_legs >= 0 || throw(ArgumentError("min_new_feasible_legs must be non-negative"))
+        mutation_min_new_feasible_legs >= 0 || throw(ArgumentError("mutation_min_new_feasible_legs must be non-negative"))
         isnothing(max_travel_time) || max_travel_time > 0.0 ||
             throw(ArgumentError("max_travel_time must be positive when set"))
         new(
             max_route_length, max_iterations, max_new_routes_per_iter, max_routes_total,
             arc_epsilon, top_b_insertions, knn_replacement, min_feasible_legs,
-            min_new_feasible_legs, max_travel_time, geometry_insertion_quota,
+            min_new_feasible_legs, mutation_min_new_feasible_legs, max_travel_time, geometry_insertion_quota,
             coverage_insertion_quota, interior_replacement_quota, endpoint_mutation_quota,
             reverse_mutation_quota, rng_seed, verbose,
         )
