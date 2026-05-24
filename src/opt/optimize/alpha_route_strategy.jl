@@ -286,6 +286,10 @@ function finalize_iterative_result!(
                 "objective_improvement" => it.objective_improvement,
                 "objective_delta" => it.objective_delta,
                 "relative_objective_improvement" => it.relative_objective_improvement,
+                "build_time_sec" => get(it.metadata, "build_time_sec", nothing),
+                "warm_start_time_sec" => get(it.metadata, "warm_start_time_sec", nothing),
+                "solve_time_sec" => get(it.metadata, "solve_time_sec", nothing),
+                "runtime_sec" => get(it.metadata, "runtime_sec", nothing),
             ) for it in history
         ],
         "convergence_reason" => convergence_reason,

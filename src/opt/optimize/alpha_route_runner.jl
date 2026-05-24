@@ -136,6 +136,10 @@ function run_alpha_route_iterative(
             it.objective_improvement,
             it.objective_delta,
             it.relative_objective_improvement,
+            get(it.metadata, "build_time_sec", nothing),
+            get(it.metadata, "warm_start_time_sec", nothing),
+            get(it.metadata, "solve_time_sec", nothing),
+            get(it.metadata, "runtime_sec", nothing),
         ) for it in iterative_result.iterations
     ]
 

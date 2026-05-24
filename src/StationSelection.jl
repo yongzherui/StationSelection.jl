@@ -25,8 +25,6 @@ include("utils/core/logging.jl")
 # Data preparation utilities
 include("utils/data/scenarios.jl")
 include("utils/data/candidate_stations.jl")
-include("utils/data/transform_orders.jl")
-include("utils/data/transform_stations.jl")
 
 # Route utilities
 include("utils/routes/route_data.jl")
@@ -89,18 +87,6 @@ include("opt/models/alpha_route_warm_start.jl")
 
 # Variable export (depends on OptResult and all mapping types)
 include("utils/analysis/export_variables.jl")
-
-# Analysis helpers for exported variables (does not depend on OptResult)
-include("utils/analysis/solution_analysis_from_exported_variables.jl")
-
-# Fixed-station operational assignment for transformation-time rerouting
-include("utils/analysis/fixed_station_operational_assignment.jl")
-
-# Objective decomposition (post-hoc attribution from exported CSVs)
-include("utils/analysis/objective_decomposition.jl")
-
-# Solution analysis (depends on OptResult, mapping types, and StationSelectionData)
-include("utils/analysis/solution_analysis.jl")
 
 # Re-export key types and functions
 
@@ -189,32 +175,5 @@ export generate_scenarios_by_datetimes
 export generate_scenarios_by_profile
 export export_results
 export export_variables
-export load_exported_assignment_variables
-export build_station_selection_data_from_config
-export FixedStationDecisions
-export load_fixed_station_decisions
-export solve_fixed_station_operational_assignment
-export build_od_counts_from_data
-export calculate_exported_walking_distance
-export calculate_exported_vehicle_routing_distance
-export ObjectiveDecomposition, decompose_objective
-
-# Re-export solution analysis functions
-export annotate_orders_with_solution
-export calculate_model_walking_distance
-export calculate_model_in_vehicle_time
-export calculate_model_vehicle_routing_distance
-
-# Re-export transform_orders functions
-export transform_orders
-export transform_orders_from_assignments
-export remap_order_times_stacked
-export parse_station_list
-export precompute_distances
-export find_closest_selected_station
-export get_timeframe_column
-
-# Re-export transform_stations functions
-export prepare_station_data, prepare_vehicle_data
 
 end # module

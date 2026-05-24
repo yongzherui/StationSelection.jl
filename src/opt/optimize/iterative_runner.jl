@@ -154,6 +154,10 @@ function run_iterative_solve(
         end
         state_change_ratio = (get(update_info, :added_count, 0) + get(update_info, :removed_count, 0)) / max(state_size_before, 1)
         metadata = build_iteration_metadata(strategy, model, data, state, result, update_info, iteration)
+        metadata["build_time_sec"] = get(result.metadata, "build_time_sec", nothing)
+        metadata["warm_start_time_sec"] = get(result.metadata, "warm_start_time_sec", nothing)
+        metadata["solve_time_sec"] = get(result.metadata, "solve_time_sec", nothing)
+        metadata["runtime_sec"] = result.runtime_sec
 
         push!(history, IterativeSolveIterationSummary(
             iteration,

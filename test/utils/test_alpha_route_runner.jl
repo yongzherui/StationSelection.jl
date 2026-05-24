@@ -166,6 +166,13 @@ const MOI = JuMP.MOI
             )
             @test runner_result.final_result.termination_status == MOI.OPTIMAL
             @test !isempty(runner_result.iterations)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :objective_delta)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :relative_objective_improvement)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :build_time_sec)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :warm_start_time_sec)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :solve_time_sec)
+            @test hasfield(StationSelection.AlphaRouteIterationSummary, :runtime_sec)
+            @test hasproperty(runner_result.iterations[1], :runtime_sec)
 
             direct_result = StationSelection.run_opt(
                 model,
@@ -176,6 +183,12 @@ const MOI = JuMP.MOI
             )
             @test direct_result.termination_status == MOI.OPTIMAL
             @test haskey(direct_result.metadata, "alpha_route_runner")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "objective_delta")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "relative_objective_improvement")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "build_time_sec")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "warm_start_time_sec")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "solve_time_sec")
+            @test haskey(direct_result.metadata["alpha_route_runner"]["iterations"][1], "runtime_sec")
         end
     end
 

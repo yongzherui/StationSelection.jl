@@ -39,8 +39,6 @@ const MOI = JuMP.MOI
     @testset "Utilities" begin
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
-        include("utils/test_transform_orders.jl")
-        include("utils/test_fixed_station_operational_assignment.jl")
         include("utils/test_alpha_route_runner.jl")
         include("utils/test_iterative_route_generation.jl")
         include("utils/test_alpha_profile_enrichment.jl")
@@ -54,11 +52,4 @@ const MOI = JuMP.MOI
         include("opt/test_integration.jl")
     end
 
-    @testset "Solution Analysis" begin
-        include("utils/test_solution_analysis.jl")
-    end
-
-    @testset "Objective Decomposition" begin
-        include("utils/test_objective_decomposition.jl")
-    end
 end

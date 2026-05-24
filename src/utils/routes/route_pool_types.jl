@@ -223,6 +223,12 @@ struct AlphaRouteIterationSummary
     removed_route_count::Int
     pool_change_ratio::Float64
     objective_improvement::Union{Nothing, Float64}
+    objective_delta::Union{Nothing, Float64}
+    relative_objective_improvement::Union{Nothing, Float64}
+    build_time_sec::Union{Nothing, Float64}
+    warm_start_time_sec::Union{Nothing, Float64}
+    solve_time_sec::Union{Nothing, Float64}
+    runtime_sec::Union{Nothing, Float64}
 end
 
 struct AlphaRouteRunnerResult
