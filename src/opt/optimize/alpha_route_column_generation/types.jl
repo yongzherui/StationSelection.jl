@@ -7,7 +7,15 @@ export AlphaRouteBucketPricingData
 export AlphaRoutePricingLabel
 
 struct AlphaRouteCGDuals
-    route_capacity::Dict{NTuple{4, Int}, Float64}  # (s, t_id, j_idx, k_idx) => dual
+    route_capacity::Dict{NTuple{4, Int}, Float64}  # (s, t_id, j_idx, k_idx) => nonnegative covering price
+    raw_route_capacity::Dict{NTuple{4, Int}, Float64}
+
+    function AlphaRouteCGDuals(
+        route_capacity::Dict{NTuple{4, Int}, Float64},
+        raw_route_capacity::Dict{NTuple{4, Int}, Float64}=copy(route_capacity),
+    )
+        new(route_capacity, raw_route_capacity)
+    end
 end
 
 struct AlphaRouteBucketDemandCaps
@@ -26,6 +34,7 @@ struct AlphaRouteBucketPricingData
     max_route_length::Int
     stop_dwell_time::Float64
     route_regularization_weight::Float64
+    repositioning_time::Float64
 end
 
 mutable struct AlphaRoutePricingLabel

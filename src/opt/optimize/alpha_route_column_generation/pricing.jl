@@ -31,6 +31,23 @@ function _request_quantity(row)::Int
     return 1
 end
 
+function _cg_log(message::AbstractString; kwargs...)
+    parts = ["[alpha_route_cg] $message"]
+    for (key, value) in kwargs
+        push!(parts, "$(key)=$(value)")
+    end
+    println(stdout, join(parts, " "))
+    flush(stdout)
+    flush(stderr)
+    return nothing
+end
+
+function _column_log_summary(column::AlphaRoutePricedColumn)
+    alpha_total = sum(values(column.alpha_profile); init=0.0)
+    route_str = join(column.route.station_indices, "|")
+    return "s=$(column.scenario_idx) t=$(column.time_id) len=$(length(column.route.station_indices)) rc=$(round(column.reduced_cost; digits=6)) travel=$(round(column.route.travel_time; digits=3)) route=$(route_str) alpha_entries=$(length(column.alpha_profile)) alpha_total=$(round(alpha_total; digits=3))"
+end
+
 function _bucket_request_time_id(
     scenario::ScenarioData,
     row,
@@ -119,6 +136,7 @@ function _build_bucket_pricing_data(
         model.max_route_length,
         model.stop_dwell_time,
         model.route_regularization_weight,
+        model.repositioning_time,
     )
 end
 
@@ -473,6 +491,7 @@ function _price_bucket(
     t0 = time()
     status = :optimal
     message = "exact pricing exhausted search"
+    last_progress_log = 0
 
     while !isempty(open_stack)
         if time() - t0 > time_limit_sec
@@ -483,10 +502,35 @@ function _price_bucket(
 
         label = pop!(open_stack)
         expanded_count += 1
+        if expanded_count - last_progress_log >= 10_000
+            last_progress_log = expanded_count
+            _cg_log(
+                "pricing_bucket_progress";
+                scenario=scenario_idx,
+                time_id=pricing_data.time_id,
+                labels_expanded=expanded_count,
+                open_stack=length(open_stack),
+                nondominated_signatures=length(nondominated),
+                completed_labels=length(completed_labels),
+                elapsed_sec=round(time() - t0; digits=2),
+            )
+        end
 
-        if isempty(label.onboard) && label.reduced_cost < rc_tolerance && length(label.route_sequence) >= 2
-            push!(completed_labels, label)
-            best_rc = min(best_rc, label.reduced_cost)
+        completed_reduced_cost = label.reduced_cost +
+            pricing_data.route_regularization_weight * pricing_data.repositioning_time
+
+        if isempty(label.onboard) && completed_reduced_cost < rc_tolerance && length(label.route_sequence) >= 2
+            completed_label = AlphaRoutePricingLabel(
+                label.current_station,
+                label.visited,
+                label.route_sequence,
+                label.resource_tau,
+                label.onboard,
+                label.alpha,
+                completed_reduced_cost,
+            )
+            push!(completed_labels, completed_label)
+            best_rc = min(best_rc, completed_reduced_cost)
         end
 
         for next_station in candidate_next_stations(label, pricing_data, data)
@@ -561,6 +605,18 @@ function price_scenario(
         duals_t = bucket_duals[time_id]
         qbar_t = get(qbar_by_bucket, time_id, AlphaRouteBucketDemandCaps(scenario_idx, time_id, Dict{Tuple{Int, Int}, Int}()))
         pricing_data = _build_bucket_pricing_data(model, data, scenario_idx, time_id, qbar_t, duals_t)
+        positive_duals = [v for v in values(duals_t) if v > 0.0]
+        _cg_log(
+            "pricing_bucket_start";
+            scenario=scenario_idx,
+            time_id=time_id,
+            max_route_length=model.max_route_length,
+            demand_pairs=length(qbar_t.caps),
+            candidate_stations=length(pricing_data.candidate_stations),
+            positive_duals=length(positive_duals),
+            max_dual=isempty(positive_duals) ? 0.0 : round(maximum(positive_duals); digits=6),
+            time_limit_sec=round(per_bucket_limit; digits=3),
+        )
         bucket_result = _price_bucket(
             model,
             data,
@@ -575,6 +631,21 @@ function price_scenario(
         bucket_metadata["bucket_$(time_id)"] = bucket_result.metadata
         push!(messages, "t=$(time_id): $(bucket_result.message)")
         bucket_result.status == :time_limit && (status = :time_limit)
+        _cg_log(
+            "pricing_bucket_done";
+            scenario=scenario_idx,
+            time_id=time_id,
+            status=bucket_result.status,
+            columns=length(bucket_result.columns),
+            labels_initialized=get(bucket_result.metadata, "labels_initialized", 0),
+            labels_expanded=get(bucket_result.metadata, "labels_expanded", 0),
+            labels_dominated=get(bucket_result.metadata, "labels_dominated", 0),
+            completed_labels=get(bucket_result.metadata, "completed_labels", 0),
+            best_reduced_cost=get(bucket_result.metadata, "best_reduced_cost", nothing),
+        )
+        for (idx, column) in enumerate(bucket_result.columns[1:min(length(bucket_result.columns), 5)])
+            _cg_log("pricing_bucket_column"; rank=idx, summary=_column_log_summary(column))
+        end
     end
 
     sort!(all_columns, by=col -> col.reduced_cost)
@@ -641,6 +712,12 @@ function solve_alpha_route_pricing(
         append!(all_columns, scenario_result.columns)
         metadata["scenario_$(scenario_idx)"] = scenario_result.metadata
         scenario_result.status == :time_limit && (status = :time_limit)
+        _cg_log(
+            "pricing_scenario_done";
+            scenario=scenario_idx,
+            status=scenario_result.status,
+            columns=length(scenario_result.columns),
+        )
     end
 
     sort!(all_columns, by=col -> col.reduced_cost)
@@ -657,6 +734,17 @@ function solve_alpha_route_pricing(
 
     if status == :optimal && isempty(novel_columns)
         status = :no_improving_column
+    end
+
+    _cg_log(
+        "pricing_done";
+        status=status,
+        total_negative_columns=length(all_columns),
+        novel_negative_columns=length(novel_columns),
+        max_columns=max_columns,
+    )
+    for (idx, column) in enumerate(novel_columns[1:min(length(novel_columns), 10)])
+        _cg_log("pricing_novel_column"; rank=idx, summary=_column_log_summary(column))
     end
 
     return AlphaRoutePricingResult(

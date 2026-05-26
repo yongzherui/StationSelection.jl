@@ -1,3 +1,41 @@
+function _safe_jump_metric(f, m)
+    try
+        value = f(m)
+        if value isa Number
+            isfinite(Float64(value)) || return nothing
+        end
+        return value
+    catch
+        return nothing
+    end
+end
+
+function _safe_moi_metric(m, attr)
+    try
+        return MOI.get(JuMP.backend(m), attr)
+    catch
+        return nothing
+    end
+end
+
+function _solve_metrics(m::Model, objective_value)
+    objective_bound = _safe_jump_metric(JuMP.objective_bound, m)
+    relative_gap = _safe_jump_metric(JuMP.relative_gap, m)
+    gap_from_bound = if objective_value isa Number && objective_bound isa Number && !iszero(Float64(objective_value))
+        abs(Float64(objective_value) - Float64(objective_bound)) / abs(Float64(objective_value))
+    else
+        nothing
+    end
+    return Dict{String, Any}(
+        "objective_bound" => objective_bound,
+        "relative_gap" => relative_gap,
+        "gap_from_objective_bound" => gap_from_bound,
+        "simplex_iterations" => _safe_moi_metric(m, MOI.SimplexIterations()),
+        "barrier_iterations" => _safe_moi_metric(m, MOI.BarrierIterations()),
+        "node_count" => _safe_moi_metric(m, MOI.NodeCount()),
+    )
+end
+
 function _run_opt_alpha_single_impl(
     model::AlphaRouteModel,
     data::StationSelectionData;
@@ -88,10 +126,14 @@ function _run_opt_alpha_single_impl(
         y_val = _value_recursive(m[:y])
         solution = (x_val, y_val)
     end
+    solver_metrics = _solve_metrics(m, obj)
 
     runtime_sec = Dates.value(now() - start_time) / 1000
     if restricted_master
         build_result.metadata["restricted_master"] = true
+        build_result.metadata["relax_integrality"] = true
+        build_result.metadata["lp_objective_value"] = obj
+        build_result.metadata["lp_objective_bound"] = get(solver_metrics, "objective_bound", nothing)
     end
     return OptResult(
         term_status,
@@ -106,7 +148,8 @@ function _run_opt_alpha_single_impl(
         Dict{String, Any}(
             "build_time_sec" => build_time_sec,
             "warm_start_time_sec" => warm_start_time_sec,
-            "solve_time_sec" => solve_time_sec
+            "solve_time_sec" => solve_time_sec,
+            "solver" => solver_metrics,
         )
     )
 end
@@ -180,6 +223,23 @@ function run_opt(
     solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
     output_dir::Union{String, Nothing}=nothing
 )
+    if solve_strategy isa AlphaRouteColumnGenerationStrategy
+        isnothing(route_pool_state) || throw(ArgumentError("route_pool_state and solve_strategy cannot both be provided to AlphaRouteModel run_opt"))
+        return run_alpha_route_column_generation(
+            model,
+            data,
+            solve_strategy.config;
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=show_counts,
+            do_optimize=do_optimize,
+            warm_start=warm_start,
+            check_feasibility=check_feasibility,
+            mip_gap=mip_gap,
+            output_dir=output_dir,
+        ).final_result
+    end
+
     if solve_strategy isa AbstractIterativeSolveStrategy
         isnothing(route_pool_state) || throw(ArgumentError("route_pool_state and solve_strategy cannot both be provided to AlphaRouteModel run_opt"))
         return run_iterative_solve(

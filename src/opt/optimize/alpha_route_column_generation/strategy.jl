@@ -91,6 +91,18 @@ function update_iteration_state!(
     iteration::Int
 )
     duals = extract_alpha_route_cg_duals(result.model)
+    positive_duals = [v for v in values(duals.route_capacity) if v > 0.0]
+    raw_duals = collect(values(duals.raw_route_capacity))
+    @info "alpha_route_cg: extracted restricted-master duals" iteration=iteration dual_count=length(duals.route_capacity) positive_dual_count=length(positive_duals) max_price=(isempty(positive_duals) ? 0.0 : maximum(positive_duals)) min_raw_dual=(isempty(raw_duals) ? nothing : minimum(raw_duals)) max_raw_dual=(isempty(raw_duals) ? nothing : maximum(raw_duals))
+    _cg_log(
+        "duals_extracted";
+        iteration=iteration,
+        dual_count=length(duals.route_capacity),
+        positive_dual_count=length(positive_duals),
+        max_price=isempty(positive_duals) ? 0.0 : round(maximum(positive_duals); digits=6),
+        min_raw_dual=isempty(raw_duals) ? nothing : round(minimum(raw_duals); digits=6),
+        max_raw_dual=isempty(raw_duals) ? nothing : round(maximum(raw_duals); digits=6),
+    )
     pricing_result = solve_alpha_route_pricing(
         model,
         data,
@@ -104,11 +116,24 @@ function update_iteration_state!(
     state.last_pricing_result = pricing_result
     inserted_count = _apply_priced_columns!(state.route_pool, pricing_result.columns)
     pricing_result.metadata["inserted_count"] = inserted_count
+    @info "alpha_route_cg: pricing iteration complete" iteration=iteration pricing_status=pricing_result.status inserted_count=inserted_count total_negative_columns=get(pricing_result.metadata, "total_negative_columns", 0) novel_negative_columns=get(pricing_result.metadata, "novel_negative_columns", 0) message=pricing_result.message
+    _cg_log(
+        "iteration_pricing_done";
+        iteration=iteration,
+        pricing_status=pricing_result.status,
+        inserted_count=inserted_count,
+        total_negative_columns=get(pricing_result.metadata, "total_negative_columns", 0),
+        novel_negative_columns=get(pricing_result.metadata, "novel_negative_columns", 0),
+    )
 
     return (
         added_count=inserted_count,
         removed_count=0,
         dual_count=length(duals.route_capacity),
+        positive_dual_count=length(positive_duals),
+        max_dual_price=isempty(positive_duals) ? 0.0 : maximum(positive_duals),
+        min_raw_dual=isempty(raw_duals) ? nothing : minimum(raw_duals),
+        max_raw_dual=isempty(raw_duals) ? nothing : maximum(raw_duals),
         pricing_status=pricing_result.status,
     )
 end
@@ -125,10 +150,18 @@ function build_iteration_metadata(
     pricing_result = state.last_pricing_result
     return Dict{String, Any}(
         "dual_count" => get(update_info, :dual_count, 0),
+        "positive_dual_count" => get(update_info, :positive_dual_count, 0),
+        "max_dual_price" => get(update_info, :max_dual_price, 0.0),
+        "min_raw_dual" => get(update_info, :min_raw_dual, nothing),
+        "max_raw_dual" => get(update_info, :max_raw_dual, nothing),
         "pricing_status" => String(get(update_info, :pricing_status, :unknown)),
         "new_columns" => get(update_info, :added_count, 0),
         "pricing_message" => isnothing(pricing_result) ? "" : pricing_result.message,
         "pricing_metadata" => isnothing(pricing_result) ? Dict{String, Any}() : pricing_result.metadata,
+        "restricted_master" => get(result.metadata, "restricted_master", false),
+        "lp_objective_value" => get(result.metadata, "lp_objective_value", result.objective_value),
+        "lp_objective_bound" => get(result.metadata, "lp_objective_bound", nothing),
+        "solver" => get(result.metadata, "solver", Dict{String, Any}()),
     )
 end
 
@@ -166,9 +199,28 @@ function finalize_iterative_result!(
     final_result.metadata["alpha_route_column_generation"] = Dict(
         "convergence_reason" => convergence_reason,
         "iteration_count" => length(history),
-        "seed_route_count" => iteration_state_size(strategy, final_state),
+        "seed_route_count" => isempty(history) ? iteration_state_size(strategy, final_state) : history[1].state_size_before,
+        "final_route_count" => iteration_state_size(strategy, final_state),
         "pricing_status" => isnothing(final_state.last_pricing_result) ? "not_run" : String(final_state.last_pricing_result.status),
         "new_columns_last_iter" => isnothing(final_state.last_pricing_result) ? 0 : get(final_state.last_pricing_result.metadata, "inserted_count", 0),
+        "total_negative_columns_last_iter" => isnothing(final_state.last_pricing_result) ? 0 : get(final_state.last_pricing_result.metadata, "total_negative_columns", 0),
+        "novel_negative_columns_last_iter" => isnothing(final_state.last_pricing_result) ? 0 : get(final_state.last_pricing_result.metadata, "novel_negative_columns", 0),
+        "last_pricing_metadata" => isnothing(final_state.last_pricing_result) ? Dict{String, Any}() : final_state.last_pricing_result.metadata,
+        "iterations" => [
+            Dict{String, Any}(
+                "iteration" => it.iteration,
+                "lp_objective_value" => it.objective_value,
+                "state_size_before" => it.state_size_before,
+                "state_size_after" => it.state_size_after,
+                "added_count" => it.added_count,
+                "removed_count" => it.removed_count,
+                "state_change_ratio" => it.state_change_ratio,
+                "objective_improvement" => it.objective_improvement,
+                "objective_delta" => it.objective_delta,
+                "relative_objective_improvement" => it.relative_objective_improvement,
+                "metadata" => it.metadata,
+            ) for it in history
+        ],
     )
     return nothing
 end

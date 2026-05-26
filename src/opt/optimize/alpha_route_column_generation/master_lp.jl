@@ -22,7 +22,7 @@ function build_alpha_route_restricted_master(
         data,
         build_result.mapping;
         route_regularization_weight=model.route_regularization_weight,
-        repositioning_time=0.0,
+        repositioning_time=model.repositioning_time,
     )
     set_optimizer_attribute(m, "Method", 1)
     set_optimizer_attribute(m, "Presolve", 0)
@@ -33,8 +33,11 @@ end
 function extract_alpha_route_cg_duals(m::Model)::AlphaRouteCGDuals
     constraint_refs = get(m.obj_dict, :arm_capacity_constraints, Dict{NTuple{4, Int}, ConstraintRef}())
     route_capacity_duals = Dict{NTuple{4, Int}, Float64}()
+    raw_route_capacity_duals = Dict{NTuple{4, Int}, Float64}()
     for (key, con_ref) in constraint_refs
-        route_capacity_duals[key] = dual(con_ref)
+        raw_dual = dual(con_ref)
+        raw_route_capacity_duals[key] = raw_dual
+        route_capacity_duals[key] = raw_dual < 0.0 ? -raw_dual : raw_dual
     end
-    return AlphaRouteCGDuals(route_capacity_duals)
+    return AlphaRouteCGDuals(route_capacity_duals, raw_route_capacity_duals)
 end

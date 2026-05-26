@@ -242,6 +242,7 @@ const MOI = JuMP.MOI
             model.max_route_length,
             model.stop_dwell_time,
             model.route_regularization_weight,
+            model.repositioning_time,
         )
         label = StationSelection.AlphaRoutePricingLabel(
             1,
@@ -272,8 +273,36 @@ const MOI = JuMP.MOI
         @test alpha_value(pricing.columns[1], 1, 2) == 2.0
     end
 
+    @testset "pricing accepts normalized negative master duals" begin
+        requests = DataFrame(
+            order_id = [1],
+            pax_num = [2],
+            start_station_id = [1],
+            end_station_id = [2],
+            request_time = [DateTime(2024, 1, 1, 8, 0, 0)],
+        )
+        data = make_data([1, 2], requests; routing_scale=10.0)
+        model = make_model(vehicle_capacity=3, max_route_length=2)
+        state = make_state(model, data)
+        pricing = StationSelection.solve_alpha_route_pricing(
+            model,
+            data,
+            state,
+            StationSelection.AlphaRouteCGDuals(
+                Dict((1, 0, 1, 2) => 50.0),
+                Dict((1, 0, 1, 2) => -50.0),
+            );
+            max_columns=10,
+            time_limit_sec=5.0,
+        )
+
+        @test !isempty(pricing.columns)
+        @test pricing.columns[1].route.station_indices == [1, 2]
+    end
+
     gurobi_available = try
         using Gurobi
+        Gurobi.Env()
         true
     catch
         false
