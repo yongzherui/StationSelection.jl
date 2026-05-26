@@ -16,7 +16,9 @@ function build_model(
         model :: AlphaRouteModel,
         data  :: StationSelectionData;
         optimizer_env = nothing,
-        route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing
+        route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing,
+        relax_integrality::Bool=false,
+        store_route_capacity_refs::Bool=false
     )::BuildResult
 
     if isnothing(optimizer_env)
@@ -82,9 +84,43 @@ function build_model(
             add_route_capacity_lazy_constraints!(m, data, mapping)
     else
         constraint_counts["route_capacity"] =
-            add_route_capacity_constraints!(m, data, mapping)
+            add_route_capacity_constraints!(m, data, mapping; store_refs=store_route_capacity_refs)
+    end
+
+    if relax_integrality
+        _relax_alpha_route_integrality!(m)
     end
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
+end
+
+function _relax_alpha_route_integrality!(m::Model)
+    for y_var in m[:y]
+        unset_binary(y_var)
+        set_lower_bound(y_var, 0.0)
+        set_upper_bound(y_var, 1.0)
+    end
+
+    for z_var in m[:z]
+        unset_binary(z_var)
+        set_lower_bound(z_var, 0.0)
+        set_upper_bound(z_var, 1.0)
+    end
+
+    for scenario_dict in m[:x]
+        for od_by_time in values(scenario_dict)
+            for x_vec in values(od_by_time)
+                for x_var in x_vec
+                    unset_integer(x_var)
+                end
+            end
+        end
+    end
+
+    for theta_var in values(m[:theta_r_ts])
+        unset_integer(theta_var)
+    end
+
+    return nothing
 end

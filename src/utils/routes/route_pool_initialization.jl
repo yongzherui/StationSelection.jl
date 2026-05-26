@@ -227,6 +227,10 @@ function initialize_route_pool(
             n_generated_total += n_generated
         end
 
+        if init_spec.mode == :direct_only
+            bucket_state.current_generated_max_route_length = 2
+        end
+
         @debug "initialize_route_pool: bucket" s=s t_id=t_id n_jk_pairs=length(jk_set) n_direct=n_direct n_file=n_file n_generated=n_generated total=length(bucket_state.routes_by_id)
         global_state.bucket_states[(s, t_id)] = bucket_state
     end

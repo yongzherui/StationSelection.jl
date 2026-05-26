@@ -40,6 +40,7 @@ const MOI = JuMP.MOI
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
         include("utils/test_alpha_route_runner.jl")
+        include("utils/test_alpha_route_column_generation.jl")
         include("utils/test_iterative_route_generation.jl")
         include("utils/test_alpha_profile_enrichment.jl")
     end

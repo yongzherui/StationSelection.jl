@@ -124,13 +124,14 @@ export RouteData, generate_simple_routes
 export IterativeRouteGenerationConfig, generate_iterative_routes
 export RouteIOData, load_routes_and_alpha
 export default_iterative_route_generation_config, generate_routes_for_bucket
-export RoutePoolInitSpec, RoutePoolState, AlphaRouteBucketPoolsState, AlphaEnrichmentConfig, AlphaRouteRunnerConfig
-export AlphaRouteIterationSummary, AlphaRouteRunnerResult
+export RoutePoolInitSpec, RoutePoolState, AlphaRouteBucketPoolsState, AlphaEnrichmentConfig, AlphaRouteRunnerConfig, AlphaRouteColumnGenerationConfig
+export AlphaRouteIterationSummary, AlphaRouteRunnerResult, AlphaRouteColumnGenerationRunnerResult
 export initialize_route_pool, export_route_pool_state, export_alpha_route_bucket_pools_state
-export run_alpha_route_iterative
+export run_alpha_route_iterative, run_alpha_route_column_generation
 export AbstractSolveStrategy, AbstractIterativeSolveStrategy
 export DirectSolveStrategy, IterativeSolveIterationSummary, IterativeSolveResult
-export AlphaRouteIterativeStrategy
+export AlphaRouteIterativeStrategy, AlphaRouteColumnGenerationStrategy
+export AlphaRouteCGDuals, AlphaRoutePricedColumn, AlphaRoutePricingResult
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -147,6 +148,7 @@ export RouteFleetLimitModel
 
 # Re-export optimization functions
 export run_opt, run_opt_fleet_search, build_model
+export build_alpha_route_restricted_master, extract_alpha_route_cg_duals, solve_alpha_route_pricing
 export get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!

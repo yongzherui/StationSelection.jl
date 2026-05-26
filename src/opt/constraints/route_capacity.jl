@@ -260,13 +260,15 @@ Only added for (j,k,t,s) combinations where at least one route has a positive al
 function add_route_capacity_constraints!(
     m       :: Model,
     data    :: StationSelectionData,
-    mapping :: AlphaRouteODMap
+    mapping :: AlphaRouteODMap;
+    store_refs::Bool=false
 )::Int
     before           = _total_num_constraints(m)
     S                = n_scenarios(data)
     x                = m[:x]
     theta_r_ts       = m[:theta_r_ts]
     arm_alpha_params = m[:arm_alpha_params]
+    arm_capacity_constraints = Dict{NTuple{4, Int}, ConstraintRef}()
 
     for s in 1:S
         for t_id in _time_ids(mapping, s)
@@ -304,10 +306,15 @@ function add_route_capacity_constraints!(
                     add_to_expression!(lhs, 1.0, x_od[pair_idx])
                 end
 
-                @constraint(m, lhs <= rhs)
+                con_ref = @constraint(m, lhs <= rhs)
+                if store_refs
+                    arm_capacity_constraints[(s, t_id, j_idx, k_idx)] = con_ref
+                end
             end
         end
     end
+
+    store_refs && (m[:arm_capacity_constraints] = arm_capacity_constraints)
 
     return _total_num_constraints(m) - before
 end

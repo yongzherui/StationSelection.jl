@@ -5,6 +5,8 @@ export AlphaEnrichmentConfig
 export AlphaRouteRunnerConfig
 export AlphaRouteIterationSummary
 export AlphaRouteRunnerResult
+export AlphaRouteColumnGenerationConfig
+export AlphaRouteColumnGenerationRunnerResult
 export IterativeRouteGenerationConfig
 
 struct RoutePoolInitSpec
@@ -17,8 +19,8 @@ struct RoutePoolInitSpec
         routes_file::Union{String, Nothing}=nothing,
         alpha_profile_file::Union{String, Nothing}=nothing
     )
-        mode in (:generated, :file, :combined) ||
-            throw(ArgumentError("RoutePoolInitSpec.mode must be :generated, :file, or :combined"))
+        mode in (:generated, :file, :combined, :direct_only) ||
+            throw(ArgumentError("RoutePoolInitSpec.mode must be :generated, :file, :combined, or :direct_only"))
         mode in (:file, :combined) && isnothing(routes_file) &&
             throw(ArgumentError("routes_file is required for mode=$mode"))
         mode in (:file, :combined) && isnothing(alpha_profile_file) &&
@@ -213,6 +215,38 @@ struct AlphaRouteRunnerConfig
     end
 end
 
+struct AlphaRouteColumnGenerationConfig
+    init_spec::RoutePoolInitSpec
+    max_iterations::Int
+    rc_tolerance::Float64
+    max_columns_per_iteration::Int
+    pricing_time_limit_sec::Float64
+    export_iteration_artifacts::Bool
+
+    function AlphaRouteColumnGenerationConfig(;
+        init_spec::RoutePoolInitSpec=RoutePoolInitSpec(:direct_only),
+        max_iterations::Int=10,
+        rc_tolerance::Float64=-1e-6,
+        max_columns_per_iteration::Int=10,
+        pricing_time_limit_sec::Float64=60.0,
+        export_iteration_artifacts::Bool=false,
+    )
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        max_columns_per_iteration > 0 || throw(ArgumentError("max_columns_per_iteration must be positive"))
+        pricing_time_limit_sec > 0.0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
+        init_spec.mode == :direct_only ||
+            throw(ArgumentError("AlphaRouteColumnGenerationConfig currently requires RoutePoolInitSpec(:direct_only)"))
+        new(
+            init_spec,
+            max_iterations,
+            rc_tolerance,
+            max_columns_per_iteration,
+            pricing_time_limit_sec,
+            export_iteration_artifacts,
+        )
+    end
+end
+
 struct AlphaRouteIterationSummary
     iteration::Int
     objective_value::Float64
@@ -236,4 +270,11 @@ struct AlphaRouteRunnerResult
     iterations::Vector{AlphaRouteIterationSummary}
     convergence_reason::String
     final_route_pool::AlphaRouteBucketPoolsState
+end
+
+struct AlphaRouteColumnGenerationRunnerResult
+    final_result::OptResult
+    iterations::Vector{Any}
+    convergence_reason::String
+    final_state::Any
 end

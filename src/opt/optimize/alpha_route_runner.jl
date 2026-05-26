@@ -8,7 +8,8 @@ function _run_opt_alpha_single_impl(
     warm_start::Bool=false,
     check_feasibility::Bool=true,
     mip_gap::Union{Float64, Nothing}=nothing,
-    route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing
+    route_pool_state::Union{AlphaRouteBucketPoolsState, Nothing}=nothing,
+    restricted_master::Bool=false
 )
     start_time = now()
 
@@ -17,12 +18,23 @@ function _run_opt_alpha_single_impl(
     end
 
     build_start = now()
-    build_result = build_model(
-        model,
-        data;
-        optimizer_env=optimizer_env,
-        route_pool_state=route_pool_state
-    )
+    if restricted_master && isnothing(route_pool_state)
+        throw(ArgumentError("route_pool_state is required for restricted_master=true"))
+    end
+
+    build_result = restricted_master ?
+        build_alpha_route_restricted_master(
+            model,
+            data,
+            route_pool_state;
+            optimizer_env=optimizer_env
+        ) :
+        build_model(
+            model,
+            data;
+            optimizer_env=optimizer_env,
+            route_pool_state=route_pool_state
+        )
     m = build_result.model
     build_time_sec = Dates.value(now() - build_start) / 1000
 
@@ -78,6 +90,9 @@ function _run_opt_alpha_single_impl(
     end
 
     runtime_sec = Dates.value(now() - start_time) / 1000
+    if restricted_master
+        build_result.metadata["restricted_master"] = true
+    end
     return OptResult(
         term_status,
         obj,
