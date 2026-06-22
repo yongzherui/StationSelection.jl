@@ -33,3 +33,4 @@ JuliaLocalPreferences.toml
 *.log
 *.pdf
 *.json
+experiments/
