@@ -4,12 +4,14 @@ module StationSelection
 using CSV
 using Combinatorics
 using DataFrames
+using DataStructures
 using Dates
 using Distances
 using Gurobi
 using JSON
 using JuMP
 using Logging
+using Printf
 using Statistics
 
 # Data loading - core data structures
@@ -51,6 +53,7 @@ include("opt/models/clustering_base.jl")
 include("opt/models/route_vehicle_capacity_model.jl")
 include("opt/models/alpha_route_model.jl")
 include("opt/models/route_fleet_limit_model.jl")
+include("opt/models/compatibility_set_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/maps/clustering_od_map.jl")
@@ -69,6 +72,9 @@ include("data/maps/alpha_route_od_map.jl")
 
 # Fleet limit OD map for RouteFleetLimitModel (depends on VehicleCapacityODMap)
 include("data/maps/fleet_limit_od_map.jl")
+
+# Compatibility-set OD map for CompatibilitySetModel
+include("data/maps/compatibility_set_od_map.jl")
 
 # Model-to-map dispatch
 include("data/maps/create_map.jl")
@@ -102,6 +108,7 @@ export ClusteringTwoStageStationMap
 export VehicleCapacityODMap
 export AlphaRouteODMap
 export FleetLimitODMap
+export CompatibilitySetODMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_two_stage_station_map
@@ -109,6 +116,7 @@ export create_clustering_base_model_map
 export create_vehicle_capacity_od_map
 export create_alpha_route_od_map
 export create_fleet_limit_od_map
+export create_compatibility_set_od_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_cost_by_id, has_routing_costs
@@ -145,16 +153,27 @@ export RouteVehicleCapacityWarmStartModel
 export AlphaRouteWarmStartModel
 export AlphaRouteModel
 export RouteFleetLimitModel
+export CompatibilitySetModel, CompatibilitySetAssignmentModel, AnyCompatibilitySetModel, CompatibilityColumn
 
 # Re-export optimization functions
 export run_opt, run_opt_fleet_search, build_model
 export build_alpha_route_restricted_master, extract_alpha_route_cg_duals, solve_alpha_route_pricing
+export add_compatibility_column!, add_or_update_compatibility_column!
+export extract_compatibility_coverage_duals
+export compatibility_coverage_sigma, generate_compatibility_columns
+export run_compatibility_column_generation, CompatibilityCoverageDuals
+export CompatibilityColumnGenerationResult
+export CompatibilityCGLogger, CompatibilityCGIterationLog, CompatibilityCGTerminationLog
+export CompatibilityPricingData, CompatibilityPricingDuals, CompatibilityPricingLabel
+export create_compatibility_pricing_data, initial_compatibility_pricing_labels
+export extend_compatibility_pricing_label, compatibility_pricing_by_label_setting
 export get_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!
 export add_alpha_r_jkts_variables!, add_theta_r_ts_variables!
 export add_v_jkts_variables!
+export add_od_activation_variables!, add_compatibility_theta_variables!
 export compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
@@ -163,11 +182,14 @@ export add_flow_activation_constraints!
 export add_route_capacity_constraints!
 export add_route_capacity_lazy_constraints!
 export add_fleet_limit_constraints!
+export add_assignment_to_od_activation_constraints!
+export add_compatibility_coverage_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_clustering_two_stage_station_objective!
 export set_route_od_objective!
 export set_fleet_limit_objective!
+export set_compatibility_set_objective!
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export select_top_used_candidate_stations

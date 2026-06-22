@@ -59,6 +59,32 @@ function add_assignment_variables!(
     return JuMP.num_variables(m) - before
 end
 
+function add_assignment_variables!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CompatibilitySetODMap
+    )
+    before = JuMP.num_variables(m)
+    S = n_scenarios(data)
+    x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+
+    for s in 1:S
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            demand = get(mapping.Q_s[s], (o, d), 0)
+            if !isempty(valid_pairs) && demand > 0
+                x[s][od_idx] = @variable(m, [1:length(valid_pairs)],
+                    integer = true, lower_bound = 0, upper_bound = demand)
+            else
+                x[s][od_idx] = VariableRef[]
+            end
+        end
+    end
+
+    m[:x] = x
+    return JuMP.num_variables(m) - before
+end
+
 
 # ============================================================================
 # ClusteringBaseModelMap (ClusteringBaseModel)

@@ -78,3 +78,17 @@ function create_map(
     )::FleetLimitODMap
     return create_fleet_limit_od_map(model, data)
 end
+
+function create_map(
+        model::CompatibilitySetModel,
+        data::StationSelectionData
+    )::CompatibilitySetODMap
+    return create_compatibility_set_od_map(model, data)
+end
+
+function create_map(
+        model::CompatibilitySetAssignmentModel,
+        data::StationSelectionData
+    )::CompatibilitySetODMap
+    return create_compatibility_set_od_map(model, data)
+end

@@ -50,6 +50,26 @@ function add_assignment_constraints!(
     return _total_num_constraints(m) - before
 end
 
+function add_assignment_constraints!(
+        m::Model,
+        data::StationSelectionData,
+        mapping::CompatibilitySetODMap
+    )
+    before = _total_num_constraints(m)
+    x = m[:x]
+
+    for s in 1:n_scenarios(data)
+        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            x_od = get(x[s], od_idx, VariableRef[])
+            isempty(x_od) && continue
+            demand = get(mapping.Q_s[s], (o, d), 0)
+            @constraint(m, sum(x_od) == demand)
+        end
+    end
+
+    return _total_num_constraints(m) - before
+end
+
 
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)

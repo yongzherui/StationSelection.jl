@@ -51,6 +51,7 @@ const MOI = JuMP.MOI
 
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
+        include("opt/test_compatibility_pricing.jl")
     end
 
 end
