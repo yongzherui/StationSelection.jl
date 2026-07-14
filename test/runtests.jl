@@ -53,6 +53,8 @@ const MOI = JuMP.MOI
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
         include("opt/test_aggregate_od_route_pricing.jl")
+        include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
+        include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
     end
 
 end

@@ -10,6 +10,7 @@ export SingleCut
 export MultiCut
 export BendersSolver
 export HeuristicSolver
+export HeuristicEnumerationSolver
 export AbstractSolveStrategy
 export AbstractIterativeSolveStrategy
 export IterativeSolveIterationSummary
@@ -278,6 +279,39 @@ struct HeuristicSolver <: AbstractStationSelectionSolver
             export_iteration_artifacts,
             enrichment,
         )
+    end
+end
+
+"""
+    HeuristicEnumerationSolver
+
+Solve `AggregateODRouteModel` by trying a caller-supplied list of candidate open-station
+sets (fixed `y`). For each candidate, the nearest-open assignment is derived and the
+resulting fixed-station, fixed-assignment routing sub-problem (`RouteCoveringProblem`) is
+solved to proven optimality via column generation. The best-scoring feasible candidate is
+then used to warm-start a direct solve of the full `AggregateODRouteModel` (with the
+winning routes folded into its column pool).
+
+Candidates are not generated internally — supply them via `candidate_open_stations`
+(e.g. station sets read from a prior run).
+"""
+struct HeuristicEnumerationSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    candidate_open_stations::Vector{Vector{Int}}
+    cg_solver::ColumnGenerationSolver
+
+    function HeuristicEnumerationSolver(;
+        config::SolverConfig=SolverConfig(),
+        candidate_open_stations::Vector{Vector{Int}},
+        cg_solver::ColumnGenerationSolver=ColumnGenerationSolver(config=config),
+    )
+        !isempty(candidate_open_stations) ||
+            throw(ArgumentError("candidate_open_stations must not be empty"))
+        for candidate in candidate_open_stations
+            length(candidate) == length(unique(candidate)) ||
+                throw(ArgumentError("candidate_open_stations entries must not contain duplicate station ids"))
+        end
+        new(config, candidate_open_stations, cg_solver)
     end
 end
 

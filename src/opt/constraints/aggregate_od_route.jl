@@ -110,8 +110,12 @@ function _endpoint_chain_variable!(
     sorted_endpoints = endpoints[order]
     sorted_costs = costs[order]
     key = _endpoint_chain_key(side, sorted_endpoints, sorted_costs)
+    relax_integrality = haskey(m, :aggregate_od_route_relax_integrality) &&
+        Bool(m[:aggregate_od_route_relax_integrality])
     return get!(cache, key) do
-        z = @variable(m, [1:length(sorted_endpoints)], binary = true)
+        z = relax_integrality ?
+            @variable(m, [1:length(sorted_endpoints)], lower_bound = 0.0, upper_bound = 1.0) :
+            @variable(m, [1:length(sorted_endpoints)], binary = true)
         @constraint(m, sum(z) == 1.0)
         for (rank, station) in enumerate(sorted_endpoints)
             @constraint(m, z[rank] <= y[station])
