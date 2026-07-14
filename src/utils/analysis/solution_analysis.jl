@@ -66,7 +66,7 @@ end
 """
     annotate_orders_with_solution(result::OptResult, mapping::ClusteringTwoStageODMap, data::StationSelectionData) -> DataFrame
 
-Annotate orders for ClusteringTwoStageODModel. No pooling support.
+Annotate orders for TwoStageODPolicy. No pooling support.
 """
 function annotate_orders_with_solution(
     result::OptResult,
@@ -246,7 +246,7 @@ Calculate total vehicle routing distance from solution.
 # Arguments
 - `result::OptResult`: Optimization result
 - `data::StationSelectionData`: Problem data with routing costs
-- `with_pooling::Bool`: Ignored for ClusteringTwoStageODModel (no pooling).
+- `with_pooling::Bool`: Ignored for TwoStageODPolicy (no pooling).
 """
 function calculate_model_vehicle_routing_distance(
     result::OptResult,
@@ -271,7 +271,7 @@ function calculate_model_vehicle_routing_distance(
         return 0.0
     end
 
-    # ClusteringTwoStageODModel has no pooling, always use assignments
+    # TwoStageODPolicy has no pooling, always use assignments
     return calculate_vrd_from_assignments_clustering(result.model, mapping, data)
 end
 

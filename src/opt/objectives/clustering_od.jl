@@ -1,8 +1,8 @@
 """
-Objective function for ClusteringTwoStageODModel.
+Objective function for TwoStageODPolicy.
 
 Contains objective for:
-- ClusteringTwoStageODModel: walking + routing costs (no pooling)
+- TwoStageODPolicy: walking + routing costs (no pooling)
 """
 
 using JuMP
@@ -19,7 +19,7 @@ export set_clustering_od_flow_regularizer_objective!
         in_vehicle_time_weight::Float64=1.0,
     )
 
-Set the minimization objective for ClusteringTwoStageODModel.
+Set the minimization objective for TwoStageODPolicy.
 
 Objective:
     min Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][od_idx][pair_idx]
@@ -72,7 +72,7 @@ end
         flow_regularization_weight::Float64=1.0,
     )
 
-Set the minimization objective for ClusteringTwoStageODModel with flow regularization.
+Set the minimization objective for TwoStageODPolicy with flow regularization.
 
 Extends the base clustering-OD objective with a route-activation penalty:
 

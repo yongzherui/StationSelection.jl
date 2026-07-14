@@ -85,8 +85,8 @@ end
     # Create Gurobi environment
     env = Gurobi.Env()
 
-    @testset "ClusteringTwoStageODModel annotation" begin
-        model = ClusteringTwoStageODModel(3, 4)
+    @testset "TwoStageODPolicy annotation" begin
+        model = ClusteringModel(TwoStageODPolicy(3, 4))
 
         result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
 
@@ -113,7 +113,7 @@ end
         @test all(!ismissing, annotated.assigned_pickup_id)
         @test all(!ismissing, annotated.assigned_dropoff_id)
 
-        println("\n--- ClusteringTwoStageODModel Annotation Results ---")
+        println("\n--- TwoStageODPolicy Annotation Results ---")
         for row in eachrow(annotated)
             println("Order $(row.order_id): $(row.start_station_id)→$(row.end_station_id)")
             println("  Assigned: $(row.assigned_pickup_id)→$(row.assigned_dropoff_id)")

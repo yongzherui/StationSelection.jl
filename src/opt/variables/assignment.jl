@@ -14,7 +14,7 @@ export add_assignment_variables!
 
 
 # ============================================================================
-# ClusteringTwoStageODMap (ClusteringTwoStageODModel)
+# ClusteringTwoStageODMap (TwoStageODPolicy)
 # ============================================================================
 
 """
@@ -24,7 +24,7 @@ export add_assignment_variables!
         mapping::ClusteringTwoStageODMap;
     )
 
-Add assignment variables x[s][od_idx][pair_idx] for ClusteringTwoStageODModel.
+Add assignment variables x[s][od_idx][pair_idx] for TwoStageODPolicy.
 
 x[s][od_idx][pair_idx] is the integer passenger count from OD pair od_idx in
 scenario s assigned to the corresponding valid pickup/dropoff pair.
@@ -87,17 +87,17 @@ end
 
 
 # ============================================================================
-# ClusteringBaseModelMap (ClusteringBaseModel)
+# ClusteringBaseModelMap (SingleStagePolicy)
 # ============================================================================
 
 # ============================================================================
-# ClusteringTwoStageStationMap (ClusteringTwoStageStationModel)
+# ClusteringTwoStageStationMap (TwoStagePolicy)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageStationMap)
 
-Add binary assignment variables x[s][i_idx][j_idx] for ClusteringTwoStageStationModel.
+Add binary assignment variables x[s][i_idx][j_idx] for TwoStagePolicy.
 
 For each scenario s and each demanded station i in that scenario, one binary
 variable is created per admissible cluster center j.
@@ -177,13 +177,13 @@ end
 
 
 # ============================================================================
-# ClusteringBaseModelMap (ClusteringBaseModel)
+# ClusteringBaseModelMap (SingleStagePolicy)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Add sparse assignment variables x[i][j_idx] for ClusteringBaseModel.
+Add sparse assignment variables x[i][j_idx] for SingleStagePolicy.
 
 For each station location i, one binary variable is created per admissible
 cluster center j.

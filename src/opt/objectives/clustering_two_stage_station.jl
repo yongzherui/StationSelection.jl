@@ -1,5 +1,5 @@
 """
-Objective function for ClusteringTwoStageStationModel.
+Objective function for TwoStagePolicy.
 """
 
 using JuMP

@@ -1,5 +1,5 @@
 """
-Clustering base mapping for ClusteringBaseModel.
+Clustering base mapping for SingleStagePolicy.
 
 This module provides data structures for the basic k-medoids clustering
 model that aggregates all scenarios and counts request origins/destinations.
@@ -106,21 +106,21 @@ end
 
 """
     create_clustering_base_model_map(
-        model::ClusteringBaseModel,
+        model::SingleStagePolicy,
         data::StationSelectionData
     ) -> ClusteringBaseModelMap
 
 Create a clustering base map with aggregated request counts.
 
 # Arguments
-- `model::ClusteringBaseModel`: The clustering model
+- `model::SingleStagePolicy`: The clustering policy
 - `data::StationSelectionData`: Problem data with stations and scenarios
 
 # Returns
 - `ClusteringBaseModelMap` with station mappings and request counts
 """
 function create_clustering_base_model_map(
-    model::ClusteringBaseModel,
+    model::SingleStagePolicy,
     data::StationSelectionData
 )::ClusteringBaseModelMap
 

@@ -8,40 +8,25 @@ struct based on the model type.
 export create_map
 
 """
-    create_map(model::ClusteringTwoStageODModel, data::StationSelectionData)
+    create_map(model::ClusteringModel, data::StationSelectionData)
 
-Create a ClusteringTwoStageODMap for ClusteringTwoStageODModel.
+Create the appropriate clustering map for `model`, dispatched on `model.policy`.
 """
 function create_map(
-        model::ClusteringTwoStageODModel,
+        model::ClusteringModel,
         data::StationSelectionData
-    )::ClusteringTwoStageODMap
-    return create_clustering_two_stage_od_map(model, data)
+    )
+    return _create_clustering_map(model.policy, data)
 end
 
-"""
-    create_map(model::ClusteringTwoStageStationModel, data::StationSelectionData)
+_create_clustering_map(policy::SingleStagePolicy, data::StationSelectionData)::ClusteringBaseModelMap =
+    create_clustering_base_model_map(policy, data)
 
-Create a ClusteringTwoStageStationMap for ClusteringTwoStageStationModel.
-"""
-function create_map(
-        model::ClusteringTwoStageStationModel,
-        data::StationSelectionData
-    )::ClusteringTwoStageStationMap
-    return create_clustering_two_stage_station_map(model, data)
-end
+_create_clustering_map(policy::TwoStagePolicy, data::StationSelectionData)::ClusteringTwoStageStationMap =
+    create_clustering_two_stage_station_map(policy, data)
 
-"""
-    create_map(model::ClusteringBaseModel, data::StationSelectionData)
-
-Create a ClusteringBaseModelMap for ClusteringBaseModel.
-"""
-function create_map(
-        model::ClusteringBaseModel,
-        data::StationSelectionData
-    )::ClusteringBaseModelMap
-    return create_clustering_base_model_map(model, data)
-end
+_create_clustering_map(policy::TwoStageODPolicy, data::StationSelectionData)::ClusteringTwoStageODMap =
+    create_clustering_two_stage_od_map(policy, data)
 
 """
     create_map(model::ExactDARPRouteModel, data::StationSelectionData)

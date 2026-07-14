@@ -4,7 +4,7 @@ Flow variable creation functions for station selection optimization models.
 These functions add flow decision variables that track vehicle movements
 between station pairs.
 
-Used by: ClusteringTwoStageODModel (with flow_regularization_weight)
+Used by: TwoStageODPolicy (with flow_regularization_weight)
 """
 
 using JuMP
@@ -19,7 +19,7 @@ Add sparse per-scenario route-activation variables:
     f_flow[s][(j,k)] ∈ {0,1}
 for each (j,k) in the union of valid_pairs across all OD pairs in scenario s.
 
-Used by: ClusteringTwoStageODModel (when flow_regularization_weight is set)
+Used by: TwoStageODPolicy (when flow_regularization_weight is set)
 """
 function add_flow_variables!(
         m::Model,

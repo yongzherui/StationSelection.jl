@@ -52,19 +52,17 @@ include("generators/zhuzhou.jl")
 
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
-include("opt/models/clustering_two_stage_od.jl")
-include("opt/models/clustering_two_stage_station.jl")
-include("opt/models/clustering_base.jl")
+include("opt/models/clustering.jl")
 include("opt/models/exact_darp_route_model.jl")
 include("opt/models/aggregate_od_route_model.jl")
 
-# Clustering OD map (depends on ClusteringTwoStageODModel)
+# Clustering OD map (depends on TwoStageODPolicy)
 include("data/maps/clustering_od_map.jl")
 
-# Clustering station map (depends on ClusteringTwoStageStationModel)
+# Clustering station map (depends on TwoStagePolicy)
 include("data/maps/clustering_two_stage_station_map.jl")
 
-# Clustering base map (depends on ClusteringBaseModel)
+# Clustering base map (depends on SingleStagePolicy)
 include("data/maps/clustering_base_map.jl")
 
 # Exact DARP route OD map for ExactDARPRouteModel (depends on RouteData, route_io)
@@ -144,9 +142,9 @@ export ExactDARPRouteCGDuals, ExactDARPRoutePricedColumn, ExactDARPRoutePricingR
 export AbstractStationSelectionModel
 export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
-export ClusteringTwoStageODModel
-export ClusteringTwoStageStationModel
-export ClusteringBaseModel
+export AbstractClusteringPolicy
+export SingleStagePolicy, TwoStagePolicy, TwoStageODPolicy
+export ClusteringModel
 export ExactDARPRouteWarmStartModel
 export ExactDARPRouteModel
 export AggregateODRouteModel

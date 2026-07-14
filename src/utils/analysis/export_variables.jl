@@ -197,7 +197,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringTwoStageODModel.
+Export assignment variables for TwoStageODPolicy.
 Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String)
@@ -245,7 +245,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringBaseModel.
+Export assignment variables for SingleStagePolicy.
 Structure: x[i] → Vector over admissible cluster centers j.
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String)
@@ -285,7 +285,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringTwoStageStationModel.
+Export assignment variables for TwoStagePolicy.
 Structure: x[s][i_idx] → Vector over admissible cluster centers j.
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String)
@@ -335,7 +335,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringTwoStageODMap, export_dir::String, metadata::Dict)
 
-Export ClusteringTwoStageODModel specific metadata (no additional variable files).
+Export TwoStageODPolicy specific metadata (no additional variable files).
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -360,7 +360,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringBaseModelMap, export_dir::String, metadata::Dict)
 
-Export ClusteringBaseModel specific metadata.
+Export SingleStagePolicy specific metadata.
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -376,7 +376,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringTwoStageStationMap, export_dir::String, metadata::Dict)
 
-Export ClusteringTwoStageStationModel specific metadata.
+Export TwoStagePolicy specific metadata.
 """
 function export_model_specific_variables(
     result::OptResult,

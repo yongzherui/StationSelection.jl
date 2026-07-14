@@ -1,5 +1,5 @@
 """
-Clustering OD mapping for ClusteringTwoStageODModel.
+Clustering OD mapping for TwoStageODPolicy.
 
 This module provides data structures for mapping scenarios to origin-destination pairs
 for the clustering two-stage optimization (without time dimension).
@@ -110,14 +110,14 @@ end
 
 """
     create_clustering_two_stage_od_map(
-        model::ClusteringTwoStageODModel,
+        model::TwoStageODPolicy,
         data::StationSelectionData
     ) -> ClusteringTwoStageODMap
 
 Create a clustering scenario OD map with OD pairs organized by scenario.
 """
 function create_clustering_two_stage_od_map(
-    model::ClusteringTwoStageODModel,
+    model::TwoStageODPolicy,
     data::StationSelectionData
 )::ClusteringTwoStageODMap
 

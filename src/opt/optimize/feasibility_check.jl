@@ -23,7 +23,7 @@ end
 
 Legacy feasibility hook for OD-style models.
 
-This is intentionally disabled for now because `ClusteringTwoStageODModel` is not a
+This is intentionally disabled for now because `TwoStageODPolicy` is not a
 good proxy for the models we want to run. We will replace this with a dedicated
 `FeasibilityModel` in a follow-up change.
 """

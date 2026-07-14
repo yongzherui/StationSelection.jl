@@ -2,8 +2,8 @@
 Objective functions for station selection optimization models.
 
 Contains objective functions for:
-- ClusteringTwoStageODModel: walking + routing costs (no pooling)
-- ClusteringBaseModel: simple walking cost minimization (k-medoids style)
+- TwoStageODPolicy: walking + routing costs (no pooling)
+- SingleStagePolicy: simple walking cost minimization (k-medoids style)
 
 Uses multiple dispatch for different model/mapping types.
 """
