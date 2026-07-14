@@ -50,6 +50,16 @@ include("data/io/requests.jl")
 include("generators/grid.jl")
 include("generators/zhuzhou.jl")
 
+# Synthetic test-case generators (middle-zone benchmark family)
+include("generators/test_cases/common.jl")
+include("generators/test_cases/base_middle_zone.jl")
+include("generators/test_cases/test1_vehicle.jl")
+include("generators/test_cases/test2_zone_proximity.jl")
+include("generators/test_cases/test3_north_shift.jl")
+include("generators/test_cases/test4_mirrored_zone.jl")
+include("generators/test_cases/test5_triangle.jl")
+include("generators/test_cases/test6_bidirectional.jl")
+
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/clustering.jl")
@@ -96,6 +106,22 @@ export grid_station_id, grid_manhattan_dist, grid_travel_cost_dict
 export create_grid_problem_data, create_grid_station_selection_data, print_grid_summary
 export ZhuzhouStation, ZhuzhouInstance, generate_zhuzhou_instance
 export create_zhuzhou_problem_data, create_zhuzhou_station_selection_data, print_zhuzhou_summary
+
+# Synthetic test-case generators (middle-zone benchmark family)
+export MiddleZoneBenchmarkInstance, generate_middle_zone_benchmark_instance, build_middle_zone_benchmark_cases, MZB_PROFILES
+export create_middle_zone_problem_data, create_middle_zone_station_selection_data, print_middle_zone_summary
+export T1Instance, generate_test1_instance, build_test1_cases, T1_FLEET_CONFIGS
+export create_test1_problem_data, create_test1_station_selection_data, print_test1_summary
+export T2Instance, generate_test2_instance, build_test2_cases, T2_VARIANTS
+export create_test2_problem_data, create_test2_station_selection_data, print_test2_summary
+export T3Instance, generate_test3_instance, build_test3_cases, T3_VARIANTS
+export create_test3_problem_data, create_test3_station_selection_data, print_test3_summary
+export T4Instance, generate_test4_instance, build_test4_cases, T4_VARIANTS
+export create_test4_problem_data, create_test4_station_selection_data, print_test4_summary
+export T5Instance, generate_test5_instance, build_test5_cases, T5_CASES, T5_DEMAND_CONFIGS
+export create_test5_problem_data, create_test5_station_selection_data, print_test5_summary
+export T6Instance, generate_test6_instance, build_test6_cases, T6_DEMAND_CONFIGS
+export create_test6_problem_data, create_test6_station_selection_data, print_test6_summary
 
 # Re-export data structures
 export StationSelectionData, ScenarioData

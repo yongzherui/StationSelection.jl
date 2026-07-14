@@ -44,6 +44,13 @@ const MOI = JuMP.MOI
         include("utils/test_iterative_route_generation.jl")
         include("utils/test_alpha_profile_enrichment.jl")
         include("utils/test_generators.jl")
+        include("utils/test_case_generators/test_base_middle_zone.jl")
+        include("utils/test_case_generators/test_test1_vehicle.jl")
+        include("utils/test_case_generators/test_test2_zone_proximity.jl")
+        include("utils/test_case_generators/test_test3_north_shift.jl")
+        include("utils/test_case_generators/test_test4_mirrored_zone.jl")
+        include("utils/test_case_generators/test_test5_triangle.jl")
+        include("utils/test_case_generators/test_test6_bidirectional.jl")
     end
 
     @testset "Data Structures" begin
