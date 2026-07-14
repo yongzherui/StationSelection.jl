@@ -44,51 +44,27 @@ function create_map(
 end
 
 """
-    create_map(model::RouteVehicleCapacityModel, data::StationSelectionData)
+    create_map(model::ExactDARPRouteModel, data::StationSelectionData)
 
-Create a VehicleCapacityODMap for RouteVehicleCapacityModel.
+Create an ExactDARPRouteODMap for ExactDARPRouteModel.
 """
 function create_map(
-        model::RouteVehicleCapacityModel,
+        model::ExactDARPRouteModel,
         data::StationSelectionData
-    )::VehicleCapacityODMap
-    return create_vehicle_capacity_od_map(model, data)
-end
-
-"""
-    create_map(model::AlphaRouteModel, data::StationSelectionData)
-
-Create an AlphaRouteODMap for AlphaRouteModel.
-"""
-function create_map(
-        model::AlphaRouteModel,
-        data::StationSelectionData
-    )::AlphaRouteODMap
-    return create_alpha_route_od_map(model, data)
-end
-
-"""
-    create_map(model::RouteFleetLimitModel, data::StationSelectionData)
-
-Create a FleetLimitODMap for RouteFleetLimitModel.
-"""
-function create_map(
-        model::RouteFleetLimitModel,
-        data::StationSelectionData
-    )::FleetLimitODMap
-    return create_fleet_limit_od_map(model, data)
+    )::ExactDARPRouteODMap
+    return create_exact_darp_route_od_map(model, data)
 end
 
 function create_map(
-        model::CompatibilitySetModel,
+        model::AggregateODRouteModel,
         data::StationSelectionData
-    )::CompatibilitySetODMap
-    return create_compatibility_set_od_map(model, data)
+    )::AggregateODRouteMap
+    return create_aggregate_od_route_map(model, data)
 end
 
 function create_map(
-        model::CompatibilitySetAssignmentModel,
+        model::RouteCoveringProblem,
         data::StationSelectionData
-    )::CompatibilitySetODMap
-    return create_compatibility_set_od_map(model, data)
+    )::AggregateODRouteMap
+    return create_aggregate_od_route_map(model, data)
 end

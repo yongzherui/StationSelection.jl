@@ -144,10 +144,13 @@ end
         @testset "ClusteringTwoStageODModel" begin
             model = ClusteringTwoStageODModel(2, 3)
             result = run_opt(
-                model, data;
-                optimizer_env=env,
-                silent=true,
-                do_optimize=false
+                data,
+                model,
+                DirectSolver(
+                    optimizer_env=env,
+                    silent=true,
+                    do_optimize=false,
+                )
             )
 
             @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
@@ -161,10 +164,13 @@ end
         @testset "ClusteringBaseModel" begin
             model = ClusteringBaseModel(3)
             result = run_opt(
-                model, data;
-                optimizer_env=env,
-                silent=true,
-                do_optimize=false
+                data,
+                model,
+                DirectSolver(
+                    optimizer_env=env,
+                    silent=true,
+                    do_optimize=false,
+                )
             )
 
             @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED

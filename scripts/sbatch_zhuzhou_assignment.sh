@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=zz_assignment
+#SBATCH --job-name=zz_compat
 #SBATCH --partition=mit_preemptable
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-# Zhuzhou CompatibilitySetAssignmentModel experiment — SLURM array runner.
+# Zhuzhou AggregateODRouteModel experiment — SLURM array runner.
 # Each task reads one line from the job list and solves one Zhuzhou instance.
 #
 # Usage (via submit_zhuzhou_assignment.sh — do not call directly):
@@ -52,7 +52,7 @@ OV_STR="${OV//./_}"
 INST="zz_n${N_STATIONS}_l${L}_p${N_PAIRS}_ov${OV_STR}_s${SEED}"
 
 echo "=========================================="
-echo "CompatibilitySetAssignmentModel — Zhuzhou"
+echo "AggregateODRouteModel — Zhuzhou"
 echo "Array job:  ${SLURM_ARRAY_JOB_ID}  task: ${TASK}"
 echo "Instance:   ${INST}"
 echo "Node:       ${SLURM_NODELIST}"
@@ -92,7 +92,6 @@ echo ""
 
 cd "$PROJECT_ROOT"
 
-export CS_MODEL_TYPE="assignment"
 export CS_TIME_LIMIT="${CS_TIME_LIMIT:-10800}"
 export CS_PRICING_TIME="${CS_PRICING_TIME:-300}"
 export CS_MAX_CG_ITERS="${CS_MAX_CG_ITERS:-10000}"
@@ -109,7 +108,6 @@ export CS_REPOSITIONING_TIME="${CS_REPOSITIONING_TIME:-20.0}"
 
 echo "===== Settings ====="
 echo "  Instance                 = ${INST}"
-echo "  CS_MODEL_TYPE            = ${CS_MODEL_TYPE}"
 echo "  DATA_DIR                 = ${DATA_DIR}"
 echo "  CS_TIME_LIMIT            = ${CS_TIME_LIMIT}s"
 echo "  CS_PRICING_TIME          = ${CS_PRICING_TIME}s"

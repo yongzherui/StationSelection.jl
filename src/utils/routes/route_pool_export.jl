@@ -1,5 +1,5 @@
 export export_route_pool_state
-export export_alpha_route_bucket_pools_state
+export export_exact_darp_route_bucket_pools_state
 
 function export_route_pool_state(
     state::RoutePoolState,
@@ -44,8 +44,8 @@ function export_route_pool_state(
     end
 end
 
-function export_alpha_route_bucket_pools_state(
-    global_state::AlphaRouteBucketPoolsState,
+function export_exact_darp_route_bucket_pools_state(
+    global_state::ExactDARPRouteBucketPoolsState,
     output_dir::String;
     array_idx_to_station_id::Union{Vector{Int}, Nothing}=nothing
 )

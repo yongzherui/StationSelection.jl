@@ -88,7 +88,7 @@ end
     @testset "ClusteringTwoStageODModel annotation" begin
         model = ClusteringTwoStageODModel(3, 4)
 
-        result = run_opt(model, data; optimizer_env=env, silent=true)
+        result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
 
         @test result.termination_status == MOI.OPTIMAL
 

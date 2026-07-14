@@ -1,15 +1,14 @@
 """
-Route activation variables for RouteVehicleCapacityModel (new formulation).
+Route activation variables for ExactDARPRouteModel.
 
-α^r_{jkts}, θ^r_{ts} ∈ Z+ stored as sparse Dicts keyed by NTuples.
+θ^r_{ts} ∈ Z+ stored as a sparse Dict keyed by scenario, time bucket, and route.
 """
 
-export add_alpha_r_jkts_variables!
 export add_theta_r_ts_variables!
 export compute_beta_r_jkl
 
 # ─────────────────────────────────────────────────────────────────────────────
-# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# Shared route helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
@@ -53,125 +52,8 @@ function _route_serves_jk(
 end
 
 
-"""
-    add_alpha_r_jkts_variables!(m, data, mapping::VehicleCapacityODMap;
-                                integer_alpha=true, upper_bound=nothing) -> Int
-
-Add route-serving variables α^r_{jkts} for RouteVehicleCapacityModel (and models that
-share its mapping type, e.g. RouteFleetLimitModel).
-
-`α^r_{jkts}` represents the amount of class-(j,k) demand served by route r in
-time window t of scenario s.
-
-Created for each (s, r_idx, j_idx, k_idx, t_id) where:
-- Route r serves leg (j→k): both station indices appear in route.station_indices with j before k
-- At least one OD pair in Omega_s_t[s][t_id] has (j_idx, k_idx) as a valid leg
-
-# Keyword arguments
-- `integer_alpha::Bool` (default `true`): if `false`, α is declared as a continuous
-  variable (Z relaxed to ℝ₊). Relaxing to continuous eliminates integer branching on α
-  and can significantly reduce solve time for RouteVehicleCapacityModel, where α
-  symmetry is the main source of slowness.
-- `upper_bound::Union{Int,Nothing}` (default `nothing`): if set, each α variable is
-  bounded above by this value. NOTE: do NOT set this to `vehicle_capacity` — α represents
-  total passengers across all deployments (θ > 1 allows α > C), so a fixed bound of C
-  causes infeasibility when demand exceeds C for a (j,k) pair with only one covering route.
-
-Stored as `m[:alpha_r_jkts]::Dict{NTuple{5,Int}, VariableRef}` keyed
-`(s, r_idx, j_idx, k_idx, t_id)`.
-
-Also stores a secondary index `m[:alpha_r_jkts_by_srt]::Dict{NTuple{3,Int}, Vector{Tuple{Int,Int}}}`
-mapping `(s, r_idx, t_id) → [(j_idx, k_idx), ...]` for efficient constraint building.
-
-Returns the number of variables added.
-"""
-function add_alpha_r_jkts_variables!(
-    m       :: Model,
-    data    :: StationSelectionData,
-    mapping :: VehicleCapacityODMap;
-    integer_alpha :: Bool            = true,
-    upper_bound   :: Union{Int, Nothing} = nothing
-)::Int
-    before = JuMP.num_variables(m)
-    S = n_scenarios(data)
-
-    alpha_r_jkts        = Dict{NTuple{5,Int}, VariableRef}()
-    alpha_r_jkts_by_srt = Dict{NTuple{3,Int}, Vector{Tuple{Int,Int}}}()
-
-    for s in 1:S
-        # Collect active (j_idx, k_idx) pairs per time bucket from valid OD demand
-        jk_by_t = Dict{Int, Set{Tuple{Int,Int}}}()
-        for (t_id, od_pairs) in mapping.Omega_s_t[s]
-            for (o, d) in od_pairs
-                for (j, k) in get_valid_jk_pairs(mapping, o, d)
-                    push!(get!(jk_by_t, t_id, Set{Tuple{Int,Int}}()), (j, k))
-                end
-            end
-        end
-
-        for (t_id, jk_set_t) in jk_by_t
-            routes_t = get(mapping.routes_s[s], t_id, RouteData[])
-            for (r_idx, route) in enumerate(routes_t)
-                for (j_idx, k_idx) in jk_set_t
-                    _route_serves_jk(route, j_idx, k_idx) || continue
-
-                    key5 = (s, r_idx, j_idx, k_idx, t_id)
-                    v = @variable(m, lower_bound = 0)
-                    isnothing(upper_bound) || set_upper_bound(v, Float64(upper_bound))
-                    integer_alpha && set_integer(v)
-                    alpha_r_jkts[key5] = v
-
-                    srt_key = (s, r_idx, t_id)
-                    push!(get!(alpha_r_jkts_by_srt, srt_key, Tuple{Int,Int}[]),
-                          (j_idx, k_idx))
-                end
-            end
-        end
-    end
-
-    m[:alpha_r_jkts]        = alpha_r_jkts
-    m[:alpha_r_jkts_by_srt] = alpha_r_jkts_by_srt
-    return JuMP.num_variables(m) - before
-end
-
-
-"""
-    add_theta_r_ts_variables!(m, data, mapping::VehicleCapacityODMap) -> Int
-
-Add integer route-deployment variables θ^r_{ts} ∈ Z+ for RouteVehicleCapacityModel.
-
-`θ^r_{ts}` counts how many times route r is deployed in time window t of scenario s.
-Created for each (s, t_id, r_idx) where at least one α^r_{jkts} variable exists.
-
-Stored as `m[:theta_r_ts]::Dict{NTuple{3,Int}, VariableRef}` keyed `(s, t_id, r_idx)`.
-
-Returns the number of variables added.
-"""
-function add_theta_r_ts_variables!(
-    m       :: Model,
-    data    :: StationSelectionData,
-    mapping :: VehicleCapacityODMap
-)::Int
-    before = JuMP.num_variables(m)
-
-    # Find all (s, t_id, r_idx) combinations that have any alpha_r_jkts variable
-    srt_with_alpha = Set{NTuple{3,Int}}()
-    for (s, r_idx, j_idx, k_idx, t_id) in keys(m[:alpha_r_jkts])
-        push!(srt_with_alpha, (s, t_id, r_idx))
-    end
-
-    theta_r_ts = Dict{NTuple{3,Int}, VariableRef}()
-    for (s, t_id, r_idx) in srt_with_alpha
-        theta_r_ts[(s, t_id, r_idx)] = @variable(m, integer = true, lower_bound = 0)
-    end
-
-    m[:theta_r_ts] = theta_r_ts
-    return JuMP.num_variables(m) - before
-end
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# AlphaRouteODMap (AlphaRouteModel — fixed alpha parameters)
+# ExactDARPRouteODMap (ExactDARPRouteModel — fixed alpha parameters)
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
@@ -180,7 +62,7 @@ These legs will have no capacity constraint and may be freely assigned without r
 """
 function _arm_warn_uncovered_jk(
     data             :: StationSelectionData,
-    mapping          :: AlphaRouteODMap,
+    mapping          :: ExactDARPRouteODMap,
     arm_alpha_params :: Dict{NTuple{5, Int}, Float64}
 )
     S = n_scenarios(data)
@@ -199,7 +81,7 @@ function _arm_warn_uncovered_jk(
                 for (j_idx, k_idx) in get_valid_jk_pairs(mapping, o, d)
                     (s, t_id, j_idx, k_idx) ∈ covered && continue
                     if n_uncovered < 5
-                        @warn "AlphaRouteModel: no alpha coverage for (s=$s, t_id=$t_id, pickup_idx=$j_idx, dropoff_idx=$k_idx) — capacity constraint skipped for this leg"
+                        @warn "ExactDARPRouteModel: no alpha coverage for (s=$s, t_id=$t_id, pickup_idx=$j_idx, dropoff_idx=$k_idx) — capacity constraint skipped for this leg"
                     end
                     n_uncovered += 1
                 end
@@ -207,15 +89,15 @@ function _arm_warn_uncovered_jk(
         end
     end
     if n_uncovered > 5
-        @warn "AlphaRouteModel: $n_uncovered total (j,k,t,s) legs have no alpha coverage (first 5 shown)"
+        @warn "ExactDARPRouteModel: $n_uncovered total (j,k,t,s) legs have no alpha coverage (first 5 shown)"
     end
 end
 
 
 """
-    add_theta_r_ts_variables!(m, data, mapping::AlphaRouteODMap) -> Int
+    add_theta_r_ts_variables!(m, data, mapping::ExactDARPRouteODMap) -> Int
 
-Integer route-deployment variables θ^r_{ts} ∈ Z+ for AlphaRouteModel.
+Integer route-deployment variables θ^r_{ts} ∈ Z+ for ExactDARPRouteModel.
 
 Created for each (s, t_id, r_idx) where the route serves at least one valid (j,k) pair
 in the bucket AND has a positive alpha value for that leg in `mapping.alpha_profile`.
@@ -229,7 +111,7 @@ Returns the number of variables added.
 function add_theta_r_ts_variables!(
     m       :: Model,
     data    :: StationSelectionData,
-    mapping :: AlphaRouteODMap
+    mapping :: ExactDARPRouteODMap
 )::Int
     before        = JuMP.num_variables(m)
     S             = n_scenarios(data)

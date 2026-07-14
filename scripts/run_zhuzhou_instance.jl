@@ -1,7 +1,7 @@
 """
     scripts/run_zhuzhou_instance.jl
 
-Solve one Zhuzhou CompatibilitySetModel instance and write result CSVs.
+Solve one Zhuzhou AggregateODRouteModel instance and write result CSVs.
 
 Usage:
     julia --project=. scripts/run_zhuzhou_instance.jl \\
@@ -71,10 +71,6 @@ if _RUN_AS_MAIN
     const MAX_STOPS_ENV      = get(ENV, "CS_MAX_STOPS", "")
     const ROUTE_REG_WEIGHT   = parse(Float64, get(ENV, "CS_ROUTE_REG_WEIGHT",   "1.0"))
     const REPOSITIONING_TIME = parse(Float64, get(ENV, "CS_REPOSITIONING_TIME", "20.0"))
-    const MODEL_TYPE         = get(ENV, "CS_MODEL_TYPE", "covering")  # "covering" or "assignment"
-    MODEL_TYPE in ("covering", "assignment") ||
-        error("CS_MODEL_TYPE must be \"covering\" or \"assignment\", got \"$MODEL_TYPE\"")
-
     ov_str = replace(string(ENDPOINT_OVERLAP), "." => "p")
     const INST_NAME    = "zz_n$(N_STATIONS)_l$(L)_p$(N_PAIRS)_ov$(ov_str)_s$(SEED)"
     const RESULTS_DIR  = joinpath(BASE_OUTDIR, "results")
@@ -115,7 +111,7 @@ end
 
 function _write_selected_columns(
     path   :: AbstractString,
-    result :: CompatibilityColumnGenerationResult,
+    result :: AggregateODRouteColumnGenerationResult,
 )
     column_by_id = Dict(col.id => col for col in result.final_result.mapping.columns)
     rows = NamedTuple[]
@@ -142,7 +138,7 @@ function main()
     end
 
     println("===========================================")
-    println("CompatibilitySetModel — Zhuzhou Experiment")
+    println("AggregateODRouteModel — Zhuzhou Experiment")
     println("===========================================")
     @printf("  Instance         : %s\n", INST_NAME)
     @printf("  n_stations       : %d\n", N_STATIONS)
@@ -150,7 +146,7 @@ function main()
     @printf("  n_pairs          : %d\n", N_PAIRS)
     @printf("  endpoint_overlap : %.2f\n", ENDPOINT_OVERLAP)
     @printf("  Seed             : %d\n", SEED)
-    @printf("  Model type       : %s\n", MODEL_TYPE)
+    @printf("  Model type       : %s\n", "AggregateODRouteModel")
     @printf("  Time limit       : %.0fs CG / %.0fs IP / %.0fs per pricing iter\n",
             TIME_LIMIT, IP_TIME_LIMIT, PRICING_TIME)
     @printf("  Detour factor    : %.2f\n", DETOUR_FACTOR)
@@ -185,12 +181,10 @@ function main()
         pricing_time_limit_sec      = PRICING_TIME,
         relax_integrality           = false,
     )
-    model = MODEL_TYPE == "assignment" ?
-        CompatibilitySetAssignmentModel(L; _model_kwargs...) :
-        CompatibilitySetModel(L; _model_kwargs...)
+    model = AggregateODRouteModel(L; _model_kwargs...)
 
     t0 = time()
-    result = run_compatibility_column_generation(
+    result = run_aggregate_od_route_column_generation(
         model,
         data;
         verbose                = false,
@@ -226,7 +220,7 @@ function main()
 
     summary_row = (
         instance             = INST_NAME,
-        model_type           = MODEL_TYPE,
+        model_type           = "AggregateODRouteModel",
         n_stations           = meta.n_stations_actual,
         l                    = L,
         n_scenarios          = meta.n_scenarios_actual,

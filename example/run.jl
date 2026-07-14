@@ -165,12 +165,14 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     optimizer_env = Gurobi.Env()
     silent = get(config["solver"], "silent", true)
     result = run_opt(
+        data,
         model,
-        data;
-        optimizer_env=optimizer_env,
-        silent=silent,
-        show_counts=true,
-        do_optimize=!no_optimize
+        DirectSolver(
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=true,
+            do_optimize=!no_optimize,
+        )
     )
     variable_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables
     constraint_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints

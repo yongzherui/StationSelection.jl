@@ -10,9 +10,9 @@ end
 
 function compute_alpha_pressure_diagnostics(
     result::OptResult,
-    config::AlphaEnrichmentConfig,
+    config::ExactDARPRouteEnrichmentConfig,
 )::AlphaPressureDiagnostics
-    mapping    = result.mapping::AlphaRouteODMap
+    mapping    = result.mapping::ExactDARPRouteODMap
     theta_r_ts = get(result.model.obj_dict, :theta_r_ts, Dict{NTuple{3,Int}, VariableRef}())
     arm_alpha  = get(result.model.obj_dict, :arm_alpha_params, Dict{NTuple{5,Int}, Float64}())
     x_vars     = result.model[:x]
@@ -142,7 +142,7 @@ function _build_enriched_alpha(
     existing_alpha::Dict{Tuple{Int,Int}, Float64},
     pressure_score::Dict{Tuple{Int,Int}, Float64},
     vehicle_capacity::Int,
-    config::AlphaEnrichmentConfig,
+    config::ExactDARPRouteEnrichmentConfig,
 )::Union{Nothing, Dict{Tuple{Int,Int}, Float64}}
     isempty(route.detour_feasible_legs) && return nothing
 
@@ -224,9 +224,9 @@ function _profile_is_valid(
 end
 
 function enrich_alpha_profiles!(
-    global_state::AlphaRouteBucketPoolsState,
+    global_state::ExactDARPRouteBucketPoolsState,
     result::OptResult,
-    config::AlphaEnrichmentConfig,
+    config::ExactDARPRouteEnrichmentConfig,
     vehicle_capacity::Int,
 )
     config.enabled || return (
@@ -239,7 +239,7 @@ function enrich_alpha_profiles!(
     )
 
     mapping = result.mapping
-    isa(mapping, AlphaRouteODMap) ||
+    isa(mapping, ExactDARPRouteODMap) ||
         return (
             skipped=true,
             added=0,

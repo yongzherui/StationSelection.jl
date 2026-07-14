@@ -3,8 +3,8 @@
 
 ## Observation
 
-In `CompatibilitySetAssignmentModel` (and `CompatibilitySetModel`), column generation
-selects broad "hub" routes that certify far more station pairs `(j,k)` than are ever
+In `AggregateODRouteModel`, column generation selects broad "hub" routes that
+certify far more station pairs `(j,k)` than are ever
 actually used for demand assignment. This drives a large LP-MIP gap (~21% on n=40 instances).
 
 **Concrete example** — n=40, l=20, p=8, ov=1.0, seed=123 (`zhuzhou_set_assignment`):
@@ -18,7 +18,7 @@ actually used for demand assignment. This drives a large LP-MIP gap (~21% on n=4
 The coverage constraint is:
 
 ```
-sum_r theta[r,s] * I[r certifies (j,k)] == u[j,k,s]      # assignment model
+sum_r theta[r,s] * I[r certifies (j,k)] >= u[j,k,s]
 ```
 
 The demand activation constraint is:

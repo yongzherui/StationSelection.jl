@@ -53,7 +53,7 @@ end
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::CompatibilitySetODMap
+        mapping::AggregateODRouteMap
     )
     before = _total_num_constraints(m)
     x = m[:x]
@@ -63,7 +63,8 @@ function add_assignment_constraints!(
             x_od = get(x[s], od_idx, VariableRef[])
             isempty(x_od) && continue
             demand = get(mapping.Q_s[s], (o, d), 0)
-            @constraint(m, sum(x_od) == demand)
+            demand > 0 || continue
+            @constraint(m, sum(x_od) == 1.0)
         end
     end
 
@@ -191,11 +192,11 @@ end
 
 
 # ============================================================================
-# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ExactDARPRouteODMap (ExactDARPRouteModel)
 # ============================================================================
 
 """
-    add_assignment_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+    add_assignment_constraints!(m, data, mapping::ExactDARPRouteODMap)
 
 All demand for each (OD, time bucket) must be assigned across valid (j,k) pairs.
     Σ_{(j,k)} x[s][t_id][od_idx] == Q_s_t[s][t_id][(o,d)]  ∀(s, t_id, od_idx)
@@ -205,7 +206,7 @@ x is integer-valued; the RHS equals the passenger count for that OD/time/scenari
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -228,7 +229,7 @@ end
 
 
 """
-    add_assignment_to_active_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+    add_assignment_to_active_constraints!(m, data, mapping::ExactDARPRouteODMap)
 
 Assignments require both pickup and dropoff stations to be active (big-M formulation).
     x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[j,s]
@@ -239,7 +240,7 @@ The big-M coefficient equals the per-(OD, time bucket, scenario) demand count.
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)

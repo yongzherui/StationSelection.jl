@@ -17,7 +17,7 @@ Calculations:
 # Usage
 
 ```julia
-result = run_opt(model, data; ...)
+result = run_opt(data, model, DirectSolver(...))
 annotated = annotate_orders_with_solution(result, data)
 walking = calculate_model_walking_distance(annotated)
 ivt = calculate_model_in_vehicle_time(annotated)

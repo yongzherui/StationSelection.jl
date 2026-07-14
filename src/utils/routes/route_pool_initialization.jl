@@ -35,14 +35,14 @@ function _copy_route_with_id(route::RouteData, route_id::Int)::RouteData
     return RouteData(route_id, copy(route.station_indices), route.travel_time, copy(route.detour_feasible_legs))
 end
 
-function _allocate_route_id!(state::AlphaRouteBucketPoolsState)::Int
+function _allocate_route_id!(state::ExactDARPRouteBucketPoolsState)::Int
     route_id = state.next_global_route_id
     state.next_global_route_id += 1
     return route_id
 end
 
 function _insert_route_variant!(
-    global_state::AlphaRouteBucketPoolsState,
+    global_state::ExactDARPRouteBucketPoolsState,
     bucket_state::RoutePoolState,
     route::RouteData,
     source_alpha::Dict{NTuple{3, Int}, Float64},
@@ -85,7 +85,7 @@ function _insert_route_variant!(
 end
 
 function _merge_route_variants!(
-    global_state::AlphaRouteBucketPoolsState,
+    global_state::ExactDARPRouteBucketPoolsState,
     bucket_state::RoutePoolState,
     routes::Vector{RouteData},
     alpha_profile::Dict{NTuple{3, Int}, Float64},
@@ -180,11 +180,11 @@ function initialize_route_pool(
     max_detour_ratio::Float64,
     stop_dwell_time::Float64,
     initial_generated_max_route_length::Union{Int, Nothing}=nothing
-)::AlphaRouteBucketPoolsState
+)::ExactDARPRouteBucketPoolsState
     n_buckets = sum(length(by_t) for by_t in values(Q_s_t))
     @info "initialize_route_pool: starting" mode=init_spec.mode n_buckets=n_buckets vehicle_capacity=vehicle_capacity route_generation_method=route_generation_method initial_max_route_length=initial_generated_max_route_length
 
-    global_state      = AlphaRouteBucketPoolsState(Dict{Tuple{Int, Int}, RoutePoolState}(), 1)
+    global_state      = ExactDARPRouteBucketPoolsState(Dict{Tuple{Int, Int}, RoutePoolState}(), 1)
     bucket_info       = _bucket_key_route_pools(Q_s_t, valid_jk_pairs)
     n_generated_total = 0
 
@@ -241,7 +241,7 @@ function initialize_route_pool(
     return global_state
 end
 
-function _sorted_bucket_route_pool_keys(global_state::AlphaRouteBucketPoolsState)
+function _sorted_bucket_route_pool_keys(global_state::ExactDARPRouteBucketPoolsState)
     return sort!(collect(keys(global_state.bucket_states)))
 end
 

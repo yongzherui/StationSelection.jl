@@ -39,10 +39,11 @@ const MOI = JuMP.MOI
     @testset "Utilities" begin
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
-        include("utils/test_alpha_route_runner.jl")
-        include("utils/test_alpha_route_column_generation.jl")
+        include("utils/test_exact_darp_route_runner.jl")
+        include("utils/test_exact_darp_route_column_generation.jl")
         include("utils/test_iterative_route_generation.jl")
         include("utils/test_alpha_profile_enrichment.jl")
+        include("utils/test_generators.jl")
     end
 
     @testset "Data Structures" begin
@@ -51,7 +52,7 @@ const MOI = JuMP.MOI
 
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
-        include("opt/test_compatibility_pricing.jl")
+        include("opt/test_aggregate_od_route_pricing.jl")
     end
 
 end

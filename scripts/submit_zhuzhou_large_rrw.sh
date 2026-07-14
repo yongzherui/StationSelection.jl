@@ -28,7 +28,7 @@ fi
 
 export CS_ROUTE_REG_WEIGHT="${CS_ROUTE_REG_WEIGHT:-100.0}"
 
-echo "Submitting $N_JOBS CompatibilitySetAssignmentModel jobs (CS_ROUTE_REG_WEIGHT=$CS_ROUTE_REG_WEIGHT)"
+echo "Submitting $N_JOBS AggregateODRouteModel jobs (CS_ROUTE_REG_WEIGHT=$CS_ROUTE_REG_WEIGHT)"
 sbatch \
     --array=1-"$N_JOBS" \
     --output="$LOG_DIR/%A_%a.out" \

@@ -1,7 +1,7 @@
 """
     scripts/generate_zhuzhou_job_list.jl
 
-Generate the tab-separated job list for the Zhuzhou CompatibilitySetModel scaling sweep.
+Generate the tab-separated job list for the Zhuzhou AggregateODRouteModel scaling sweep.
 Each row encodes one (n_stations, l, n_pairs, endpoint_overlap, seed) instance so the
 SLURM array task can generate the data on the fly via run_zhuzhou_instance.jl.
 

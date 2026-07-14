@@ -1,5 +1,5 @@
 """
-CSV loading of pre-built routes and alpha capacity profiles for RouteVehicleCapacityModel.
+CSV loading of pre-built routes and alpha capacity profiles.
 
 Input file formats (cross-compatible with existing variable exports):
 

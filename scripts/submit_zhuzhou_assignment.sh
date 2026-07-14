@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EXP_DIR="${1:-$PROJECT_ROOT/experiments/zhuzhou_set_assignment}"
+EXP_DIR="${1:-$PROJECT_ROOT/experiments/zhuzhou_set_aggregate_od_route}"
 DATA_DIR="${ZZ_DATA_DIR:-$PROJECT_ROOT/../Data/base_data}"
 JOBS_FILE="$EXP_DIR/jobs.txt"
 LOG_DIR="$EXP_DIR/slurm_logs"
@@ -26,7 +26,7 @@ if [ "$N_JOBS" -le 0 ]; then
     exit 1
 fi
 
-echo "Submitting $N_JOBS CompatibilitySetAssignmentModel jobs"
+echo "Submitting $N_JOBS AggregateODRouteModel jobs"
 sbatch \
     --array=1-"$N_JOBS" \
     --output="$LOG_DIR/%A_%a.out" \

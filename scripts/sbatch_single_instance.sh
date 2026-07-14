@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-# CompatibilitySetModel scaling experiment — SLURM array runner.
+# AggregateODRouteModel scaling experiment — SLURM array runner.
 # Each task reads one line from the job list and solves one synthetic instance.
 #
 # Usage:
@@ -47,7 +47,7 @@ N_REQUESTS=$(echo "$JOB_LINE" | cut -f3)
 SEED=$(echo "$JOB_LINE" | cut -f4)
 
 echo "=========================================="
-echo "CompatibilitySetModel Scaling Experiment"
+echo "AggregateODRouteModel Scaling Experiment"
 echo "Array job:  ${SLURM_ARRAY_JOB_ID}  task: ${TASK}"
 echo "Instance:   g${NX}x${NY}_r${N_REQUESTS}_s${SEED}"
 echo "Node:       ${SLURM_NODELIST}"

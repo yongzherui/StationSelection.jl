@@ -62,7 +62,7 @@ end
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::CompatibilitySetODMap
+        mapping::AggregateODRouteMap
     )
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
@@ -74,7 +74,7 @@ function add_assignment_variables!(
             demand = get(mapping.Q_s[s], (o, d), 0)
             if !isempty(valid_pairs) && demand > 0
                 x[s][od_idx] = @variable(m, [1:length(valid_pairs)],
-                    integer = true, lower_bound = 0, upper_bound = demand)
+                    integer = true, lower_bound = 0, upper_bound = 1)
             else
                 x[s][od_idx] = VariableRef[]
             end
@@ -127,15 +127,15 @@ function add_assignment_variables!(
 end
 
 # ============================================================================
-# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ExactDARPRouteODMap (ExactDARPRouteModel)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData,
-                              mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+                              mapping::ExactDARPRouteODMap)
 
 Add sparse integer assignment variables x[s][t_id][od_idx] for time-bucketed route models
-(RouteVehicleCapacityModel and AlphaRouteModel).
+(ExactDARPRouteModel).
 
 For each OD pair (o,d) in time bucket t of scenario s, one integer variable is created
 per valid (j,k) pair, with upper bound equal to Q_s_t[s][t][(o,d)] (the demand count).
@@ -147,7 +147,7 @@ scenario → t_id → od_idx → pair variables.
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = JuMP.num_variables(m)
     S = n_scenarios(data)

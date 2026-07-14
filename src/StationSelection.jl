@@ -12,6 +12,7 @@ using JSON
 using JuMP
 using Logging
 using Printf
+using Random
 using Statistics
 
 # Data loading - core data structures
@@ -37,7 +38,7 @@ include("utils/routes/generate_routes_from_orders.jl")
 include("utils/routes/generate_iterative_routes.jl")
 include("utils/routes/route_generation_dispatch.jl")
 include("utils/routes/route_io.jl")
-include("utils/routes/generate_alpha_routes.jl")
+include("utils/routes/generate_exact_darp_routes.jl")
 include("utils/routes/route_pool_initialization.jl")
 include("utils/routes/route_pool_iteration.jl")
 include("utils/routes/route_pool_enrichment.jl")
@@ -45,15 +46,17 @@ include("utils/routes/route_pool_export.jl")
 include("data/io/stations.jl")
 include("data/io/requests.jl")
 
+# Synthetic and file-backed experiment generators
+include("generators/grid.jl")
+include("generators/zhuzhou.jl")
+
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
 include("opt/models/clustering_two_stage_od.jl")
 include("opt/models/clustering_two_stage_station.jl")
 include("opt/models/clustering_base.jl")
-include("opt/models/route_vehicle_capacity_model.jl")
-include("opt/models/alpha_route_model.jl")
-include("opt/models/route_fleet_limit_model.jl")
-include("opt/models/compatibility_set_model.jl")
+include("opt/models/exact_darp_route_model.jl")
+include("opt/models/aggregate_od_route_model.jl")
 
 # Clustering OD map (depends on ClusteringTwoStageODModel)
 include("data/maps/clustering_od_map.jl")
@@ -64,17 +67,11 @@ include("data/maps/clustering_two_stage_station_map.jl")
 # Clustering base map (depends on ClusteringBaseModel)
 include("data/maps/clustering_base_map.jl")
 
-# Vehicle capacity OD map for RouteVehicleCapacityModel (depends on RouteData)
-include("data/maps/vehicle_capacity_od_map.jl")
+# Exact DARP route OD map for ExactDARPRouteModel (depends on RouteData, route_io)
+include("data/maps/exact_darp_route_od_map.jl")
 
-# Alpha route OD map for AlphaRouteModel (depends on RouteData, route_io)
-include("data/maps/alpha_route_od_map.jl")
-
-# Fleet limit OD map for RouteFleetLimitModel (depends on VehicleCapacityODMap)
-include("data/maps/fleet_limit_od_map.jl")
-
-# Compatibility-set OD map for CompatibilitySetModel
-include("data/maps/compatibility_set_od_map.jl")
+# Aggregate OD route OD map for AggregateODRouteModel
+include("data/maps/aggregate_od_route_map.jl")
 
 # Model-to-map dispatch
 include("data/maps/create_map.jl")
@@ -85,11 +82,8 @@ include("opt/constraints.jl")
 include("opt/objective.jl")
 include("opt/optimize.jl")
 
-# Warm start model for RouteVehicleCapacityModel (depends on opt/optimize.jl)
-include("opt/models/route_vehicle_capacity_warm_start.jl")
-
-# Warm start model for AlphaRouteModel (depends on opt/optimize.jl)
-include("opt/models/alpha_route_warm_start.jl")
+# Warm start model for ExactDARPRouteModel (depends on opt/optimize.jl)
+include("opt/models/exact_darp_route_warm_start.jl")
 
 # Variable export (depends on OptResult and all mapping types)
 include("utils/analysis/export_variables.jl")
@@ -99,24 +93,25 @@ include("utils/analysis/export_variables.jl")
 export ModelCounts, DetourComboData, BuildResult, OptResult
 export bd09_to_wgs84
 export read_candidate_stations, read_customer_requests
+export GridStation, GridInstance, generate_grid_instance
+export grid_station_id, grid_manhattan_dist, grid_travel_cost_dict
+export create_grid_problem_data, create_grid_station_selection_data, print_grid_summary
+export ZhuzhouStation, ZhuzhouInstance, generate_zhuzhou_instance
+export create_zhuzhou_problem_data, create_zhuzhou_station_selection_data, print_zhuzhou_summary
 
 # Re-export data structures
 export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export ClusteringTwoStageStationMap
-export VehicleCapacityODMap
-export AlphaRouteODMap
-export FleetLimitODMap
-export CompatibilitySetODMap
+export ExactDARPRouteODMap
+export AggregateODRouteMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_two_stage_station_map
 export create_clustering_base_model_map
-export create_vehicle_capacity_od_map
-export create_alpha_route_od_map
-export create_fleet_limit_od_map
-export create_compatibility_set_od_map
+export create_exact_darp_route_od_map
+export create_aggregate_od_route_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_cost_by_id, has_routing_costs
@@ -132,14 +127,18 @@ export RouteData, generate_simple_routes
 export IterativeRouteGenerationConfig, generate_iterative_routes
 export RouteIOData, load_routes_and_alpha
 export default_iterative_route_generation_config, generate_routes_for_bucket
-export RoutePoolInitSpec, RoutePoolState, AlphaRouteBucketPoolsState, AlphaEnrichmentConfig, AlphaRouteRunnerConfig, AlphaRouteColumnGenerationConfig
-export AlphaRouteIterationSummary, AlphaRouteRunnerResult, AlphaRouteColumnGenerationRunnerResult
-export initialize_route_pool, export_route_pool_state, export_alpha_route_bucket_pools_state
-export run_alpha_route_iterative, run_alpha_route_column_generation
+export RoutePoolInitSpec, RoutePoolState, ExactDARPRouteBucketPoolsState, ExactDARPRouteEnrichmentConfig, ExactDARPRouteRunnerConfig, ExactDARPRouteColumnGenerationConfig
+export ExactDARPRouteIterationSummary, ExactDARPRouteRunnerResult, ExactDARPRouteColumnGenerationRunnerResult
+export initialize_route_pool, export_route_pool_state, export_exact_darp_route_bucket_pools_state
+export run_exact_darp_route_iterative, run_exact_darp_route_column_generation
+export AbstractStationSelectionSolver
+export SolverConfig, DirectSolver, ColumnGenerationSolver, BendersSolver, HeuristicSolver
+export AbstractBendersDecomposition, BendersY, BendersXY
+export AbstractBendersCutMode, SingleCut, MultiCut
 export AbstractSolveStrategy, AbstractIterativeSolveStrategy
-export DirectSolveStrategy, IterativeSolveIterationSummary, IterativeSolveResult
-export AlphaRouteIterativeStrategy, AlphaRouteColumnGenerationStrategy
-export AlphaRouteCGDuals, AlphaRoutePricedColumn, AlphaRoutePricingResult
+export IterativeSolveIterationSummary, IterativeSolveResult
+export ExactDARPRouteIterativeStrategy, ExactDARPRouteColumnGenerationStrategy
+export ExactDARPRouteCGDuals, ExactDARPRoutePricedColumn, ExactDARPRoutePricingResult
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
@@ -148,32 +147,30 @@ export AbstractTwoStageModel, AbstractODModel
 export ClusteringTwoStageODModel
 export ClusteringTwoStageStationModel
 export ClusteringBaseModel
-export RouteVehicleCapacityModel
-export RouteVehicleCapacityWarmStartModel
-export AlphaRouteWarmStartModel
-export AlphaRouteModel
-export RouteFleetLimitModel
-export CompatibilitySetModel, CompatibilitySetAssignmentModel, AnyCompatibilitySetModel, CompatibilityColumn
+export ExactDARPRouteWarmStartModel
+export ExactDARPRouteModel
+export AggregateODRouteModel
+export AbstractAggregateODAssignmentPolicy, FreeAggregateODAssignmentPolicy, NearestOpenAggregateODAssignmentPolicy
+export RouteCoveringProblem, AnyAggregateODRouteModel, AggregateODRouteColumn
 
 # Re-export optimization functions
-export run_opt, run_opt_fleet_search, build_model
-export build_alpha_route_restricted_master, extract_alpha_route_cg_duals, solve_alpha_route_pricing
-export add_compatibility_column!, add_or_update_compatibility_column!
-export extract_compatibility_coverage_duals
-export compatibility_coverage_sigma, generate_compatibility_columns
-export run_compatibility_column_generation, CompatibilityCoverageDuals
-export CompatibilityColumnGenerationResult
-export CompatibilityCGLogger, CompatibilityCGIterationLog, CompatibilityCGTerminationLog
-export CompatibilityPricingData, CompatibilityPricingDuals, CompatibilityPricingLabel
-export create_compatibility_pricing_data, initial_compatibility_pricing_labels
-export extend_compatibility_pricing_label, compatibility_pricing_by_label_setting
-export get_warm_start_solution
+export run_opt, build_model
+export build_exact_darp_route_restricted_master, extract_exact_darp_route_cg_duals, solve_exact_darp_route_pricing
+export add_aggregate_od_route_column!, add_or_update_aggregate_od_route_column!
+export extract_aggregate_od_route_coverage_duals
+export aggregate_od_route_coverage_sigma, generate_aggregate_od_route_columns
+export run_aggregate_od_route_column_generation, AggregateODRouteCoverageDuals
+export AggregateODRouteColumnGenerationResult
+export AggregateODRouteCGLogger, AggregateODRouteCGIterationLog, AggregateODRouteCGTerminationLog
+export AggregateODRoutePricingData, AggregateODRoutePricingDuals, AggregateODRoutePricingLabel
+export create_aggregate_od_route_pricing_data, initial_aggregate_od_route_pricing_labels
+export extend_aggregate_od_route_pricing_label, aggregate_od_route_pricing_by_label_setting
+export get_exact_darp_route_warm_start_solution
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!
-export add_alpha_r_jkts_variables!, add_theta_r_ts_variables!
-export add_v_jkts_variables!
-export add_od_activation_variables!, add_compatibility_theta_variables!
+export add_theta_r_ts_variables!
+export add_aggregate_od_route_theta_variables!
 export compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
@@ -181,15 +178,12 @@ export add_assignment_to_active_constraints!, add_assignment_to_selected_constra
 export add_flow_activation_constraints!
 export add_route_capacity_constraints!
 export add_route_capacity_lazy_constraints!
-export add_fleet_limit_constraints!
-export add_assignment_to_od_activation_constraints!
-export add_compatibility_coverage_constraints!
+export add_aggregate_od_route_coverage_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_clustering_two_stage_station_objective!
 export set_route_od_objective!
-export set_fleet_limit_objective!
-export set_compatibility_set_objective!
+export set_aggregate_od_route_objective!
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export select_top_used_candidate_stations
