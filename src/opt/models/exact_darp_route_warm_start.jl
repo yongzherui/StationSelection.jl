@@ -141,8 +141,8 @@ function build_model(
                 x_od = get(get(x[s], t_id, Dict{Int, Vector{VariableRef}}()), od_idx, VariableRef[])
                 isempty(x_od) && continue
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    cost = get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
+                for (pair_idx, pair) in enumerate(valid_pairs)
+                    cost = od_pair_walking_cost(data, o, d, pair)
                     add_to_expression!(obj, cost, x_od[pair_idx])
                 end
             end
@@ -371,6 +371,9 @@ function _check_covering_constraints_arm(
             od_dict = get(x_vals[s], t_id, nothing)
 
             for (j_idx, k_idx) in jk_set
+                # Walk-only assignments use no route/alpha coverage by design —
+                # they would always read as a spurious "violation" here.
+                is_walk_only_pair((j_idx, k_idx)) && continue
                 # x sum: Σ_{od using (j,k)} x hint
                 x_sum = 0.0
                 if !isnothing(od_dict)

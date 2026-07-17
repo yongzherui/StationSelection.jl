@@ -9,6 +9,38 @@ using DataFrames
 
 export ClusteringTwoStageODMap
 export create_clustering_two_stage_od_map
+export WALK_ONLY_PAIR
+export is_walk_only_pair
+export od_pair_walking_cost
+
+"""
+    WALK_ONLY_PAIR
+
+Sentinel `(j, k)` pair meaning "no station/vehicle used — walk directly from
+origin to destination." Station indices start at 1, so `(0, 0)` cannot collide
+with a real station pair.
+"""
+const WALK_ONLY_PAIR = (0, 0)
+
+is_walk_only_pair(pair::Tuple{Int, Int}) = pair == WALK_ONLY_PAIR
+
+"""
+    od_pair_walking_cost(data, o, d, pair) -> Float64
+
+Walking cost of assigning OD pair (o, d) to station pair `pair`. For a real
+station pair (j, k) this is walk(o, j) + walk(k, d). For [`WALK_ONLY_PAIR`]
+it is the direct walk(o, d) — no station is used.
+"""
+function od_pair_walking_cost(
+    data::StationSelectionData,
+    o::Int,
+    d::Int,
+    pair::Tuple{Int, Int},
+)::Float64
+    is_walk_only_pair(pair) && return get_walking_cost(data, o, d)
+    j, k = pair
+    return get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
+end
 
 """
     ClusteringTwoStageODMap
@@ -57,7 +89,8 @@ For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
-    max_walking_distance::Float64
+    max_walking_distance::Float64;
+    allow_walk_only::Bool=false
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
@@ -67,13 +100,24 @@ function compute_valid_jk_pairs(
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
-                # we need to skip if they are the same, this results in no meaningful assignment
-                # because it means we ask the request to walk at most <= 2 * max_walking_distance
-                # and they will complete their trip.
+                # station pairs must be distinct: j==k would mean boarding and
+                # alighting at the same station, i.e. no vehicle trip at all.
+                # That case is handled separately below via WALK_ONLY_PAIR.
                 j == k && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end
+        end
+        # Walk-only option (opt-in): skip stations entirely if the direct walk
+        # is within 2 * max_walking_distance (the same budget a
+        # station-mediated trip would use: up to max_walking_distance on each
+        # leg). Off by default — real walking costs obey the triangle
+        # inequality, so this condition is satisfied almost any time a real
+        # 2-hop station pair exists, and callers that don't expect a
+        # station-free option (e.g. NearestOpenAggregateODAssignmentPolicy,
+        # Benders, route-pool generation) must opt in deliberately.
+        if allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
+            push!(pairs, WALK_ONLY_PAIR)
         end
         valid_jk_pairs[(o, d)] = pairs
     end

@@ -33,8 +33,10 @@ function add_flow_variables!(
     for s in 1:S
         active_pairs = Set{Tuple{Int,Int}}()
         for (o, d) in mapping.Omega_s[s]
-            for (j, k) in get_valid_jk_pairs(mapping, o, d)
-                push!(active_pairs, (j, k))
+            for pair in get_valid_jk_pairs(mapping, o, d)
+                # Walk-only trips use no vehicle route, so they get no flow variable.
+                is_walk_only_pair(pair) && continue
+                push!(active_pairs, pair)
             end
         end
         for (j, k) in active_pairs

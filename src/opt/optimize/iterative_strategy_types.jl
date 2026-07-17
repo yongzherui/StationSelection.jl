@@ -175,16 +175,19 @@ struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     decomposition::AbstractBendersDecomposition
     cut_mode::AbstractBendersCutMode
-    inner_solver::ColumnGenerationSolver
+    inner_solver::Union{ColumnGenerationSolver, DirectSolver}
     max_iterations::Int
     optimality_tol::Float64
     log_dir::Union{String, Nothing}
+    check_lp_ip_gap::Bool
+    reprice_subproblem::Bool
+    max_reprice_rounds::Int
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
         decomposition::AbstractBendersDecomposition=BendersY(),
         cut_mode::AbstractBendersCutMode=MultiCut(),
-        inner_solver::Union{ColumnGenerationSolver, Nothing}=nothing,
+        inner_solver::Union{ColumnGenerationSolver, DirectSolver, Nothing}=nothing,
         max_iterations::Int=10_000,
         optimality_tol::Union{Number, Nothing}=nothing,
         reduced_cost_tol::Union{Number, Nothing}=nothing,
@@ -193,7 +196,11 @@ struct BendersSolver <: AbstractStationSelectionSolver
         pricing_time_limit_sec::Number=30.0,
         final_ip_time_limit_sec::Number=3600.0,
         log_dir::Union{AbstractString, Nothing}=nothing,
+        check_lp_ip_gap::Bool=false,
+        reprice_subproblem::Bool=false,
+        max_reprice_rounds::Int=20,
     )
+        max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         resolved_tol = isnothing(optimality_tol) ?
             (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
@@ -218,6 +225,9 @@ struct BendersSolver <: AbstractStationSelectionSolver
             max_iterations,
             resolved_tol,
             isnothing(log_dir) ? nothing : String(log_dir),
+            check_lp_ip_gap,
+            reprice_subproblem,
+            max_reprice_rounds,
         )
     end
 end

@@ -1,6 +1,130 @@
 # Cross-Solver Alignment Under NearestOpenAggregateODAssignmentPolicy
 *2026-07-14, session paused pending visual inspection*
 
+## UPDATE (later same-day session): root cause found — the enumerator is the one that's wrong
+
+Re-opened this investigation using the `scripts/test_case_generation` test2-test6 synthetic
+benchmark families (real geometry, hand-designed hypotheses, already generated under
+`../Data/test{2,3,4,5_triangle,6}*/.../seed_01`) instead of only the original real-data subset,
+specifically to get several independent, reasoned fixtures to check whether "ground truth"
+(`DirectSolver`/`enumerate_aggregate_od_route_columns`) or the CG pricer is at fault.
+
+Built a driver (`AggregateODRouteModel(5; assignment_policy=NearestOpenAggregateODAssignmentPolicy(:gamma_chain),
+max_walking_distance=1000.0, route_regularization_weight=0.1, max_stops=3, max_wait_time=10000.0,
+detour_factor=2.0)`, full un-subsetted station/request set per case) and ran all four solve paths on
+five independent fixtures. **The same disagreement reproduces on every single one**, and in the three
+where DirectSolver and CG/BendersXY agree on `y`, they disagree only on which routes cover that
+identical `y` — i.e. it is not a station-selection bug, it's a route-covering-cost bug:
+
+| Fixture (seed_01)                          | DirectSolver (GT) | Standalone CG | BendersY         | BendersXY | same y? |
+|---------------------------------------------|-------------------|---------------|-------------------|-----------|---------|
+| test2_zone_proximity/close_to_B              | 246.666 (4 routes)| 198.833 (2)   | 494.157 (diff. y) | 198.833   | yes     |
+| test3_north_shift/north_shift_h              | 279.437 (4)       | 208.239 (2)   | 502.723 (diff. y) | 208.239   | yes     |
+| test4_mirrored_zone/mirrored_zones           | 967.389 (4)       | 894.759 (2, diff. y) | 2011.55 (diff. y) | 894.759 | no |
+| test5_triangle/corridor_base                 | 282.2 (4)         | 210.581 (2)   | 302.334 (diff. y) | 210.581   | yes     |
+| test6_bidirectional/fwd100_bwd0              | 282.2 (4)         | 210.581 (2)   | 505.56 (diff. y)  | 210.581   | yes     |
+
+(BendersY's separate premature-convergence bug, already documented above, reconfirms on all five —
+not re-investigated further here.)
+
+### Hand-verified: CG's routes are genuinely feasible, and DirectSolver is missing them
+
+Took test2 apart by hand. Both DirectSolver and CG select the identical `y={1,4,6,7,8}` and the
+identical assignment (od_idx 1-5, same pickup/dropoff pairs) — they differ *only* in which routes
+cover those assignments:
+
+- DirectSolver's pool has only 7 columns, **all singletons** (one per feasible (j,k) pair), and
+  activates 4 of them: `{8,4}` τ=245.108, `{6,4}` τ=254.414, `{7,4}` τ=280.763, `{1,4}` τ=750.0 —
+  total route cost 1530.285.
+- Standalone CG's pool has those same 7 singletons *plus* ten 3-stop, 2-OD-pair consolidated
+  routes (e.g. `{1,7,4}` τ=768.824, `{6,8,4}` τ=283.125), and activates just two of them, covering
+  the same 5 assignments for total route cost 1051.949 — the exact 478.336 raw-cost gap times
+  `route_regularization_weight=0.1` reproduces the 47.833 objective gap (246.666-198.833) almost
+  exactly.
+- Checked route `{1,7,4}` (τ=768.824=488.061+280.763, from `read_routing_costs_from_segments`)
+  against every constraint: `max_stops=3` (route has exactly 3 stops) ✓; detour for passenger
+  (1,4) riding the whole route = 768.824 vs direct 750.0 → ratio 1.025, well under
+  `detour_factor=2.0` ✓; passenger (7,4) boards after the vehicle already visited 1, so their ride
+  segment is just 7→4 = direct, zero detour ✓; `max_wait_time=10000.0` non-binding either way;
+  `max_visits_per_node=2` non-binding (each station visited once). **This route is unambiguously
+  feasible and CG is right to use it.** DirectSolver's enumerator is missing it — "ground truth"
+  is a misnomer here.
+
+### Root cause: dominance pruning in the shared labeling engine is unsound for exhaustive enumeration
+
+`enumerate_aggregate_od_route_columns` (`src/opt/optimize/aggregate_od_route_covering.jl:108`)
+calls the *exact same* `_enumerate_aggregate_od_route_pricing_labels` label-setting search used by
+real CG pricing (`src/opt/optimize/aggregate_od_route_column_generation.jl:546`), just with
+`use_reduced_cost_pruning=false` and synthetic uniform duals (`σ=1.0` for every active pair). The
+docstring's claim ("unit rewards so every certifiable route prefix is retained") is false: disabling
+`use_reduced_cost_pruning` only skips the *frontier-priority* cutoff (deciding whether to keep
+*expanding* a popped label) — it does **not** disable the separate, always-on **dominance-bucket**
+admission check in `_add_aggregate_od_route_label_to_bucket!`
+(`aggregate_od_route_column_generation.jl:473`), keyed purely by `label.current`
+(`_aggregate_od_route_dominance_signature(label) = label.current`, line 406) and governed by
+`_dominates_aggregate_od_route_label` (line 442): label `a` dominates `b` sharing the same current
+node iff `a.time<=b.time`, `a.reduced_cost<=b.reduced_cost`, `issubset(a.served_pairs,
+b.served_pairs)`, and per-station `age` no worse for every station either has tracked.
+
+That rule is the standard (and valid) one for real pricing, where the only goal is *the* most
+negative reduced-cost column — if `a` is cheaper and serves a subset of what `b` serves, any
+completion of `b` can be replicated more cheaply starting from `a`, so discarding `b` can't lose
+the eventual optimum. It is **not valid** for one-shot exhaustive enumeration, because it can
+(and here, does) discard a label that has *already reached a terminal, `max_stops`-exhausted
+state representing a distinct, complete column* just because a cheaper, less-accomplished label
+happens to share its current node. Concretely: the fresh 2-stop label `7→4` (`served={(7,4)}`,
+reduced_cost≈27.08 under uniform duals) dominates the 3-stop label `1→7→4`
+(`served={(1,4),(7,4)}`, reduced_cost≈74.88, strictly *more* value collected but nominally "worse"
+reduced cost) at the shared bucket key `current=4`, because `issubset({(7,4)}, {(1,4),(7,4)})`
+holds and the per-station-age check happens to pass once station 1's age is pruned from the
+2-pair label after that pair is certified (`_prune_irrelevant_aggregate_od_route_station_ages`,
+`aggregate_od_route_column_generation.jl` — makes both labels show `Inf`/untracked for station 1,
+so the inequality trivially holds). The 3-stop label is deleted from `live_labels` at insertion
+time and never reaches the `best_by_signature` recording step
+(`_enumerate_aggregate_od_route_pricing_labels`, ~line 649) — so its signature is permanently lost
+from the enumerated pool, for every fixture in the table above.
+
+CG never hits this failure mode in practice because it iterates: across successive iterations
+with duals that actually vary pair-to-pair (reflecting the LP's real marginal values, not a flat
+1.0), a different label wins the same bucket contention on different iterations, and enough
+distinct combinations accumulate in the running column pool across iterations to reach the true
+optimum — even though any *single* pricing call has exactly the same soundness gap as the
+"exhaustive" enumerator.
+
+### FIXED (same-day, follow-up session): independent brute-force enumerator
+
+Rather than patch the dominance logic in place, replaced `enumerate_aggregate_od_route_columns`
+entirely with a fresh, standalone implementation in a new file,
+`src/opt/optimize/aggregate_od_route_enumeration.jl`, sharing no code with the CG label-setting
+pricer (no duals, no dominance buckets, no reduced-cost bookkeeping at all). It does a plain
+bounded DFS over station sequences, restricted to stations that are an OD-pair endpoint (lossless,
+since routing costs are direct point-to-point — no road graph to transit through), and for each
+sequence prefix of length >= 2 checks, directly and existentially, whether each active pair
+`(j,k)` has *some* valid boarding position `p` (`route[p]==j`, within `max_wait_time` of route
+start) and later alighting position `q>p` (`route[q]==k`, ride time within `detour_factor` of
+direct) — a strictly more complete check than the pricer's "most recent boarding only" dominance
+shortcut. The old implementation was deleted outright from
+`src/opt/optimize/aggregate_od_route_covering.jl`; `_run_direct_enumerated_aggregate_od_route`
+(DirectSolver's call site) is otherwise unchanged, since the function name/signature/contract
+(`max_routes`, `time_limit_sec`, throwing `ArgumentError` on overflow) is preserved.
+
+Re-ran the same 5-fixture comparison after the fix: **DirectSolver = standalone CG = BendersXY,
+exactly, on all five** (test2 246.666→198.833, test3 279.437→208.239, test4 967.389→894.759
+*and* now agrees on `y` too, test5 282.2→210.581, test6 282.2→210.581). Full package test suite:
+651 passed / 2 broken (both `BendersY`'s pre-existing, separate premature-convergence bug on the
+*synthetic* fixture only — see below) / 0 errors / 0 failures.
+
+One test-file update was needed beyond the enumerator swap: `BendersY`'s `@test_broken` on the
+*real-data* fixture started **unexpectedly passing** once ground truth was fixed (Julia's
+`Test` treats an unexpectedly-passing `@test_broken` as an error) — apparently on that fixture
+BendersY's cut happens to land correctly even though its cut-derivation is still theoretically
+unsound in general. `run_cross_solver_alignment_checks` in
+`test/opt/test_aggregate_od_route_nearest_open_alignment.jl` now takes a
+`benders_y_expected_broken::Bool` kwarg: `true` for the synthetic fixture (genuinely still
+broken), `false` for the real-data fixture (now a hard `@test`). `BendersY`'s own bug is
+otherwise untouched and not yet fixed — do not trust `BendersY` specifically without checking it
+against `BendersXY`/CG on any new fixture.
+
 ## Goal
 
 Build a test pipeline treating exhaustive route enumeration as ground truth for

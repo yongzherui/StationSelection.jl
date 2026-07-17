@@ -102,6 +102,9 @@ function _run_opt_impl(
         x_val = _value_recursive(m[:x])
         y_val = _value_recursive(m[:y])
         solution = (x_val, y_val)
+        # No-op unless this model built endpoint-nearest zp/zd indicators
+        # (AggregateODRouteModel/RouteCoveringProblem only).
+        assert_endpoint_chain_near_binary(m)
     end
 
     runtime_sec = Dates.value(now() - start_time) / 1000

@@ -42,7 +42,9 @@ function add_flow_activation_constraints!(
             demand = get(mapping.Q_s[s], (o, d), 0)
             demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            for (idx, (j, k)) in enumerate(valid_pairs)
+            for (idx, pair) in enumerate(valid_pairs)
+                is_walk_only_pair(pair) && continue
+                j, k = pair
                 x_var = x[s][od_idx][idx]
                 @constraint(m, x_var <= demand * f_flow[s][(j, k)])
                 push!(get!(x_terms, (s, j, k), VariableRef[]), x_var)

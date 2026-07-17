@@ -159,7 +159,9 @@ function _bucket_key_route_pools(
             x_candidate_count = 0
             for (o, d) in keys(od_cnt)
                 valid = get(valid_jk_pairs, (o, d), Tuple{Int, Int}[])
-                union!(jk_set, valid)
+                # Walk-only assignments use no vehicle route, so they never
+                # need a route generated/seeded for them.
+                union!(jk_set, Iterators.filter(!is_walk_only_pair, valid))
                 x_candidate_count += length(valid)
             end
             bucket_info[(s, t_id)] = (jk_set, x_candidate_count)

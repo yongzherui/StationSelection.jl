@@ -79,6 +79,7 @@ function _arm_warn_uncovered_jk(
             for (o, d) in od_pairs
                 get(mapping.Q_s_t[s][t_id], (o, d), 0) > 0 || continue
                 for (j_idx, k_idx) in get_valid_jk_pairs(mapping, o, d)
+                    is_walk_only_pair((j_idx, k_idx)) && continue
                     (s, t_id, j_idx, k_idx) ∈ covered && continue
                     if n_uncovered < 5
                         @warn "ExactDARPRouteModel: no alpha coverage for (s=$s, t_id=$t_id, pickup_idx=$j_idx, dropoff_idx=$k_idx) — capacity constraint skipped for this leg"

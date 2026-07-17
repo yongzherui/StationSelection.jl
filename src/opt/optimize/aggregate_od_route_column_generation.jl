@@ -35,6 +35,7 @@ struct AggregateODRoutePricingData
     detour_factor::Float64
     max_stops::Int
     max_visits_per_node::Int
+    bounded_max_stops::Bool
 end
 
 struct AggregateODRoutePricingDuals
@@ -196,13 +197,14 @@ function create_aggregate_od_route_pricing_data(
     isempty(missing_arcs) ||
         throw(ArgumentError("missing finite routing costs for aggregate OD route pricing arcs: $(missing_arcs)"))
 
-    all_pairs = get(mapping.active_jk_s, scenario, Tuple{Int, Int}[])
+    all_pairs = filter(!is_walk_only_pair, get(mapping.active_jk_s, scenario, Tuple{Int, Int}[]))
     active_pairs = if isnothing(pricing_duals)
         all_pairs
     else
         filter(pair -> get(pricing_duals.sigma, pair, 0.0) > 1e-9, all_pairs)
     end
 
+    bounded_max_stops = model.max_stops != typemax(Int)
     max_stops = model.max_stops == typemax(Int) ? length(nodes) : model.max_stops
     return AggregateODRoutePricingData(
         scenario,
@@ -215,6 +217,7 @@ function create_aggregate_od_route_pricing_data(
         model.detour_factor,
         max_stops,
         model.max_visits_per_node,
+        bounded_max_stops,
     )
 end
 
@@ -325,10 +328,14 @@ end
 function _aggregate_od_route_candidate_next_nodes(
     label::AggregateODRoutePricingLabel,
     pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals,
+    duals::AggregateODRoutePricingDuals;
+    max_visits_per_node::Int=pricing_data.max_visits_per_node,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
-    _has_useful_live_aggregate_od_route_origin(label, pricing_data, duals) || return Int[]
+    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    if past_pickup_cutoff && !_has_useful_live_aggregate_od_route_origin(label, pricing_data, duals)
+        return Int[]
+    end
     for pair in pricing_data.active_pairs
         get(duals.sigma, pair, 0.0) > 1e-9 || continue
         origin, destination = pair
@@ -346,12 +353,12 @@ function _aggregate_od_route_candidate_next_nodes(
             _direct_ride_limit(pricing_data, pair) + 1e-9 && push!(candidate_nodes, destination)
     end
 
-    if pricing_data.max_visits_per_node < typemax(Int)
+    if max_visits_per_node < typemax(Int)
         visit_counts = Dict{Int, Int}()
         for node in label.route
             visit_counts[node] = get(visit_counts, node, 0) + 1
         end
-        filter!(node -> get(visit_counts, node, 0) < pricing_data.max_visits_per_node, candidate_nodes)
+        filter!(node -> get(visit_counts, node, 0) < max_visits_per_node, candidate_nodes)
     end
 
     return sort!(collect(candidate_nodes))
@@ -442,8 +449,10 @@ end
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
     b::AggregateODRoutePricingLabel,
+    bounded_max_stops::Bool,
 )::Bool
     _aggregate_od_route_dominance_signature(a) == _aggregate_od_route_dominance_signature(b) || return false
+    (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
     issubset(a.served_pairs, b.served_pairs) || return false
@@ -459,8 +468,10 @@ function _dominates_aggregate_od_route_label(
     b::AggregateODRoutePricingLabel,
     abs::AggregateODRouteLabelBitsets,
     bbs::AggregateODRouteLabelBitsets,
+    bounded_max_stops::Bool,
 )::Bool
     _aggregate_od_route_dominance_signature(a) == _aggregate_od_route_dominance_signature(b) || return false
+    (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
     issubset(abs.served_bits, bbs.served_bits) || return false
@@ -477,6 +488,7 @@ function _add_aggregate_od_route_label_to_bucket!(
     label::AggregateODRoutePricingLabel,
     label_id::Int,
     label_bs::AggregateODRouteLabelBitsets,
+    bounded_max_stops::Bool,
 )
     inserted = true
     dominated_ids = Int[]
@@ -487,7 +499,7 @@ function _add_aggregate_od_route_label_to_bucket!(
         existing_bs = label_bitsets[existing_id]
 
         if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_aggregate_od_route_label(existing_label, label, existing_bs, label_bs)
+            if _dominates_aggregate_od_route_label(existing_label, label, existing_bs, label_bs, bounded_max_stops)
                 inserted = false
                 break
             end
@@ -495,7 +507,7 @@ function _add_aggregate_od_route_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_aggregate_od_route_label(label, existing_label, label_bs, existing_bs)
+        if _dominates_aggregate_od_route_label(label, existing_label, label_bs, existing_bs, bounded_max_stops)
             push!(dominated_ids, existing_id)
         end
     end
@@ -551,6 +563,7 @@ function _enumerate_aggregate_od_route_pricing_labels(
     max_visits_per_node::Int,
     use_reduced_cost_pruning::Bool=true,
     profile::Bool=false,
+    stop_if=label -> false,
 )
     frontier = PriorityQueue{Int, Float64}()
     live_labels = Dict{Int, AggregateODRoutePricingLabel}()
@@ -618,7 +631,10 @@ function _enumerate_aggregate_od_route_pricing_labels(
         label_bs = _make_aggregate_od_route_label_bitsets(label, pair_index, n_pairs, node_index, n_nodes)
         bucket = get!(() -> _create_aggregate_od_route_dominance_bucket(), dominance_buckets, _aggregate_od_route_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
-        inserted, removed = _add_aggregate_od_route_label_to_bucket!(bucket, live_labels, label_bitsets, label, label_id, label_bs)
+        inserted, removed = _add_aggregate_od_route_label_to_bucket!(
+            bucket, live_labels, label_bitsets, label, label_id, label_bs,
+            pricing_data.bounded_max_stops,
+        )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
         if inserted
@@ -654,6 +670,10 @@ function _enumerate_aggregate_od_route_pricing_labels(
             incumbent = get(best_by_signature, signature, nothing)
             if isnothing(incumbent) || label.tau < incumbent.tau - 1e-9
                 best_by_signature[signature] = label
+                if stop_if(label)
+                    exhausted = false
+                    break
+                end
             end
         end
 
@@ -663,7 +683,12 @@ function _enumerate_aggregate_od_route_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        next_nodes = _aggregate_od_route_candidate_next_nodes(label, pricing_data, duals)
+        next_nodes = _aggregate_od_route_candidate_next_nodes(
+            label,
+            pricing_data,
+            duals;
+            max_visits_per_node=max_visits_per_node,
+        )
         profile && (t_candidates += time_ns() - t0)
 
         for next_node in next_nodes
@@ -679,7 +704,10 @@ function _enumerate_aggregate_od_route_pricing_labels(
                 child_bs = _make_aggregate_od_route_label_bitsets(child, pair_index, n_pairs, node_index, n_nodes)
                 bucket = get!(() -> _create_aggregate_od_route_dominance_bucket(), dominance_buckets, _aggregate_od_route_dominance_signature(child))
                 t0 = profile ? time_ns() : UInt64(0)
-                inserted, removed = _add_aggregate_od_route_label_to_bucket!(bucket, live_labels, label_bitsets, child, child_id, child_bs)
+                inserted, removed = _add_aggregate_od_route_label_to_bucket!(
+                    bucket, live_labels, label_bitsets, child, child_id, child_bs,
+                    pricing_data.bounded_max_stops,
+                )
                 profile && (t_dominance += time_ns() - t0)
                 labels_removed_by_dominance += removed
                 if inserted
@@ -720,7 +748,7 @@ function aggregate_od_route_pricing_by_label_setting(
     max_new_columns::Int=1,
     n_candidates::Int=max_new_columns,
     time_limit::Float64=30.0,
-    max_visits_per_node::Int=2,
+    max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
 )
     max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
@@ -733,6 +761,22 @@ function aggregate_od_route_pricing_by_label_setting(
         best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
     end
 
+    scored_by_signature = Dict{Any, Tuple{Float64, AggregateODRoutePricingLabel}}()
+
+    function accept_pricing_label!(label::AggregateODRoutePricingLabel)
+        isempty(label.served_pairs) && return false
+        label.reduced_cost < -reduced_cost_tol || return false
+        signature = _aggregate_od_route_column_signature(label.served_pairs)
+        label.tau < get(best_pool_tau, signature, Inf) - 1e-9 || return false
+        current = get(scored_by_signature, signature, nothing)
+        if isnothing(current) ||
+                label.reduced_cost < current[1] - 1e-9 ||
+                (abs(label.reduced_cost - current[1]) <= 1e-9 && label.tau < current[2].tau - 1e-9)
+            scored_by_signature[signature] = (label.reduced_cost, label)
+        end
+        return length(scored_by_signature) >= n_candidates
+    end
+
     labels, exhausted, stats = _enumerate_aggregate_od_route_pricing_labels(
         pricing_data,
         duals;
@@ -740,9 +784,9 @@ function aggregate_od_route_pricing_by_label_setting(
         reduced_cost_tol=reduced_cost_tol,
         max_visits_per_node=max_visits_per_node,
         profile=profile,
+        stop_if=accept_pricing_label!,
     )
 
-    scored_by_signature = Dict{Any, Tuple{Float64, AggregateODRoutePricingLabel}}()
     for label in labels
         isempty(label.served_pairs) && continue
         label.reduced_cost < -reduced_cost_tol || continue
@@ -1064,6 +1108,7 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
         initial_columns             = columns,
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
+        allow_walk_only             = model.allow_walk_only,
     )
 end
 
@@ -1086,6 +1131,7 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         initial_columns             = columns,
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
+        allow_walk_only             = model.allow_walk_only,
     )
 end
 
@@ -1207,6 +1253,7 @@ function run_aggregate_od_route_column_generation(
                 pricing_data.detour_factor,
                 pricing_data.max_stops,
                 max_visits_per_node,
+                pricing_data.bounded_max_stops,
             )
             new_columns_s, exhausted_s, stats_s = aggregate_od_route_pricing_by_label_setting(
                 pricing_data,
@@ -1339,6 +1386,8 @@ function run_aggregate_od_route_column_generation(
     final_solution = final_term == MOI.OPTIMAL ?
         (_value_recursive(final_m[:x]), _value_recursive(final_m[:y])) :
         nothing
+    # No-op unless an endpoint nearest-open style built zp/zd indicators.
+    final_term == MOI.OPTIMAL && assert_endpoint_chain_near_binary(final_m)
     final_result = OptResult(
         final_term,
         final_obj,

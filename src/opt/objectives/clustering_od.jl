@@ -50,13 +50,12 @@ function set_clustering_od_objective!(
     @objective(m, Min,
         sum(
             (
-                get_walking_cost(data, o, j) +
-                get_walking_cost(data, k, d) +
-                in_vehicle_time_weight * get_routing_cost(data, j, k)
+                od_pair_walking_cost(data, o, d, pair) +
+                (is_walk_only_pair(pair) ? 0.0 : in_vehicle_time_weight * get_routing_cost(data, pair[1], pair[2]))
             ) * x[s][od_idx][idx]
             for s in 1:S
             for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            for (idx, (j, k)) in enumerate(get_valid_jk_pairs(mapping, o, d))
+            for (idx, pair) in enumerate(get_valid_jk_pairs(mapping, o, d))
         )
     )
 

@@ -152,7 +152,9 @@ function add_assignment_to_active_constraints!(
             demand = get(mapping.Q_s[s], (o, d), 0)
             demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            for (idx, (j, k)) in enumerate(valid_pairs)
+            for (idx, pair) in enumerate(valid_pairs)
+                is_walk_only_pair(pair) && continue
+                j, k = pair
                 @constraint(m, x[s][od_idx][idx] <= demand * z[j, s])
                 @constraint(m, x[s][od_idx][idx] <= demand * z[k, s])
             end
@@ -256,7 +258,9 @@ function add_assignment_to_active_constraints!(
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 x_od = get(x[s][t_id], od_idx, VariableRef[])
                 isempty(x_od) && continue
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                for (pair_idx, pair) in enumerate(valid_pairs)
+                    is_walk_only_pair(pair) && continue
+                    j, k = pair
                     @constraint(m, x_od[pair_idx] <= demand * z[j, s])
                     @constraint(m, x_od[pair_idx] <= demand * z[k, s])
                 end

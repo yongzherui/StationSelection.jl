@@ -58,18 +58,27 @@ function _build_aggregate_od_route_core!(
         add_assignment_constraints!(m, data, mapping)
     constraint_counts["assignment_to_selected"] =
         add_assignment_to_selected_constraints!(m, data, mapping)
-    if base_model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
-        if base_model.assignment_policy.feasibility_cut_style == :big_m_nearest
-            validate_big_m_nearest_aggregate_od_route!(data, mapping)
+    if model isa RouteCoveringProblem
+        constraint_counts["fixed_open_stations"] =
+            add_fixed_open_station_constraints!(m, data, model)
+    elseif base_model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
+        if _is_endpoint_nearest_style(base_model.assignment_policy.feasibility_cut_style)
+            # Endpoint styles build independent per-endpoint nearest-open selectors
+            # (no ranking over station pairs), so they can support direct walking
+            # unlike :pair_chain, which ranks station *pairs* jointly and has no
+            # walk-only wiring.
+            validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base_model.allow_walk_only)
             constraint_counts["nearest_open_assignment"] =
-                add_nearest_open_endpoint_chain_constraints!(m, data, mapping)
+                add_nearest_open_endpoint_constraints!(
+                    m, data, mapping;
+                    allow_walk_only=base_model.allow_walk_only,
+                    selector_style=base_model.assignment_policy.feasibility_cut_style,
+                )
         else
+            assert_no_walk_only_pairs(mapping, "NearestOpenAggregateODAssignmentPolicy(:pair_chain)")
             constraint_counts["nearest_open_assignment"] =
                 add_nearest_open_assignment_constraints!(m, data, mapping)
         end
-    elseif model isa RouteCoveringProblem
-        constraint_counts["fixed_open_stations"] =
-            add_fixed_open_station_constraints!(m, data, model)
     end
     constraint_counts["aggregate_od_route_coverage"] =
         add_aggregate_od_route_coverage_constraints!(m, data, mapping; equality=coverage_equality)

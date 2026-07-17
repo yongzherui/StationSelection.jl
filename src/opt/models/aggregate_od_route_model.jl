@@ -42,10 +42,10 @@ struct NearestOpenAggregateODAssignmentPolicy <: AbstractAggregateODAssignmentPo
     feasibility_cut_style::Symbol
 
     function NearestOpenAggregateODAssignmentPolicy(
-        feasibility_cut_style::Symbol=:gamma_chain,
+        feasibility_cut_style::Symbol=:big_m_nearest,
     )
-        feasibility_cut_style in (:big_m_nearest, :gamma_chain) ||
-            throw(ArgumentError("feasibility_cut_style must be :big_m_nearest or :gamma_chain"))
+        feasibility_cut_style in (:big_m_nearest, :endpoint_chain, :pair_chain) ||
+            throw(ArgumentError("feasibility_cut_style must be :big_m_nearest, :endpoint_chain, or :pair_chain"))
         new(feasibility_cut_style)
     end
 end
@@ -64,6 +64,14 @@ Column-generation-ready restricted master problem.
   singleton columns `{(j,k)}` are created for every feasible station OD pair.
 - `relax_integrality`: if true, build the LP relaxation used by column generation
 - `assignment_policy`: controls aggregate OD assignment semantics.
+- `allow_walk_only`: if true, an OD pair may be assigned a station-free "walk
+  directly" option (no vehicle route) whenever the direct walk is within
+  `2 * max_walking_distance`. Off by default for backward compatibility.
+  Supported with the default free-assignment policy and with the independent
+  endpoint nearest-open policies (`:big_m_nearest` and `:endpoint_chain`),
+  including the NearestOpen Benders paths. `NearestOpenAggregateODAssignmentPolicy(:pair_chain)`
+  still rejects walk-only assignments because it ranks station pairs jointly
+  and has no station-free endpoint-collision representation.
 """
 struct AggregateODRouteModel <: AbstractODModel
     l::Int
@@ -81,6 +89,7 @@ struct AggregateODRouteModel <: AbstractODModel
     initial_columns::Union{Nothing, Vector{AggregateODRouteColumn}}
     relax_integrality::Bool
     assignment_policy::AbstractAggregateODAssignmentPolicy
+    allow_walk_only::Bool
 
     function AggregateODRouteModel(
             l::Int;
@@ -90,7 +99,7 @@ struct AggregateODRouteModel <: AbstractODModel
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
-            max_visits_per_node::Int=2,
+            max_visits_per_node::Int=typemax(Int),
             max_new_columns::Int=20,
             n_candidates::Int=max_new_columns,
             pricing_time_limit_sec::Number=30.0,
@@ -98,6 +107,7 @@ struct AggregateODRouteModel <: AbstractODModel
             initial_columns::Union{Nothing, Vector{AggregateODRouteColumn}}=nothing,
             relax_integrality::Bool=false,
             assignment_policy::AbstractAggregateODAssignmentPolicy=FreeAggregateODAssignmentPolicy(),
+            allow_walk_only::Bool=false,
         )
         l > 0 || throw(ArgumentError("l must be positive"))
         route_regularization_weight >= 0 ||
@@ -139,6 +149,7 @@ struct AggregateODRouteModel <: AbstractODModel
             initial_columns,
             relax_integrality,
             assignment_policy,
+            allow_walk_only,
         )
     end
 end

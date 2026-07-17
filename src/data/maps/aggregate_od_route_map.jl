@@ -4,6 +4,7 @@ OD mapping and initial restricted column pool for AggregateODRouteModel.
 
 export AggregateODRouteMap
 export create_aggregate_od_route_map
+export assert_no_walk_only_pairs
 
 mutable struct AggregateODRouteMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -22,6 +23,28 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
 end
 
 has_walking_distance_limit(mapping::AggregateODRouteMap) = true
+
+"""
+    assert_no_walk_only_pairs(mapping::AggregateODRouteMap, context::AbstractString)
+
+WALK_ONLY_PAIR assignments (from `allow_walk_only=true`) are wired through the
+direct-solve / column-generation build path (`_build_aggregate_od_route_core!`)
+and the FreeAggregateODAssignmentPolicy Benders (BendersXY) path. The
+NearestOpen assignment policy and its Benders paths (BendersY, and BendersXY
+with NearestOpen) build their own `y[j]`/`y[k]`-indexed ranking/domination
+constraints outside those paths and do not yet know how to handle a
+station-free pair. Fail loudly and early instead of erroring deep inside a
+solver with a cryptic index-0 BoundsError.
+"""
+function assert_no_walk_only_pairs(mapping::AggregateODRouteMap, context::AbstractString)::Nothing
+    any(any(is_walk_only_pair, pairs) for pairs in values(mapping.valid_jk_pairs)) &&
+        throw(ArgumentError(
+            "$context does not yet support walk-only (station-free) assignments; " *
+            "set allow_walk_only=false, or use the default FreeAggregateODAssignmentPolicy " *
+            "direct-solve / column-generation path instead."
+        ))
+    return nothing
+end
 
 get_valid_jk_pairs(mapping::AggregateODRouteMap, o::Int, d::Int) =
     get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
@@ -72,6 +95,7 @@ function _singleton_aggregate_od_route_columns(
     columns = AggregateODRouteColumn[]
     next_id = 1
     for (j, k) in sort!(collect(all_pairs))
+        is_walk_only_pair((j, k)) && continue
         tau = get_routing_cost(data, j, k)
         if !isfinite(tau)
             push!(missing_pairs, (j, k))
@@ -113,7 +137,8 @@ function create_aggregate_od_route_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        base_model.max_walking_distance,
+        base_model.max_walking_distance;
+        allow_walk_only=base_model.allow_walk_only,
     )
     if model isa RouteCoveringProblem
         _apply_route_covering_assignments!(valid_jk_pairs, Q_s, model)
@@ -157,7 +182,8 @@ function _apply_route_covering_assignments!(
             haskey(model.fixed_assignments, key) ||
                 throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
             assigned = model.fixed_assignments[key]
-            assigned[1] in open_set && assigned[2] in open_set ||
+            is_walk_only_pair(assigned) ||
+                assigned[1] in open_set && assigned[2] in open_set ||
                 throw(ArgumentError("fixed assignment $(assigned) for $(key) uses a station that is not open"))
             feasible = get(valid_jk_pairs, (o, d), Tuple{Int, Int}[])
             assigned in feasible ||

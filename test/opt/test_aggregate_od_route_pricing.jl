@@ -17,6 +17,7 @@
             detour_factor=1.5,
             max_stops=5,
             max_visits_per_node=2,
+            bounded_max_stops=true,
         )
         return AggregateODRoutePricingData(
             scenario,
@@ -29,6 +30,7 @@
             detour_factor,
             max_stops,
             max_visits_per_node,
+            bounded_max_stops,
         )
     end
 
@@ -101,17 +103,32 @@
             2.0,
             1,
         )
+        longer_but_otherwise_better = AggregateODRoutePricingLabel(
+            2,
+            [1, 2],
+            0.5,
+            Dict(2 => 0.5),
+            Set{Tuple{Int, Int}}(),
+            0.0,
+            0.5,
+            2,
+        )
 
-        @test StationSelection._dominates_aggregate_od_route_label(good, worse)
-        @test !StationSelection._dominates_aggregate_od_route_label(worse, good)
-        @test !StationSelection._dominates_aggregate_od_route_label(good, different_node)
+        @test StationSelection._dominates_aggregate_od_route_label(good, worse, true)
+        @test !StationSelection._dominates_aggregate_od_route_label(worse, good, true)
+        @test !StationSelection._dominates_aggregate_od_route_label(good, different_node, true)
+        @test !StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, true)
+        @test StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, false)
 
         pair_index = Dict((1, 3) => 1, (2, 4) => 2)
         node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
         good_bs = StationSelection._make_aggregate_od_route_label_bitsets(good, pair_index, 2, node_index, 4)
         worse_bs = StationSelection._make_aggregate_od_route_label_bitsets(worse, pair_index, 2, node_index, 4)
-        @test StationSelection._dominates_aggregate_od_route_label(good, worse, good_bs, worse_bs)
-        @test !StationSelection._dominates_aggregate_od_route_label(worse, good, worse_bs, good_bs)
+        longer_bs = StationSelection._make_aggregate_od_route_label_bitsets(longer_but_otherwise_better, pair_index, 2, node_index, 4)
+        @test StationSelection._dominates_aggregate_od_route_label(good, worse, good_bs, worse_bs, true)
+        @test !StationSelection._dominates_aggregate_od_route_label(worse, good, worse_bs, good_bs, true)
+        @test !StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, true)
+        @test StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, false)
     end
 
     @testset "aggregate OD route station-age bitsets" begin
@@ -132,6 +149,59 @@
         @test bs.station_age[node_index[1]] == 1.0
         @test bs.station_age[node_index[2]] == 0.0
         @test isinf(bs.station_age[node_index[3]])
+    end
+
+    @testset "label-setting candidate generation enforces max visits per node" begin
+        pricing_data = line_pricing_data(
+            active_pairs=[(1, 2)],
+            detour_factor=3.0,
+            max_stops=4,
+            max_visits_per_node=1,
+        )
+        duals = AggregateODRoutePricingDuals(Dict((1, 2) => 10.0))
+        label = AggregateODRoutePricingLabel(
+            1,
+            [1, 2, 1],
+            2.0,
+            Dict(1 => 0.0),
+            Set{Tuple{Int, Int}}(),
+            2.0,
+            -1.0,
+            3,
+        )
+
+        candidates = StationSelection._aggregate_od_route_candidate_next_nodes(label, pricing_data, duals)
+        @test isempty(candidates)
+        relaxed_candidates = StationSelection._aggregate_od_route_candidate_next_nodes(
+            label,
+            pricing_data,
+            duals;
+            max_visits_per_node=2,
+        )
+        @test relaxed_candidates == [2]
+    end
+
+    @testset "candidate generation can open fresh origins before pickup cutoff" begin
+        pricing_data = line_pricing_data(
+            active_pairs=[(3, 4)],
+            max_wait_time=10.0,
+            detour_factor=3.0,
+            max_stops=4,
+        )
+        duals = AggregateODRoutePricingDuals(Dict((3, 4) => 10.0))
+        label = AggregateODRoutePricingLabel(
+            2,
+            [1, 2],
+            1.0,
+            Dict{Int, Float64}(),
+            Set{Tuple{Int, Int}}(),
+            1.0,
+            1.0,
+            2,
+        )
+
+        candidates = StationSelection._aggregate_od_route_candidate_next_nodes(label, pricing_data, duals)
+        @test 3 in candidates
     end
 
     @testset "pricing returns improving columns for one scenario" begin
@@ -158,6 +228,30 @@
         @test !isempty(columns)
         @test any(column -> Set(column.od_pairs) == Set([(1, 3), (3, 4), (1, 4)]), columns)
         @test all(column -> column.metadata["scenario"] == 1, columns)
+    end
+
+    @testset "pricing stops early after enough candidates" begin
+        pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4), (1, 4)])
+        existing = AggregateODRouteColumn[
+            AggregateODRouteColumn(1, [(1, 3)], 2.0),
+            AggregateODRouteColumn(2, [(3, 4)], 1.0),
+            AggregateODRouteColumn(3, [(1, 4)], 3.0),
+        ]
+        duals = AggregateODRoutePricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
+
+        columns, exhausted, stats = aggregate_od_route_pricing_by_label_setting(
+            pricing_data,
+            existing,
+            duals;
+            next_column_id=10,
+            max_new_columns=1,
+            n_candidates=1,
+            time_limit=5.0,
+        )
+
+        @test !exhausted
+        @test length(columns) == 1
+        @test stats.labels_generated > 0
     end
 
     @testset "scenario pricing uses only scenario-specific duals" begin
@@ -477,7 +571,7 @@
         @test result.metadata["benders_iterations"] >= 1
         @test result.metadata["optimality_cuts_added"] >= 1
         @test result.metadata["inner_cg_iterations"] >= 1
-        @test result.metadata["feasibility_cut_style"] == "gamma_chain"
+        @test result.metadata["feasibility_cut_style"] == "big_m_nearest"
         y = value.(result.model[:y])
         x = result.model[:x]
         mapping = result.mapping
@@ -499,6 +593,7 @@
         @test BendersSolver().decomposition isa BendersY
         @test BendersSolver().cut_mode isa MultiCut
         @test BendersSolver().inner_solver isa ColumnGenerationSolver
+        @test BendersSolver(inner_solver=DirectSolver(silent=true)).inner_solver isa DirectSolver
         xy_result = run_opt(
             data,
             nearest,
@@ -583,6 +678,16 @@
             readdir(benders_log_dir),
         )
 
+        # A walking distance wide enough that pickup and dropoff candidate
+        # sets fully coincide ({1,2,3} on both sides) must still build: the
+        # off-diagonal (j != k) pair list is necessarily a strict subset of
+        # the full n x n Cartesian product (the diagonal j==k is never a
+        # real station pair -- see WALK_ONLY_PAIR), so `_check_big_m_nearest_pair_consistency!`
+        # compares against the *off-diagonal* Cartesian product, not the
+        # full one. (Previously this threw ArgumentError because the
+        # validator required literal full Cartesian coverage including the
+        # diagonal, which can never hold once j != k is enforced -- that was
+        # a validator bug, not a real modeling restriction.)
         wide_big_m = AggregateODRouteModel(
             2;
             assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
@@ -592,11 +697,12 @@
             max_stops=3,
             max_wait_time=100.0,
         )
-        @test_throws ArgumentError StationSelection.build_model(
+        wide_big_m_build = StationSelection.build_model(
             wide_big_m,
             data;
             optimizer_env=Gurobi.Env(),
         )
+        @test wide_big_m_build isa StationSelection.BuildResult
 
         tight_big_m = AggregateODRouteModel(
             2;

@@ -51,6 +51,7 @@ const MOI = JuMP.MOI
         include("utils/test_case_generators/test_test4_mirrored_zone.jl")
         include("utils/test_case_generators/test_test5_triangle.jl")
         include("utils/test_case_generators/test_test6_bidirectional.jl")
+        include("utils/test_export_variables.jl")
     end
 
     @testset "Data Structures" begin
@@ -62,6 +63,7 @@ const MOI = JuMP.MOI
         include("opt/test_aggregate_od_route_pricing.jl")
         include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
         include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
+        include("opt/test_aggregate_od_route_direct_walking.jl")
     end
 
 end
