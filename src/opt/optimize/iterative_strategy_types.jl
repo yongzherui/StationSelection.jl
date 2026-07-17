@@ -171,6 +171,31 @@ struct MultiCut <: AbstractBendersCutMode
     end
 end
 
+"""
+    BendersSolver
+
+# `cut_derivation`
+
+Controls how BendersY's optimality cuts are derived (`BendersXY` always uses the standard
+subgradient cut; this field is ignored there). One of:
+
+- `:standard` (default): the pre-existing subgradient cut from the fixed-`y` nearest-open
+  subproblem LP's duals off the `y == y_hat` fixing constraints. Byte-identical to behavior
+  before this field existed.
+- `:zero_completion`: a restricted dual-completion cut (see below) with a zero completion
+  objective, i.e. any dual-feasible completion tight at `y_hat` — a baseline for comparison,
+  not a stronger cut.
+- `:restricted_mw_fixed_pi`: a restricted, fixed-pricing-dual Magnanti-Wong-style cut. Fixes the
+  route-covering dual block at the vector certified by exact column-generation pricing on the
+  fixed-assignment route-covering problem, then completes the remaining (nearest-open selector
+  and assignment-linking) duals by maximizing the completed cut at a relative-interior core point
+  of the y-master's structural region. This is *not* a full Magnanti-Wong procedure over the
+  entire subproblem dual optimal face (only the non-`pi` duals are optimized) and is not claimed
+  to be globally Pareto-optimal. Only supported for
+  `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` with `allow_walk_only=false` and
+  `inner_solver isa ColumnGenerationSolver`; falls back to `:standard` for any iteration where the
+  completion LP is infeasible. See `notes/2026-07-17_restricted_mw_cut_benders_y.md`.
+"""
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     decomposition::AbstractBendersDecomposition
@@ -182,6 +207,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
     check_lp_ip_gap::Bool
     reprice_subproblem::Bool
     max_reprice_rounds::Int
+    cut_derivation::Symbol
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
@@ -199,9 +225,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
         check_lp_ip_gap::Bool=false,
         reprice_subproblem::Bool=false,
         max_reprice_rounds::Int=20,
+        cut_derivation::Symbol=:standard,
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        cut_derivation in (:standard, :zero_completion, :restricted_mw_fixed_pi) ||
+            throw(ArgumentError("cut_derivation must be :standard, :zero_completion, or :restricted_mw_fixed_pi"))
         resolved_tol = isnothing(optimality_tol) ?
             (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
             Float64(optimality_tol)
@@ -228,6 +257,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
             check_lp_ip_gap,
             reprice_subproblem,
             max_reprice_rounds,
+            cut_derivation,
         )
     end
 end

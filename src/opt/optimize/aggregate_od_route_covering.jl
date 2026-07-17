@@ -1197,6 +1197,20 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
+    if solver.cut_derivation != :standard
+        (model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+            model.assignment_policy.feasibility_cut_style == :big_m_nearest) ||
+            throw(ArgumentError(
+                "BendersSolver(cut_derivation=$(solver.cut_derivation)) requires " *
+                "NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"
+            ))
+        model.allow_walk_only && throw(ArgumentError(
+            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
+        ))
+    end
+    y_core_point = solver.cut_derivation == :standard ? nothing :
+        _y_master_core_point(data, model, requests, optimizer_env, cfg.silent)
+
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
     @variable(master, y[1:data.n_stations], Bin)
@@ -1295,10 +1309,17 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 reprice_objective_delta=0.0,
                 reprice_columns_found=0,
                 reprice_rounds=0,
+                cut_derivation=string(solver.cut_derivation),
+                mw_fallback_count=0,
+                mw_completion_seconds=0.0,
+                mw_phi_core=nothing,
             ))
             _flush_benders_iteration_log!(
                 solver, benders_rows;
-                extra_headers=[:subproblem_ip_seconds, :lp_ip_gap, :reprice_objective_delta, :reprice_columns_found, :reprice_rounds],
+                extra_headers=[
+                    :subproblem_ip_seconds, :lp_ip_gap, :reprice_objective_delta, :reprice_columns_found, :reprice_rounds,
+                    :cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core,
+                ],
             )
             continue
         end
@@ -1332,6 +1353,9 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         reprice_columns_found = 0
         reprice_rounds_total = 0
         max_reprice_objective_delta = 0.0
+        mw_fallback_count = 0
+        mw_completion_seconds = 0.0
+        mw_last_phi_core = nothing
         for cut_id in cut_ids
             group_requests = cut_groups[cut_id]
             lp_start = time()
@@ -1374,6 +1398,33 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 )
                 pool_for_ip_check = shared_pool
             end
+
+            # For the restricted-completion cut modes, `v_hat` above is only as good as
+            # `shared_pool`'s completeness at this `y_hat` when `reprice_subproblem=false` -- an
+            # incomplete pool can only ever inflate `v_hat` (fewer columns can't reduce covering
+            # cost), so an inflated `v_hat` can make the `theta_hat < v_hat - tol` gate below
+            # believe convergence has already happened, before the cut-derivation code ever runs.
+            # `_certified_qbar`'s Section-C CG solve is independent of `shared_pool`/
+            # `reprice_subproblem` (always certified exactly from scratch), so tightening `v_hat`
+            # with it here closes that gap for these modes without requiring
+            # `reprice_subproblem=true`. See notes/2026-07-17_restricted_mw_cut_benders_y.md.
+            certified_for_cut = nothing
+            qbar_for_cut = nothing
+            certification_already_failed = false
+            if solver.cut_derivation != :standard
+                assignments_for_group = Dict(request => assignments[request] for request in group_requests)
+                try
+                    certified_for_cut, qbar_for_cut = _certified_qbar(
+                        data, model, solver, group_requests, assignments_for_group, _open_station_values(y_hat),
+                    )
+                    v_hat = min(v_hat, qbar_for_cut)
+                catch err
+                    certification_already_failed = true
+                    @warn "BendersY restricted cut_derivation: certified Q_bar computation failed; " *
+                        "falling back to the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                end
+            end
+
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
             if solver.check_lp_ip_gap
@@ -1398,10 +1449,18 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 end
             end
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
-                alpha = v_hat - sum(rho[j] * y_hat[j] for j in 1:data.n_stations)
-                @constraint(master, theta[cut_id] >= alpha + sum(rho[j] * y[j] for j in 1:data.n_stations))
+                cut_diag = _add_aggregate_od_route_benders_y_optimality_cut!(
+                    master, y, theta, cut_id, data, model, solver,
+                    group_requests, feasible_pairs, y_hat, assignments, _open_station_values(y_hat),
+                    y_core_point, optimizer_env, v_hat, rho;
+                    certified=certified_for_cut, Q_bar=qbar_for_cut,
+                    certification_already_failed=certification_already_failed,
+                )
                 optimality_cuts += 1
                 cuts_added_this_iteration += 1
+                cut_diag.fallback && (mw_fallback_count += 1)
+                mw_completion_seconds += cut_diag.completion_runtime_sec
+                isnan(cut_diag.phi_core) || (mw_last_phi_core = cut_diag.phi_core)
             end
         end
         total_reprice_columns_found += reprice_columns_found
@@ -1428,10 +1487,17 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             reprice_objective_delta=max_reprice_objective_delta,
             reprice_columns_found=reprice_columns_found,
             reprice_rounds=reprice_rounds_total,
+            cut_derivation=string(solver.cut_derivation),
+            mw_fallback_count=mw_fallback_count,
+            mw_completion_seconds=mw_completion_seconds,
+            mw_phi_core=mw_last_phi_core,
         ))
         _flush_benders_iteration_log!(
             solver, benders_rows;
-            extra_headers=[:subproblem_ip_seconds, :lp_ip_gap, :reprice_objective_delta, :reprice_columns_found, :reprice_rounds],
+            extra_headers=[
+                :subproblem_ip_seconds, :lp_ip_gap, :reprice_objective_delta, :reprice_columns_found, :reprice_rounds,
+                :cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core,
+            ],
         )
 
         if cuts_added_this_iteration == 0
@@ -1462,6 +1528,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(shared_pool),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
+                "cut_derivation" => string(solver.cut_derivation),
             ))
         end
     end
