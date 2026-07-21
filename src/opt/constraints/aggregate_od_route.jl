@@ -169,6 +169,26 @@ indicator is linked to open stations by `z[i] <= y[station_i]`; for every
 candidate `j'`, the selected walking distance must be no larger than
 `cost[j']` whenever `y[j'] == 1`, relaxed by `M[j'] * (1 - y[j'])` when
 `j'` is closed.
+
+Two candidates tied at exactly the same true cost make `selected_cost`'s own
+definition flat across them, so a continuous `z` (`binary=false`, used when
+`y` is integer-fixed/known and this LP's simplex duals are needed -- the
+BendersY subproblem, and now the BendersXY/BendersYZ/BendersYZH masters with
+`y` as the only genuinely binary variable) has a real 1-dimensional degenerate
+face of optimal solutions where `z` splits fractionally between the tied,
+open candidates: nothing here discriminates by station id the way
+`_endpoint_chain_variable!`'s cascading domination rows already do. Fixed by
+building `selected_cost` (and the big-M threshold) from a strictly increasing
+`tb_costs` array -- `sorted_costs` plus a per-rank offset large enough to
+survive Gurobi's default feasibility tolerances (`FeasibilityTol`/`IntFeasTol`
+are both `~1e-6`; an offset below that is mathematically a strict tie-break
+but numerically invisible to the solver, which will then accept the very
+face this is meant to eliminate) yet far too small (`>= 1e-4` absolute, or
+`1e-6` relative to cost magnitude if that is larger) to reorder any
+genuinely distinct costs. Forces the tie to resolve to the lower-ranked
+(cheaper, then lower station id, per the existing `sortperm` tie-break)
+candidate at the unique vertex `z=1` there, `z=0` elsewhere among the tied
+set.
 """
 function _endpoint_big_m_variable!(
     m::Model,
@@ -193,12 +213,14 @@ function _endpoint_big_m_variable!(
             @variable(m, [1:length(sorted_endpoints)], binary = true) :
             @variable(m, [1:length(sorted_endpoints)], lower_bound = 0.0, upper_bound = 1.0)
         @constraint(m, sum(z) == 1.0)
-        selected_cost = @expression(m, sum(sorted_costs[idx] * z[idx] for idx in eachindex(sorted_endpoints)))
-        max_cost = maximum(sorted_costs)
+        tie_break_scale = max(1e-4, maximum(abs, sorted_costs; init=0.0) * 1e-6)
+        tb_costs = [sorted_costs[idx] + tie_break_scale * (idx - 1) for idx in eachindex(sorted_costs)]
+        selected_cost = @expression(m, sum(tb_costs[idx] * z[idx] for idx in eachindex(sorted_endpoints)))
+        max_cost = maximum(tb_costs)
         for (idx, station) in enumerate(sorted_endpoints)
             @constraint(m, z[idx] <= y[station])
-            big_m = max_cost - sorted_costs[idx]
-            @constraint(m, selected_cost <= sorted_costs[idx] + big_m * (1.0 - y[station]))
+            big_m = max_cost - tb_costs[idx]
+            @constraint(m, selected_cost <= tb_costs[idx] + big_m * (1.0 - y[station]))
         end
         @constraint(m, sum(y[station] for station in sorted_endpoints) >= 1.0)
         z
@@ -442,43 +464,29 @@ function _assert_walk_collision_feasible!(
 end
 
 """
-    _add_nearest_open_endpoint_linked_x!(m, data, y, o, d, pairs, x_by_pair, max_walking_distance; binary, allow_walk_only, selector_style)
+    _nearest_open_endpoint_selectors!(m, data, y, o, d, pairs, max_walking_distance; binary, allow_walk_only, selector_style)
 
-Station-generic nearest-open request coupling for one physical OD bucket
-(call once per distinct `(o,d)` with positive demand — shared across every
-request in that bucket and across scenarios, since `y` and the containing
-model are shared). Builds/reuses the independent per-side `zp`/`zd` endpoint
-selectors and links every real `(j,k)` pair
-(`j != k`) with the full product linearization
-`x <= zp, x <= zd, x >= zp + zd - 1`. The lower bound is what makes the
-outcome deterministic: given `sum(values(x_by_pair)) == 1` is enforced
-elsewhere (`add_assignment_constraints!`) and the chains resolve `zp`/`zd`
-to a unique winner per side, exactly one term in that sum is forced to 1 by
-its own lower bound, and every other term (including the walk slot, if
-present) is forced to 0 by nonnegativity — no separate upper bound on the
-walk variable is needed.
-
-If `pairs` contains `WALK_ONLY_PAIR` (`allow_walk_only=true` and direct
-walking is within budget for this OD), also emits the same-station coupling
-lower bound `x_walk >= zp[rank(j)] + zd[rank(j)] - 1` for every station `j`
-common to both endpoints' candidate sets, forcing direct walking exactly
-when both sides resolve to the same station — this is `w_p` from the spec,
-reusing the existing `WALK_ONLY_PAIR` sentinel slot instead of introducing a
-new variable type.
+Candidate lookup, validation, and `zp`/`zd` chain construction for one
+physical OD bucket `(o,d)` -- everything `_add_nearest_open_endpoint_linked_x!`
+needs before it can link an assignment variable to the two sides. Extracted
+so callers that need `zp`/`zd` (and their rank maps) without any `x`/`h`
+linking -- e.g. the BendersYZ/BendersYZH master `z`-builder, which only needs
+this function's cache side-effect on `m[:nearest_endpoint_chain_cache]` -- can
+reuse the exact same candidate/validation/chain logic instead of duplicating
+it.
 """
-function _add_nearest_open_endpoint_linked_x!(
+function _nearest_open_endpoint_selectors!(
     m::Model,
     data::StationSelectionData,
     y,
     o::Int,
     d::Int,
     pairs::Vector{Tuple{Int, Int}},
-    x_by_pair::Dict{Tuple{Int, Int}, VariableRef},
     max_walking_distance::Float64;
     binary::Bool,
     allow_walk_only::Bool,
     selector_style::Symbol,
-)::Nothing
+)
     real_pairs = filter(!is_walk_only_pair, pairs)
     pickups = _nearest_open_endpoint_candidates(data, o, max_walking_distance, :pickup)
     dropoffs = _nearest_open_endpoint_candidates(data, d, max_walking_distance, :dropoff)
@@ -498,19 +506,81 @@ function _add_nearest_open_endpoint_linked_x!(
     pickup_rank = Dict(station => idx for (idx, station) in enumerate(sorted_pickups))
     dropoff_rank = Dict(station => idx for (idx, station) in enumerate(sorted_dropoffs))
 
+    return zp, zd, real_pairs, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs
+end
+
+"""
+    _add_endpoint_x_linking!(m, real_pairs, pairs, assignment_by_pair, zp, zd, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs)
+
+Links an assignment variable (`x` for the per-scenario master/subproblem
+builders, `h` for BendersYZH's scenario-compressed master) to the `zp`/`zd`
+endpoint selectors returned by [`_nearest_open_endpoint_selectors!`](@ref),
+via the full product linearization `assignment <= zp, assignment <= zd,
+assignment >= zp + zd - 1` for every real `(j,k)` pair, plus the walk-only
+same-station coupling lower bound when `WALK_ONLY_PAIR` is present in
+`pairs`. Body identical to the linking half of the pre-refactor
+`_add_nearest_open_endpoint_linked_x!`; see that function's docstring for why
+the lower bound alone is enough to make the outcome deterministic.
+"""
+function _add_endpoint_x_linking!(
+    m::Model,
+    real_pairs::Vector{Tuple{Int, Int}},
+    pairs::Vector{Tuple{Int, Int}},
+    assignment_by_pair::Dict{Tuple{Int, Int}, VariableRef},
+    zp,
+    zd,
+    pickup_rank::Dict{Int, Int},
+    dropoff_rank::Dict{Int, Int},
+    sorted_pickups::Vector{Int},
+    sorted_dropoffs::Vector{Int},
+)::Nothing
     for (j, k) in real_pairs
-        x = x_by_pair[(j, k)]
-        @constraint(m, x <= zp[pickup_rank[j]])
-        @constraint(m, x <= zd[dropoff_rank[k]])
-        @constraint(m, x >= zp[pickup_rank[j]] + zd[dropoff_rank[k]] - 1.0)
+        assignment = assignment_by_pair[(j, k)]
+        @constraint(m, assignment <= zp[pickup_rank[j]])
+        @constraint(m, assignment <= zd[dropoff_rank[k]])
+        @constraint(m, assignment >= zp[pickup_rank[j]] + zd[dropoff_rank[k]] - 1.0)
     end
 
     if any(is_walk_only_pair, pairs)
-        x_walk = x_by_pair[WALK_ONLY_PAIR]
+        assignment_walk = assignment_by_pair[WALK_ONLY_PAIR]
         for j in intersect(Set(sorted_pickups), Set(sorted_dropoffs))
-            @constraint(m, x_walk >= zp[pickup_rank[j]] + zd[dropoff_rank[j]] - 1.0)
+            @constraint(m, assignment_walk >= zp[pickup_rank[j]] + zd[dropoff_rank[j]] - 1.0)
         end
     end
+    return nothing
+end
+
+"""
+    _add_nearest_open_endpoint_linked_x!(m, data, y, o, d, pairs, x_by_pair, max_walking_distance; binary, allow_walk_only, selector_style)
+
+Station-generic nearest-open request coupling for one physical OD bucket
+(call once per distinct `(o,d)` with positive demand — shared across every
+request in that bucket and across scenarios, since `y` and the containing
+model are shared). Builds/reuses the independent per-side `zp`/`zd` endpoint
+selectors ([`_nearest_open_endpoint_selectors!`](@ref)) and links every real
+`(j,k)` pair to them ([`_add_endpoint_x_linking!`](@ref)).
+"""
+function _add_nearest_open_endpoint_linked_x!(
+    m::Model,
+    data::StationSelectionData,
+    y,
+    o::Int,
+    d::Int,
+    pairs::Vector{Tuple{Int, Int}},
+    x_by_pair::Dict{Tuple{Int, Int}, VariableRef},
+    max_walking_distance::Float64;
+    binary::Bool,
+    allow_walk_only::Bool,
+    selector_style::Symbol,
+)::Nothing
+    zp, zd, real_pairs, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs =
+        _nearest_open_endpoint_selectors!(
+            m, data, y, o, d, pairs, max_walking_distance;
+            binary=binary, allow_walk_only=allow_walk_only, selector_style=selector_style,
+        )
+    _add_endpoint_x_linking!(
+        m, real_pairs, pairs, x_by_pair, zp, zd, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs,
+    )
     return nothing
 end
 

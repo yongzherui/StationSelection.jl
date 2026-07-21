@@ -5,6 +5,8 @@ export ColumnGenerationSolver
 export AbstractBendersDecomposition
 export BendersY
 export BendersXY
+export BendersYZ
+export BendersYZH
 export AbstractBendersCutMode
 export SingleCut
 export MultiCut
@@ -146,6 +148,39 @@ Benders decomposition whose master/cuts include first-stage design variables and
 linking or assignment variables.
 """
 struct BendersXY <: AbstractBendersDecomposition end
+
+"""
+    BendersYZ
+
+Benders decomposition (`AggregateODRouteModel`, `NearestOpenAggregateODAssignmentPolicy`
+with `feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` only) whose master
+includes the first-stage design variables `y` and the nearest-open endpoint selectors `z`;
+the assignment variables `x` and route-covering `θ` are left to the subproblem. Unlike
+`BendersXY`, `y_hat` alone does not guarantee a feasible nearest-open resolution here (`z`'s
+two sides can independently resolve to a colliding station), so this decomposition also
+uses `BendersY`-style feasibility cuts.
+
+The subproblem fixes only `z`, leaving `x` free -- the same structural gap `BendersY`'s
+subproblem has (see `_solve_nearest_open_y_subproblem_lp_with_repricing`'s docstring), which
+lets a column pool that's exhaustive for one nearest-open assignment be incomplete for the
+LP's own dual structure. **`BendersSolver(reprice_subproblem=true)` is required for a
+provably optimal result**, exactly as with `BendersY`; without it, BendersYZ can converge to
+a genuinely suboptimal-but-correctly-costed `y` (confirmed empirically on the real-data
+alignment fixture).
+"""
+struct BendersYZ <: AbstractBendersDecomposition end
+
+"""
+    BendersYZH
+
+Benders decomposition (`AggregateODRouteModel`, `NearestOpenAggregateODAssignmentPolicy`
+with `feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` only) whose master
+includes `y`, `z`, and a scenario-compressed assignment variable `h` -- one `h` per
+*physical* OD pair `(o,d)`, shared across every scenario in which that pair appears
+(weighted by its raw scenario-occurrence count), rather than `BendersXY`'s per-`(scenario,
+o, d)` `x`. Only route-covering `θ` is left to the subproblem.
+"""
+struct BendersYZH <: AbstractBendersDecomposition end
 
 abstract type AbstractBendersCutMode end
 

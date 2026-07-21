@@ -116,7 +116,7 @@
     # is always re-derived for the actual candidate being evaluated).
     function run_cross_solver_alignment_checks(
         data::StationSelectionData, model_for::Function; benders_y_expected_broken::Bool,
-        styles::Tuple=(:pair_chain, :big_m_nearest),
+        styles::Tuple=(:pair_chain, :big_m_nearest, :endpoint_chain),
     )
         for style in styles
             @testset "style=$style" begin
@@ -182,6 +182,53 @@
                 @test benders_xy.termination_status == MOI.OPTIMAL
                 @test isapprox(benders_xy.objective_value, ground_truth.objective_value; atol=1e-6)
                 assert_nearest_open_assignments(data, benders_xy)
+
+                # BendersYZ (master = y,z; subproblem = x,θ) only supports the
+                # endpoint-nearest styles -- :pair_chain has no addressable z
+                # separate from x, so it must throw instead.
+                if StationSelection._is_endpoint_nearest_style(style)
+                    benders_yz = run_opt(
+                        data, model,
+                        BendersSolver(
+                            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                            decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
+                            reprice_subproblem=true,
+                        ),
+                    )
+                    @test benders_yz.termination_status == MOI.OPTIMAL
+                    @test isapprox(benders_yz.objective_value, ground_truth.objective_value; atol=1e-6)
+                    assert_nearest_open_assignments(data, benders_yz)
+
+                    # BendersYZH (master = y,z,h; subproblem = θ only) -- h is fixed
+                    # fully in its subproblem (unlike BendersYZ's z-only fixing), so
+                    # unlike BendersYZ it needs no reprice_subproblem to be exact.
+                    benders_yzh = run_opt(
+                        data, model,
+                        BendersSolver(
+                            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                            decomposition=BendersYZH(), inner_solver=inner_cg, max_iterations=50,
+                        ),
+                    )
+                    @test benders_yzh.termination_status == MOI.OPTIMAL
+                    @test isapprox(benders_yzh.objective_value, ground_truth.objective_value; atol=1e-6)
+                    assert_nearest_open_assignments(data, benders_yzh)
+                else
+                    @test_throws ArgumentError run_opt(
+                        data, model,
+                        BendersSolver(
+                            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                            decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
+                            reprice_subproblem=true,
+                        ),
+                    )
+                    @test_throws ArgumentError run_opt(
+                        data, model,
+                        BendersSolver(
+                            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                            decomposition=BendersYZH(), inner_solver=inner_cg, max_iterations=50,
+                        ),
+                    )
+                end
             end
         end
     end
@@ -250,6 +297,223 @@
         run_cross_solver_alignment_checks(
             data, nearest_open_walk_only_model; benders_y_expected_broken=false, styles=(:big_m_nearest,),
         )
+    end
+
+    # BendersYZ-specific fixture: unlike BendersXY, BendersYZ's master has no
+    # x at all, so a rounded y_hat can be structurally *master*-feasible (every
+    # z-chain resolves to a unique winner per side) yet still yield an
+    # infeasible nearest-open assignment overall, when the two independently-
+    # resolved sides collide at the same station with allow_walk_only=false.
+    # Station 1 is the cheapest candidate on BOTH sides of the one request here
+    # (o=4, d=5); stations 2 and 3 are each the sole alternate on their own
+    # side. Whenever station 1 is open it wins on both sides (collision,
+    # infeasible); the unique feasible/optimal 2-station choice is {2,3} (real
+    # pair (2,3)). None of the other fixtures in this file ever force this
+    # collision under allow_walk_only=false.
+    function nearest_open_collision_fixture()
+        stations = DataFrame(id=collect(1:5), lon=Float64.(1:5), lat=zeros(5))
+        requests = DataFrame(
+            id=[1],
+            start_station_id=[4],
+            end_station_id=[5],
+            request_time=[DateTime(2024, 1, 1, 8)],
+        )
+        walking_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:5, j in 1:5
+            walking_costs[(i, j)] = 100.0
+        end
+        walking_costs[(4, 1)] = 0.0
+        walking_costs[(4, 2)] = 5.0
+        walking_costs[(1, 5)] = 0.0
+        walking_costs[(3, 5)] = 5.0
+        routing_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:5, j in 1:5
+            routing_costs[(i, j)] = abs(i - j) + 1.0
+        end
+        return create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
+    end
+
+    @testset "BendersYZ collision fixture (feasibility-cut branch, allow_walk_only=false)" begin
+        data = nearest_open_collision_fixture()
+        for style in (:big_m_nearest, :endpoint_chain)
+            @testset "style=$style" begin
+                model = AggregateODRouteModel(
+                    2;
+                    assignment_policy=NearestOpenAggregateODAssignmentPolicy(style),
+                    max_walking_distance=5.0,
+                    route_regularization_weight=0.1,
+                    repositioning_time=0.0,
+                    max_stops=3,
+                    max_wait_time=1000.0,
+                    detour_factor=2.0,
+                    allow_walk_only=false,
+                )
+                ground_truth = run_opt(
+                    data, model,
+                    DirectSolver(
+                        optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0,
+                        max_enumerated_routes=2000, max_enumeration_time_sec=20.0,
+                    ),
+                )
+                @test ground_truth.termination_status == MOI.OPTIMAL
+                y_gt = value.(ground_truth.model[:y])
+                @test Set(j for j in eachindex(y_gt) if y_gt[j] > 0.5) == Set([2, 3])
+
+                inner_cg = ColumnGenerationSolver(
+                    config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                    max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
+                    final_ip_time_limit_sec=30.0,
+                )
+                benders_yz = run_opt(
+                    data, model,
+                    BendersSolver(
+                        config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                        decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
+                        reprice_subproblem=true,
+                    ),
+                )
+                @test benders_yz.termination_status == MOI.OPTIMAL
+                @test isapprox(benders_yz.objective_value, ground_truth.objective_value; atol=1e-6)
+                # The collision is unavoidable whenever station 1 is open, so a correct
+                # implementation must hit the feasibility-cut branch at least once before
+                # converging -- a run that never does would indicate the master's own
+                # constraints are (incorrectly) already excluding the collision, silently
+                # papering over the code path this fixture exists to exercise.
+                @test get(benders_yz.metadata, "feasibility_cuts_added", 0) > 0
+            end
+        end
+    end
+
+    # Tie-break regression: two candidates (stations 2, 3) tied at exactly equal
+    # walking cost from the same endpoint. Exercises _endpoint_big_m_variable!'s
+    # tie-break perturbation directly -- without it, a continuous z in a MIP
+    # master (BendersXY/BendersYZ/BendersYZH) can land on a genuinely fractional
+    # point on the degenerate face between the two tied, open candidates.
+    @testset "tie-break: two equal-cost open candidates resolve to a single station" begin
+        stations = DataFrame(id=collect(1:4), lon=Float64.(1:4), lat=zeros(4))
+        requests = DataFrame(
+            id=[1],
+            start_station_id=[1],
+            end_station_id=[4],
+            request_time=[DateTime(2024, 1, 1, 8)],
+        )
+        walking_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:4, j in 1:4
+            walking_costs[(i, j)] = 100.0
+        end
+        walking_costs[(1, 2)] = 2.0
+        walking_costs[(1, 3)] = 2.0
+        walking_costs[(4, 4)] = 0.0
+        routing_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:4, j in 1:4
+            routing_costs[(i, j)] = abs(i - j) + 1.0
+        end
+        data = create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
+
+        model = AggregateODRouteModel(
+            3;
+            assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
+            max_walking_distance=5.0,
+            route_regularization_weight=0.1,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=1000.0,
+            detour_factor=2.0,
+            allow_walk_only=false,
+        )
+        inner_cg = ColumnGenerationSolver(
+            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+            max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
+            final_ip_time_limit_sec=30.0,
+        )
+        benders_yz = run_opt(
+            data, model,
+            BendersSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
+                reprice_subproblem=true,
+            ),
+        )
+        @test benders_yz.termination_status == MOI.OPTIMAL
+    end
+
+    # BendersYZH SingleCut: the h-fixing dual's scenario-aggregation
+    # (delta^t_pjk = sum over scenarios sharing physical pair p) is only
+    # actually exercised when a single cut-group LP contains more than one
+    # coverage row for the same h -- i.e. under SingleCut, since MultiCut
+    # groups by scenario and Omega_s guarantees at most one occurrence of a
+    # physical pair per scenario. Two requests share the same physical OD
+    # pair (1,5) but fall in two different (explicit time-window) scenarios;
+    # a third, unrelated request (2,4) keeps the fixture non-trivial.
+    @testset "BendersYZH SingleCut: physical OD pair recurring across scenarios" begin
+        stations = DataFrame(id=collect(1:5), lon=Float64.(1:5), lat=zeros(5))
+        requests = DataFrame(
+            id=[1, 2, 3],
+            start_station_id=[1, 1, 2],
+            end_station_id=[5, 5, 4],
+            request_time=[DateTime(2024, 1, 1, 8), DateTime(2024, 1, 1, 9), DateTime(2024, 1, 1, 8, 1)],
+        )
+        walking_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:5, j in 1:5
+            walking_costs[(i, j)] = 100.0
+        end
+        walking_costs[(1, 1)] = 0.0
+        walking_costs[(1, 2)] = 3.0
+        walking_costs[(4, 5)] = 3.0
+        walking_costs[(5, 5)] = 0.0
+        walking_costs[(2, 2)] = 0.0
+        walking_costs[(4, 4)] = 0.0
+        routing_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:5, j in 1:5
+            routing_costs[(i, j)] = abs(i - j) + 1.0
+        end
+        data = create_station_selection_data(
+            stations, requests, walking_costs; routing_costs=routing_costs,
+            scenarios=[
+                ("2024-01-01 07:59:00", "2024-01-01 08:30:00"),
+                ("2024-01-01 08:59:00", "2024-01-01 09:30:00"),
+            ],
+        )
+        @test n_scenarios(data) == 2
+
+        model = AggregateODRouteModel(
+            4;
+            assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
+            max_walking_distance=5.0,
+            route_regularization_weight=0.1,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=1000.0,
+            detour_factor=2.0,
+        )
+        mapping = StationSelection.create_map(model, data)
+        @test [s for s in 1:n_scenarios(data) if get(mapping.Q_s[s], (1, 5), 0) > 0] == [1, 2]
+
+        ground_truth = run_opt(
+            data, model,
+            DirectSolver(
+                optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0,
+                max_enumerated_routes=2000, max_enumeration_time_sec=20.0,
+            ),
+        )
+        @test ground_truth.termination_status == MOI.OPTIMAL
+
+        inner_cg = ColumnGenerationSolver(
+            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+            max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
+            final_ip_time_limit_sec=30.0,
+        )
+        benders_yzh = run_opt(
+            data, model,
+            BendersSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                decomposition=BendersYZH(), inner_solver=inner_cg, max_iterations=50,
+                cut_mode=SingleCut(),
+            ),
+        )
+        @test benders_yzh.termination_status == MOI.OPTIMAL
+        @test isapprox(benders_yzh.objective_value, ground_truth.objective_value; atol=1e-6)
+        assert_nearest_open_assignments(data, benders_yzh)
     end
 
     # Reuse the hand-crafted real-coordinate benchmark data under ../Data/test2_zone_proximity
