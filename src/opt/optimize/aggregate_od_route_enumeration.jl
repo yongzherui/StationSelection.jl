@@ -2,15 +2,12 @@
 Exhaustive route-column enumeration for aggregate OD route models.
 
 Deliberately independent of the column-generation label-setting pricer
-(`aggregate_od_route_column_generation.jl`): that engine's dominance-bucket
-pruning (keyed only on the current node, ignoring route length / served-pair
-signature) is sound for real pricing -- where only *a* negative-reduced-cost
-column is needed and duals evolve across iterations -- but is NOT sound for
-one-shot exhaustive enumeration, since it can discard a complete, distinct,
-strictly cheaper route just because a less-accomplished route happens to
-reach the same node first. See
-`notes/2026-07-14_nearest_open_solver_alignment.md` for the full derivation
-and the concrete fixtures that exposed the gap.
+(`aggregate_od_route_column_generation.jl`): the pricer is optimized for
+finding negative-reduced-cost columns under a particular dual vector, while
+direct solves need a dual-free route universe. See
+`notes/2026-07-14_nearest_open_solver_alignment.md` for the historical
+dominance-pruning gap that originally motivated keeping this enumerator
+separate.
 
 This module instead does a plain bounded depth-first search over station
 sequences (no duals, no dominance, no reduced-cost bookkeeping) and checks

@@ -767,6 +767,10 @@ function aggregate_od_route_pricing_by_label_setting(
         isempty(label.served_pairs) && return false
         label.reduced_cost < -reduced_cost_tol || return false
         signature = _aggregate_od_route_column_signature(label.served_pairs)
+        # This assumes `duals` came from the optimal RMP over `existing_columns`.
+        # Under that condition, an existing column cannot have negative reduced
+        # cost, so subset-served dominance cannot hide a missing improving column
+        # behind a non-improving duplicate signature.
         label.tau < get(best_pool_tau, signature, Inf) - 1e-9 || return false
         current = get(scored_by_signature, signature, nothing)
         if isnothing(current) ||
