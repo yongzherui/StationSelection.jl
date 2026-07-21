@@ -57,6 +57,8 @@ function add_assignment_constraints!(
     )
     before = _total_num_constraints(m)
     x = m[:x]
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
+    u = unmet_demand_active ? m[:u] : nothing
 
     for s in 1:n_scenarios(data)
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -64,7 +66,11 @@ function add_assignment_constraints!(
             isempty(x_od) && continue
             demand = get(mapping.Q_s[s], (o, d), 0)
             demand > 0 || continue
-            @constraint(m, sum(x_od) == 1.0)
+            if unmet_demand_active
+                @constraint(m, sum(x_od) == u[s][od_idx])
+            else
+                @constraint(m, sum(x_od) == 1.0)
+            end
         end
     end
 

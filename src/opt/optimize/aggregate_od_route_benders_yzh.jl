@@ -29,44 +29,61 @@ function _add_nearest_open_master_h!(
     allow_walk_only::Bool,
     selector_style::Symbol,
 )
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(master)
     h = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, VariableRef}()
+    u = unmet_demand_active ? Dict{Tuple{Int, Int}, VariableRef}() : nothing
     for p in physical_pairs
         o, d = p
         pairs = feasible_pairs_by_p[p]
         for pair in pairs
             h[(p, pair)] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
         end
-        @constraint(master, sum(h[(p, pair)] for pair in pairs; init=0.0) == 1.0)
+        if unmet_demand_active
+            u[p] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
+            @constraint(master, sum(h[(p, pair)] for pair in pairs; init=0.0) == u[p])
+        else
+            @constraint(master, sum(h[(p, pair)] for pair in pairs; init=0.0) == 1.0)
+        end
         h_by_pair = Dict(pair => h[(p, pair)] for pair in pairs)
         _add_nearest_open_endpoint_linked_x!(
             master, data, y, o, d, pairs, h_by_pair, max_walking_distance;
             binary=false, allow_walk_only=allow_walk_only, selector_style=selector_style,
         )
     end
+    master[:u] = u
     return h
 end
 
 """
-    _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat)
+    _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat; unmet_demand_active=false)
 
 Expands a rounded, scenario-compressed `h_hat` back into the flat
 `Dict{(s,o,d), (j,k)}` shape `_solve_fixed_route_covering_by_cg` expects --
 mirrors `_selected_assignments_from_x`, but each physical pair's selected
 station pair is replicated across every scenario in which it occurs.
+
+Under "always feasible" mode (`unmet_demand_active=true`), a physical pair
+with no selected `h` (all pairs ~0, i.e. `u[p]≈0`) is genuinely unserved --
+skipped entirely rather than thrown, matching `_apply_route_covering_assignments!`'s
+tolerance for a missing entry under this mode. Without the mode, a missing
+selection is always a real bug.
 """
 function _selected_assignments_from_h(
     physical_pairs::Vector{Tuple{Int, Int}},
     occurrences::Dict{Tuple{Int, Int}, Vector{Int}},
     feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
-    h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64},
+    h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64};
+    unmet_demand_active::Bool=false,
 )
     assignments = Dict{NTuple{3, Int}, Tuple{Int, Int}}()
     for p in physical_pairs
         o, d = p
         pairs = feasible_pairs_by_p[p]
         selected_pair = pairs[argmax([get(h_hat, (p, pair), 0.0) for pair in pairs])]
-        get(h_hat, (p, selected_pair), 0.0) >= 0.5 ||
+        if get(h_hat, (p, selected_pair), 0.0) < 0.5
+            unmet_demand_active && continue
             throw(ArgumentError("BendersYZH master produced no selected assignment for physical pair $(p)"))
+        end
         for s in occurrences[p]
             assignments[(s, o, d)] = selected_pair
         end
@@ -128,9 +145,9 @@ function _build_yzh_route_subproblem_lp(
     @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
     for p in group_physical_pairs
         for pair in feasible_pairs_by_p[p]
-            # Walk-only assignments use no vehicle route, so no route column
-            # can (or needs to) cover them.
-            is_walk_only_pair(pair) && continue
+            # Walk-only and same-station assignments use no vehicle route, so
+            # no route column can (or needs to) cover them.
+            requires_no_vehicle_route(pair) && continue
             covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
             for s in group_occurrences[p]
                 @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= h[(p, pair)])
@@ -217,8 +234,10 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
+    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
+    master[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
@@ -226,11 +245,18 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         master, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,
         model.assignment_policy.feasibility_cut_style,
     )
+    u = unmet_demand_active ? master[:u] : nothing
 
     obj = AffExpr(0.0)
     for p in physical_pairs, pair in feasible_pairs_by_p[p]
         o, d = p
         add_to_expression!(obj, occurrence_count[p] * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
+    end
+    if unmet_demand_active
+        for p in physical_pairs
+            add_to_expression!(obj, occurrence_count[p] * model.unmet_demand_penalty)
+            add_to_expression!(obj, -occurrence_count[p] * model.unmet_demand_penalty, u[p])
+        end
     end
     for cut_id in cut_ids
         add_to_expression!(obj, 1.0, theta[cut_id])
@@ -251,11 +277,14 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
             throw(ArgumentError("BendersYZH master failed with status $(termination_status(master))"))
         lower_bound = objective_value(master)
         assert_endpoint_chain_near_binary(master)
+        assert_service_near_binary(master)
 
         h_hat = Dict(key => round(value(var)) for (key, var) in h)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
-        assignments = _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat)
+        assignments = _selected_assignments_from_h(
+            physical_pairs, occurrences, feasible_pairs_by_p, h_hat; unmet_demand_active=unmet_demand_active,
+        )
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(

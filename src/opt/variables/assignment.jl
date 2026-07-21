@@ -67,6 +67,8 @@ function add_assignment_variables!(
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
     x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
+    u = unmet_demand_active ? [Dict{Int, VariableRef}() for _ in 1:S] : nothing
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -75,6 +77,7 @@ function add_assignment_variables!(
             if !isempty(valid_pairs) && demand > 0
                 x[s][od_idx] = @variable(m, [1:length(valid_pairs)],
                     integer = true, lower_bound = 0, upper_bound = 1)
+                unmet_demand_active && (u[s][od_idx] = @variable(m, integer = true, lower_bound = 0, upper_bound = 1))
             else
                 x[s][od_idx] = VariableRef[]
             end
@@ -82,6 +85,7 @@ function add_assignment_variables!(
     end
 
     m[:x] = x
+    unmet_demand_active && (m[:u] = u)
     return JuMP.num_variables(m) - before
 end
 

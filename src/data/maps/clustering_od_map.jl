@@ -11,6 +11,8 @@ export ClusteringTwoStageODMap
 export create_clustering_two_stage_od_map
 export WALK_ONLY_PAIR
 export is_walk_only_pair
+export is_same_station_pair
+export requires_no_vehicle_route
 export od_pair_walking_cost
 
 """
@@ -23,6 +25,30 @@ with a real station pair.
 const WALK_ONLY_PAIR = (0, 0)
 
 is_walk_only_pair(pair::Tuple{Int, Int}) = pair == WALK_ONLY_PAIR
+
+"""
+    is_same_station_pair(pair) -> Bool
+
+A real (non-`WALK_ONLY_PAIR`) station pair `(j, j)`: pickup and dropoff both
+resolve to the same open station `j`, so no vehicle trip is needed (the same
+reason `WALK_ONLY_PAIR` needs none), but unlike `WALK_ONLY_PAIR` it still
+requires station `j` itself to be open. Only produced by `compute_valid_jk_pairs`
+when `allow_same_station=true` (`AggregateODRouteModel(unmet_demand_penalty=...)`).
+"""
+is_same_station_pair(pair::Tuple{Int, Int}) = pair[1] == pair[2] && !is_walk_only_pair(pair)
+
+"""
+    requires_no_vehicle_route(pair) -> Bool
+
+Either sentinel that needs no route-covering column: direct walking
+(`WALK_ONLY_PAIR`) or a same-station assignment (`is_same_station_pair`).
+Every call site that currently skips route-coverage/pricing/column logic for
+`is_walk_only_pair` alone must use this combined predicate instead once
+same-station pairs exist, or a same-station `x`/`h` gets forced to 0 by a
+coverage row with no matching route column while the endpoint-chain linking
+simultaneously forces it to 1 — a direct, reachable infeasibility.
+"""
+requires_no_vehicle_route(pair::Tuple{Int, Int}) = is_walk_only_pair(pair) || is_same_station_pair(pair)
 
 """
     od_pair_walking_cost(data, o, d, pair) -> Float64
@@ -85,12 +111,17 @@ end
 
 For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 (pickup_idx, dropoff_idx) satisfy both walking distance limits.
+
+`allow_same_station` (off by default, only ever set by `AggregateODRouteModel(unmet_demand_penalty=...)`)
+includes `j==k` real pairs instead of skipping them -- see [`is_same_station_pair`](@ref).
+Both per-side distance checks against `o`/`d` still apply normally with `k=j`.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
     max_walking_distance::Float64;
-    allow_walk_only::Bool=false
+    allow_walk_only::Bool=false,
+    allow_same_station::Bool=false,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
@@ -100,10 +131,11 @@ function compute_valid_jk_pairs(
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
-                # station pairs must be distinct: j==k would mean boarding and
-                # alighting at the same station, i.e. no vehicle trip at all.
-                # That case is handled separately below via WALK_ONLY_PAIR.
-                j == k && continue
+                # station pairs must be distinct by default: j==k would mean
+                # boarding and alighting at the same station, i.e. no vehicle
+                # trip at all -- handled separately below via WALK_ONLY_PAIR,
+                # or (opt-in) as a real same-station pair here.
+                j == k && !allow_same_station && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end

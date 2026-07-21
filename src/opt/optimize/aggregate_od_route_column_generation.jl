@@ -197,7 +197,7 @@ function create_aggregate_od_route_pricing_data(
     isempty(missing_arcs) ||
         throw(ArgumentError("missing finite routing costs for aggregate OD route pricing arcs: $(missing_arcs)"))
 
-    all_pairs = filter(!is_walk_only_pair, get(mapping.active_jk_s, scenario, Tuple{Int, Int}[]))
+    all_pairs = filter(!requires_no_vehicle_route, get(mapping.active_jk_s, scenario, Tuple{Int, Int}[]))
     active_pairs = if isnothing(pricing_duals)
         all_pairs
     else
@@ -1113,6 +1113,7 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
+        unmet_demand_penalty        = model.unmet_demand_penalty,
     )
 end
 
@@ -1136,6 +1137,7 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
+        unmet_demand_penalty        = model.unmet_demand_penalty,
     )
 end
 

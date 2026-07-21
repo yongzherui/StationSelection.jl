@@ -47,6 +47,7 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
+        unmet_demand_penalty=model.unmet_demand_penalty,
     )
 end
 
@@ -72,6 +73,7 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
+        unmet_demand_penalty=model.unmet_demand_penalty,
     )
 end
 
@@ -80,7 +82,7 @@ function _all_active_aggregate_od_route_pairs(mapping::AggregateODRouteMap)::Vec
     for scenario_pairs in values(mapping.active_jk_s)
         union!(pairs, scenario_pairs)
     end
-    delete!(pairs, WALK_ONLY_PAIR)
+    filter!(!requires_no_vehicle_route, pairs)
     return sort!(collect(pairs))
 end
 
@@ -308,7 +310,8 @@ function _independent_nearest_open_assignment(
     d::Int,
     max_walking_distance::Float64,
     open_set::Set{Int},
-    allow_walk_only::Bool,
+    allow_walk_only::Bool;
+    allow_same_station::Bool=false,
 )::Union{Tuple{Int, Int}, Nothing}
     pickups = _nearest_open_endpoint_candidates(data, o, max_walking_distance, :pickup)
     dropoffs = _nearest_open_endpoint_candidates(data, d, max_walking_distance, :dropoff)
@@ -316,15 +319,30 @@ function _independent_nearest_open_assignment(
     k_star = _first_open_by_cost(data, d, dropoffs, open_set, :dropoff)
     (isnothing(j_star) || isnothing(k_star)) && return nothing
     j_star != k_star && return (j_star, k_star)
-    return allow_walk_only ? WALK_ONLY_PAIR : nothing
+    # Both sides collide on the same station. Prefer WALK_ONLY_PAIR when
+    # available (cheaper or equal by the triangle inequality -- direct
+    # walk(o,d) <= walk(o,j*)+walk(j*,d) -- and it's what the model's own
+    # objective would pick between the two if both were valid x entries), and
+    # fall back to the real same-station pair only when it isn't.
+    allow_walk_only && return WALK_ONLY_PAIR
+    allow_same_station && return (j_star, j_star)
+    return nothing
 end
 
 """
-    _fixed_assignments_from_y(data, requests, feasible_pairs, y_hat; style, max_walking_distance, allow_walk_only)
+    _fixed_assignments_from_y(data, requests, feasible_pairs, y_hat; style, max_walking_distance, allow_walk_only, allow_same_station)
 
 Procedural nearest-open assignment given a fixed binary `y_hat`, used both to
 prime `RouteCoveringProblem` CG subproblems and as an independent assertion
 oracle (`_assert_x_matches_nearest_open`) against the LP's own resolved `x`.
+
+`allow_same_station` (`AggregateODRouteModel(unmet_demand_penalty=...)`) makes
+a same-station collision resolve to the real pair `(j*,j*)` instead of
+`infeasible`, mirroring the model's own relaxed `sum(z)<=1`/`sum(x)==u`
+constraints. A request can still land in `infeasible` when `allow_same_station`
+is on -- no open candidate at all on one side -- and callers under "always
+feasible" mode must treat that as "genuinely unserved (`u=0`)", not as
+grounds for a feasibility cut.
 
 `style == :pair_chain` ranks each request's
 feasible station *pairs* jointly by combined walking cost and picks the
@@ -346,6 +364,7 @@ function _fixed_assignments_from_y(
     style::Symbol=:pair_chain,
     max_walking_distance::Union{Nothing, Float64}=nothing,
     allow_walk_only::Bool=false,
+    allow_same_station::Bool=false,
 )
     style in (:pair_chain, :big_m_nearest, :endpoint_chain) || throw(ArgumentError("unsupported style $(style)"))
     _is_endpoint_nearest_style(style) && isnothing(max_walking_distance) &&
@@ -357,7 +376,8 @@ function _fixed_assignments_from_y(
         if _is_endpoint_nearest_style(style)
             _s, o, d = request
             assignment = _independent_nearest_open_assignment(
-                data, o, d, max_walking_distance, open_set, allow_walk_only,
+                data, o, d, max_walking_distance, open_set, allow_walk_only;
+                allow_same_station=allow_same_station,
             )
             if isnothing(assignment)
                 push!(infeasible, request)
@@ -561,6 +581,7 @@ function _route_covering_problem_from_assignments(
         pricing_time_limit_sec=base.pricing_time_limit_sec,
         reduced_cost_tol=base.reduced_cost_tol,
         allow_walk_only=base.allow_walk_only,
+        unmet_demand_penalty=base.unmet_demand_penalty,
     )
 end
 

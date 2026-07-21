@@ -65,6 +65,7 @@ const MOI = JuMP.MOI
         include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
         include("opt/test_aggregate_od_route_direct_walking.jl")
         include("opt/test_aggregate_od_route_restricted_mw_cut.jl")
+        include("opt/test_aggregate_od_route_unmet_demand.jl")
     end
 
 end

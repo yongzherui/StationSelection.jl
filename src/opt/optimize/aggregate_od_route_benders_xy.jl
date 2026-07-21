@@ -31,20 +31,28 @@ function _add_nearest_open_endpoint_master_x!(
     allow_walk_only::Bool,
     selector_style::Symbol,
 )
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(master)
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
+    u = unmet_demand_active ? Dict{NTuple{3, Int}, VariableRef}() : nothing
     for request in requests
         _s, o, d = request
         pairs = feasible_pairs[request]
         for pair in pairs
             x[(request, pair)] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
         end
-        @constraint(master, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
+        if unmet_demand_active
+            u[request] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
+            @constraint(master, sum(x[(request, pair)] for pair in pairs; init=0.0) == u[request])
+        else
+            @constraint(master, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
+        end
         x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
         _add_nearest_open_endpoint_linked_x!(
             master, data, y, o, d, pairs, x_by_pair, max_walking_distance;
             binary=false, allow_walk_only=allow_walk_only, selector_style=selector_style,
         )
     end
+    master[:u] = u
     return x
 end
 
@@ -133,10 +141,11 @@ function _build_xy_route_subproblem_lp(
     for request in requests
         s, _o, _d = request
         for pair in feasible_pairs[request]
-            # Walk-only assignments use no vehicle route, so no route column
-            # can (or needs to) cover them — a coverage row here would force
-            # x[(request, pair)] to 0 even when the master fixed it to 1.
-            is_walk_only_pair(pair) && continue
+            # Walk-only and same-station assignments use no vehicle route, so
+            # no route column can (or needs to) cover them — a coverage row
+            # here would force x[(request, pair)] to 0 even when the master
+            # fixed it to 1.
+            requires_no_vehicle_route(pair) && continue
             covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
             @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= x[(request, pair)])
         end
@@ -180,14 +189,17 @@ end
 function _selected_assignments_from_x(
     requests::Vector{NTuple{3, Int}},
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
-    x_hat::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},
+    x_hat::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64};
+    unmet_demand_active::Bool=false,
 )
     assignments = Dict{NTuple{3, Int}, Tuple{Int, Int}}()
     for request in requests
         pairs = feasible_pairs[request]
         selected_pair = pairs[argmax([get(x_hat, (request, pair), 0.0) for pair in pairs])]
-        get(x_hat, (request, selected_pair), 0.0) >= 0.5 ||
+        if get(x_hat, (request, selected_pair), 0.0) < 0.5
+            unmet_demand_active && continue
             throw(ArgumentError("BendersXY master produced no selected assignment for $(request)"))
+        end
         assignments[request] = selected_pair
     end
     return assignments
@@ -205,7 +217,13 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     else
         assert_no_walk_only_pairs(mapping, "AggregateODRouteModel Benders (BendersXY, NearestOpen, :pair_chain)")
+        !isnothing(model.unmet_demand_penalty) && throw(ArgumentError(
+            "BendersXY does not support unmet_demand_penalty with feasibility_cut_style=:pair_chain -- " *
+            "\"always feasible\" mode relies on the endpoint-nearest z chain's own relaxation, which " *
+            ":pair_chain has no equivalent of"
+        ))
     end
+    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
@@ -213,14 +231,22 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
+    master[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
     x = _add_nearest_open_master_x!(master, data, model, y, requests, feasible_pairs)
+    u = unmet_demand_active ? master[:u] : nothing
 
     obj = AffExpr(0.0)
     for request in requests, pair in feasible_pairs[request]
         add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+    end
+    if unmet_demand_active
+        for request in requests
+            add_to_expression!(obj, model.unmet_demand_penalty)
+            add_to_expression!(obj, -model.unmet_demand_penalty, u[request])
+        end
     end
     for cut_id in cut_ids
         add_to_expression!(obj, 1.0, theta[cut_id])
@@ -243,11 +269,14 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
         # No-op unless an endpoint nearest-open style built zp/zd indicators
         # on this master (via _add_nearest_open_endpoint_master_x!).
         assert_endpoint_chain_near_binary(master)
+        assert_service_near_binary(master)
 
         x_hat = Dict(key => round(value(var)) for (key, var) in x)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
-        assignments = _selected_assignments_from_x(requests, feasible_pairs, x_hat)
+        assignments = _selected_assignments_from_x(
+            requests, feasible_pairs, x_hat; unmet_demand_active=unmet_demand_active,
+        )
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(

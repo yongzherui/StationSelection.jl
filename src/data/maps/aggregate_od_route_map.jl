@@ -95,7 +95,7 @@ function _singleton_aggregate_od_route_columns(
     columns = AggregateODRouteColumn[]
     next_id = 1
     for (j, k) in sort!(collect(all_pairs))
-        is_walk_only_pair((j, k)) && continue
+        requires_no_vehicle_route((j, k)) && continue
         tau = get_routing_cost(data, j, k)
         if !isfinite(tau)
             push!(missing_pairs, (j, k))
@@ -139,6 +139,7 @@ function create_aggregate_od_route_map(
         data,
         base_model.max_walking_distance;
         allow_walk_only=base_model.allow_walk_only,
+        allow_same_station=!isnothing(base_model.unmet_demand_penalty),
     )
     if model isa RouteCoveringProblem
         _apply_route_covering_assignments!(valid_jk_pairs, Q_s, model)
@@ -179,8 +180,16 @@ function _apply_route_covering_assignments!(
         for ((o, d), demand) in q_s
             demand > 0 || continue
             key = (s, o, d)
-            haskey(model.fixed_assignments, key) ||
-                throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
+            if !haskey(model.fixed_assignments, key)
+                # Under "always feasible" mode, a caller (e.g. Benders CG-priming)
+                # may deliberately omit an OD it decided is unserved (u=0) rather
+                # than throw -- leave valid_jk_pairs[(o,d)] as originally computed
+                # so this sub-solve's own u lands on 0 too, consistently. Without
+                # unmet_demand_penalty, a missing entry is always a real bug.
+                isnothing(model.unmet_demand_penalty) &&
+                    throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
+                continue
+            end
             assigned = model.fixed_assignments[key]
             is_walk_only_pair(assigned) ||
                 assigned[1] in open_set && assigned[2] in open_set ||

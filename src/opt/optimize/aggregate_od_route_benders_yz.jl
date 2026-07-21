@@ -51,14 +51,21 @@ function _build_yz_route_subproblem_lp(
         zvar
     end
 
+    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
+    u = unmet_demand_active ? Dict{NTuple{3, Int}, VariableRef}() : nothing
     for request in requests
         _s, o, d = request
         pairs = feasible_pairs[request]
         for pair in pairs
             x[(request, pair)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
         end
-        @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
+        if unmet_demand_active
+            u[request] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
+            @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == u[request])
+        else
+            @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
+        end
         x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
 
         pickup_key, sorted_pickups, _pickup_costs = _sorted_endpoint_chain(data, o, model.max_walking_distance, :pickup)
@@ -78,9 +85,9 @@ function _build_yz_route_subproblem_lp(
     for request in requests
         s, _o, _d = request
         for pair in feasible_pairs[request]
-            # See _build_nearest_open_y_subproblem_lp: walk-only assignments use no
-            # vehicle route, so no coverage row for them.
-            is_walk_only_pair(pair) && continue
+            # See _build_nearest_open_y_subproblem_lp: walk-only and same-station
+            # assignments use no vehicle route, so no coverage row for them.
+            requires_no_vehicle_route(pair) && continue
             covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
             cover_cons[(request, pair)] =
                 @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= x[(request, pair)])
@@ -91,6 +98,10 @@ function _build_yz_route_subproblem_lp(
     for request in requests
         for pair in feasible_pairs[request]
             add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+        end
+        if unmet_demand_active
+            add_to_expression!(obj, model.unmet_demand_penalty)
+            add_to_expression!(obj, -model.unmet_demand_penalty, u[request])
         end
     end
     for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
@@ -105,6 +116,8 @@ function _build_yz_route_subproblem_lp(
         )
     end
     @objective(m, Min, obj)
+    m[:u] = u
+    m[:x] = x
     return m, fix_cons, cover_cons
 end
 
@@ -124,6 +137,7 @@ function _solve_yz_route_subproblem_lp(
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersYZ route LP subproblem failed with status $(termination_status(m))"))
+    assert_service_near_binary(m)
     return objective_value(m), Dict(key => dual(con) for (key, con) in fix_cons)
 end
 
@@ -171,6 +185,7 @@ function _solve_yz_route_subproblem_lp_with_repricing(
         primal_status(m) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersYZ repricing subproblem LP failed with status $(termination_status(m))"))
         assert_endpoint_chain_near_binary(m)
+        assert_service_near_binary(m)
         v_hat = objective_value(m)
         if isnothing(baseline_v_hat)
             baseline_v_hat = v_hat
@@ -267,6 +282,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
+    master[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
@@ -300,8 +316,12 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             style=model.assignment_policy.feasibility_cut_style,
             max_walking_distance=model.max_walking_distance,
             allow_walk_only=model.allow_walk_only,
+            allow_same_station=!isnothing(model.unmet_demand_penalty),
         )
-        if !isempty(infeasible)
+        # Under "always feasible" mode, `infeasible` requests are genuinely
+        # unserved (u=0), not grounds for a feasibility cut -- see BendersY's
+        # outer loop for the identical reasoning.
+        if !isempty(infeasible) && isnothing(model.unmet_demand_penalty)
             feasibility_before = feasibility_cuts
             open_set = Set(_open_station_values(y_hat))
             for request in infeasible

@@ -72,6 +72,17 @@ Column-generation-ready restricted master problem.
   including the NearestOpen Benders paths. `NearestOpenAggregateODAssignmentPolicy(:pair_chain)`
   still rejects walk-only assignments because it ranks station pairs jointly
   and has no station-free endpoint-collision representation.
+- `unmet_demand_penalty`: if set (non-`nothing`), turns on "always feasible" mode --
+  same-station assignment (`x_{j,j}=1`, needs no vehicle route, see
+  [`is_same_station_pair`](@ref)) becomes a valid resolution even with
+  `allow_walk_only=false`, and every OD's assignment constraint relaxes from
+  `sum(x) == 1` to `sum(x) == u` with a binary service indicator `u`, penalized
+  `unmet_demand_penalty` per unit left unserved (`1-u`) in the objective. `nothing`
+  (default) preserves existing behavior exactly -- the assignment/coverage
+  constraints and the shared endpoint-selector's `sum(z)==1` are unconditional
+  hard constraints, so a station budget `l` too small for some request's
+  candidates makes the model outright infeasible, same as before this field
+  existed.
 """
 struct AggregateODRouteModel <: AbstractODModel
     l::Int
@@ -90,6 +101,7 @@ struct AggregateODRouteModel <: AbstractODModel
     relax_integrality::Bool
     assignment_policy::AbstractAggregateODAssignmentPolicy
     allow_walk_only::Bool
+    unmet_demand_penalty::Union{Nothing, Float64}
 
     function AggregateODRouteModel(
             l::Int;
@@ -108,6 +120,7 @@ struct AggregateODRouteModel <: AbstractODModel
             relax_integrality::Bool=false,
             assignment_policy::AbstractAggregateODAssignmentPolicy=FreeAggregateODAssignmentPolicy(),
             allow_walk_only::Bool=false,
+            unmet_demand_penalty::Union{Nothing, Number}=nothing,
         )
         l > 0 || throw(ArgumentError("l must be positive"))
         route_regularization_weight >= 0 ||
@@ -133,6 +146,8 @@ struct AggregateODRouteModel <: AbstractODModel
             throw(ArgumentError("pricing_time_limit_sec must be positive"))
         reduced_cost_tol >= 0 ||
             throw(ArgumentError("reduced_cost_tol must be non-negative"))
+        isnothing(unmet_demand_penalty) || unmet_demand_penalty >= 0 ||
+            throw(ArgumentError("unmet_demand_penalty must be non-negative"))
         new(
             l,
             Float64(route_regularization_weight),
@@ -150,6 +165,7 @@ struct AggregateODRouteModel <: AbstractODModel
             relax_integrality,
             assignment_policy,
             allow_walk_only,
+            isnothing(unmet_demand_penalty) ? nothing : Float64(unmet_demand_penalty),
         )
     end
 end
