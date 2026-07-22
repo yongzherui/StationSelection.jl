@@ -698,7 +698,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         )
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(final_result, Dict{String, Any}(
+            return _opt_result_from_benders(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersY",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),

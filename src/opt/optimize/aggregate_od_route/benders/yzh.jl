@@ -1,8 +1,27 @@
 """
 Benders-YZH decomposition for AggregateODRouteModel (NearestOpen policy only): master =
 y,z,h (h scenario-compressed per physical OD pair); subproblem = theta only (see
-`iterative_strategy_types.jl`'s `BendersYZH` docstring). Unlike BendersYZ, no repricing
-companion is needed -- h is fixed fully in the subproblem.
+`iterative_strategy_types.jl`'s `BendersYZH` docstring).
+
+**Repricing is not actually a structural non-issue here** (an earlier version of this docstring
+claimed it was, based on an incomplete argument -- see the `BendersYZH` docstring's 2026-07-21
+correction). `h` being fixed fully removes the master's own assignment-selection degeneracy, but
+`_build_yzh_route_subproblem_lp`'s route-covering LP (fixed `h`, free continuous `lambda`) is
+still a set-cover-style LP with a potentially degenerate dual-optimal face -- CG-priming's own
+exhaustiveness proof only certifies the *one* dual vertex CG happened to land on, and this
+subproblem LP is a separately-solved formulation with no guarantee of landing on that same vertex.
+`solver.reprice_subproblem` is fully wired here (not a no-op) via
+`_solve_yzh_route_subproblem_lp_with_repricing`, mirroring BendersYZ's repricing loop exactly, and
+is the currently-implemented way to close that gap empirically. A cheaper, provably-valid
+alternative exists but is not implemented: reuse CG's own already-certified dual directly
+(zero-extended over `(request, pair)` rows not present in CG's restricted model) instead of
+re-solving this subproblem LP at all -- any dual-feasible point tight at `h_hat` gives a valid
+cut by LP duality, regardless of which point on a degenerate optimal face is chosen, so CG's own
+certified dual suffices without exposure to this LP's own re-solve degeneracy. This is the same
+idea as `BendersY`'s `cut_derivation=:zero_completion`
+(notes/2026-07-17_restricted_mw_cut_benders_y.md), simplified further for `BendersYZH` since there
+is no remaining free y/z/x block left to complete once `h` is fixed -- the certified dual *is*
+the whole thing needed for the cut.
 """
 
 """
@@ -112,6 +131,12 @@ per-group physical-pair/occurrence grouping from it, so a single `h`
 variable can feed multiple scenarios' coverage rows within the same group
 (the compression point of this whole decomposition) without ever being
 duplicated.
+
+Also returns `cover_cons`, keyed `(request, pair) => ConstraintRef` with `request=(s,o,d)`
+reconstructed from each physical pair's `group_occurrences` -- deliberately the identical
+shape `_build_nearest_open_y_subproblem_lp`/`_build_yz_route_subproblem_lp` use, so
+`_extract_nearest_open_y_subproblem_coverage_duals` can be reused unmodified by
+`_solve_yzh_route_subproblem_lp_with_repricing`.
 """
 function _build_yzh_route_subproblem_lp(
     data::StationSelectionData,
@@ -143,6 +168,7 @@ function _build_yzh_route_subproblem_lp(
     end
 
     @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
+    cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
     for p in group_physical_pairs
         for pair in feasible_pairs_by_p[p]
             # Walk-only and same-station assignments use no vehicle route, so
@@ -150,7 +176,8 @@ function _build_yzh_route_subproblem_lp(
             requires_no_vehicle_route(pair) && continue
             covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
             for s in group_occurrences[p]
-                @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= h[(p, pair)])
+                con = @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= h[(p, pair)])
+                cover_cons[((s, p[1], p[2]), pair)] = con
             end
         end
     end
@@ -168,7 +195,7 @@ function _build_yzh_route_subproblem_lp(
         )
     end
     @objective(m, Min, obj)
-    return m, fix_cons
+    return m, fix_cons, cover_cons
 end
 
 function _solve_yzh_route_subproblem_lp(
@@ -181,13 +208,107 @@ function _solve_yzh_route_subproblem_lp(
     optimizer_env,
     silent::Bool,
 )
-    m, fix_cons = _build_yzh_route_subproblem_lp(
+    m, fix_cons, _cover_cons = _build_yzh_route_subproblem_lp(
         data, model, group_requests, feasible_pairs_by_p, columns, h_hat, optimizer_env, silent
     )
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersYZH route LP subproblem failed with status $(termination_status(m))"))
     return objective_value(m), Dict(key => dual(con) for (key, con) in fix_cons)
+end
+
+"""
+    _solve_yzh_route_subproblem_lp_with_repricing(data, model, mapping, group_requests, feasible_pairs_by_p, columns, h_hat, optimizer_env, silent; max_reprice_rounds)
+
+Diagnostic/soundness-check companion to [`_solve_yzh_route_subproblem_lp`](@ref), mirroring
+`_solve_yz_route_subproblem_lp_with_repricing` exactly: after each LP solve, extracts the
+covering-constraint duals (via `_extract_nearest_open_y_subproblem_coverage_duals`, reused
+unmodified since `cover_cons` has the identical `(request, pair) => ConstraintRef` shape) and
+runs genuine label-setting pricing against them. If pricing finds a column with negative
+reduced cost beyond the seeded pool, the pool folds it in and the LP is re-solved, repeating
+until pricing finds nothing more or `max_reprice_rounds` is hit -- the same convergence
+criterion CG's own pricing uses. Unlike `BendersY`/`BendersYZ`, this is not expected to find
+anything (the design argument in this file's module docstring is that CG-priming is already
+provably exhaustive for this exact LP since `h` is fixed fully, not merely linked), so this
+function exists to make that argument empirically checkable rather than merely assumed.
+Re-solving after adding repriced columns must preserve the subproblem objective value; a
+change means the original restricted LP value was not certified and the routine throws.
+"""
+function _solve_yzh_route_subproblem_lp_with_repricing(
+    data::StationSelectionData,
+    model::AnyAggregateODRouteModel,
+    mapping::AggregateODRouteMap,
+    group_requests,
+    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
+    columns::Vector{AggregateODRouteColumn},
+    h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64},
+    optimizer_env,
+    silent::Bool;
+    max_reprice_rounds::Int=20,
+)
+    pool = copy(columns)
+    v_hat = NaN
+    baseline_v_hat = nothing
+    max_objective_delta = 0.0
+    rho = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64}()
+    n_new_columns_total = 0
+    rounds = 0
+    fully_exhausted = true
+    for round in 1:max_reprice_rounds
+        rounds = round
+        m, fix_cons, cover_cons = _build_yzh_route_subproblem_lp(
+            data, model, group_requests, feasible_pairs_by_p, pool, h_hat, optimizer_env, silent
+        )
+        optimize!(m)
+        primal_status(m) == MOI.FEASIBLE_POINT ||
+            throw(ArgumentError("BendersYZH repricing subproblem LP failed with status $(termination_status(m))"))
+        v_hat = objective_value(m)
+        if isnothing(baseline_v_hat)
+            baseline_v_hat = v_hat
+        else
+            objective_delta = abs(v_hat - baseline_v_hat)
+            max_objective_delta = max(max_objective_delta, objective_delta)
+            objective_delta <= 1e-6 * max(1.0, abs(baseline_v_hat)) || throw(ArgumentError(
+                "BendersYZH repricing changed subproblem objective: before=$(baseline_v_hat), " *
+                "after=$(v_hat), delta=$(objective_delta). Repricing is expected to certify the " *
+                "same LP value, not improve it."
+            ))
+        end
+        rho = Dict(key => dual(con) for (key, con) in fix_cons)
+
+        duals = _extract_nearest_open_y_subproblem_coverage_duals(cover_cons)
+        next_column_id = isempty(pool) ? 1 : maximum(column.id for column in pool) + 1
+        all_new_columns = AggregateODRouteColumn[]
+        pricing_exhausted = true
+        for s in 1:n_scenarios(data)
+            pricing_duals = _scenario_pricing_duals(duals, s)
+            pricing_data = create_aggregate_od_route_pricing_data(model, data, mapping, s, pricing_duals)
+            new_columns_s, exhausted_s, _stats = aggregate_od_route_pricing_by_label_setting(
+                pricing_data,
+                pool,
+                pricing_duals;
+                next_column_id=next_column_id,
+                reduced_cost_tol=model.reduced_cost_tol,
+                max_new_columns=model.max_new_columns,
+                n_candidates=model.n_candidates,
+                time_limit=model.pricing_time_limit_sec,
+                max_visits_per_node=model.max_visits_per_node,
+            )
+            pricing_exhausted &= exhausted_s
+            append!(all_new_columns, new_columns_s)
+            next_column_id += length(new_columns_s)
+        end
+        fully_exhausted = pricing_exhausted
+        isempty(all_new_columns) && break
+        pricing_exhausted ||
+            @warn "BendersYZH subproblem repricing: pricing hit its time limit before exhausting the search " *
+                "while new columns were still being found -- completeness not fully proven this round" round
+        @warn "BendersYZH subproblem repricing found columns beyond the seeded pool -- pool was not complete " *
+            "for this subproblem's own dual structure (dual degeneracy or genuine pool gap)" round n_new=length(all_new_columns)
+        n_new_columns_total += length(all_new_columns)
+        pool = _deduplicate_aggregate_od_route_columns(vcat(pool, all_new_columns))
+    end
+    return v_hat, rho, pool, n_new_columns_total, rounds, fully_exhausted, max_objective_delta
 end
 
 """
@@ -267,6 +388,8 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     best_ub = Inf
     optimality_cuts = 0
     inner_cg_iters = 0
+    total_reprice_columns_found = 0
+    total_reprice_rounds = 0
     benders_rows = NamedTuple[]
 
     for iteration in 1:solver.max_iterations
@@ -304,16 +427,35 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         for cut_id in cut_ids
             group_requests = cut_groups[cut_id]
             lp_start = time()
-            v_hat, rho = _solve_yzh_route_subproblem_lp(
-                data,
-                model,
-                group_requests,
-                feasible_pairs_by_p,
-                cg_result.generated_columns,
-                h_hat,
-                optimizer_env,
-                cfg.silent,
-            )
+            if solver.reprice_subproblem
+                v_hat, rho, _pool, n_new, reprice_rounds, exhausted, _delta = _solve_yzh_route_subproblem_lp_with_repricing(
+                    data,
+                    model,
+                    mapping,
+                    group_requests,
+                    feasible_pairs_by_p,
+                    cg_result.generated_columns,
+                    h_hat,
+                    optimizer_env,
+                    cfg.silent;
+                    max_reprice_rounds=solver.max_reprice_rounds,
+                )
+                total_reprice_columns_found += n_new
+                total_reprice_rounds += reprice_rounds
+                exhausted ||
+                    @warn "BendersYZH subproblem repricing hit max_reprice_rounds without pricing exhaustion" iteration cut_id
+            else
+                v_hat, rho = _solve_yzh_route_subproblem_lp(
+                    data,
+                    model,
+                    group_requests,
+                    feasible_pairs_by_p,
+                    cg_result.generated_columns,
+                    h_hat,
+                    optimizer_env,
+                    cfg.silent,
+                )
+            end
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
@@ -345,7 +487,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         _flush_benders_iteration_log!(solver, benders_rows)
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(final_result, Dict{String, Any}(
+            return _opt_result_from_benders(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersYZH",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -366,6 +508,9 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(cg_result.generated_columns),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
+                "reprice_subproblem" => solver.reprice_subproblem,
+                "total_reprice_columns_found" => total_reprice_columns_found,
+                "total_reprice_rounds" => total_reprice_rounds,
             ))
         end
     end

@@ -179,6 +179,28 @@ includes `y`, `z`, and a scenario-compressed assignment variable `h` -- one `h` 
 *physical* OD pair `(o,d)`, shared across every scenario in which that pair appears
 (weighted by its raw scenario-occurrence count), rather than `BendersXY`'s per-`(scenario,
 o, d)` `x`. Only route-covering `θ` is left to the subproblem.
+
+**Correction (2026-07-21, see notes/2026-07-21_bendersyz_yzh_verification_gaps.md and
+notes/2026-07-21_benders_final_result_vs_best_result_bug.md):** earlier text here and in that
+note claimed `h` being fixed fully makes CG-priming provably exhaustive for the subproblem LP's
+own dual structure, needing no repricing. That reasoning is incomplete: `h` being fixed removes
+degeneracy *in the master's choice of assignment*, but the theta-only subproblem's route-covering
+LP (fixed `h`, free continuous route-selection `lambda`) is a set-cover-style LP, which commonly
+has a *degenerate* dual-optimal face. CG's own pricing only certifies exhaustiveness against
+*the one dual vertex CG's solver happened to return* -- `_build_yzh_route_subproblem_lp` builds
+and solves a *separately formulated* LP for the cut, with no guarantee Gurobi returns that same
+vertex rather than a different, equally-optimal one the pool isn't proven exhaustive against.
+Empirically (`reprice_subproblem=true`), repricing does find real columns beyond the seeded pool,
+growing with instance size (negligible at n=15, 12-18x subproblem-time overhead at n=20) -- so
+this is not a hypothetical concern. It has not yet been observed to change the final objective on
+any tested fixture, but nothing rules that out at larger scale; treat "exact without repricing" as
+unproven, not disproven, absent one of: (a) `reprice_subproblem=true`, or (b) reusing CG's own
+already-certified dual directly instead of re-solving (a "zero completion" analogous to
+`BendersY`'s `cut_derivation=:zero_completion`, see notes/2026-07-17_restricted_mw_cut_benders_y.md
+-- not implemented for `BendersYZH`, but provably valid by the same LP-duality argument: any
+dual-feasible point tight at `h_hat` gives a valid cut, regardless of which point among a
+degenerate optimal face is chosen, and CG's own certified dual already satisfies both properties
+without a fresh, degeneracy-exposed re-solve).
 """
 struct BendersYZH <: AbstractBendersDecomposition end
 

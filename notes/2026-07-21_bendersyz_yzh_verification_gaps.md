@@ -6,6 +6,27 @@
 because the *pattern* behind them is worth remembering for the next new decomposition, not
 because anything shipped broken.
 
+## Correction (later, 2026-07-21): item 3's "BendersYZH is not affected" claim is overstated
+
+Point 3 below claims `BendersYZH`'s subproblem fixing `h` fully makes its priming CG "always
+exhaustive for exactly the LP the cut is drawn from." That reasoning has a gap: `h` being fixed
+removes degeneracy in *what assignment the master picks*, but `_build_yzh_route_subproblem_lp`'s
+route-covering LP (fixed `h`, free continuous route-selection `lambda`) is a set-cover-style LP,
+which commonly has a *degenerate dual-optimal face* of its own. CG's exhaustive-pricing proof only
+certifies the one dual vertex CG's solver happened to return — the theta-only subproblem is a
+separately-solved LP with no guarantee of landing on that same vertex, so "the priming CG already
+proved exhaustiveness" doesn't automatically transfer to it, the same way it doesn't for `BendersY`
+or `BendersYZ`. See notes/2026-07-21_benders_final_result_vs_best_result_bug.md for how this was
+actually found (a real objective mismatch on a Zhuzhou instance, initially misdiagnosed as this
+gap before turning out to be an unrelated return-value bug — but the theoretical gap described
+here is real and separate, confirmed by repricing genuinely finding columns beyond the seeded pool
+on every scale tested, growing with instance size). Full corrected reasoning, and a provably-valid
+alternative to repricing (reusing CG's own certified dual directly, no re-solve), is in the
+`BendersYZH` docstring in `src/opt/optimize/iterative_strategy_types.jl` and the module docstring
+in `src/opt/optimize/aggregate_od_route/benders/yzh.jl`. Treat "exact without repricing" as
+*unproven*, not *disproven* — it has not failed on any fixture tested, but the argument that it
+can't was wrong.
+
 ## What happened
 
 Adding `BendersYZ` (master=y,z; subproblem=x,θ) and `BendersYZH` (master=y,z,h; subproblem=θ)
