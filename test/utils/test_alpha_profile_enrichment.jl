@@ -34,11 +34,11 @@ using Dates
     end
 
     # -------------------------------------------------------------------------
-    # AlphaEnrichmentConfig construction
+    # ExactDARPRouteEnrichmentConfig construction
     # -------------------------------------------------------------------------
 
-    @testset "AlphaEnrichmentConfig defaults" begin
-        cfg = StationSelection.AlphaEnrichmentConfig()
+    @testset "ExactDARPRouteEnrichmentConfig defaults" begin
+        cfg = StationSelection.ExactDARPRouteEnrichmentConfig()
         @test cfg.enabled == true
         @test cfg.pressure_threshold == 0.70
         @test cfg.binding_threshold == 0.95
@@ -49,19 +49,19 @@ using Dates
         @test cfg.max_candidate_routes_for_enrichment == 20
     end
 
-    @testset "AlphaEnrichmentConfig disabled default in AlphaRouteRunnerConfig" begin
+    @testset "ExactDARPRouteEnrichmentConfig disabled default in ExactDARPRouteRunnerConfig" begin
         init_spec = StationSelection.RoutePoolInitSpec(:generated)
-        cfg = StationSelection.AlphaRouteRunnerConfig(
+        cfg = StationSelection.ExactDARPRouteRunnerConfig(
             init_spec;
             route_length_schedule=[2],
         )
         @test cfg.enrichment.enabled == false
     end
 
-    @testset "AlphaEnrichmentConfig validation" begin
-        @test_throws ArgumentError StationSelection.AlphaEnrichmentConfig(pressure_threshold=0.95, binding_threshold=0.90)
-        @test_throws ArgumentError StationSelection.AlphaEnrichmentConfig(alpha_scale_factor=-0.1)
-        @test_throws ArgumentError StationSelection.AlphaEnrichmentConfig(max_profiles_per_route_sequence=0)
+    @testset "ExactDARPRouteEnrichmentConfig validation" begin
+        @test_throws ArgumentError StationSelection.ExactDARPRouteEnrichmentConfig(pressure_threshold=0.95, binding_threshold=0.90)
+        @test_throws ArgumentError StationSelection.ExactDARPRouteEnrichmentConfig(alpha_scale_factor=-0.1)
+        @test_throws ArgumentError StationSelection.ExactDARPRouteEnrichmentConfig(max_profiles_per_route_sequence=0)
     end
 
     # -------------------------------------------------------------------------
@@ -140,7 +140,7 @@ using Dates
     @testset "_build_enriched_alpha: binding leg gets more capacity" begin
         route     = make_route([1, 2, 3])
         capacity  = 2
-        cfg       = StationSelection.AlphaEnrichmentConfig(
+        cfg       = StationSelection.ExactDARPRouteEnrichmentConfig(
             pressure_threshold=0.70, binding_threshold=0.95, alpha_scale_factor=1.5,
         )
         existing  = Dict((1,2) => 1.0, (1,3) => 1.0, (2,3) => 1.0)
@@ -155,7 +155,7 @@ using Dates
     @testset "_build_enriched_alpha: no pressured leg returns nothing" begin
         route    = make_route([1, 2, 3])
         capacity = 2
-        cfg      = StationSelection.AlphaEnrichmentConfig()
+        cfg      = StationSelection.ExactDARPRouteEnrichmentConfig()
         existing = Dict((1,2) => 1.0, (1,3) => 1.0, (2,3) => 1.0)
         pressure = Dict{Tuple{Int,Int},Float64}()  # nothing is pressured
 
@@ -166,7 +166,7 @@ using Dates
     @testset "_build_enriched_alpha: repeated station route A→B→A" begin
         legs  = [(1, 2), (2, 1)]
         route = StationSelection.RouteData(1, [1, 2, 1], 100.0, legs)
-        cfg   = StationSelection.AlphaEnrichmentConfig(
+        cfg   = StationSelection.ExactDARPRouteEnrichmentConfig(
             pressure_threshold=0.70, binding_threshold=0.95, alpha_scale_factor=1.5,
         )
         existing = Dict((1,2) => 1.0, (2,1) => 1.0)
@@ -248,7 +248,7 @@ using Dates
             )
 
             # vehicle_capacity=1 forces binding on every route
-            model = StationSelection.AlphaRouteModel(
+            model = StationSelection.ExactDARPRouteModel(
                 2, 2;
                 generate_routes=true,
                 max_route_length=3,
@@ -259,7 +259,7 @@ using Dates
                 vehicle_capacity=1,
             )
 
-            enrichment_cfg = StationSelection.AlphaEnrichmentConfig(
+            enrichment_cfg = StationSelection.ExactDARPRouteEnrichmentConfig(
                 enabled=true,
                 pressure_threshold=0.50,
                 binding_threshold=0.90,
@@ -268,7 +268,7 @@ using Dates
                 max_profiles_per_route_sequence=5,
                 max_new_profiles_per_iteration=50,
             )
-            runner_cfg = StationSelection.AlphaRouteRunnerConfig(
+            runner_cfg = StationSelection.ExactDARPRouteRunnerConfig(
                 StationSelection.RoutePoolInitSpec(:generated);
                 route_length_schedule=[2, 3],
                 max_iterations=2,
@@ -276,7 +276,7 @@ using Dates
             )
 
             env = Gurobi.Env()
-            base = StationSelection._build_alpha_route_base(model, data)
+            base = StationSelection._build_exact_darp_route_base(model, data)
             state = StationSelection.initialize_route_pool(
                 runner_cfg.init_spec,
                 data,
@@ -291,7 +291,7 @@ using Dates
 
             pool_before = sum(length(b.routes_by_id) for b in values(state.bucket_states))
 
-            strategy = StationSelection.AlphaRouteIterativeStrategy(runner_cfg)
+            strategy = StationSelection.ExactDARPRouteIterativeStrategy(runner_cfg)
             result = StationSelection.run_iteration_subproblem(
                 strategy, model, data, state;
                 optimizer_env=env, silent=true,

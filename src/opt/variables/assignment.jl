@@ -14,7 +14,7 @@ export add_assignment_variables!
 
 
 # ============================================================================
-# ClusteringTwoStageODMap (ClusteringTwoStageODModel)
+# ClusteringTwoStageODMap (TwoStageODPolicy)
 # ============================================================================
 
 """
@@ -24,7 +24,7 @@ export add_assignment_variables!
         mapping::ClusteringTwoStageODMap;
     )
 
-Add assignment variables x[s][od_idx][pair_idx] for ClusteringTwoStageODModel.
+Add assignment variables x[s][od_idx][pair_idx] for TwoStageODPolicy.
 
 x[s][od_idx][pair_idx] is the integer passenger count from OD pair od_idx in
 scenario s assigned to the corresponding valid pickup/dropoff pair.
@@ -62,11 +62,13 @@ end
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::CompatibilitySetODMap
+        mapping::AggregateODRouteMap
     )
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
     x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
+    u = unmet_demand_active ? [Dict{Int, VariableRef}() for _ in 1:S] : nothing
 
     for s in 1:S
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -74,7 +76,8 @@ function add_assignment_variables!(
             demand = get(mapping.Q_s[s], (o, d), 0)
             if !isempty(valid_pairs) && demand > 0
                 x[s][od_idx] = @variable(m, [1:length(valid_pairs)],
-                    integer = true, lower_bound = 0, upper_bound = demand)
+                    integer = true, lower_bound = 0, upper_bound = 1)
+                unmet_demand_active && (u[s][od_idx] = @variable(m, integer = true, lower_bound = 0, upper_bound = 1))
             else
                 x[s][od_idx] = VariableRef[]
             end
@@ -82,22 +85,23 @@ function add_assignment_variables!(
     end
 
     m[:x] = x
+    unmet_demand_active && (m[:u] = u)
     return JuMP.num_variables(m) - before
 end
 
 
 # ============================================================================
-# ClusteringBaseModelMap (ClusteringBaseModel)
+# ClusteringBaseModelMap (SingleStagePolicy)
 # ============================================================================
 
 # ============================================================================
-# ClusteringTwoStageStationMap (ClusteringTwoStageStationModel)
+# ClusteringTwoStageStationMap (TwoStagePolicy)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringTwoStageStationMap)
 
-Add binary assignment variables x[s][i_idx][j_idx] for ClusteringTwoStageStationModel.
+Add binary assignment variables x[s][i_idx][j_idx] for TwoStagePolicy.
 
 For each scenario s and each demanded station i in that scenario, one binary
 variable is created per admissible cluster center j.
@@ -127,15 +131,15 @@ function add_assignment_variables!(
 end
 
 # ============================================================================
-# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ExactDARPRouteODMap (ExactDARPRouteModel)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData,
-                              mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+                              mapping::ExactDARPRouteODMap)
 
 Add sparse integer assignment variables x[s][t_id][od_idx] for time-bucketed route models
-(RouteVehicleCapacityModel and AlphaRouteModel).
+(ExactDARPRouteModel).
 
 For each OD pair (o,d) in time bucket t of scenario s, one integer variable is created
 per valid (j,k) pair, with upper bound equal to Q_s_t[s][t][(o,d)] (the demand count).
@@ -147,7 +151,7 @@ scenario → t_id → od_idx → pair variables.
 function add_assignment_variables!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = JuMP.num_variables(m)
     S = n_scenarios(data)
@@ -177,13 +181,13 @@ end
 
 
 # ============================================================================
-# ClusteringBaseModelMap (ClusteringBaseModel)
+# ClusteringBaseModelMap (SingleStagePolicy)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Add sparse assignment variables x[i][j_idx] for ClusteringBaseModel.
+Add sparse assignment variables x[i][j_idx] for SingleStagePolicy.
 
 For each station location i, one binary variable is created per admissible
 cluster center j.

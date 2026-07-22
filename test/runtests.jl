@@ -39,10 +39,19 @@ const MOI = JuMP.MOI
     @testset "Utilities" begin
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
-        include("utils/test_alpha_route_runner.jl")
-        include("utils/test_alpha_route_column_generation.jl")
+        include("utils/test_exact_darp_route_runner.jl")
+        include("utils/test_exact_darp_route_column_generation.jl")
         include("utils/test_iterative_route_generation.jl")
         include("utils/test_alpha_profile_enrichment.jl")
+        include("utils/test_generators.jl")
+        include("utils/test_case_generators/test_base_middle_zone.jl")
+        include("utils/test_case_generators/test_test1_vehicle.jl")
+        include("utils/test_case_generators/test_test2_zone_proximity.jl")
+        include("utils/test_case_generators/test_test3_north_shift.jl")
+        include("utils/test_case_generators/test_test4_mirrored_zone.jl")
+        include("utils/test_case_generators/test_test5_triangle.jl")
+        include("utils/test_case_generators/test_test6_bidirectional.jl")
+        include("utils/test_export_variables.jl")
     end
 
     @testset "Data Structures" begin
@@ -51,7 +60,12 @@ const MOI = JuMP.MOI
 
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
-        include("opt/test_compatibility_pricing.jl")
+        include("opt/test_aggregate_od_route_pricing.jl")
+        include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
+        include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
+        include("opt/test_aggregate_od_route_direct_walking.jl")
+        include("opt/test_aggregate_od_route_restricted_mw_cut.jl")
+        include("opt/test_aggregate_od_route_unmet_demand.jl")
     end
 
 end

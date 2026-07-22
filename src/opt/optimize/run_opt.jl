@@ -2,22 +2,14 @@ using Dates
 using Logging
 
 """
-    run_opt(model, data; optimizer_env=nothing, silent=false, show_counts=false,
-            do_optimize=true, warm_start=false, mip_gap=nothing)
+    run_opt(instance, formulation, solver)
 
 Construct and solve a station selection optimization model.
 
 # Arguments
-- `model::AbstractStationSelectionModel`: The model specification (e.g., ClusteringTwoStageODModel)
-- `data::StationSelectionData`: Problem data with stations, requests, and costs
-
-# Keyword Arguments
-- `optimizer_env`: Gurobi environment (created if not provided)
-- `silent::Bool`: Whether to suppress solver output (default: false)
-- `show_counts::Bool`: Whether to print variable/constraint counts before solving (default: false)
-- `do_optimize::Bool`: Whether to run `optimize!` (default: true)
-- `warm_start::Bool`: When true, solve a restricted warm start model first and inject its solution as starting hints (supported by RouteVehicleCapacityModel)
-- `mip_gap::Union{Float64, Nothing}`: MIP optimality gap tolerance; solver stops when gap ≤ this value (default: nothing = Gurobi default 1e-4)
+- `instance::StationSelectionData`: Problem data with stations, requests, and costs
+- `formulation::AbstractStationSelectionModel`: Mathematical formulation
+- `solver::AbstractStationSelectionSolver`: Solve algorithm and execution config
 
 # Returns
 - `OptResult`
@@ -73,7 +65,7 @@ function _run_opt_impl(
 
     if warm_start
         ws_start = now()
-        warm_start_solution = get_warm_start_solution(
+        warm_start_solution = get_exact_darp_route_warm_start_solution(
             model, data, build_result;
             optimizer_env=optimizer_env, silent=false,
             check_feasibility=check_feasibility
@@ -110,6 +102,9 @@ function _run_opt_impl(
         x_val = _value_recursive(m[:x])
         y_val = _value_recursive(m[:y])
         solution = (x_val, y_val)
+        # No-op unless this model built endpoint-nearest zp/zd indicators
+        # (AggregateODRouteModel/RouteCoveringProblem only).
+        assert_endpoint_chain_near_binary(m)
     end
 
     runtime_sec = Dates.value(now() - start_time) / 1000
@@ -134,40 +129,18 @@ function _run_opt_impl(
 end
 
 """
-    run_opt(model::AbstractStationSelectionModel, data; ...) -> OptResult
+    run_opt(instance::StationSelectionData, formulation, solver::DirectSolver) -> OptResult
 
-Generic dispatch: build and solve directly.
+Build and solve a formulation directly.
 """
 function run_opt(
-        model::AbstractStationSelectionModel,
-        data::StationSelectionData;
-        optimizer_env=nothing,
-        silent::Bool=false,
-        show_counts::Bool=false,
-        do_optimize::Bool=true,
-        warm_start::Bool=false,
-        check_feasibility::Bool=true,
-        mip_gap::Union{Float64, Nothing}=nothing,
-        solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
-        output_dir::Union{String, Nothing}=nothing
+        instance::StationSelectionData,
+        formulation::AbstractStationSelectionModel,
+        solver::DirectSolver
     )
-    if solve_strategy isa AbstractIterativeSolveStrategy
-        return run_iterative_solve(
-            solve_strategy,
-            model,
-            data;
-            optimizer_env=optimizer_env,
-            silent=silent,
-            show_counts=show_counts,
-            do_optimize=do_optimize,
-            warm_start=warm_start,
-            check_feasibility=check_feasibility,
-            mip_gap=mip_gap,
-            output_dir=output_dir,
-        ).final_result
-    end
-    if do_optimize
-        feasibility_issue = check_model_feasibility(model, data)
+    cfg = solver.config
+    if cfg.do_optimize
+        feasibility_issue = check_model_feasibility(formulation, instance)
         if !isnothing(feasibility_issue)
             @warn "run_opt: pre-solve feasibility check failed" reason=feasibility_issue
             return OptResult(
@@ -184,105 +157,27 @@ function run_opt(
             )
         end
     end
-    return _run_opt_impl(model, data;
-        optimizer_env=optimizer_env,
-        silent=silent,
-        show_counts=show_counts,
-        do_optimize=do_optimize,
-        warm_start=warm_start,
-        check_feasibility=check_feasibility,
-        mip_gap=mip_gap
+    return _run_opt_impl(formulation, instance;
+        optimizer_env=cfg.optimizer_env,
+        silent=cfg.silent,
+        show_counts=cfg.show_counts,
+        do_optimize=cfg.do_optimize,
+        warm_start=cfg.warm_start,
+        check_feasibility=cfg.check_feasibility,
+        mip_gap=cfg.mip_gap
     )
 end
 
-
-"""
-    run_opt(model::RouteVehicleCapacityModel, data; use_fleet_search=true, ...) -> OptResult
-
-Specialized dispatch for `RouteVehicleCapacityModel`.
-
-When `use_fleet_search=true` (default), delegates to `run_opt_fleet_search`, which
-solves a sequence of `RouteFleetLimitModel` instances (delay_weight=0) with
-increasing fleet size until the fleet constraint is strictly non-binding across all
-time windows and scenarios. This typically converges faster than solving the
-unconstrained model directly.
-
-Set `use_fleet_search=false` to fall back to the direct `build_model + optimize!` path.
-
-# Fleet-search-specific keyword arguments
-- `use_fleet_search::Bool=true`
-- `fleet_search_start::Int=1`: initial fleet size F
-- `fleet_search_max::Union{Int,Nothing}=10000`: hard cap on F
-- `fleet_size_increment::Int=1`: F increment per iteration
-- `unmet_demand_penalty::Float64=1e9`: penalty for unserved demand (must be >> route cost)
-"""
 function run_opt(
-        model::RouteVehicleCapacityModel,
-        data::StationSelectionData;
-        optimizer_env=nothing,
-        silent::Bool=false,
-        show_counts::Bool=false,
-        do_optimize::Bool=true,
-        warm_start::Bool=false,
-        check_feasibility::Bool=true,
-        mip_gap::Union{Float64, Nothing}=nothing,
-        use_fleet_search::Bool=true,
-        fleet_search_start::Int=1,
-        fleet_search_max::Union{Int, Nothing}=10000,
-        fleet_size_increment::Int=1,
-        unmet_demand_penalty::Float64=1e9,
-        solve_strategy::Union{AbstractSolveStrategy, Nothing}=nothing,
-        output_dir::Union{String, Nothing}=nothing
+        instance::StationSelectionData,
+        formulation::AbstractStationSelectionModel,
+        solver::AbstractStationSelectionSolver
     )
-    isnothing(solve_strategy) || throw(ArgumentError("solve_strategy is not supported for RouteVehicleCapacityModel"))
-    rrw_threshold = 0.05
-    use_fleet_search_effective = use_fleet_search && model.route_regularization_weight > rrw_threshold
-    if use_fleet_search && !use_fleet_search_effective
-        println("  [fleet search] skipped: route_regularization_weight=$(model.route_regularization_weight) ≤ $(rrw_threshold), using direct solve")
-        flush(stdout)
-    end
-    if use_fleet_search_effective && do_optimize
-        feasibility_issue = check_model_feasibility(model, data)
-        if !isnothing(feasibility_issue)
-            @warn "run_opt: pre-solve feasibility check failed — skipping fleet search" reason=feasibility_issue
-            return OptResult(
-                MOI.INFEASIBLE,
-                nothing,
-                nothing,
-                0.0,
-                JuMP.Model(),
-                EmptyStationSelectionMap(),
-                nothing,
-                nothing,
-                nothing,
-                Dict{String, Any}("feasibility_issue" => feasibility_issue)
-            )
-        end
-        return run_opt_fleet_search(model, data;
-            optimizer_env        = optimizer_env,
-            silent               = silent,
-            mip_gap              = mip_gap,
-            fleet_search_start   = fleet_search_start,
-            fleet_search_max     = fleet_search_max,
-            fleet_size_increment = fleet_size_increment,
-            unmet_demand_penalty = unmet_demand_penalty,
-            show_counts          = show_counts,
-        )
-    else  # direct solve (low rrw, use_fleet_search=false, or do_optimize=false)
-        return _run_opt_impl(model, data;
-            optimizer_env     = optimizer_env,
-            silent            = silent,
-            show_counts       = show_counts,
-            do_optimize       = do_optimize,
-            warm_start        = warm_start,
-            check_feasibility = check_feasibility,
-            mip_gap           = mip_gap,
-        )
-    end
+    throw(ArgumentError("$(typeof(solver)) is not supported for $(typeof(formulation))"))
 end
 
 
-function get_warm_start_solution(
+function get_exact_darp_route_warm_start_solution(
         model::AbstractStationSelectionModel,
         data::StationSelectionData,
         build_result;

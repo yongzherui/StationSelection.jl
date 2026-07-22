@@ -143,21 +143,21 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
         println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)s")
         println("  - detour_use_flow_bounds=$(model.detour_use_flow_bounds)")
-    elseif model_type == "ClusteringTwoStageODModel"
+    elseif model_type == "TwoStageOD"
         max_walking_distance = get(mc, "max_walking_distance", 300.0)
         in_vehicle_time_weight = get(mc, "in_vehicle_time_weight", 1.0)
-        model = ClusteringTwoStageODModel(
+        model = ClusteringModel(TwoStageODPolicy(
             mc["k"], mc["l"];
             in_vehicle_time_weight=in_vehicle_time_weight,
             max_walking_distance=max_walking_distance
-        )
+        ))
         println("  - k=$(model.k), l=$(model.l), w_ivt=$(model.in_vehicle_time_weight)")
         println("  - max_walking_distance=$(model.max_walking_distance)s")
-    elseif model_type == "ClusteringBaseModel"
-        model = ClusteringBaseModel(mc["k"])
+    elseif model_type == "SingleStage"
+        model = ClusteringModel(SingleStagePolicy(mc["k"]))
         println("  - k=$(model.k) (stations to select)")
     else
-        error("Unknown model type: $model_type. Supported: TwoStageSingleDetourModel, ClusteringTwoStageODModel, ClusteringBaseModel")
+        error("Unknown model type: $model_type. Supported: TwoStageSingleDetourModel, TwoStageOD, SingleStage")
     end
 
     # Run optimization
@@ -165,12 +165,14 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
     optimizer_env = Gurobi.Env()
     silent = get(config["solver"], "silent", true)
     result = run_opt(
+        data,
         model,
-        data;
-        optimizer_env=optimizer_env,
-        silent=silent,
-        show_counts=true,
-        do_optimize=!no_optimize
+        DirectSolver(
+            optimizer_env=optimizer_env,
+            silent=silent,
+            show_counts=true,
+            do_optimize=!no_optimize,
+        )
     )
     variable_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.variables
     constraint_counts = isnothing(result.counts) ? Dict{String, Int}() : result.counts.constraints
@@ -212,12 +214,12 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         model_metadata["routing_delay"] = model.routing_delay
         model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
         model_metadata["max_walking_distance"] = model.max_walking_distance
-    elseif model_type == "ClusteringTwoStageODModel"
+    elseif model_type == "TwoStageOD"
         model_metadata["l"] = model.l
         model_metadata["in_vehicle_time_weight"] = model.in_vehicle_time_weight
         model_metadata["max_walking_distance"] = model.max_walking_distance
     end
-    # ClusteringBaseModel only has k, which is already added
+    # SingleStage only has k, which is already added
 
     metadata = Dict(
         "model" => model_metadata,

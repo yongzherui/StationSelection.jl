@@ -1,12 +1,12 @@
 export RoutePoolInitSpec
 export RoutePoolState
-export AlphaRouteBucketPoolsState
-export AlphaEnrichmentConfig
-export AlphaRouteRunnerConfig
-export AlphaRouteIterationSummary
-export AlphaRouteRunnerResult
-export AlphaRouteColumnGenerationConfig
-export AlphaRouteColumnGenerationRunnerResult
+export ExactDARPRouteBucketPoolsState
+export ExactDARPRouteEnrichmentConfig
+export ExactDARPRouteRunnerConfig
+export ExactDARPRouteIterationSummary
+export ExactDARPRouteRunnerResult
+export ExactDARPRouteColumnGenerationConfig
+export ExactDARPRouteColumnGenerationRunnerResult
 export IterativeRouteGenerationConfig
 
 struct RoutePoolInitSpec
@@ -106,12 +106,12 @@ struct IterativeRouteGenerationConfig
     end
 end
 
-mutable struct AlphaRouteBucketPoolsState
+mutable struct ExactDARPRouteBucketPoolsState
     bucket_states::Dict{Tuple{Int, Int}, RoutePoolState}
     next_global_route_id::Int
 end
 
-struct AlphaEnrichmentConfig
+struct ExactDARPRouteEnrichmentConfig
     enabled                             :: Bool
     pressure_threshold                  :: Float64
     binding_threshold                   :: Float64
@@ -121,7 +121,7 @@ struct AlphaEnrichmentConfig
     max_new_profiles_per_iteration      :: Int
     max_candidate_routes_for_enrichment :: Int
 
-    function AlphaEnrichmentConfig(;
+    function ExactDARPRouteEnrichmentConfig(;
         enabled                             :: Bool    = true,
         pressure_threshold                  :: Float64 = 0.70,
         binding_threshold                   :: Float64 = 0.95,
@@ -154,7 +154,7 @@ struct AlphaEnrichmentConfig
     end
 end
 
-struct AlphaRouteRunnerConfig
+struct ExactDARPRouteRunnerConfig
     init_spec::RoutePoolInitSpec
     iterative::Bool
     max_iterations::Int
@@ -168,9 +168,9 @@ struct AlphaRouteRunnerConfig
     objective_improvement_tol::Float64
     route_pool_change_tol::Float64
     export_iteration_artifacts::Bool
-    enrichment::AlphaEnrichmentConfig
+    enrichment::ExactDARPRouteEnrichmentConfig
 
-    function AlphaRouteRunnerConfig(
+    function ExactDARPRouteRunnerConfig(
         init_spec::RoutePoolInitSpec;
         iterative::Bool=true,
         max_iterations::Int=3,
@@ -184,7 +184,7 @@ struct AlphaRouteRunnerConfig
         objective_improvement_tol::Float64=1e-6,
         route_pool_change_tol::Float64=0.0,
         export_iteration_artifacts::Bool=false,
-        enrichment::AlphaEnrichmentConfig=AlphaEnrichmentConfig(enabled=false),
+        enrichment::ExactDARPRouteEnrichmentConfig=ExactDARPRouteEnrichmentConfig(enabled=false),
     )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         min_theta_to_keep >= 0.0 || throw(ArgumentError("min_theta_to_keep must be non-negative"))
@@ -215,7 +215,7 @@ struct AlphaRouteRunnerConfig
     end
 end
 
-struct AlphaRouteColumnGenerationConfig
+struct ExactDARPRouteColumnGenerationConfig
     init_spec::RoutePoolInitSpec
     max_iterations::Int
     rc_tolerance::Float64
@@ -223,7 +223,7 @@ struct AlphaRouteColumnGenerationConfig
     pricing_time_limit_sec::Float64
     export_iteration_artifacts::Bool
 
-    function AlphaRouteColumnGenerationConfig(;
+    function ExactDARPRouteColumnGenerationConfig(;
         init_spec::RoutePoolInitSpec=RoutePoolInitSpec(:direct_only),
         max_iterations::Int=10,
         rc_tolerance::Float64=-1e-6,
@@ -235,7 +235,7 @@ struct AlphaRouteColumnGenerationConfig
         max_columns_per_iteration > 0 || throw(ArgumentError("max_columns_per_iteration must be positive"))
         pricing_time_limit_sec > 0.0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
         init_spec.mode == :direct_only ||
-            throw(ArgumentError("AlphaRouteColumnGenerationConfig currently requires RoutePoolInitSpec(:direct_only)"))
+            throw(ArgumentError("ExactDARPRouteColumnGenerationConfig currently requires RoutePoolInitSpec(:direct_only)"))
         new(
             init_spec,
             max_iterations,
@@ -247,7 +247,7 @@ struct AlphaRouteColumnGenerationConfig
     end
 end
 
-struct AlphaRouteIterationSummary
+struct ExactDARPRouteIterationSummary
     iteration::Int
     objective_value::Float64
     route_count_before::Int
@@ -265,14 +265,14 @@ struct AlphaRouteIterationSummary
     runtime_sec::Union{Nothing, Float64}
 end
 
-struct AlphaRouteRunnerResult
+struct ExactDARPRouteRunnerResult
     final_result::OptResult
-    iterations::Vector{AlphaRouteIterationSummary}
+    iterations::Vector{ExactDARPRouteIterationSummary}
     convergence_reason::String
-    final_route_pool::AlphaRouteBucketPoolsState
+    final_route_pool::ExactDARPRouteBucketPoolsState
 end
 
-struct AlphaRouteColumnGenerationRunnerResult
+struct ExactDARPRouteColumnGenerationRunnerResult
     final_result::OptResult
     iterations::Vector{Any}
     convergence_reason::String

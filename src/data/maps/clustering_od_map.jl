@@ -1,5 +1,5 @@
 """
-Clustering OD mapping for ClusteringTwoStageODModel.
+Clustering OD mapping for TwoStageODPolicy.
 
 This module provides data structures for mapping scenarios to origin-destination pairs
 for the clustering two-stage optimization (without time dimension).
@@ -9,6 +9,64 @@ using DataFrames
 
 export ClusteringTwoStageODMap
 export create_clustering_two_stage_od_map
+export WALK_ONLY_PAIR
+export is_walk_only_pair
+export is_same_station_pair
+export requires_no_vehicle_route
+export od_pair_walking_cost
+
+"""
+    WALK_ONLY_PAIR
+
+Sentinel `(j, k)` pair meaning "no station/vehicle used — walk directly from
+origin to destination." Station indices start at 1, so `(0, 0)` cannot collide
+with a real station pair.
+"""
+const WALK_ONLY_PAIR = (0, 0)
+
+is_walk_only_pair(pair::Tuple{Int, Int}) = pair == WALK_ONLY_PAIR
+
+"""
+    is_same_station_pair(pair) -> Bool
+
+A real (non-`WALK_ONLY_PAIR`) station pair `(j, j)`: pickup and dropoff both
+resolve to the same open station `j`, so no vehicle trip is needed (the same
+reason `WALK_ONLY_PAIR` needs none), but unlike `WALK_ONLY_PAIR` it still
+requires station `j` itself to be open. Only produced by `compute_valid_jk_pairs`
+when `allow_same_station=true` (`AggregateODRouteModel(unmet_demand_penalty=...)`).
+"""
+is_same_station_pair(pair::Tuple{Int, Int}) = pair[1] == pair[2] && !is_walk_only_pair(pair)
+
+"""
+    requires_no_vehicle_route(pair) -> Bool
+
+Either sentinel that needs no route-covering column: direct walking
+(`WALK_ONLY_PAIR`) or a same-station assignment (`is_same_station_pair`).
+Every call site that currently skips route-coverage/pricing/column logic for
+`is_walk_only_pair` alone must use this combined predicate instead once
+same-station pairs exist, or a same-station `x`/`h` gets forced to 0 by a
+coverage row with no matching route column while the endpoint-chain linking
+simultaneously forces it to 1 — a direct, reachable infeasibility.
+"""
+requires_no_vehicle_route(pair::Tuple{Int, Int}) = is_walk_only_pair(pair) || is_same_station_pair(pair)
+
+"""
+    od_pair_walking_cost(data, o, d, pair) -> Float64
+
+Walking cost of assigning OD pair (o, d) to station pair `pair`. For a real
+station pair (j, k) this is walk(o, j) + walk(k, d). For [`WALK_ONLY_PAIR`]
+it is the direct walk(o, d) — no station is used.
+"""
+function od_pair_walking_cost(
+    data::StationSelectionData,
+    o::Int,
+    d::Int,
+    pair::Tuple{Int, Int},
+)::Float64
+    is_walk_only_pair(pair) && return get_walking_cost(data, o, d)
+    j, k = pair
+    return get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
+end
 
 """
     ClusteringTwoStageODMap
@@ -53,11 +111,17 @@ end
 
 For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 (pickup_idx, dropoff_idx) satisfy both walking distance limits.
+
+`allow_same_station` (off by default, only ever set by `AggregateODRouteModel(unmet_demand_penalty=...)`)
+includes `j==k` real pairs instead of skipping them -- see [`is_same_station_pair`](@ref).
+Both per-side distance checks against `o`/`d` still apply normally with `k=j`.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
-    max_walking_distance::Float64
+    max_walking_distance::Float64;
+    allow_walk_only::Bool=false,
+    allow_same_station::Bool=false,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
@@ -67,13 +131,25 @@ function compute_valid_jk_pairs(
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
-                # we need to skip if they are the same, this results in no meaningful assignment
-                # because it means we ask the request to walk at most <= 2 * max_walking_distance
-                # and they will complete their trip.
-                j == k && continue
+                # station pairs must be distinct by default: j==k would mean
+                # boarding and alighting at the same station, i.e. no vehicle
+                # trip at all -- handled separately below via WALK_ONLY_PAIR,
+                # or (opt-in) as a real same-station pair here.
+                j == k && !allow_same_station && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end
+        end
+        # Walk-only option (opt-in): skip stations entirely if the direct walk
+        # is within 2 * max_walking_distance (the same budget a
+        # station-mediated trip would use: up to max_walking_distance on each
+        # leg). Off by default — real walking costs obey the triangle
+        # inequality, so this condition is satisfied almost any time a real
+        # 2-hop station pair exists, and callers that don't expect a
+        # station-free option (e.g. NearestOpenAggregateODAssignmentPolicy,
+        # Benders, route-pool generation) must opt in deliberately.
+        if allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
+            push!(pairs, WALK_ONLY_PAIR)
         end
         valid_jk_pairs[(o, d)] = pairs
     end
@@ -110,14 +186,14 @@ end
 
 """
     create_clustering_two_stage_od_map(
-        model::ClusteringTwoStageODModel,
+        model::TwoStageODPolicy,
         data::StationSelectionData
     ) -> ClusteringTwoStageODMap
 
 Create a clustering scenario OD map with OD pairs organized by scenario.
 """
 function create_clustering_two_stage_od_map(
-    model::ClusteringTwoStageODModel,
+    model::TwoStageODPolicy,
     data::StationSelectionData
 )::ClusteringTwoStageODMap
 

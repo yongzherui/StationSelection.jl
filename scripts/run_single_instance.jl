@@ -1,7 +1,7 @@
 """
     scripts/run_single_instance.jl
 
-Solve one synthetic compatibility-set instance and write a single-row summary
+Solve one synthetic aggregate OD route instance and write a single-row summary
 CSV plus the CG iteration/column/dual logs.
 
 Designed to be called as a SLURM array task via `sbatch_single_instance.sh`.
@@ -150,7 +150,7 @@ function _write_summary(path::AbstractString, row::NamedTuple)
     CSV.write(path, DataFrame([row]))
 end
 
-function _write_selected_columns(path::AbstractString, result::CompatibilityColumnGenerationResult)
+function _write_selected_columns(path::AbstractString, result::AggregateODRouteColumnGenerationResult)
     column_by_id = Dict(column.id => column for column in result.final_result.mapping.columns)
     rows = NamedTuple[]
     for column_id in result.selected_column_ids
@@ -182,7 +182,7 @@ function main()
     end
 
     println("===========================================")
-    println("CompatibilitySetModel Scaling Experiment")
+    println("AggregateODRouteModel Scaling Experiment")
     println("===========================================")
     @printf("  Instance     : %s\n", INST_NAME)
     @printf("  Grid         : %d×%d (%d stations)\n", NX, NY, NX * NY)
@@ -202,7 +202,7 @@ function main()
     @printf("  Demand set   : %s\n", string(demand_station_ids))
     println()
 
-    model = CompatibilitySetModel(
+    model = AggregateODRouteModel(
         max(1, min(8, data.n_stations));
         route_regularization_weight=ROUTE_REGULARIZATION_WEIGHT,
         repositioning_time=REPOSITIONING_TIME,
@@ -216,7 +216,7 @@ function main()
     )
 
     t0 = time()
-    result = run_compatibility_column_generation(
+    result = run_aggregate_od_route_column_generation(
         model,
         data;
         verbose=false,

@@ -29,7 +29,7 @@ export add_assignment_to_selected_constraints!
 All demand for each OD pair must be assigned across valid station pairs.
     Σⱼₖ x[s][od_idx][j,k] = Q_s[s][(o,d)]  ∀od_idx ∈ Ω_s, s
 
-Used by: ClusteringTwoStageODModel
+Used by: TwoStageODPolicy
 """
 function add_assignment_constraints!(
         m::Model,
@@ -53,17 +53,24 @@ end
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::CompatibilitySetODMap
+        mapping::AggregateODRouteMap
     )
     before = _total_num_constraints(m)
     x = m[:x]
+    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
+    u = unmet_demand_active ? m[:u] : nothing
 
     for s in 1:n_scenarios(data)
         for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
             x_od = get(x[s], od_idx, VariableRef[])
             isempty(x_od) && continue
             demand = get(mapping.Q_s[s], (o, d), 0)
-            @constraint(m, sum(x_od) == demand)
+            demand > 0 || continue
+            if unmet_demand_active
+                @constraint(m, sum(x_od) == u[s][od_idx])
+            else
+                @constraint(m, sum(x_od) == 1.0)
+            end
         end
     end
 
@@ -74,10 +81,10 @@ end
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Each station location must be assigned to exactly one medoid (ClusteringBaseModel).
+Each station location must be assigned to exactly one medoid (SingleStagePolicy).
     Σ_{j ∈ Aᵢ} x[i,j] = 1  ∀i
 
-Used by: ClusteringBaseModel
+Used by: SingleStagePolicy
 """
 function add_assignment_constraints!(
         m::Model,
@@ -130,11 +137,11 @@ end
         mapping::ClusteringTwoStageODMap;
     )
 
-Assignment requires both stations to be active (ClusteringTwoStageODModel).
+Assignment requires both stations to be active (TwoStageODPolicy).
     x[s][od_idx][pair_idx] ≤ Q_s[s][(o,d)] * z[j,s]
     x[s][od_idx][pair_idx] ≤ Q_s[s][(o,d)] * z[k,s]
 
-Used by: ClusteringTwoStageODModel
+Used by: TwoStageODPolicy
 """
 function add_assignment_to_active_constraints!(
         m::Model,
@@ -151,7 +158,9 @@ function add_assignment_to_active_constraints!(
             demand = get(mapping.Q_s[s], (o, d), 0)
             demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
-            for (idx, (j, k)) in enumerate(valid_pairs)
+            for (idx, pair) in enumerate(valid_pairs)
+                is_walk_only_pair(pair) && continue
+                j, k = pair
                 @constraint(m, x[s][od_idx][idx] <= demand * z[j, s])
                 @constraint(m, x[s][od_idx][idx] <= demand * z[k, s])
             end
@@ -191,11 +200,11 @@ end
 
 
 # ============================================================================
-# VehicleCapacityODMap (RouteVehicleCapacityModel — new formulation)
+# ExactDARPRouteODMap (ExactDARPRouteModel)
 # ============================================================================
 
 """
-    add_assignment_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+    add_assignment_constraints!(m, data, mapping::ExactDARPRouteODMap)
 
 All demand for each (OD, time bucket) must be assigned across valid (j,k) pairs.
     Σ_{(j,k)} x[s][t_id][od_idx] == Q_s_t[s][t_id][(o,d)]  ∀(s, t_id, od_idx)
@@ -205,7 +214,7 @@ x is integer-valued; the RHS equals the passenger count for that OD/time/scenari
 function add_assignment_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -228,7 +237,7 @@ end
 
 
 """
-    add_assignment_to_active_constraints!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap})
+    add_assignment_to_active_constraints!(m, data, mapping::ExactDARPRouteODMap)
 
 Assignments require both pickup and dropoff stations to be active (big-M formulation).
     x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[j,s]
@@ -239,7 +248,7 @@ The big-M coefficient equals the per-(OD, time bucket, scenario) demand count.
 function add_assignment_to_active_constraints!(
         m::Model,
         data::StationSelectionData,
-        mapping::Union{VehicleCapacityODMap, AlphaRouteODMap}
+        mapping::ExactDARPRouteODMap
     )
     before = _total_num_constraints(m)
     S = n_scenarios(data)
@@ -255,7 +264,9 @@ function add_assignment_to_active_constraints!(
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
                 x_od = get(x[s][t_id], od_idx, VariableRef[])
                 isempty(x_od) && continue
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
+                for (pair_idx, pair) in enumerate(valid_pairs)
+                    is_walk_only_pair(pair) && continue
+                    j, k = pair
                     @constraint(m, x_od[pair_idx] <= demand * z[j, s])
                     @constraint(m, x_od[pair_idx] <= demand * z[k, s])
                 end
@@ -274,10 +285,10 @@ end
 """
     add_assignment_to_selected_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Assignment can only be made to selected stations (ClusteringBaseModel).
+Assignment can only be made to selected stations (SingleStagePolicy).
     x[i,j] ≤ y[j]  ∀i, j ∈ Aᵢ
 
-Used by: ClusteringBaseModel
+Used by: SingleStagePolicy
 """
 function add_assignment_to_selected_constraints!(
         m::Model,

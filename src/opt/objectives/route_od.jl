@@ -1,5 +1,5 @@
 """
-Objective function for RouteVehicleCapacityModel.
+Objective function for ExactDARPRouteModel.
 
 Walking cost plus route deployment penalty with repositioning time.
 """
@@ -9,12 +9,11 @@ using JuMP
 export set_route_od_objective!
 
 """
-    set_route_od_objective!(m, data, mapping::Union{VehicleCapacityODMap, AlphaRouteODMap};
+    set_route_od_objective!(m, data, mapping::ExactDARPRouteODMap;
                              route_regularization_weight::Float64=1.0,
                              repositioning_time::Float64=20.0)
 
-Set the minimization objective for time-bucketed route models
-(RouteVehicleCapacityModel and AlphaRouteModel).
+Set the minimization objective for ExactDARPRouteModel.
 
     min Σ_s [ Σ_{(o,d,t)∈Ω_s} Σ_{(j,k)} (d_{oj} + d_{kd}) x_{odjkts}
             + μ Σ_{(s,t,r)} (τ^r + ρ) · θ^r_{ts} ]
@@ -26,7 +25,7 @@ a constant repositioning time (seconds) added to each route deployment cost.
 function set_route_od_objective!(
     m::Model,
     data::StationSelectionData,
-    mapping::Union{VehicleCapacityODMap, AlphaRouteODMap};
+    mapping::ExactDARPRouteODMap;
     route_regularization_weight::Float64 = 1.0,
     repositioning_time::Float64 = 20.0,
 )
@@ -42,8 +41,8 @@ function set_route_od_objective!(
                 x_od = get(x[s][t_id], od_idx, VariableRef[])
                 isempty(x_od) && continue
                 valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    cost = get_walking_cost(data, o, j) + get_walking_cost(data, k, d)
+                for (pair_idx, pair) in enumerate(valid_pairs)
+                    cost = od_pair_walking_cost(data, o, d, pair)
                     add_to_expression!(obj, cost, x_od[pair_idx])
                 end
             end

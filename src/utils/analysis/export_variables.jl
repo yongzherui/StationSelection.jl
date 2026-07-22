@@ -18,7 +18,7 @@ Common (all models):
 # Usage
 
 ```julia
-result = run_opt(model, data; ...)
+result = run_opt(data, model, DirectSolver(...))
 export_variables(result, output_dir)
 ```
 """
@@ -29,6 +29,16 @@ using JSON
 using JuMP
 
 export export_variables
+
+"""
+    _exported_station_id(array_idx_to_station_id, idx) -> Int
+
+Map an assignment array index to a station ID for CSV export, with `0`
+reserved for [`WALK_ONLY_PAIR`](@ref) (no station used — direct walk).
+Real station IDs are always >= 1, so `0` is unambiguous.
+"""
+_exported_station_id(array_idx_to_station_id, idx::Int)::Int =
+    idx == 0 ? 0 : array_idx_to_station_id[idx]
 
 
 """
@@ -197,7 +207,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringTwoStageODModel.
+Export assignment variables for TwoStageODPolicy.
 Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String)
@@ -225,8 +235,8 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
                         dest_id = array_idx_to_station_id[d],
                         pickup_idx = j,
                         dropoff_idx = k,
-                        pickup_id = array_idx_to_station_id[j],
-                        dropoff_id = array_idx_to_station_id[k],
+                        pickup_id = _exported_station_id(array_idx_to_station_id, j),
+                        dropoff_id = _exported_station_id(array_idx_to_station_id, k),
                         value = round(Int, val)
                     ))
                 end
@@ -245,7 +255,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringBaseModel.
+Export assignment variables for SingleStagePolicy.
 Structure: x[i] → Vector over admissible cluster centers j.
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringBaseModelMap, export_dir::String)
@@ -285,7 +295,7 @@ end
 """
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String) -> Int
 
-Export assignment variables for ClusteringTwoStageStationModel.
+Export assignment variables for TwoStagePolicy.
 Structure: x[s][i_idx] → Vector over admissible cluster centers j.
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageStationMap, export_dir::String)
@@ -335,7 +345,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringTwoStageODMap, export_dir::String, metadata::Dict)
 
-Export ClusteringTwoStageODModel specific metadata (no additional variable files).
+Export TwoStageODPolicy specific metadata (no additional variable files).
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -360,7 +370,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringBaseModelMap, export_dir::String, metadata::Dict)
 
-Export ClusteringBaseModel specific metadata.
+Export SingleStagePolicy specific metadata.
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -376,7 +386,7 @@ end
 """
     export_model_specific_variables(result::OptResult, mapping::ClusteringTwoStageStationMap, export_dir::String, metadata::Dict)
 
-Export ClusteringTwoStageStationModel specific metadata.
+Export TwoStagePolicy specific metadata.
 """
 function export_model_specific_variables(
     result::OptResult,
@@ -392,178 +402,17 @@ end
 
 
 # =============================================================================
-# VehicleCapacityODMap exports (RouteVehicleCapacityModel — new formulation)
+# ExactDARPRouteODMap exports (ExactDARPRouteModel)
 # =============================================================================
 
 """
-    export_assignment_variables(m, mapping::VehicleCapacityODMap, export_dir) -> Int
+    export_assignment_variables(m, mapping::ExactDARPRouteODMap, export_dir) -> Int
 
-Export assignment variables for RouteVehicleCapacityModel (new formulation).
-Structure: x[s][t_id][od_idx] → Vector{VariableRef} (one per valid (j,k) pair).
-Columns: scenario, t_id, od_idx, origin_id, dest_id, pickup_id, dropoff_id, value.
-Only rows with value > 0 are written (integer variables).
+Export assignment variables for ExactDARPRouteModel.
 """
 function export_assignment_variables(
     m::JuMP.Model,
-    mapping::VehicleCapacityODMap,
-    export_dir::String
-)
-    if !haskey(m.obj_dict, :x)
-        return 0
-    end
-
-    x = m[:x]
-    id_map = mapping.array_idx_to_station_id
-
-    rows = []
-    for (s, x_s) in enumerate(x)
-        for (t_id, x_t) in x_s
-            od_pairs = _time_od_pairs(mapping, s, t_id)
-            for (od_idx, x_od) in x_t
-                isempty(x_od) && continue
-                o, d = od_pairs[od_idx]
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    val = JuMP.value(x_od[pair_idx])
-                    val > 0 || continue
-                    push!(rows, (
-                        scenario   = s,
-                        t_id       = t_id,
-                        od_idx     = od_idx,
-                        origin_id  = id_map[o],
-                        dest_id    = id_map[d],
-                        pickup_id  = id_map[j],
-                        dropoff_id = id_map[k],
-                        value      = round(Int, val)
-                    ))
-                end
-            end
-        end
-    end
-
-    df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
-    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
-    return nrow(df)
-end
-
-
-"""
-    export_model_specific_variables(result, mapping::VehicleCapacityODMap, export_dir, metadata)
-
-Export RouteVehicleCapacityModel (new formulation) specific variables:
-theta_r_ts.csv, alpha_r_jkts.csv.
-"""
-function export_model_specific_variables(
-    result::OptResult,
-    mapping::VehicleCapacityODMap,
-    export_dir::String,
-    metadata::Dict
-)
-    metadata["model_type"] = "RouteVehicleCapacityModel"
-    metadata["n_routes"]   = sum(
-        sum(length(v) for v in values(rs); init = 0)
-        for rs in values(mapping.routes_s); init = 0
-    )
-
-    n_theta = _export_theta_r_ts(result.model, mapping, export_dir)
-    n_alpha = _export_alpha_r_jkts(result.model, mapping, export_dir)
-
-    metadata["n_theta_r_ts_nonzero"]   = n_theta
-    metadata["n_alpha_r_jkts_nonzero"] = n_alpha
-end
-
-
-"""
-    _export_theta_r_ts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
-
-Export timed route deployment variables (theta_r_ts) to `theta_r_ts.csv`.
-Key: (s, t_id, r_idx). Columns: scenario, t_id, route_idx, station_ids, travel_time, value.
-Only rows with value > 0.5 are written.
-"""
-function _export_theta_r_ts(
-    m::JuMP.Model,
-    mapping::VehicleCapacityODMap,
-    export_dir::String
-)
-    if !haskey(m.obj_dict, :theta_r_ts)
-        println("    ✓ theta_r_ts.csv (0 deployments — theta_r_ts not present)")
-        return 0
-    end
-
-    rows = []
-    for ((s, t_id, r_idx), var) in m[:theta_r_ts]
-        val = JuMP.value(var)
-        val > 0.5 || continue
-        route = mapping.routes_s[s][t_id][r_idx]
-        push!(rows, (
-            scenario    = s,
-            t_id        = t_id,
-            route_idx   = r_idx,
-            station_ids = join((mapping.array_idx_to_station_id[idx] for idx in route.station_indices), "|"),
-            travel_time = route.travel_time,
-            value       = round(Int, val)
-        ))
-    end
-
-    df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
-    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments)")
-    return nrow(df)
-end
-
-
-"""
-    _export_alpha_r_jkts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
-
-Export route-OD assignment indicator variables (alpha_r_jkts) to `alpha_r_jkts.csv`.
-Key: (s, r_idx, j_idx, k_idx, t_id). Columns: scenario, t_id, route_idx, pickup_id, dropoff_id, value.
-Only rows with value > 0 are written.
-"""
-function _export_alpha_r_jkts(
-    m::JuMP.Model,
-    mapping::VehicleCapacityODMap,
-    export_dir::String
-)
-    if !haskey(m.obj_dict, :alpha_r_jkts)
-        println("    ✓ alpha_r_jkts.csv (0 rows — alpha_r_jkts not present)")
-        return 0
-    end
-
-    id_map = mapping.array_idx_to_station_id
-    rows = []
-    for ((s, r_idx, j_idx, k_idx, t_id), var) in m[:alpha_r_jkts]
-        val = JuMP.value(var)
-        val > 0 || continue
-        push!(rows, (
-            scenario   = s,
-            t_id       = t_id,
-            route_idx  = r_idx,
-            pickup_id  = id_map[j_idx],
-            dropoff_id = id_map[k_idx],
-            value      = round(Int, val)
-        ))
-    end
-
-    df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "alpha_r_jkts.csv"), df)
-    println("    ✓ alpha_r_jkts.csv ($(nrow(df)) rows)")
-    return nrow(df)
-end
-
-
-# =============================================================================
-# AlphaRouteODMap exports (AlphaRouteModel)
-# =============================================================================
-
-"""
-    export_assignment_variables(m, mapping::AlphaRouteODMap, export_dir) -> Int
-
-Export assignment variables for AlphaRouteModel. Same structure as VehicleCapacityODMap.
-"""
-function export_assignment_variables(
-    m::JuMP.Model,
-    mapping::AlphaRouteODMap,
+    mapping::ExactDARPRouteODMap,
     export_dir::String
 )
     if !haskey(m.obj_dict, :x)
@@ -590,8 +439,8 @@ function export_assignment_variables(
                         od_idx     = od_idx,
                         origin_id  = id_map[o],
                         dest_id    = id_map[d],
-                        pickup_id  = id_map[j],
-                        dropoff_id = id_map[k],
+                        pickup_id  = _exported_station_id(id_map, j),
+                        dropoff_id = _exported_station_id(id_map, k),
                         value      = round(Int, val)
                     ))
                 end
@@ -607,18 +456,18 @@ end
 
 
 """
-    export_model_specific_variables(result, mapping::AlphaRouteODMap, export_dir, metadata)
+    export_model_specific_variables(result, mapping::ExactDARPRouteODMap, export_dir, metadata)
 
-Export AlphaRouteModel-specific variables: theta_r_ts.csv.
+Export ExactDARPRouteModel-specific variables: theta_r_ts.csv.
 Alpha values are fixed parameters (not variables); the input CSV is the source of record.
 """
 function export_model_specific_variables(
     result    :: OptResult,
-    mapping   :: AlphaRouteODMap,
+    mapping   :: ExactDARPRouteODMap,
     export_dir :: String,
     metadata  :: Dict
 )
-    metadata["model_type"] = "AlphaRouteModel"
+    metadata["model_type"] = "ExactDARPRouteModel"
     metadata["n_routes"]   = sum(
         sum(length(v) for v in values(rs); init = 0)
         for rs in values(mapping.routes_s); init = 0
@@ -630,7 +479,7 @@ end
 
 
 """
-    _arm_export_theta_r_ts(m, mapping::AlphaRouteODMap, export_dir) -> Int
+    _arm_export_theta_r_ts(m, mapping::ExactDARPRouteODMap, export_dir) -> Int
 
 Export theta_r_ts variables to `theta_r_ts.csv`.
 Columns: scenario, t_id, route_id, route_idx, n_stops, is_direct, station_ids, travel_time, value.
@@ -638,7 +487,7 @@ Only rows with value > 0.5 are written.
 """
 function _arm_export_theta_r_ts(
     m          :: JuMP.Model,
-    mapping    :: AlphaRouteODMap,
+    mapping    :: ExactDARPRouteODMap,
     export_dir :: String
 )
     if !haskey(m.obj_dict, :theta_r_ts)
@@ -682,128 +531,6 @@ function _arm_export_theta_r_ts(
     println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments: $n_direct direct, $n_multileg multi-leg)")
     return nrow(df)
 end
-
-
-
-# =============================================================================
-# FleetLimitODMap exports (RouteFleetLimitModel)
-# =============================================================================
-
-"""
-    export_station_mapping(mapping::FleetLimitODMap, export_dir)
-
-Delegate to inner VehicleCapacityODMap.
-"""
-function export_station_mapping(mapping::FleetLimitODMap, export_dir::String)
-    export_station_mapping(mapping.inner, export_dir)
-end
-
-"""
-    export_scenario_info(mapping::FleetLimitODMap, export_dir)
-
-Delegate to inner VehicleCapacityODMap.
-"""
-function export_scenario_info(mapping::FleetLimitODMap, export_dir::String)
-    export_scenario_info(mapping.inner, export_dir)
-end
-
-"""
-    export_station_selection(m, mapping::FleetLimitODMap, export_dir) -> Int
-
-Delegate to base AbstractStationSelectionMap method (uses mapping.array_idx_to_station_id).
-"""
-function export_station_selection(m::JuMP.Model, mapping::FleetLimitODMap, export_dir::String)
-    export_station_selection(m, mapping.inner, export_dir)
-end
-
-"""
-    export_scenario_activation(m, mapping::FleetLimitODMap, export_dir) -> Int
-
-Delegate to base AbstractStationSelectionMap method.
-"""
-function export_scenario_activation(m::JuMP.Model, mapping::FleetLimitODMap, export_dir::String)
-    export_scenario_activation(m, mapping.inner, export_dir)
-end
-
-"""
-    export_assignment_variables(m, mapping::FleetLimitODMap, export_dir) -> Int
-
-Export assignment variables for RouteFleetLimitModel (same structure as VehicleCapacityODMap).
-"""
-function export_assignment_variables(
-    m::JuMP.Model,
-    mapping::FleetLimitODMap,
-    export_dir::String
-)
-    export_assignment_variables(m, mapping.inner, export_dir)
-end
-
-"""
-    export_model_specific_variables(result, mapping::FleetLimitODMap, export_dir, metadata)
-
-Export RouteFleetLimitModel-specific variables: theta_r_ts.csv, alpha_r_jkts.csv, v_jkts.csv.
-"""
-function export_model_specific_variables(
-    result     :: OptResult,
-    mapping    :: FleetLimitODMap,
-    export_dir :: String,
-    metadata   :: Dict
-)
-    metadata["model_type"] = "RouteFleetLimitModel"
-    metadata["fleet_size"] = mapping.fleet_size
-    metadata["n_routes"]   = sum(
-        sum(length(v) for v in values(rs); init = 0)
-        for rs in values(mapping.inner.routes_s); init = 0
-    )
-
-    n_theta = _export_theta_r_ts(result.model, mapping.inner, export_dir)
-    n_alpha = _export_alpha_r_jkts(result.model, mapping.inner, export_dir)
-    n_v     = _export_v_jkts(result.model, mapping.inner, export_dir)
-
-    metadata["n_theta_r_ts_nonzero"]   = n_theta
-    metadata["n_alpha_r_jkts_nonzero"] = n_alpha
-    metadata["n_v_jkts_nonzero"]       = n_v
-end
-
-
-"""
-    _export_v_jkts(m, mapping::VehicleCapacityODMap, export_dir) -> Int
-
-Export unmet demand variables v_{jkts} to `v_jkts.csv`.
-Key: (s, j_idx, k_idx, t_id). Columns: scenario, t_id, pickup_id, dropoff_id, value.
-Only rows with value > 0 are written.
-"""
-function _export_v_jkts(
-    m          :: JuMP.Model,
-    mapping    :: VehicleCapacityODMap,
-    export_dir :: String
-)
-    if !haskey(m.obj_dict, :v_jkts)
-        println("    ✓ v_jkts.csv (0 rows — v_jkts not present)")
-        return 0
-    end
-
-    id_map = mapping.array_idx_to_station_id
-    rows   = []
-    for ((s, j_idx, k_idx, t_id), var) in m[:v_jkts]
-        val = JuMP.value(var)
-        val > 0 || continue
-        push!(rows, (
-            scenario   = s,
-            t_id       = t_id,
-            pickup_id  = id_map[j_idx],
-            dropoff_id = id_map[k_idx],
-            value      = round(Int, val)
-        ))
-    end
-
-    df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "v_jkts.csv"), df)
-    println("    ✓ v_jkts.csv ($(nrow(df)) unmet demand rows)")
-    return nrow(df)
-end
-
-
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 
@@ -846,4 +573,155 @@ function export_flow_activation_variables(
     CSV.write(joinpath(export_dir, "flow_activation.csv"), df)
     println("    ✓ flow_activation.csv ($(nrow(df)) activated routes)")
     return nrow(df)
+end
+
+
+# =============================================================================
+# AggregateODRouteMap exports (AggregateODRouteModel, RouteCoveringProblem)
+# =============================================================================
+
+"""
+    export_assignment_variables(m, mapping::AggregateODRouteMap, export_dir) -> Int
+
+Export assignment variables for AggregateODRouteModel / RouteCoveringProblem.
+Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs (same
+shape as ClusteringTwoStageODMap). Adds a `demand` column from mapping.Q_s.
+"""
+function export_assignment_variables(
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    export_dir::String
+)
+    if !haskey(m.obj_dict, :x)
+        return 0
+    end
+
+    x = m[:x]
+    array_idx_to_station_id = mapping.array_idx_to_station_id
+
+    rows = []
+    for (s, x_s) in enumerate(x)
+        od_pairs = mapping.Omega_s[s]
+        for (od_idx, x_od) in x_s
+            isempty(x_od) && continue
+            o, d = od_pairs[od_idx]
+            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+            demand = get(mapping.Q_s[s], (o, d), 0)
+            for (pair_idx, var) in enumerate(x_od)
+                val = JuMP.value(var)
+                if val > 0.5
+                    j, k = valid_pairs[pair_idx]
+                    push!(rows, (
+                        scenario = s,
+                        od_idx = od_idx,
+                        origin_id = array_idx_to_station_id[o],
+                        dest_id = array_idx_to_station_id[d],
+                        pickup_idx = j,
+                        dropoff_idx = k,
+                        pickup_id = _exported_station_id(array_idx_to_station_id, j),
+                        dropoff_id = _exported_station_id(array_idx_to_station_id, k),
+                        demand = demand,
+                        value = round(Int, val)
+                    ))
+                end
+            end
+        end
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
+    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
+    return nrow(df)
+end
+
+
+"""
+    _export_route_columns(mapping::AggregateODRouteMap, export_dir) -> Int
+
+Export the scenario-independent pool of AggregateODRouteColumns to
+`route_columns.csv`. One row per column. Station order is taken from
+`column.metadata["route"]` when present (CG-generated columns); for
+singleton columns (metadata only has "initialization"=>"singleton", no
+"route" key) the two stations of the column's single od_pair are used.
+"""
+function _export_route_columns(mapping::AggregateODRouteMap, export_dir::String)
+    id_map = mapping.array_idx_to_station_id
+    rows = []
+    for column in mapping.columns
+        station_idxs = haskey(column.metadata, "route") ?
+            collect(column.metadata["route"]) :
+            collect(column.od_pairs[1])
+        push!(rows, (
+            column_id = column.id,
+            n_stations = length(station_idxs),
+            n_od_pairs = length(column.od_pairs),
+            station_ids = join((id_map[idx] for idx in station_idxs), "|"),
+            od_pairs = join(("$(id_map[j])-$(id_map[k])" for (j, k) in column.od_pairs), ";"),
+            tau = column.tau,
+            initialization = string(get(column.metadata, "initialization", ""))
+        ))
+    end
+
+    df = DataFrame(rows)
+    CSV.write(joinpath(export_dir, "route_columns.csv"), df)
+    println("    ✓ route_columns.csv ($(nrow(df)) columns in pool)")
+    return nrow(df)
+end
+
+
+"""
+    _export_route_activations(m, mapping::AggregateODRouteMap, export_dir) -> Int
+
+Export per-scenario route activation (theta_compat) to `route_activations.csv`.
+Only rows with value > 0.5 (theta_compat is built for every (column, scenario)
+pair regardless of activation — see add_aggregate_od_route_theta_variables!).
+"""
+function _export_route_activations(
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    export_dir::String
+)
+    empty_df() = DataFrame(scenario=Int[], column_id=Int[], value=Int[])
+
+    if !haskey(m.obj_dict, :theta_compat)
+        CSV.write(joinpath(export_dir, "route_activations.csv"), empty_df())
+        println("    ✓ route_activations.csv (0 activations — theta_compat not present)")
+        return 0
+    end
+
+    rows = []
+    for ((column_id, s), var) in m[:theta_compat]
+        val = JuMP.value(var)
+        val > 0.5 || continue
+        push!(rows, (scenario = s, column_id = column_id, value = round(Int, val)))
+    end
+
+    df = isempty(rows) ? empty_df() : sort!(DataFrame(rows), [:scenario, :column_id])
+    CSV.write(joinpath(export_dir, "route_activations.csv"), df)
+    println("    ✓ route_activations.csv ($(nrow(df)) activations)")
+    return nrow(df)
+end
+
+
+"""
+    export_model_specific_variables(result, mapping::AggregateODRouteMap, export_dir, metadata)
+
+Export AggregateODRouteModel/RouteCoveringProblem-specific variables:
+route_columns.csv (static route pool) and route_activations.csv
+(per-scenario theta_compat activations).
+"""
+function export_model_specific_variables(
+    result::OptResult,
+    mapping::AggregateODRouteMap,
+    export_dir::String,
+    metadata::Dict
+)
+    metadata["model_type"] = "AggregateODRouteModel"
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_route_columns_in_pool"] = length(mapping.columns)
+
+    n_columns = _export_route_columns(mapping, export_dir)
+    n_activations = _export_route_activations(result.model, mapping, export_dir)
+    metadata["n_route_columns_exported"] = n_columns
+    metadata["n_route_activations"] = n_activations
 end

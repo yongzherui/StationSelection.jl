@@ -5,7 +5,7 @@ struct EmptyStationSelectionMap <: AbstractStationSelectionMap end
     check_model_feasibility(model, data) -> Union{Nothing, String}
 
 Pre-solve feasibility check dispatched by model type. Called by `run_opt` before
-entering the main solve (or fleet search loop for RouteVehicleCapacityModel).
+entering the main solve.
 Returns `nothing` if the instance looks solvable, or a non-nothing String describing
 the detected issue for early exit.
 
@@ -23,7 +23,7 @@ end
 
 Legacy feasibility hook for OD-style models.
 
-This is intentionally disabled for now because `ClusteringTwoStageODModel` is not a
+This is intentionally disabled for now because `TwoStageODPolicy` is not a
 good proxy for the models we want to run. We will replace this with a dedicated
 `FeasibilityModel` in a follow-up change.
 """

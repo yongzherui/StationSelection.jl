@@ -1,5 +1,5 @@
 """
-Exhaustive DFS-based route generation for RouteVehicleCapacityModel.
+Exhaustive DFS-based route generation for route pools.
 
 Generates all demand-justified routes up to `max_route_length` stops using a
 coverage/salvageability pruning rule.

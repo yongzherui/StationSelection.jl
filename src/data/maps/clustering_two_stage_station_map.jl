@@ -1,5 +1,5 @@
 """
-Clustering map for ClusteringTwoStageStationModel.
+Clustering map for TwoStagePolicy.
 
 This module aggregates scenario demand to endpoint counts q_{is} and enumerates
 admissible i→j assignments for each demand station i.
@@ -64,7 +64,7 @@ function compute_valid_j_assignments(
 end
 
 function create_clustering_two_stage_station_map(
-    model::ClusteringTwoStageStationModel,
+    model::TwoStagePolicy,
     data::StationSelectionData
 )::ClusteringTwoStageStationMap
     scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)

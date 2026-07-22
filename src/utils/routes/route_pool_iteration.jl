@@ -85,7 +85,7 @@ function _prune_route_pool!(
 end
 
 function _enforce_global_total_route_cap!(
-    global_state::AlphaRouteBucketPoolsState,
+    global_state::ExactDARPRouteBucketPoolsState,
     usage_by_bucket::Dict{Tuple{Int, Int}, Dict{Int, Float64}},
     min_theta_to_keep::Float64,
     total_target_size::Int,
@@ -130,7 +130,7 @@ function _enforce_global_total_route_cap!(
 end
 
 function _expand_route_pool!(
-    global_state::AlphaRouteBucketPoolsState,
+    global_state::ExactDARPRouteBucketPoolsState,
     bucket_state::RoutePoolState,
     data::StationSelectionData,
     target_max_route_length::Int;

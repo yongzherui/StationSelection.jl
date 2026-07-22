@@ -1,7 +1,7 @@
 """
     scripts/generate_job_list.jl
 
-Generate the tab-separated job list for the compatibility-set scaling sweep.
+Generate the tab-separated job list for the aggregate OD route scaling sweep.
 Each row encodes one `(nx, ny, n_requests, seed)` instance by its generation
 parameters, so the sbatch task can synthesize the input data on the fly.
 
@@ -9,7 +9,7 @@ Usage:
     julia --project=. scripts/generate_job_list.jl [outpath]
 
 Default output:
-    experiments/compatibility_set_scaling/jobs.txt
+    experiments/aggregate_od_route_scaling/jobs.txt
 """
 
 const GRIDS = [(4, 4), (6, 6), (8, 8), (10, 10)]
@@ -18,7 +18,7 @@ const SEEDS = [42, 123, 999]
 
 function main()
     outpath = length(ARGS) >= 1 ? ARGS[1] :
-        joinpath(@__DIR__, "..", "experiments", "compatibility_set_scaling", "jobs.txt")
+        joinpath(@__DIR__, "..", "experiments", "aggregate_od_route_scaling", "jobs.txt")
 
     mkpath(dirname(outpath))
 

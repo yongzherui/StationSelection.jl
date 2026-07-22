@@ -56,8 +56,8 @@ end
     # Create Gurobi environment once
     env = Gurobi.Env()
 
-    @testset "ClusteringTwoStageODModel build" begin
-        model = ClusteringTwoStageODModel(2, 3)
+    @testset "TwoStageODPolicy build" begin
+        model = ClusteringModel(TwoStageODPolicy(2, 3))
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -99,8 +99,8 @@ end
         @test haskey(object_dictionary(m), :x)
     end
 
-    @testset "ClusteringBaseModel build" begin
-        model = ClusteringBaseModel(3)
+    @testset "SingleStagePolicy build" begin
+        model = ClusteringModel(SingleStagePolicy(3))
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -138,16 +138,62 @@ end
         @test haskey(object_dictionary(m), :x)
     end
 
-    @testset "run_opt without optimization" begin
-        # Test run_opt with do_optimize=false for all three models
+    @testset "TwoStagePolicy build" begin
+        model = ClusteringModel(TwoStagePolicy(2, 3))
 
-        @testset "ClusteringTwoStageODModel" begin
-            model = ClusteringTwoStageODModel(2, 3)
+        build_result = StationSelection.build_model(
+            model, data; optimizer_env=env
+        )
+        m = build_result.model
+        var_counts = build_result.counts.variables
+        con_counts = build_result.counts.constraints
+        extra_counts = build_result.counts.extras
+
+        # Check that model was created
+        @test m isa JuMP.Model
+
+        # Check variables exist
+        @test haskey(var_counts, "station_selection")
+        @test haskey(var_counts, "scenario_activation")
+        @test haskey(var_counts, "assignment")
+
+        @test var_counts["station_selection"] == 5  # n stations
+        @test var_counts["scenario_activation"] == 5  # n * S = 5 * 1
+
+        # Check constraints exist
+        @test haskey(con_counts, "station_limit")
+        @test haskey(con_counts, "scenario_activation_limit")
+        @test haskey(con_counts, "activation_linking")
+        @test haskey(con_counts, "assignment")
+        @test haskey(con_counts, "assignment_to_active")
+
+        @test con_counts["station_limit"] == 1
+        @test con_counts["scenario_activation_limit"] == 1
+        @test con_counts["activation_linking"] == 5
+
+        # Check extra counts
+        @test haskey(extra_counts, "total_endpoint_groups")
+        @test extra_counts["total_endpoint_groups"] > 0
+
+        # Check model variables are accessible
+        @test haskey(object_dictionary(m), :y)
+        @test haskey(object_dictionary(m), :z)
+        @test haskey(object_dictionary(m), :x)
+    end
+
+    @testset "run_opt without optimization" begin
+        # Test run_opt with do_optimize=false for all policies
+
+        @testset "TwoStageODPolicy" begin
+            model = ClusteringModel(TwoStageODPolicy(2, 3))
             result = run_opt(
-                model, data;
-                optimizer_env=env,
-                silent=true,
-                do_optimize=false
+                data,
+                model,
+                DirectSolver(
+                    optimizer_env=env,
+                    silent=true,
+                    do_optimize=false,
+                )
             )
 
             @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
@@ -158,13 +204,36 @@ end
             @test !isempty(result.counts.constraints)
         end
 
-        @testset "ClusteringBaseModel" begin
-            model = ClusteringBaseModel(3)
+        @testset "SingleStagePolicy" begin
+            model = ClusteringModel(SingleStagePolicy(3))
             result = run_opt(
-                model, data;
-                optimizer_env=env,
-                silent=true,
-                do_optimize=false
+                data,
+                model,
+                DirectSolver(
+                    optimizer_env=env,
+                    silent=true,
+                    do_optimize=false,
+                )
+            )
+
+            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
+            @test isnothing(result.objective_value)
+            @test isnothing(result.solution)
+            @test result.model isa JuMP.Model
+            @test !isempty(result.counts.variables)
+            @test !isempty(result.counts.constraints)
+        end
+
+        @testset "TwoStagePolicy" begin
+            model = ClusteringModel(TwoStagePolicy(2, 3))
+            result = run_opt(
+                data,
+                model,
+                DirectSolver(
+                    optimizer_env=env,
+                    silent=true,
+                    do_optimize=false,
+                )
             )
 
             @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
@@ -178,7 +247,7 @@ end
 
     @testset "Mapping creation" begin
         @testset "ClusteringTwoStageODMap" begin
-            model = ClusteringTwoStageODModel(2, 3)
+            model = ClusteringModel(TwoStageODPolicy(2, 3))
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -190,7 +259,7 @@ end
         end
 
         @testset "ClusteringBaseModelMap" begin
-            model = ClusteringBaseModel(3)
+            model = ClusteringModel(SingleStagePolicy(3))
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -202,18 +271,35 @@ end
             total_requests = sum(values(mapping.request_counts))
             @test total_requests == 12  # 6 requests × 2 (pickup + dropoff)
         end
+
+        @testset "ClusteringTwoStageStationMap" begin
+            model = ClusteringModel(TwoStagePolicy(2, 3))
+            mapping = StationSelection.create_map(model, data)
+
+            @test length(mapping.station_id_to_array_idx) == 5
+            @test length(mapping.array_idx_to_station_id) == 5
+            @test length(mapping.scenarios) == 1
+            @test haskey(mapping.I_s, 1)
+            @test haskey(mapping.q_s, 1)
+            @test length(mapping.I_s[1]) > 0
+        end
     end
 
     @testset "Model construction validation" begin
-        @testset "ClusteringTwoStageODModel" begin
-            @test_throws ArgumentError ClusteringTwoStageODModel(0, 5)   # k must be positive
-            @test_throws ArgumentError ClusteringTwoStageODModel(5, 3)   # l must be >= k
-            @test_throws ArgumentError ClusteringTwoStageODModel(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
+        @testset "TwoStageODPolicy" begin
+            @test_throws ArgumentError TwoStageODPolicy(0, 5)   # k must be positive
+            @test_throws ArgumentError TwoStageODPolicy(5, 3)   # l must be >= k
+            @test_throws ArgumentError TwoStageODPolicy(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
         end
 
-        @testset "ClusteringBaseModel" begin
-            @test_throws ArgumentError ClusteringBaseModel(0)   # k must be positive
-            @test_throws ArgumentError ClusteringBaseModel(-1)  # k must be positive
+        @testset "SingleStagePolicy" begin
+            @test_throws ArgumentError SingleStagePolicy(0)   # k must be positive
+            @test_throws ArgumentError SingleStagePolicy(-1)  # k must be positive
+        end
+
+        @testset "TwoStagePolicy" begin
+            @test_throws ArgumentError TwoStagePolicy(0, 5)   # k must be positive
+            @test_throws ArgumentError TwoStagePolicy(5, 3)   # l must be >= k
         end
     end
 end

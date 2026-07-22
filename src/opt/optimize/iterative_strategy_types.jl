@@ -1,13 +1,419 @@
+export AbstractStationSelectionSolver
+export SolverConfig
+export DirectSolver
+export ColumnGenerationSolver
+export AbstractBendersDecomposition
+export BendersY
+export BendersXY
+export BendersYZ
+export BendersYZH
+export AbstractBendersCutMode
+export SingleCut
+export MultiCut
+export BendersSolver
+export HeuristicSolver
+export HeuristicEnumerationSolver
 export AbstractSolveStrategy
 export AbstractIterativeSolveStrategy
-export DirectSolveStrategy
 export IterativeSolveIterationSummary
 export IterativeSolveResult
 
+abstract type AbstractStationSelectionSolver end
+
+struct SolverConfig
+    optimizer_env::Any
+    silent::Bool
+    show_counts::Bool
+    do_optimize::Bool
+    warm_start::Bool
+    check_feasibility::Bool
+    mip_gap::Union{Float64, Nothing}
+    output_dir::Union{String, Nothing}
+
+    function SolverConfig(;
+        optimizer_env=nothing,
+        silent::Bool=false,
+        show_counts::Bool=false,
+        do_optimize::Bool=true,
+        warm_start::Bool=false,
+        check_feasibility::Bool=true,
+        mip_gap::Union{Number, Nothing}=nothing,
+        output_dir::Union{AbstractString, Nothing}=nothing,
+    )
+        resolved_mip_gap = isnothing(mip_gap) ? nothing : Float64(mip_gap)
+        resolved_output_dir = isnothing(output_dir) ? nothing : String(output_dir)
+        new(
+            optimizer_env,
+            silent,
+            show_counts,
+            do_optimize,
+            warm_start,
+            check_feasibility,
+            resolved_mip_gap,
+            resolved_output_dir,
+        )
+    end
+end
+
+struct DirectSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    max_enumerated_routes::Int
+    max_enumeration_time_sec::Float64
+
+    function DirectSolver(
+        config::SolverConfig;
+        max_enumerated_routes::Int=10_000,
+        max_enumeration_time_sec::Number=30.0,
+    )
+        max_enumerated_routes > 0 ||
+            throw(ArgumentError("max_enumerated_routes must be positive"))
+        max_enumeration_time_sec > 0 ||
+            throw(ArgumentError("max_enumeration_time_sec must be positive"))
+        new(config, max_enumerated_routes, Float64(max_enumeration_time_sec))
+    end
+end
+
+function DirectSolver(;
+    config::Union{SolverConfig, Nothing}=nothing,
+    max_enumerated_routes::Int=10_000,
+    max_enumeration_time_sec::Number=30.0,
+    kwargs...
+)
+    cfg = isnothing(config) ? SolverConfig(; kwargs...) : config
+    return DirectSolver(
+        cfg;
+        max_enumerated_routes=max_enumerated_routes,
+        max_enumeration_time_sec=max_enumeration_time_sec,
+    )
+end
+
+struct ColumnGenerationSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    max_iterations::Int
+    max_columns_per_iteration::Int
+    n_candidates::Int
+    reduced_cost_tol::Float64
+    pricing_time_limit_sec::Float64
+    final_ip_time_limit_sec::Float64
+    log_dir::Union{String, Nothing}
+
+    function ColumnGenerationSolver(;
+        config::SolverConfig=SolverConfig(),
+        max_iterations::Int=10_000,
+        max_columns_per_iteration::Int=20,
+        n_candidates::Int=max_columns_per_iteration,
+        reduced_cost_tol::Number=1e-6,
+        pricing_time_limit_sec::Number=30.0,
+        final_ip_time_limit_sec::Number=3600.0,
+        log_dir::Union{AbstractString, Nothing}=nothing,
+    )
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        max_columns_per_iteration > 0 ||
+            throw(ArgumentError("max_columns_per_iteration must be positive"))
+        n_candidates >= max_columns_per_iteration ||
+            throw(ArgumentError("n_candidates must be >= max_columns_per_iteration"))
+        reduced_cost_tol >= 0 ||
+            throw(ArgumentError("reduced_cost_tol must be non-negative"))
+        pricing_time_limit_sec > 0 ||
+            throw(ArgumentError("pricing_time_limit_sec must be positive"))
+        final_ip_time_limit_sec > 0 ||
+            throw(ArgumentError("final_ip_time_limit_sec must be positive"))
+        new(
+            config,
+            max_iterations,
+            max_columns_per_iteration,
+            n_candidates,
+            Float64(reduced_cost_tol),
+            Float64(pricing_time_limit_sec),
+            Float64(final_ip_time_limit_sec),
+            isnothing(log_dir) ? nothing : String(log_dir),
+        )
+    end
+end
+
+abstract type AbstractBendersDecomposition end
+
+"""
+    BendersY
+
+Benders decomposition whose master/cuts are expressed over first-stage design
+variables only.
+"""
+struct BendersY <: AbstractBendersDecomposition end
+
+"""
+    BendersXY
+
+Benders decomposition whose master/cuts include first-stage design variables and
+linking or assignment variables.
+"""
+struct BendersXY <: AbstractBendersDecomposition end
+
+"""
+    BendersYZ
+
+Benders decomposition (`AggregateODRouteModel`, `NearestOpenAggregateODAssignmentPolicy`
+with `feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` only) whose master
+includes the first-stage design variables `y` and the nearest-open endpoint selectors `z`;
+the assignment variables `x` and route-covering `θ` are left to the subproblem. Unlike
+`BendersXY`, `y_hat` alone does not guarantee a feasible nearest-open resolution here (`z`'s
+two sides can independently resolve to a colliding station), so this decomposition also
+uses `BendersY`-style feasibility cuts.
+
+The subproblem fixes only `z`, leaving `x` free -- the same structural gap `BendersY`'s
+subproblem has (see `_solve_nearest_open_y_subproblem_lp_with_repricing`'s docstring), which
+lets a column pool that's exhaustive for one nearest-open assignment be incomplete for the
+LP's own dual structure. **`BendersSolver(reprice_subproblem=true)` is required for a
+provably optimal result**, exactly as with `BendersY`; without it, BendersYZ can converge to
+a genuinely suboptimal-but-correctly-costed `y` (confirmed empirically on the real-data
+alignment fixture).
+"""
+struct BendersYZ <: AbstractBendersDecomposition end
+
+"""
+    BendersYZH
+
+Benders decomposition (`AggregateODRouteModel`, `NearestOpenAggregateODAssignmentPolicy`
+with `feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` only) whose master
+includes `y`, `z`, and a scenario-compressed assignment variable `h` -- one `h` per
+*physical* OD pair `(o,d)`, shared across every scenario in which that pair appears
+(weighted by its raw scenario-occurrence count), rather than `BendersXY`'s per-`(scenario,
+o, d)` `x`. Only route-covering `θ` is left to the subproblem.
+
+**Correction (2026-07-21, see notes/2026-07-21_bendersyz_yzh_verification_gaps.md and
+notes/2026-07-21_benders_final_result_vs_best_result_bug.md):** earlier text here and in that
+note claimed `h` being fixed fully makes CG-priming provably exhaustive for the subproblem LP's
+own dual structure, needing no repricing. That reasoning is incomplete: `h` being fixed removes
+degeneracy *in the master's choice of assignment*, but the theta-only subproblem's route-covering
+LP (fixed `h`, free continuous route-selection `lambda`) is a set-cover-style LP, which commonly
+has a *degenerate* dual-optimal face. CG's own pricing only certifies exhaustiveness against
+*the one dual vertex CG's solver happened to return* -- `_build_yzh_route_subproblem_lp` builds
+and solves a *separately formulated* LP for the cut, with no guarantee Gurobi returns that same
+vertex rather than a different, equally-optimal one the pool isn't proven exhaustive against.
+Empirically (`reprice_subproblem=true`), repricing does find real columns beyond the seeded pool,
+growing with instance size (negligible at n=15, 12-18x subproblem-time overhead at n=20) -- so
+this is not a hypothetical concern. It has not yet been observed to change the final objective on
+any tested fixture, but nothing rules that out at larger scale; treat "exact without repricing" as
+unproven, not disproven, absent one of: (a) `reprice_subproblem=true`, or (b) reusing CG's own
+already-certified dual directly instead of re-solving (a "zero completion" analogous to
+`BendersY`'s `cut_derivation=:zero_completion`, see notes/2026-07-17_restricted_mw_cut_benders_y.md
+-- not implemented for `BendersYZH`, but provably valid by the same LP-duality argument: any
+dual-feasible point tight at `h_hat` gives a valid cut, regardless of which point among a
+degenerate optimal face is chosen, and CG's own certified dual already satisfies both properties
+without a fresh, degeneracy-exposed re-solve).
+"""
+struct BendersYZH <: AbstractBendersDecomposition end
+
+abstract type AbstractBendersCutMode end
+
+"""
+    SingleCut
+
+Aggregate all scenario subproblem values into one Benders theta/cut.
+"""
+struct SingleCut <: AbstractBendersCutMode end
+
+"""
+    MultiCut(:scenario)
+
+Generate separate Benders theta variables and cuts by scenario.
+"""
+struct MultiCut <: AbstractBendersCutMode
+    dimension::Symbol
+
+    function MultiCut(dimension::Symbol=:scenario)
+        dimension == :scenario ||
+            throw(ArgumentError("only MultiCut(:scenario) is currently supported"))
+        new(dimension)
+    end
+end
+
+"""
+    BendersSolver
+
+# `cut_derivation`
+
+Controls how BendersY's optimality cuts are derived (`BendersXY` always uses the standard
+subgradient cut; this field is ignored there). One of:
+
+- `:standard` (default): the pre-existing subgradient cut from the fixed-`y` nearest-open
+  subproblem LP's duals off the `y == y_hat` fixing constraints. Byte-identical to behavior
+  before this field existed.
+- `:zero_completion`: a restricted dual-completion cut (see below) with a zero completion
+  objective, i.e. any dual-feasible completion tight at `y_hat` — a baseline for comparison,
+  not a stronger cut.
+- `:restricted_mw_fixed_pi`: a restricted, fixed-pricing-dual Magnanti-Wong-style cut. Fixes the
+  route-covering dual block at the vector certified by exact column-generation pricing on the
+  fixed-assignment route-covering problem, then completes the remaining (nearest-open selector
+  and assignment-linking) duals by maximizing the completed cut at a relative-interior core point
+  of the y-master's structural region. This is *not* a full Magnanti-Wong procedure over the
+  entire subproblem dual optimal face (only the non-`pi` duals are optimized) and is not claimed
+  to be globally Pareto-optimal. Only supported for
+  `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` with `allow_walk_only=false` and
+  `inner_solver isa ColumnGenerationSolver`; falls back to `:standard` for any iteration where the
+  completion LP is infeasible. See `notes/2026-07-17_restricted_mw_cut_benders_y.md`.
+"""
+struct BendersSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    decomposition::AbstractBendersDecomposition
+    cut_mode::AbstractBendersCutMode
+    inner_solver::Union{ColumnGenerationSolver, DirectSolver}
+    max_iterations::Int
+    optimality_tol::Float64
+    log_dir::Union{String, Nothing}
+    check_lp_ip_gap::Bool
+    reprice_subproblem::Bool
+    max_reprice_rounds::Int
+    cut_derivation::Symbol
+
+    function BendersSolver(;
+        config::SolverConfig=SolverConfig(),
+        decomposition::AbstractBendersDecomposition=BendersY(),
+        cut_mode::AbstractBendersCutMode=MultiCut(),
+        inner_solver::Union{ColumnGenerationSolver, DirectSolver, Nothing}=nothing,
+        max_iterations::Int=10_000,
+        optimality_tol::Union{Number, Nothing}=nothing,
+        reduced_cost_tol::Union{Number, Nothing}=nothing,
+        max_columns_per_iteration::Int=20,
+        n_candidates::Int=max_columns_per_iteration,
+        pricing_time_limit_sec::Number=30.0,
+        final_ip_time_limit_sec::Number=3600.0,
+        log_dir::Union{AbstractString, Nothing}=nothing,
+        check_lp_ip_gap::Bool=false,
+        reprice_subproblem::Bool=false,
+        max_reprice_rounds::Int=20,
+        cut_derivation::Symbol=:standard,
+    )
+        max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        cut_derivation in (:standard, :zero_completion, :restricted_mw_fixed_pi) ||
+            throw(ArgumentError("cut_derivation must be :standard, :zero_completion, or :restricted_mw_fixed_pi"))
+        resolved_tol = isnothing(optimality_tol) ?
+            (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
+            Float64(optimality_tol)
+        resolved_tol >= 0 || throw(ArgumentError("optimality_tol must be non-negative"))
+        resolved_inner = isnothing(inner_solver) ?
+            ColumnGenerationSolver(
+                config=config,
+                max_columns_per_iteration=max_columns_per_iteration,
+                n_candidates=n_candidates,
+                reduced_cost_tol=isnothing(reduced_cost_tol) ? resolved_tol : Float64(reduced_cost_tol),
+                pricing_time_limit_sec=pricing_time_limit_sec,
+                final_ip_time_limit_sec=final_ip_time_limit_sec,
+                log_dir=log_dir,
+            ) :
+            inner_solver
+        new(
+            config,
+            decomposition,
+            cut_mode,
+            resolved_inner,
+            max_iterations,
+            resolved_tol,
+            isnothing(log_dir) ? nothing : String(log_dir),
+            check_lp_ip_gap,
+            reprice_subproblem,
+            max_reprice_rounds,
+            cut_derivation,
+        )
+    end
+end
+
+struct HeuristicSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    init_spec::RoutePoolInitSpec
+    max_iterations::Int
+    route_length_schedule::Vector{Int}
+    prune_enabled::Bool
+    expand_enabled::Bool
+    min_active_value_to_keep::Float64
+    pool_target_size::Int
+    bucket_multiplier::Float64
+    random_retention_seed::Int
+    objective_improvement_tol::Float64
+    pool_change_tol::Float64
+    export_iteration_artifacts::Bool
+    enrichment::ExactDARPRouteEnrichmentConfig
+
+    function HeuristicSolver(;
+        config::SolverConfig=SolverConfig(),
+        init_spec::RoutePoolInitSpec=RoutePoolInitSpec(:direct_only),
+        max_iterations::Int=3,
+        route_length_schedule::Vector{Int}=Int[],
+        prune_enabled::Bool=true,
+        expand_enabled::Bool=true,
+        min_active_value_to_keep::Number=1e-6,
+        pool_target_size::Int=1_000_000,
+        bucket_multiplier::Number=100.0,
+        random_retention_seed::Int=1234,
+        objective_improvement_tol::Number=1e-6,
+        pool_change_tol::Number=0.0,
+        export_iteration_artifacts::Bool=false,
+        enrichment::ExactDARPRouteEnrichmentConfig=ExactDARPRouteEnrichmentConfig(enabled=false),
+    )
+        max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
+        min_active_value_to_keep >= 0 ||
+            throw(ArgumentError("min_active_value_to_keep must be non-negative"))
+        pool_target_size > 0 || throw(ArgumentError("pool_target_size must be positive"))
+        bucket_multiplier >= 1 ||
+            throw(ArgumentError("bucket_multiplier must be at least 1"))
+        pool_change_tol >= 0 || throw(ArgumentError("pool_change_tol must be non-negative"))
+        all(v -> v >= 2, route_length_schedule) ||
+            throw(ArgumentError("route_length_schedule values must be >= 2"))
+        new(
+            config,
+            init_spec,
+            max_iterations,
+            route_length_schedule,
+            prune_enabled,
+            expand_enabled,
+            Float64(min_active_value_to_keep),
+            pool_target_size,
+            Float64(bucket_multiplier),
+            random_retention_seed,
+            Float64(objective_improvement_tol),
+            Float64(pool_change_tol),
+            export_iteration_artifacts,
+            enrichment,
+        )
+    end
+end
+
+"""
+    HeuristicEnumerationSolver
+
+Solve `AggregateODRouteModel` by trying a caller-supplied list of candidate open-station
+sets (fixed `y`). For each candidate, the nearest-open assignment is derived and the
+resulting fixed-station, fixed-assignment routing sub-problem (`RouteCoveringProblem`) is
+solved to proven optimality via column generation. The best-scoring feasible candidate is
+then used to warm-start a direct solve of the full `AggregateODRouteModel` (with the
+winning routes folded into its column pool).
+
+Candidates are not generated internally — supply them via `candidate_open_stations`
+(e.g. station sets read from a prior run).
+"""
+struct HeuristicEnumerationSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    candidate_open_stations::Vector{Vector{Int}}
+    cg_solver::ColumnGenerationSolver
+
+    function HeuristicEnumerationSolver(;
+        config::SolverConfig=SolverConfig(),
+        candidate_open_stations::Vector{Vector{Int}},
+        cg_solver::ColumnGenerationSolver=ColumnGenerationSolver(config=config),
+    )
+        !isempty(candidate_open_stations) ||
+            throw(ArgumentError("candidate_open_stations must not be empty"))
+        for candidate in candidate_open_stations
+            length(candidate) == length(unique(candidate)) ||
+                throw(ArgumentError("candidate_open_stations entries must not contain duplicate station ids"))
+        end
+        new(config, candidate_open_stations, cg_solver)
+    end
+end
+
 abstract type AbstractSolveStrategy end
 abstract type AbstractIterativeSolveStrategy <: AbstractSolveStrategy end
-
-struct DirectSolveStrategy <: AbstractSolveStrategy end
 
 struct IterativeSolveIterationSummary
     iteration::Int

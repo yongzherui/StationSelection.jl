@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-# Zhuzhou CompatibilitySetModel scaling experiment — SLURM array runner.
+# Zhuzhou AggregateODRouteModel scaling experiment — SLURM array runner.
 # Each task reads one line from the job list and solves one Zhuzhou instance.
 #
 # Usage (via submit_zhuzhou_scaling.sh — do not call directly):
@@ -52,7 +52,7 @@ OV_STR="${OV//./_}"
 INST="zz_n${N_STATIONS}_l${L}_p${N_PAIRS}_ov${OV_STR}_s${SEED}"
 
 echo "=========================================="
-echo "CompatibilitySetModel — Zhuzhou Scaling"
+echo "AggregateODRouteModel — Zhuzhou Scaling"
 echo "Array job:  ${SLURM_ARRAY_JOB_ID}  task: ${TASK}"
 echo "Instance:   ${INST}"
 echo "Node:       ${SLURM_NODELIST}"
