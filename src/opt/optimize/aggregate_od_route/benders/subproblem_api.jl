@@ -226,7 +226,7 @@ function solve_benders_yzh_master(
     obj = AffExpr(0.0)
     for p in physical_pairs, pair in feasible_pairs_by_p[p]
         o, d = p
-        add_to_expression!(obj, occurrence_count[p] * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
+        add_to_expression!(obj, occurrence_count[p] * model.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
     end
     if unmet_demand_active
         for p in physical_pairs

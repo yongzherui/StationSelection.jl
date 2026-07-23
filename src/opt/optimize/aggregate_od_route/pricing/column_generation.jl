@@ -110,6 +110,7 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
     return AggregateODRouteModel(
         model.l;
         route_regularization_weight = model.route_regularization_weight,
+        walk_cost_weight            = model.walk_cost_weight,
         repositioning_time          = model.repositioning_time,
         max_walking_distance        = model.max_walking_distance,
         max_wait_time               = model.max_wait_time,
@@ -134,6 +135,7 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         model.open_stations,
         model.fixed_assignments;
         route_regularization_weight = model.route_regularization_weight,
+        walk_cost_weight            = model.walk_cost_weight,
         repositioning_time          = model.repositioning_time,
         max_walking_distance        = model.max_walking_distance,
         max_wait_time               = model.max_wait_time,

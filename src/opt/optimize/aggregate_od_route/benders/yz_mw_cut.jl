@@ -255,7 +255,7 @@ function _yz_completion_lp(
     # unaffected by whether z or y is the decomposition's fixed master variable).
     for p in requests, pair in feasible_pairs[p]
         is_walk_only_pair(pair) && continue
-        c_walk = _assignment_pair_cost(data, p, pair)
+        c_walk = _assignment_pair_cost(data, p, pair; weight=base.walk_cost_weight)
         pi_val = pi_full[(p, pair)]
         @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
     end

@@ -9,6 +9,7 @@ function set_aggregate_od_route_objective!(
     data::StationSelectionData,
     mapping::AggregateODRouteMap;
     route_regularization_weight::Float64=1.0,
+    walk_cost_weight::Float64=1.0,
     repositioning_time::Float64=20.0,
 )
     obj = AffExpr(0.0)
@@ -21,7 +22,7 @@ function set_aggregate_od_route_objective!(
             x_od = get(x[s], od_idx, VariableRef[])
             isempty(x_od) && continue
             for (pair_idx, pair) in enumerate(get_valid_jk_pairs(mapping, o, d))
-                cost = od_pair_walking_cost(data, o, d, pair)
+                cost = walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
                 add_to_expression!(obj, cost, x_od[pair_idx])
             end
             if unmet_demand_active

@@ -417,7 +417,7 @@ function _restricted_mw_completion_lp(
     # x-dual constraints: alpha[p] - rhoO - rhoD + sigma - pi_full <= c_walk
     for p in requests, pair in feasible_pairs[p]
         is_walk_only_pair(pair) && continue
-        c_walk = _assignment_pair_cost(data, p, pair)
+        c_walk = _assignment_pair_cost(data, p, pair; weight=base.walk_cost_weight)
         pi_val = pi_full[(p, pair)]
         @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
     end

@@ -58,6 +58,11 @@ Column-generation-ready restricted master problem.
 # Fields
 - `l`: number of stations selected in the first stage
 - `route_regularization_weight`: μ, multiplying each aggregate OD route column cost
+- `walk_cost_weight`: multiplies the walking-cost term (`od_pair_walking_cost`) everywhere
+  it enters an objective or a Benders subproblem/dual-completion LP for this model, so it
+  scales consistently with the true objective and doesn't corrupt reduced costs/cuts.
+  Defaults to 1.0 (walking cost enters at its raw data-derived value, matching prior
+  behavior exactly).
 - `repositioning_time`: ρ, added to every aggregate OD route column travel/service cost
 - `max_walking_distance`: walking feasibility radius used to build Δ(o), Δ(d)
 - `initial_columns`: optional restricted aggregate OD route pool. If omitted,
@@ -87,6 +92,7 @@ Column-generation-ready restricted master problem.
 struct AggregateODRouteModel <: AbstractODModel
     l::Int
     route_regularization_weight::Float64
+    walk_cost_weight::Float64
     repositioning_time::Float64
     max_walking_distance::Float64
     max_wait_time::Float64
@@ -106,6 +112,7 @@ struct AggregateODRouteModel <: AbstractODModel
     function AggregateODRouteModel(
             l::Int;
             route_regularization_weight::Number=1.0,
+            walk_cost_weight::Number=1.0,
             repositioning_time::Number=20.0,
             max_walking_distance::Number=300,
             max_wait_time::Number=Inf,
@@ -125,6 +132,8 @@ struct AggregateODRouteModel <: AbstractODModel
         l > 0 || throw(ArgumentError("l must be positive"))
         route_regularization_weight >= 0 ||
             throw(ArgumentError("route_regularization_weight must be non-negative"))
+        walk_cost_weight >= 0 ||
+            throw(ArgumentError("walk_cost_weight must be non-negative"))
         repositioning_time >= 0 ||
             throw(ArgumentError("repositioning_time must be non-negative"))
         max_walking_distance >= 0 ||
@@ -151,6 +160,7 @@ struct AggregateODRouteModel <: AbstractODModel
         new(
             l,
             Float64(route_regularization_weight),
+            Float64(walk_cost_weight),
             Float64(repositioning_time),
             Float64(max_walking_distance),
             Float64(max_wait_time),

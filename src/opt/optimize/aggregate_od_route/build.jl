@@ -3,7 +3,6 @@ function _build_aggregate_od_route_core!(
         data::StationSelectionData,
         optimizer_env;
         relax_integrality::Bool,
-        coverage_equality::Bool,
     )::BuildResult
     base_model = model isa RouteCoveringProblem ? model.base : model
     mapping = create_map(model, data)
@@ -19,6 +18,7 @@ function _build_aggregate_od_route_core!(
     extra_counts["aggregate_od_route_columns"] = length(mapping.columns)
 
     m[:aggregate_od_route_route_regularization_weight] = base_model.route_regularization_weight
+    m[:aggregate_od_route_walk_cost_weight] = base_model.walk_cost_weight
     m[:aggregate_od_route_repositioning_time] = base_model.repositioning_time
     m[:aggregate_od_route_relax_integrality] = relax_integrality
     m[:aggregate_od_route_unmet_demand_penalty] = base_model.unmet_demand_penalty
@@ -50,6 +50,7 @@ function _build_aggregate_od_route_core!(
         data,
         mapping;
         route_regularization_weight=base_model.route_regularization_weight,
+        walk_cost_weight=base_model.walk_cost_weight,
         repositioning_time=base_model.repositioning_time,
     )
 
@@ -82,7 +83,7 @@ function _build_aggregate_od_route_core!(
         end
     end
     constraint_counts["aggregate_od_route_coverage"] =
-        add_aggregate_od_route_coverage_constraints!(m, data, mapping; equality=coverage_equality)
+        add_aggregate_od_route_coverage_constraints!(m, data, mapping)
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
@@ -98,7 +99,6 @@ function build_model(
     return _build_aggregate_od_route_core!(
         model, data, optimizer_env;
         relax_integrality=relax_integrality,
-        coverage_equality=false,
     )
 end
 
@@ -112,7 +112,6 @@ function build_model(
     return _build_aggregate_od_route_core!(
         model, data, optimizer_env;
         relax_integrality=relax_integrality,
-        coverage_equality=true,
     )
 end
 

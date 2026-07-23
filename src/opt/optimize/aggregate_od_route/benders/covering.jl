@@ -42,6 +42,7 @@ function _copy_with_initial_columns(
         model.open_stations,
         model.fixed_assignments;
         route_regularization_weight=model.route_regularization_weight,
+        walk_cost_weight=model.walk_cost_weight,
         repositioning_time=model.repositioning_time,
         max_walking_distance=model.max_walking_distance,
         max_wait_time=model.max_wait_time,
@@ -68,6 +69,7 @@ function _copy_with_initial_columns(
     return AggregateODRouteModel(
         model.l;
         route_regularization_weight=model.route_regularization_weight,
+        walk_cost_weight=model.walk_cost_weight,
         repositioning_time=model.repositioning_time,
         max_walking_distance=model.max_walking_distance,
         max_wait_time=model.max_wait_time,
@@ -257,9 +259,11 @@ function _benders_cut_groups(
     throw(ArgumentError("unsupported Benders cut mode $(typeof(cut_mode))"))
 end
 
-function _assignment_pair_cost(data::StationSelectionData, request::NTuple{3, Int}, pair::Tuple{Int, Int})
+function _assignment_pair_cost(
+    data::StationSelectionData, request::NTuple{3, Int}, pair::Tuple{Int, Int}; weight::Float64=1.0,
+)
     _s, o, d = request
-    return od_pair_walking_cost(data, o, d, pair)
+    return weight * od_pair_walking_cost(data, o, d, pair)
 end
 
 function _ranked_request_pairs(
@@ -701,6 +705,7 @@ function _route_covering_problem_from_assignments(
         open,
         assignments;
         route_regularization_weight=base.route_regularization_weight,
+        walk_cost_weight=base.walk_cost_weight,
         repositioning_time=base.repositioning_time,
         max_walking_distance=base.max_walking_distance,
         max_wait_time=base.max_wait_time,

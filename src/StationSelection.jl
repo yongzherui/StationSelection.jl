@@ -13,6 +13,7 @@ using JuMP
 using Logging
 using Printf
 using Random
+using Serialization
 using Statistics
 
 # Data loading - core data structures

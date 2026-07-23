@@ -783,8 +783,7 @@ end
 function add_aggregate_od_route_coverage_constraints!(
     m::Model,
     data::StationSelectionData,
-    mapping::AggregateODRouteMap;
-    equality::Bool=false,
+    mapping::AggregateODRouteMap,
 )::Int
     before = _total_num_constraints(m)
     x = m[:x]
@@ -811,8 +810,12 @@ function add_aggregate_od_route_coverage_constraints!(
                     theta_var === nothing && continue
                     add_to_expression!(expr, 1.0, theta_var)
                 end
-                con = equality ? @constraint(m, expr - x_od[pair_idx] == 0.0) :
-                                 @constraint(m, expr - x_od[pair_idx] >= 0.0)
+                # Set-covering semantics: a route covering this pair "for free" alongside
+                # others it was selected for is harmless (>= 0, not == 0) -- routes routinely
+                # overlap in which pairs they serve (that's the point of pooling), and forcing
+                # exact equality would make otherwise-cheaper, perfectly valid combinations
+                # infeasible whenever two selected routes happen to both cover the same pair.
+                con = @constraint(m, expr - x_od[pair_idx] >= 0.0)
                 coverage[(j, k, s, od_idx, pair_idx)] = con
                 push!(get!(coverage_by_pair_s, (j, k, s), ConstraintRef[]), con)
             end

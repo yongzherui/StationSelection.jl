@@ -228,12 +228,11 @@ unmodified since `cover_cons` has the identical `(request, pair) => ConstraintRe
 runs genuine label-setting pricing against them. If pricing finds a column with negative
 reduced cost beyond the seeded pool, the pool folds it in and the LP is re-solved, repeating
 until pricing finds nothing more or `max_reprice_rounds` is hit -- the same convergence
-criterion CG's own pricing uses. Unlike `BendersY`/`BendersYZ`, this is not expected to find
-anything (the design argument in this file's module docstring is that CG-priming is already
-provably exhaustive for this exact LP since `h` is fixed fully, not merely linked), so this
-function exists to make that argument empirically checkable rather than merely assumed.
-Re-solving after adding repriced columns must preserve the subproblem objective value; a
-change means the original restricted LP value was not certified and the routine throws.
+criterion CG's own pricing uses. This is a certification check for dual-basis degeneracy:
+newly priced columns may appear under the separately solved LP's chosen duals, but after
+adding them the LP objective must remain unchanged. Re-solving after adding repriced columns
+must preserve the subproblem objective value; an improvement means the original restricted LP
+value was not certified and the routine throws.
 """
 function _solve_yzh_route_subproblem_lp_with_repricing(
     data::StationSelectionData,
@@ -510,7 +509,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     obj = AffExpr(0.0)
     for p in physical_pairs, pair in feasible_pairs_by_p[p]
         o, d = p
-        add_to_expression!(obj, occurrence_count[p] * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
+        add_to_expression!(obj, occurrence_count[p] * model.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
     end
     if unmet_demand_active
         for p in physical_pairs
@@ -530,6 +529,14 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     total_reprice_columns_found = 0
     total_reprice_rounds = 0
     benders_rows = NamedTuple[]
+
+    # DIAGNOSTIC (temporary, opt-in via YZH_DIAG_DUMP_PATH): dumps everything needed to
+    # reconstruct any iteration's route-covering LP and IP outside this run -- h_hat, the
+    # candidate column pool, which columns the IP selected, and the LP dual value(s) per cut
+    # group -- for investigating why a given iteration's LP/IP gap is what it is (see
+    # notes/2026-07-23_benders_reports_optimal_with_unclosed_outer_gap.md).
+    _diag_path = get(ENV, "YZH_DIAG_DUMP_PATH", "")
+    _diag_dump = NamedTuple[]
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -564,6 +571,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         cuts_added_this_iteration = 0
         subproblem_lp_seconds = 0.0
         zc_fallback_count = 0
+        v_hat_by_cut = Dict{Int, Float64}()
         for cut_id in cut_ids
             group_requests = cut_groups[cut_id]
             lp_start = time()
@@ -619,6 +627,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
 
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
+            v_hat_by_cut[cut_id] = v_hat
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
                 cut_diag = _add_aggregate_od_route_benders_yzh_optimality_cut!(
                     master, h, theta, cut_id, data, model, solver,
@@ -649,10 +658,39 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
             inner_cg_iterations=inner_cg_iters,
             cut_derivation=string(solver.cut_derivation),
             zero_completion_fallback_count=zc_fallback_count,
+            # DIAGNOSTIC (temporary): iteration_lp_value is the sum of v_hat across cut
+            # groups this iteration -- the LP-relaxation subproblem bound actually compared
+            # against theta_hat to decide whether to add a cut / stop (see the
+            # `theta_hat[cut_id] < v_hat - solver.optimality_tol` check above). It was
+            # computed but never logged before. iteration_ip_value is this SAME iteration's
+            # integer-optimal route-covering cost (cg_result.final_result.objective_value,
+            # not the running best_ub across iterations). Comparing the two directly shows
+            # whether a large outer_gap comes from a genuine LP/IP gap in the route-covering
+            # subproblem, or from v_hat under-converging (e.g. repricing hitting
+            # max_reprice_rounds without exhaustion) while a true LP/IP gap is actually small.
+            iteration_lp_value=iteration_lp_value,
+            iteration_ip_value=isnothing(final_result.objective_value) ? NaN : final_result.objective_value,
         ))
         _flush_benders_iteration_log!(
-            solver, benders_rows; extra_headers=[:cut_derivation, :zero_completion_fallback_count],
+            solver, benders_rows; extra_headers=[:cut_derivation, :zero_completion_fallback_count, :iteration_lp_value, :iteration_ip_value],
         )
+
+        if !isempty(_diag_path)
+            push!(_diag_dump, (
+                iteration=iteration,
+                h_hat=copy(h_hat),
+                assignments=copy(assignments),
+                cut_groups=Dict(cid => copy(cut_groups[cid]) for cid in cut_ids),
+                feasible_pairs_by_p=Dict(p => copy(v) for (p, v) in feasible_pairs_by_p),
+                generated_columns=copy(cg_result.generated_columns),
+                selected_column_ids=copy(cg_result.selected_column_ids),
+                v_hat_by_cut=copy(v_hat_by_cut),
+                iteration_ip_value=isnothing(final_result.objective_value) ? NaN : final_result.objective_value,
+            ))
+            open(_diag_path, "w") do io
+                Serialization.serialize(io, _diag_dump)
+            end
+        end
 
         if cuts_added_this_iteration == 0
             return _opt_result_from_benders(best_result, Dict{String, Any}(

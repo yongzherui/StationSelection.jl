@@ -97,7 +97,7 @@ function _build_yz_route_subproblem_lp(
     obj = AffExpr(0.0)
     for request in requests
         for pair in feasible_pairs[request]
-            add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+            add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
         end
         if unmet_demand_active
             add_to_expression!(obj, model.unmet_demand_penalty)
@@ -154,7 +154,12 @@ BendersY (confirmed empirically: the plain, non-repricing
 `_solve_yz_route_subproblem_lp` converges BendersYZ to a genuinely
 suboptimal-but-correctly-costed `y` on the real-data alignment fixture).
 Reuses `_extract_nearest_open_y_subproblem_coverage_duals` unchanged since
-`cover_cons` has the identical `(request, pair) => ConstraintRef` shape.
+`cover_cons` has the identical `(request, pair) => ConstraintRef` shape. Like
+`_solve_nearest_open_y_subproblem_lp_with_repricing`, this is a certification
+check for dual-basis degeneracy: newly priced columns may appear under the LP's
+chosen duals, but after adding them the LP objective must remain unchanged. If
+the objective improves, the restricted subproblem value used for the cut was not
+certified and this routine throws.
 """
 function _solve_yz_route_subproblem_lp_with_repricing(
     data::StationSelectionData,

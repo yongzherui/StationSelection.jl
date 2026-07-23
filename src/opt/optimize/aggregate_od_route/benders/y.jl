@@ -93,7 +93,7 @@ function _build_nearest_open_y_subproblem_lp(
     obj = AffExpr(0.0)
     for request in requests
         for pair in feasible_pairs[request]
-            add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+            add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
         end
         if unmet_demand_active
             add_to_expression!(obj, model.unmet_demand_penalty)
@@ -271,9 +271,12 @@ dual vertex under which a column looks non-improving) is one plausible source, s
 duals used are whichever vertex of the LP's optimal face the solver happened to return.
 Either way the newly found columns are folded in and the LP is re-solved, repeating until
 pricing finds nothing more (mirroring standard CG's own convergence, `cg_stop_reason ==
-:optimality_proven`) or `max_reprice_rounds` is hit. Re-solving after adding
-repriced columns must preserve the subproblem objective value; a change means
-the original restricted LP value was not certified and the routine throws.
+:optimality_proven`) or `max_reprice_rounds` is hit. This is a certification check, not
+a corrective CG loop for an actually underpriced LP value: under the intended degeneracy case,
+an alternate dual basis may expose columns outside the seeded pool, but those columns must be
+zero-value alternatives for the same LP optimum. Re-solving after adding repriced columns must
+therefore preserve the subproblem objective value; an improvement means the original restricted
+LP value was not certified and the routine throws.
 Returns `(v_hat, rho, pool, n_new_columns_total, n_rounds, fully_exhausted,
 max_objective_delta)`; `n_new_columns_total > 0` is itself the signal worth
 surfacing -- see notes/2026-07-15_bendersy_stale_cut_soundness.md.

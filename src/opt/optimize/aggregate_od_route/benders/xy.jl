@@ -242,7 +242,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
 
     obj = AffExpr(0.0)
     for request in requests, pair in feasible_pairs[request]
-        add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+        add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
     end
     if unmet_demand_active
         for request in requests
@@ -393,7 +393,7 @@ function _run_aggregate_od_route_free_benders_xy(
 
     obj = AffExpr(0.0)
     for request in requests, pair in feasible_pairs[request]
-        add_to_expression!(obj, _assignment_pair_cost(data, request, pair), x[(request, pair)])
+        add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
     end
     for cut_id in cut_ids
         add_to_expression!(obj, 1.0, theta[cut_id])
