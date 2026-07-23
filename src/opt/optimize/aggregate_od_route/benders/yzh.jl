@@ -12,16 +12,17 @@ exhaustiveness proof only certifies the *one* dual vertex CG happened to land on
 subproblem LP is a separately-solved formulation with no guarantee of landing on that same vertex.
 `solver.reprice_subproblem` is fully wired here (not a no-op) via
 `_solve_yzh_route_subproblem_lp_with_repricing`, mirroring BendersYZ's repricing loop exactly, and
-is the currently-implemented way to close that gap empirically. A cheaper, provably-valid
-alternative exists but is not implemented: reuse CG's own already-certified dual directly
-(zero-extended over `(request, pair)` rows not present in CG's restricted model) instead of
-re-solving this subproblem LP at all -- any dual-feasible point tight at `h_hat` gives a valid
-cut by LP duality, regardless of which point on a degenerate optimal face is chosen, so CG's own
-certified dual suffices without exposure to this LP's own re-solve degeneracy. This is the same
-idea as `BendersY`'s `cut_derivation=:zero_completion`
+is one way to close that gap empirically. A cheaper, provably-valid alternative is also
+implemented: `BendersSolver(cut_derivation=:zero_completion)` reuses CG's own already-certified
+dual directly (zero-extended over `(request, pair)` rows not present in CG's restricted model,
+`_zero_completion_yzh_rho` below) instead of re-solving this subproblem LP at all -- any
+dual-feasible point tight at `h_hat` gives a valid cut by LP duality, regardless of which point on
+a degenerate optimal face is chosen, so CG's own certified dual suffices without exposure to this
+LP's own re-solve degeneracy. This is the same idea as `BendersY`'s `cut_derivation=:zero_completion`
 (notes/2026-07-17_restricted_mw_cut_benders_y.md), simplified further for `BendersYZH` since there
 is no remaining free y/z/x block left to complete once `h` is fixed -- the certified dual *is*
-the whole thing needed for the cut.
+the whole thing needed for the cut, computed by a plain sum rather than a completion LP.
+`reprice_subproblem=false` is sound under `cut_derivation=:zero_completion`.
 """
 
 """
@@ -312,6 +313,125 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
 end
 
 """
+    _yzh_group_physical_pairs(group_requests) -> (group_physical_pairs, group_occurrences)
+
+Factors out the `(o,d) -> [scenarios]` grouping `_build_yzh_route_subproblem_lp` already does
+inline, so the outer loop's zero-completion cut derivation can reuse it without touching the
+subproblem builder.
+"""
+function _yzh_group_physical_pairs(
+    group_requests,
+)::Tuple{Vector{Tuple{Int, Int}}, Dict{Tuple{Int, Int}, Vector{Int}}}
+    group_occurrences = Dict{Tuple{Int, Int}, Vector{Int}}()
+    for (s, o, d) in group_requests
+        push!(get!(group_occurrences, (o, d), Int[]), s)
+    end
+    return collect(keys(group_occurrences)), group_occurrences
+end
+
+"""
+    _zero_completion_yzh_rho(data, model, solver, group_requests, feasible_pairs, assignments,
+                              open_stations) -> (Q_bar, rho, certified)
+
+`BendersYZH`'s zero-completion: since `h` is fixed with no other structural row in the subproblem
+(same shape as `BendersY`'s `y` and `BendersYZ`'s `z`), and `h`'s only other appearance is in the
+coverage rows (`sum(lambda) >= h[(p,pair)]`, one row per scenario occurrence), the fix-constraint's
+dual is *exactly* the sum of the certified, zero-extended coverage-row duals across those
+occurrences -- no completion LP needed at all, unlike `BendersY`/`BendersYZ` (see the module
+docstring above and `notes/2026-07-17_restricted_mw_cut_benders_y.md`).
+"""
+function _zero_completion_yzh_rho(
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    solver::BendersSolver,
+    group_requests,
+    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+)
+    group_requests_vec = collect(group_requests)
+    assignments_for_group = Dict(request => assignments[request] for request in group_requests_vec)
+    certified, Q_bar = _certified_qbar(data, model, solver, group_requests_vec, assignments_for_group, open_stations)
+    feasible_pairs_flat = Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}(
+        request => feasible_pairs_by_p[(request[2], request[3])] for request in group_requests_vec
+    )
+    pi_full = _zero_extended_pi(group_requests_vec, feasible_pairs_flat, assignments_for_group, certified.pi_by_request)
+
+    _group_physical_pairs, group_occurrences = _yzh_group_physical_pairs(group_requests_vec)
+    rho = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64}()
+    for p in _group_physical_pairs, pair in feasible_pairs_by_p[p]
+        requires_no_vehicle_route(pair) && continue
+        rho[(p, pair)] = sum(
+            get(pi_full, ((s, p[1], p[2]), pair), 0.0) for s in group_occurrences[p]; init=0.0,
+        )
+    end
+    return Q_bar, rho, certified
+end
+
+"""
+    _add_aggregate_od_route_benders_yzh_optimality_cut!(master, h, theta, cut_id, data, model,
+        solver, group_requests, feasible_pairs_by_p, h_hat, assignments, open_stations, v_hat,
+        rho; certified=nothing, Q_bar=nothing, certification_already_failed=false)
+
+`BendersYZH` analogue of `_add_aggregate_od_route_benders_y_optimality_cut!`/
+`_add_aggregate_od_route_benders_yz_optimality_cut!`: `:standard` reproduces the pre-existing
+subgradient cut exactly. `:zero_completion` uses `_zero_completion_yzh_rho`'s certified sum
+directly (no completion LP, no fallback needed beyond the certification itself failing).
+`:restricted_mw_fixed_pi` is rejected earlier (`BendersSolver` construction) since there is no free
+dual block left to optimize a core-point objective over once `h` is fixed fully.
+"""
+function _add_aggregate_od_route_benders_yzh_optimality_cut!(
+    master::Model,
+    h,
+    theta,
+    cut_id::Int,
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    solver::BendersSolver,
+    group_requests,
+    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
+    h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64},
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+    v_hat::Float64,
+    rho::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64};
+    zc_result=nothing,
+    certification_already_failed::Bool=false,
+)
+    if solver.cut_derivation == :standard
+        @constraint(master, theta[cut_id] >= v_hat + sum(
+            rho[key] * (h[key] - get(h_hat, key, 0.0)) for key in keys(rho)
+        ))
+        return (mode=:standard, fallback=false)
+    end
+
+    if isnothing(zc_result) && !certification_already_failed
+        zc_result = try
+            _zero_completion_yzh_rho(
+                data, model, solver, group_requests, feasible_pairs_by_p, assignments, open_stations,
+            )
+        catch err
+            @warn "BendersYZH zero-completion cut derivation failed; falling back to the standard cut " *
+                "for this (iteration, cut_id)" cut_id error = err
+            nothing
+        end
+    end
+
+    if isnothing(zc_result)
+        @constraint(master, theta[cut_id] >= v_hat + sum(
+            rho[key] * (h[key] - get(h_hat, key, 0.0)) for key in keys(rho)
+        ))
+        return (mode=solver.cut_derivation, fallback=true)
+    end
+
+    Q_bar, zero_rho, _certified = zc_result
+    @constraint(master, theta[cut_id] >= Q_bar + sum(
+        get(zero_rho, key, 0.0) * (h[key] - get(h_hat, key, 0.0)) for key in keys(zero_rho)
+    ))
+    return (mode=solver.cut_derivation, fallback=false)
+end
+
+"""
     _run_aggregate_od_route_nearest_open_benders_yzh(data, model, solver)
 
 Benders-YZH (Variant 3): master = `y,z,h`; subproblem = `θ` only. `h` is
@@ -350,10 +470,28 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+    _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     physical_pairs, occurrences, feasible_pairs_by_p = _aggregate_od_route_benders_physical_pairs(mapping)
     occurrence_count = Dict(p => length(occurrences[p]) for p in physical_pairs)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
+
+    if solver.cut_derivation != :standard
+        (model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+            model.assignment_policy.feasibility_cut_style == :big_m_nearest) ||
+            throw(ArgumentError(
+                "BendersSolver(cut_derivation=$(solver.cut_derivation)) requires " *
+                "NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"
+            ))
+        model.allow_walk_only && throw(ArgumentError(
+            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
+        ))
+        !isnothing(model.unmet_demand_penalty) && throw(ArgumentError(
+            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support unmet_demand_penalty -- " *
+            "the certified zero-completion does not yet account for the relaxed h/u constraints " *
+            "\"always feasible\" mode uses; use cut_derivation=:standard with unmet_demand_penalty for now"
+        ))
+    end
 
     unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
@@ -362,6 +500,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
+    _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     h = _add_nearest_open_master_h!(
         master, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,
         model.assignment_policy.feasibility_cut_style,
@@ -424,6 +563,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         iteration_lp_value = 0.0
         cuts_added_this_iteration = 0
         subproblem_lp_seconds = 0.0
+        zc_fallback_count = 0
         for cut_id in cut_ids
             group_requests = cut_groups[cut_id]
             lp_start = time()
@@ -456,14 +596,38 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
                     cfg.silent,
                 )
             end
+
+            # For `:zero_completion`, tighten `v_hat` with the independently-certified `Q_bar`
+            # before the gating decision, exactly mirroring BendersY/BendersYZ. `zc_result` is
+            # reused below when adding the cut, so the (expensive) CG certification only runs
+            # once per (iteration, cut_id).
+            zc_result = nothing
+            certification_already_failed = false
+            if solver.cut_derivation != :standard
+                try
+                    zc_result = _zero_completion_yzh_rho(
+                        data, model, solver, group_requests, feasible_pairs_by_p, assignments,
+                        _open_station_values(y_hat),
+                    )
+                    v_hat = min(v_hat, zc_result[1])
+                catch err
+                    certification_already_failed = true
+                    @warn "BendersYZH zero_completion: certified Q_bar computation failed; falling back to " *
+                        "the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                end
+            end
+
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
-                @constraint(master, theta[cut_id] >= v_hat + sum(
-                    rho[key] * (h[key] - get(h_hat, key, 0.0)) for key in keys(rho)
-                ))
+                cut_diag = _add_aggregate_od_route_benders_yzh_optimality_cut!(
+                    master, h, theta, cut_id, data, model, solver,
+                    group_requests, feasible_pairs_by_p, h_hat, assignments, _open_station_values(y_hat), v_hat, rho;
+                    zc_result=zc_result, certification_already_failed=certification_already_failed,
+                )
                 optimality_cuts += 1
                 cuts_added_this_iteration += 1
+                cut_diag.fallback && (zc_fallback_count += 1)
             end
         end
         push!(benders_rows, (
@@ -483,8 +647,12 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
             selected_assignment_count=length(assignments),
             generated_column_pool_size=length(cg_result.generated_columns),
             inner_cg_iterations=inner_cg_iters,
+            cut_derivation=string(solver.cut_derivation),
+            zero_completion_fallback_count=zc_fallback_count,
         ))
-        _flush_benders_iteration_log!(solver, benders_rows)
+        _flush_benders_iteration_log!(
+            solver, benders_rows; extra_headers=[:cut_derivation, :zero_completion_fallback_count],
+        )
 
         if cuts_added_this_iteration == 0
             return _opt_result_from_benders(best_result, Dict{String, Any}(

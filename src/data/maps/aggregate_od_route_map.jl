@@ -139,7 +139,7 @@ function create_aggregate_od_route_map(
         data,
         base_model.max_walking_distance;
         allow_walk_only=base_model.allow_walk_only,
-        allow_same_station=!isnothing(base_model.unmet_demand_penalty),
+        allow_same_station=true,
     )
     if model isa RouteCoveringProblem
         _apply_route_covering_assignments!(valid_jk_pairs, Q_s, model)

@@ -301,15 +301,19 @@
 
     # BendersYZ-specific fixture: unlike BendersXY, BendersYZ's master has no
     # x at all, so a rounded y_hat can be structurally *master*-feasible (every
-    # z-chain resolves to a unique winner per side) yet still yield an
-    # infeasible nearest-open assignment overall, when the two independently-
-    # resolved sides collide at the same station with allow_walk_only=false.
-    # Station 1 is the cheapest candidate on BOTH sides of the one request here
-    # (o=4, d=5); stations 2 and 3 are each the sole alternate on their own
-    # side. Whenever station 1 is open it wins on both sides (collision,
-    # infeasible); the unique feasible/optimal 2-station choice is {2,3} (real
-    # pair (2,3)). None of the other fixtures in this file ever force this
-    # collision under allow_walk_only=false.
+    # z-chain resolves to a unique winner per side) yet still yield a collision
+    # in the nearest-open assignment overall -- the two independently-resolved
+    # sides landing on the same station -- with allow_walk_only=false. Station 1
+    # is the cheapest candidate on BOTH sides of the one request here (o=4,
+    # d=5); stations 2 and 3 are each the sole alternate on their own side.
+    # Station 1 always wins the collision whenever it's open; since same-station
+    # real pairs are always allowed now (`compute_valid_jk_pairs`,
+    # `allow_same_station=true` unconditionally), that collision resolves
+    # cleanly to the real pair (1,1) at zero walking cost -- strictly cheaper
+    # than the {2,3} alternative (walking cost 10) that used to be the only
+    # option when a same-station collision was infeasible. The unique
+    # feasible/optimal 2-station choice is now {1,2} (arbitrary second station;
+    # 2 vs 3 is broken by `routing_costs`, not walking cost).
     function nearest_open_collision_fixture()
         stations = DataFrame(id=collect(1:5), lon=Float64.(1:5), lat=zeros(5))
         requests = DataFrame(
@@ -333,7 +337,7 @@
         return create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
     end
 
-    @testset "BendersYZ collision fixture (feasibility-cut branch, allow_walk_only=false)" begin
+    @testset "BendersYZ collision fixture (same-station resolution, allow_walk_only=false)" begin
         data = nearest_open_collision_fixture()
         for style in (:big_m_nearest, :endpoint_chain)
             @testset "style=$style" begin
@@ -357,7 +361,7 @@
                 )
                 @test ground_truth.termination_status == MOI.OPTIMAL
                 y_gt = value.(ground_truth.model[:y])
-                @test Set(j for j in eachindex(y_gt) if y_gt[j] > 0.5) == Set([2, 3])
+                @test Set(j for j in eachindex(y_gt) if y_gt[j] > 0.5) == Set([1, 2])
 
                 inner_cg = ColumnGenerationSolver(
                     config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
@@ -374,12 +378,14 @@
                 )
                 @test benders_yz.termination_status == MOI.OPTIMAL
                 @test isapprox(benders_yz.objective_value, ground_truth.objective_value; atol=1e-6)
-                # The collision is unavoidable whenever station 1 is open, so a correct
-                # implementation must hit the feasibility-cut branch at least once before
-                # converging -- a run that never does would indicate the master's own
-                # constraints are (incorrectly) already excluding the collision, silently
-                # papering over the code path this fixture exists to exercise.
-                @test get(benders_yz.metadata, "feasibility_cuts_added", 0) > 0
+                # The station-1 collision now resolves cleanly to the real same-station
+                # pair (1,1) (`compute_valid_jk_pairs`, `allow_same_station=true`
+                # unconditionally) instead of being infeasible, and the default
+                # endpoint-coverage constraints (`_add_default_endpoint_coverage_constraints!`)
+                # guarantee every request's pickup/dropoff side has an open candidate by
+                # construction -- so this fixture, which used to force the reactive
+                # collision-cut branch, should now never need a feasibility cut at all.
+                @test get(benders_yz.metadata, "feasibility_cuts_added", 0) == 0
             end
         end
     end

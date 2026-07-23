@@ -200,7 +200,14 @@ function _certified_route_covering_pi(
         request in requests || continue
         pi_by_request[request] = dual(con)
     end
+    # A request whose assigned pair `requires_no_vehicle_route` (same-station or walk-only) gets
+    # no coverage row anywhere in the codebase (`add_aggregate_od_route_coverage_constraints!`,
+    # `_singleton_aggregate_od_route_columns`, and this LP's own build all skip such pairs) --
+    # there is genuinely no `pi` dual to certify for it, not a certification failure. Missing here
+    # is therefore expected, not an error; `_zero_extended_pi` below zero-extends it, which is
+    # correct since such a pair contributes no route/covering cost to `Q_bar` in the first place.
     for request in requests
+        requires_no_vehicle_route(assignments[request]) && continue
         haskey(pi_by_request, request) ||
             throw(ArgumentError("restricted MW cut: fixed route-covering LP has no coverage row for request $(request)"))
     end
@@ -235,8 +242,10 @@ end
 Section D: zero-extends the certified, retained-row-only route-covering duals over every
 `(request, pair)` in `feasible_pairs`, not just the one retained (assigned) pair per request.
 Missing components are exactly the pairs `R(x_bar)` never built a coverage row for (`x_bar=0`
-there); zero credit there cannot change any route's reduced cost, since reduced cost only sums
-dual credit over the pairs a route actually serves.
+there, or `x_bar=1` but `requires_no_vehicle_route` -- same-station/walk-only assignments get no
+coverage row even when assigned, see `_certified_route_covering_pi`); zero credit there cannot
+change any route's reduced cost, since reduced cost only sums dual credit over the pairs a route
+actually serves, and a `requires_no_vehicle_route` pair is never served by any route regardless.
 """
 function _zero_extended_pi(
     requests::Vector{NTuple{3, Int}},
@@ -247,9 +256,10 @@ function _zero_extended_pi(
     pi_full = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64}()
     for p in requests
         assigned = assignments[p]
+        assigned_has_coverage_row = !requires_no_vehicle_route(assigned)
         for pair in feasible_pairs[p]
             is_walk_only_pair(pair) && continue
-            pi_full[(p, pair)] = pair == assigned ? pi_by_request[p] : 0.0
+            pi_full[(p, pair)] = (pair == assigned && assigned_has_coverage_row) ? pi_by_request[p] : 0.0
         end
     end
     return pi_full

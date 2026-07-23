@@ -112,9 +112,19 @@ end
 For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 (pickup_idx, dropoff_idx) satisfy both walking distance limits.
 
-`allow_same_station` (off by default, only ever set by `AggregateODRouteModel(unmet_demand_penalty=...)`)
-includes `j==k` real pairs instead of skipping them -- see [`is_same_station_pair`](@ref).
-Both per-side distance checks against `o`/`d` still apply normally with `k=j`.
+`allow_same_station` (off by default) includes `j==k` real pairs instead of
+skipping them -- see [`is_same_station_pair`](@ref). Both per-side distance
+checks against `o`/`d` still apply normally with `k=j`. Whenever `WALK_ONLY_PAIR`
+is *also* available for that OD (`allow_walk_only` and `dist(o,d) <= 2 *
+max_walking_distance`), same-station real pairs are omitted even with
+`allow_same_station=true`: by the triangle inequality, any `j` that's a valid
+same-station candidate (within `max_walking_distance` of *both* `o` and `d`)
+implies `dist(o,d) <= 2 * max_walking_distance` is already met, so walk-only
+already covers exactly the same case at equal-or-lower cost and needs no open
+station at all. Offering both as separate, identically-costed real/virtual
+pairs would otherwise make the "nearest-open" chain formulation's LP relax
+into fractional splits between them (see notes on `assert_endpoint_chain_near_binary`)
+instead of resolving deterministically to one.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
@@ -127,15 +137,17 @@ function compute_valid_jk_pairs(
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
 
     for (o, d) in all_od_pairs
+        walk_only_available = allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
         pairs = Tuple{Int, Int}[]
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
                 # station pairs must be distinct by default: j==k would mean
                 # boarding and alighting at the same station, i.e. no vehicle
-                # trip at all -- handled separately below via WALK_ONLY_PAIR,
-                # or (opt-in) as a real same-station pair here.
-                j == k && !allow_same_station && continue
+                # trip at all -- handled separately below via WALK_ONLY_PAIR
+                # when it's available for this OD, or (opt-in) as a real
+                # same-station pair here when it isn't.
+                j == k && (!allow_same_station || walk_only_available) && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end
@@ -148,7 +160,7 @@ function compute_valid_jk_pairs(
         # 2-hop station pair exists, and callers that don't expect a
         # station-free option (e.g. NearestOpenAggregateODAssignmentPolicy,
         # Benders, route-pool generation) must opt in deliberately.
-        if allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
+        if walk_only_available
             push!(pairs, WALK_ONLY_PAIR)
         end
         valid_jk_pairs[(o, d)] = pairs

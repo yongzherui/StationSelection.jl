@@ -226,6 +226,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
     unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+    _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
@@ -235,6 +236,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
+    _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     x = _add_nearest_open_master_x!(master, data, model, y, requests, feasible_pairs)
     u = unmet_demand_active ? master[:u] : nothing
 
@@ -377,6 +379,7 @@ function _run_aggregate_od_route_free_benders_xy(
         isempty(feasible_pairs[request]) &&
             throw(ArgumentError("BendersXY master has no open feasible pair candidate for $(request)"))
     end
+    _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
@@ -385,6 +388,7 @@ function _run_aggregate_od_route_free_benders_xy(
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
+    _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     x = _add_unrestricted_master_x!(master, y, requests, feasible_pairs)
 
     obj = AffExpr(0.0)

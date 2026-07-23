@@ -277,8 +277,29 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+    _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
+
+    if solver.cut_derivation != :standard
+        (model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+            model.assignment_policy.feasibility_cut_style == :big_m_nearest) ||
+            throw(ArgumentError(
+                "BendersSolver(cut_derivation=$(solver.cut_derivation)) requires " *
+                "NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"
+            ))
+        model.allow_walk_only && throw(ArgumentError(
+            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
+        ))
+        !isnothing(model.unmet_demand_penalty) && throw(ArgumentError(
+            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support unmet_demand_penalty -- " *
+            "the restricted dual-completion LP in yz_mw_cut.jl does not yet account for the relaxed z/x/u " *
+            "constraints \"always feasible\" mode uses; use cut_derivation=:standard with unmet_demand_penalty for now"
+        ))
+    end
+    z_core_point = solver.cut_derivation == :standard ? nothing :
+        _yz_joint_core_point(data, model, requests, optimizer_env, cfg.silent)
+    z_core = isnothing(z_core_point) ? nothing : z_core_point.z
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
@@ -286,6 +307,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
+    _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     _add_nearest_open_master_z!(
         master, data, y, requests, feasible_pairs, model.max_walking_distance, model.allow_walk_only,
         model.assignment_policy.feasibility_cut_style,
@@ -316,7 +338,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             style=model.assignment_policy.feasibility_cut_style,
             max_walking_distance=model.max_walking_distance,
             allow_walk_only=model.allow_walk_only,
-            allow_same_station=!isnothing(model.unmet_demand_penalty),
+            allow_same_station=true,
         )
         # Under "always feasible" mode, `infeasible` requests are genuinely
         # unserved (u=0), not grounds for a feasibility cut -- see BendersY's
@@ -367,8 +389,15 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 selected_assignment_count=length(assignments),
                 generated_column_pool_size=0,
                 inner_cg_iterations=inner_cg_iters,
+                cut_derivation=string(solver.cut_derivation),
+                mw_fallback_count=0,
+                mw_completion_seconds=0.0,
+                mw_phi_core=nothing,
             ))
-            _flush_benders_iteration_log!(solver, benders_rows)
+            _flush_benders_iteration_log!(
+                solver, benders_rows;
+                extra_headers=[:cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core],
+            )
             continue
         end
 
@@ -391,6 +420,9 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         iteration_lp_value = 0.0
         cuts_added_this_iteration = 0
         subproblem_lp_seconds = 0.0
+        mw_fallback_count = 0
+        mw_completion_seconds = 0.0
+        mw_last_phi_core = nothing
         for cut_id in cut_ids
             group_requests = cut_groups[cut_id]
             lp_start = time()
@@ -421,15 +453,49 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                     cfg.silent,
                 )
             end
+
+            # For the restricted-completion cut modes, `v_hat` above is only as good as
+            # `cg_result.generated_columns`'s completeness at this `z_hat` when
+            # `reprice_subproblem=false` -- tighten it with `_certified_qbar`'s independently
+            # certified value before the gating decision, exactly mirroring BendersY. See
+            # notes/2026-07-17_restricted_mw_cut_benders_y.md.
+            # Only built when actually needed: under `unmet_demand_penalty` (where `:standard`
+            # is the only allowed mode, enforced above), `assignments` legitimately omits
+            # genuinely-unserved requests, so an unconditional per-group restriction here would
+            # `KeyError` even though the `:standard` cut branch never touches `assignments`.
+            certified_for_cut = nothing
+            qbar_for_cut = nothing
+            certification_already_failed = false
+            assignments_for_group = Dict{NTuple{3, Int}, Tuple{Int, Int}}()
+            if solver.cut_derivation != :standard
+                assignments_for_group = Dict(request => assignments[request] for request in group_requests)
+                try
+                    certified_for_cut, qbar_for_cut = _certified_qbar(
+                        data, model, solver, group_requests, assignments_for_group, _open_station_values(y_hat),
+                    )
+                    v_hat = min(v_hat, qbar_for_cut)
+                catch err
+                    certification_already_failed = true
+                    @warn "BendersYZ restricted cut_derivation: certified Q_bar computation failed; " *
+                        "falling back to the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                end
+            end
+
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
-                @constraint(master, theta[cut_id] >= v_hat + sum(
-                    rho[(key, i)] * (master[:nearest_endpoint_chain_cache][key][i] - z_hat[key][i])
-                    for (key, i) in keys(rho)
-                ))
+                cut_diag = _add_aggregate_od_route_benders_yz_optimality_cut!(
+                    master, theta, cut_id, data, model, solver,
+                    group_requests, feasible_pairs, z_hat, assignments_for_group, _open_station_values(y_hat),
+                    z_core, optimizer_env, v_hat, rho;
+                    certified=certified_for_cut, Q_bar=qbar_for_cut,
+                    certification_already_failed=certification_already_failed,
+                )
                 optimality_cuts += 1
                 cuts_added_this_iteration += 1
+                cut_diag.fallback && (mw_fallback_count += 1)
+                mw_completion_seconds += cut_diag.completion_runtime_sec
+                isnan(cut_diag.phi_core) || (mw_last_phi_core = cut_diag.phi_core)
             end
         end
         push!(benders_rows, (
@@ -449,8 +515,15 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             selected_assignment_count=length(assignments),
             generated_column_pool_size=length(cg_result.generated_columns),
             inner_cg_iterations=inner_cg_iters,
+            cut_derivation=string(solver.cut_derivation),
+            mw_fallback_count=mw_fallback_count,
+            mw_completion_seconds=mw_completion_seconds,
+            mw_phi_core=mw_last_phi_core,
         ))
-        _flush_benders_iteration_log!(solver, benders_rows)
+        _flush_benders_iteration_log!(
+            solver, benders_rows;
+            extra_headers=[:cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core],
+        )
 
         if cuts_added_this_iteration == 0
             return _opt_result_from_benders(best_result, Dict{String, Any}(

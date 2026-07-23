@@ -152,7 +152,7 @@ function _assert_x_matches_nearest_open(
         style=model.assignment_policy.feasibility_cut_style,
         max_walking_distance=model.max_walking_distance,
         allow_walk_only=model.allow_walk_only,
-        allow_same_station=unmet_demand_active,
+        allow_same_station=true,
     )
     (unmet_demand_active || isempty(infeasible)) || throw(ArgumentError(
         "nearest-open subproblem LP check: y_hat=$(y_hat) leaves requests infeasible: $(infeasible)"
@@ -377,6 +377,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         ))
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+    _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
@@ -405,6 +406,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
+    _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     end
@@ -443,7 +445,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             style=model.assignment_policy.feasibility_cut_style,
             max_walking_distance=model.max_walking_distance,
             allow_walk_only=model.allow_walk_only,
-            allow_same_station=!isnothing(model.unmet_demand_penalty),
+            allow_same_station=true,
         )
         # Under "always feasible" mode, a request left in `infeasible` (no open
         # candidate at all on some side -- should be unreachable given the
