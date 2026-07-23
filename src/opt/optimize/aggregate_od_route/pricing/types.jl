@@ -24,6 +24,15 @@ struct AggregateODRoutePricingDuals
     sigma::Dict{Tuple{Int, Int}, Float64}
 end
 
+"""
+A partial unlimited-capacity, synchronized-start route.
+
+`time` is absolute time since the common `t=0` route/passenger start;
+`station_age[j]` is ride time since the latest pickup-eligible visit to `j`;
+and `served_pairs` records independently certified pairs. There is intentionally
+no onboard passenger count or capacity resource. See `labels.jl` for the full
+pricing contract.
+"""
 struct AggregateODRoutePricingLabel
     current::Int
     route::Vector{Int}

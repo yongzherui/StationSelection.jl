@@ -127,9 +127,9 @@ end
 Controls how `BendersY`'s, `BendersYZ`'s, and `BendersYZH`'s optimality cuts are derived
 (`BendersXY` always uses the standard subgradient cut; this field is ignored there). One of:
 
-- `:standard` (default): the pre-existing subgradient cut from the fixed-`y`/`z`/`h` subproblem
+- `:standard`: the pre-existing subgradient cut from the fixed-`y`/`z`/`h` subproblem
   LP's duals off the fixing constraints. Byte-identical to behavior before this field existed.
-- `:zero_completion`: a restricted dual-completion cut with a zero completion objective, i.e. any
+- `:zero_completion` (default): a restricted dual-completion cut with a zero completion objective, i.e. any
   dual-feasible completion tight at `y_hat`/`z_hat`/`h_hat` — a baseline for comparison, not a
   stronger cut. For `BendersYZH` this needs no completion LP at all (see `BendersYZH`'s docstring).
 - `:restricted_mw_fixed_pi`: a restricted, fixed-pricing-dual Magnanti-Wong-style cut. Fixes the
@@ -144,10 +144,15 @@ Controls how `BendersY`'s, `BendersYZ`'s, and `BendersYZH`'s optimality cuts are
 
 For all three decompositions that honor this field, the non-`:standard` modes are only supported
 for `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` with `allow_walk_only=false`,
-`unmet_demand_penalty === nothing`, and `inner_solver isa ColumnGenerationSolver`; each falls back
-to `:standard` for any (iteration, cut group) where the completion/certification fails. See
+`unmet_demand_penalty === nothing`, and `inner_solver isa ColumnGenerationSolver`. Any
+completion/certification failure is fatal; the solver never substitutes a standard cut. See
 `notes/2026-07-17_restricted_mw_cut_benders_y.md` (the `BendersY` derivation) and
 `benders/yz_mw_cut.jl`/`benders/yzh.jl` (the `BendersYZ`/`BendersYZH` analogues).
+
+`cut_derivation=:standard` with `reprice_subproblem=false` is retained for diagnostics but emits
+a warning because its restricted-pool cuts are not correctness-certified. A completed solve also
+warns when its recorded relative outer gap exceeds `outer_gap_warning_tol` (default `0.03`). The
+incumbent is still returned, and the threshold/check result are recorded in result metadata.
 """
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
@@ -157,10 +162,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
     max_iterations::Int
     optimality_tol::Float64
     log_dir::Union{String, Nothing}
+    log_subiteration_details::Bool
     check_lp_ip_gap::Bool
     reprice_subproblem::Bool
     max_reprice_rounds::Int
     cut_derivation::Symbol
+    outer_gap_warning_tol::Float64
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
@@ -175,10 +182,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
         pricing_time_limit_sec::Number=30.0,
         final_ip_time_limit_sec::Number=3600.0,
         log_dir::Union{AbstractString, Nothing}=nothing,
+        log_subiteration_details::Bool=true,
         check_lp_ip_gap::Bool=false,
         reprice_subproblem::Bool=false,
-        max_reprice_rounds::Int=20,
-        cut_derivation::Symbol=:standard,
+        max_reprice_rounds::Int=10_000,
+        cut_derivation::Symbol=:zero_completion,
+        outer_gap_warning_tol::Number=0.03,
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -192,6 +201,9 @@ struct BendersSolver <: AbstractStationSelectionSolver
             (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
             Float64(optimality_tol)
         resolved_tol >= 0 || throw(ArgumentError("optimality_tol must be non-negative"))
+        resolved_outer_gap_warning_tol = Float64(outer_gap_warning_tol)
+        resolved_outer_gap_warning_tol >= 0 ||
+            throw(ArgumentError("outer_gap_warning_tol must be non-negative"))
         resolved_inner = isnothing(inner_solver) ?
             ColumnGenerationSolver(
                 config=config,
@@ -211,10 +223,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
             max_iterations,
             resolved_tol,
             isnothing(log_dir) ? nothing : String(log_dir),
+            log_subiteration_details,
             check_lp_ip_gap,
             reprice_subproblem,
             max_reprice_rounds,
             cut_derivation,
+            resolved_outer_gap_warning_tol,
         )
     end
 end

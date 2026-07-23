@@ -271,12 +271,12 @@ dual vertex under which a column looks non-improving) is one plausible source, s
 duals used are whichever vertex of the LP's optimal face the solver happened to return.
 Either way the newly found columns are folded in and the LP is re-solved, repeating until
 pricing finds nothing more (mirroring standard CG's own convergence, `cg_stop_reason ==
-:optimality_proven`) or `max_reprice_rounds` is hit. This is a certification check, not
-a corrective CG loop for an actually underpriced LP value: under the intended degeneracy case,
-an alternate dual basis may expose columns outside the seeded pool, but those columns must be
-zero-value alternatives for the same LP optimum. Re-solving after adding repriced columns must
-therefore preserve the subproblem objective value; an improvement means the original restricted
-LP value was not certified and the routine throws.
+:optimality_proven`). Hitting `max_reprice_rounds` before that pass is an error. This is a
+certification check, not a corrective CG loop for an underpriced LP: the fixed-assignment priming
+solve has already established the objective that the activated-assignment subproblem must attain.
+Alternate columns exposed by a different dual basis must preserve that objective. An improvement
+therefore indicates invalid pricing output or a mismatch between the priming and activated-
+assignment formulations, and the routine throws rather than hiding that upstream defect.
 Returns `(v_hat, rho, pool, n_new_columns_total, n_rounds, fully_exhausted,
 max_objective_delta)`; `n_new_columns_total > 0` is itself the signal worth
 surfacing -- see notes/2026-07-15_bendersy_stale_cut_soundness.md.
@@ -292,7 +292,7 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
     y_hat::Vector{Float64},
     optimizer_env,
     silent::Bool;
-    max_reprice_rounds::Int=20,
+    max_reprice_rounds::Int=10_000,
 )
     pool = copy(columns)
     v_hat = NaN
@@ -301,7 +301,7 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
     rho = Dict{Int, Float64}()
     n_new_columns_total = 0
     rounds = 0
-    fully_exhausted = true
+    fully_exhausted = false
     for round in 1:max_reprice_rounds
         rounds = round
         m, fix_cons, x, cover_cons = _build_nearest_open_y_subproblem_lp(
@@ -349,8 +349,17 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
             append!(all_new_columns, new_columns_s)
             next_column_id += length(new_columns_s)
         end
-        fully_exhausted = pricing_exhausted
-        isempty(all_new_columns) && break
+        if isempty(all_new_columns)
+            if pricing_exhausted
+                fully_exhausted = true
+                break
+            end
+            round == max_reprice_rounds && throw(ArgumentError(
+                "BendersY repricing did not exhaust pricing within max_reprice_rounds=$(max_reprice_rounds); " *
+                "no cut can be certified from the current duals."
+            ))
+            continue
+        end
         pricing_exhausted ||
             @warn "BendersY subproblem repricing: pricing hit its time limit before exhausting the search " *
                 "while new columns were still being found -- completeness not fully proven this round" round
@@ -358,7 +367,13 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
             "for this subproblem's own dual structure (dual degeneracy or genuine pool gap)" round n_new=length(all_new_columns)
         n_new_columns_total += length(all_new_columns)
         pool = _deduplicate_aggregate_od_route_columns(vcat(pool, all_new_columns))
+        round == max_reprice_rounds && throw(ArgumentError(
+            "BendersY repricing found negative route columns in the final allowed round " *
+            "max_reprice_rounds=$(max_reprice_rounds); the expanded LP must be re-solved and " *
+            "re-priced to exhaustion before its cut is valid."
+        ))
     end
+    fully_exhausted || throw(ArgumentError("BendersY repricing terminated without pricing exhaustion"))
     return v_hat, rho, pool, n_new_columns_total, rounds, fully_exhausted, max_objective_delta
 end
 
@@ -439,7 +454,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersY master failed with status $(termination_status(master))"))
-        lower_bound = objective_value(master)
+        lower_bound = objective_bound(master)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
 
@@ -621,9 +636,11 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                     )
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
-                    certification_already_failed = true
-                    @warn "BendersY restricted cut_derivation: certified Q_bar computation failed; " *
-                        "falling back to the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                    throw(ErrorException(
+                        "BendersY restricted cut certification failed at iteration=$(iteration), " *
+                        "cut_id=$(cut_id); refusing to fall back to an uncertified standard cut: " *
+                        sprint(showerror, err)
+                    ))
                 end
             end
 
@@ -703,7 +720,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         )
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(best_result, Dict{String, Any}(
+            return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersY",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -731,7 +748,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 "generated_column_pool_size" => length(shared_pool),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
                 "cut_derivation" => string(solver.cut_derivation),
-            ))
+            ), solver)
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersY did not find a feasible incumbent"))

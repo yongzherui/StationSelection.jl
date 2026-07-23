@@ -227,12 +227,11 @@ covering-constraint duals (via `_extract_nearest_open_y_subproblem_coverage_dual
 unmodified since `cover_cons` has the identical `(request, pair) => ConstraintRef` shape) and
 runs genuine label-setting pricing against them. If pricing finds a column with negative
 reduced cost beyond the seeded pool, the pool folds it in and the LP is re-solved, repeating
-until pricing finds nothing more or `max_reprice_rounds` is hit -- the same convergence
-criterion CG's own pricing uses. This is a certification check for dual-basis degeneracy:
-newly priced columns may appear under the separately solved LP's chosen duals, but after
-adding them the LP objective must remain unchanged. Re-solving after adding repriced columns
-must preserve the subproblem objective value; an improvement means the original restricted LP
-value was not certified and the routine throws.
+until an exhaustive pricing pass finds no negative columns; hitting `max_reprice_rounds` first
+is an error. This is a certification check for dual-basis degeneracy. The priming solve already
+established the activated assignment's objective, so alternate columns may change the dual basis
+but must not improve that objective. An improvement indicates a pricing or formulation-alignment
+defect, and this routine throws.
 """
 function _solve_yzh_route_subproblem_lp_with_repricing(
     data::StationSelectionData,
@@ -244,7 +243,7 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
     h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64},
     optimizer_env,
     silent::Bool;
-    max_reprice_rounds::Int=20,
+    max_reprice_rounds::Int=10_000,
 )
     pool = copy(columns)
     v_hat = NaN
@@ -253,7 +252,7 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
     rho = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64}()
     n_new_columns_total = 0
     rounds = 0
-    fully_exhausted = true
+    fully_exhausted = false
     for round in 1:max_reprice_rounds
         rounds = round
         m, fix_cons, cover_cons = _build_yzh_route_subproblem_lp(
@@ -298,8 +297,17 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
             append!(all_new_columns, new_columns_s)
             next_column_id += length(new_columns_s)
         end
-        fully_exhausted = pricing_exhausted
-        isempty(all_new_columns) && break
+        if isempty(all_new_columns)
+            if pricing_exhausted
+                fully_exhausted = true
+                break
+            end
+            round == max_reprice_rounds && throw(ArgumentError(
+                "BendersYZH repricing did not exhaust pricing within max_reprice_rounds=$(max_reprice_rounds); " *
+                "no cut can be certified from the current duals."
+            ))
+            continue
+        end
         pricing_exhausted ||
             @warn "BendersYZH subproblem repricing: pricing hit its time limit before exhausting the search " *
                 "while new columns were still being found -- completeness not fully proven this round" round
@@ -307,7 +315,13 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
             "for this subproblem's own dual structure (dual degeneracy or genuine pool gap)" round n_new=length(all_new_columns)
         n_new_columns_total += length(all_new_columns)
         pool = _deduplicate_aggregate_od_route_columns(vcat(pool, all_new_columns))
+        round == max_reprice_rounds && throw(ArgumentError(
+            "BendersYZH repricing found negative route columns in the final allowed round " *
+            "max_reprice_rounds=$(max_reprice_rounds); the expanded LP must be re-solved and " *
+            "re-priced to exhaustion before its cut is valid."
+        ))
     end
+    fully_exhausted || throw(ArgumentError("BendersYZH repricing terminated without pricing exhaustion"))
     return v_hat, rho, pool, n_new_columns_total, rounds, fully_exhausted, max_objective_delta
 end
 
@@ -350,7 +364,19 @@ function _zero_completion_yzh_rho(
 )
     group_requests_vec = collect(group_requests)
     assignments_for_group = Dict(request => assignments[request] for request in group_requests_vec)
-    certified, Q_bar = _certified_qbar(data, model, solver, group_requests_vec, assignments_for_group, open_stations)
+    certified, full_Q_bar = _certified_qbar(
+        data, model, solver, group_requests_vec, assignments_for_group, open_stations,
+    )
+    # `_certified_qbar` solves RouteCoveringProblem, whose objective contains both the fixed
+    # walking term and route cost. BendersYZH's master already prices walking through `h`, while
+    # its theta-only subproblem represents route recourse only. Remove that fixed walking constant
+    # here or the zero-completion cut applies walk_cost_weight twice.
+    fixed_walking_cost = sum(
+        _assignment_pair_cost(data, request, assignments_for_group[request]; weight=model.walk_cost_weight)
+        for request in group_requests_vec;
+        init=0.0,
+    )
+    Q_bar = full_Q_bar - fixed_walking_cost
     feasible_pairs_flat = Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}(
         request => feasible_pairs_by_p[(request[2], request[3])] for request in group_requests_vec
     )
@@ -404,23 +430,20 @@ function _add_aggregate_od_route_benders_yzh_optimality_cut!(
         return (mode=:standard, fallback=false)
     end
 
-    if isnothing(zc_result) && !certification_already_failed
+    certification_already_failed && throw(ErrorException(
+        "BendersYZH zero-completion cut cannot be constructed after certification failed"
+    ))
+    if isnothing(zc_result)
         zc_result = try
             _zero_completion_yzh_rho(
                 data, model, solver, group_requests, feasible_pairs_by_p, assignments, open_stations,
             )
         catch err
-            @warn "BendersYZH zero-completion cut derivation failed; falling back to the standard cut " *
-                "for this (iteration, cut_id)" cut_id error = err
-            nothing
+            throw(ErrorException(
+                "BendersYZH zero-completion cut derivation failed for cut_id=$(cut_id); refusing " *
+                "to fall back to an uncertified standard cut: " * sprint(showerror, err)
+            ))
         end
-    end
-
-    if isnothing(zc_result)
-        @constraint(master, theta[cut_id] >= v_hat + sum(
-            rho[key] * (h[key] - get(h_hat, key, 0.0)) for key in keys(rho)
-        ))
-        return (mode=solver.cut_derivation, fallback=true)
     end
 
     Q_bar, zero_rho, _certified = zc_result
@@ -544,7 +567,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersYZH master failed with status $(termination_status(master))"))
-        lower_bound = objective_value(master)
+        lower_bound = objective_bound(master)
         assert_endpoint_chain_near_binary(master)
         assert_service_near_binary(master)
 
@@ -619,9 +642,11 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
                     )
                     v_hat = min(v_hat, zc_result[1])
                 catch err
-                    certification_already_failed = true
-                    @warn "BendersYZH zero_completion: certified Q_bar computation failed; falling back to " *
-                        "the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                    throw(ErrorException(
+                        "BendersYZH zero-completion certification failed at iteration=$(iteration), " *
+                        "cut_id=$(cut_id); refusing to fall back to an uncertified standard cut: " *
+                        sprint(showerror, err)
+                    ))
                 end
             end
 
@@ -693,7 +718,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         end
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(best_result, Dict{String, Any}(
+            return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersYZH",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -717,7 +742,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
                 "reprice_subproblem" => solver.reprice_subproblem,
                 "total_reprice_columns_found" => total_reprice_columns_found,
                 "total_reprice_rounds" => total_reprice_rounds,
-            ))
+            ), solver)
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersYZH did not find a feasible incumbent"))

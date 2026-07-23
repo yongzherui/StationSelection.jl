@@ -609,8 +609,9 @@ requested completion (`objective_mode ∈ (:maximize_core, :zero)`), and (only f
 `Phi(y_core;d_star) >= Phi(y_core;d_baseline)` before returning -- both completions reuse the
 same fixed `pi_full`/`Q_bar`, so this is one extra small LP solve, not another pricing pass
 (`n_pricing_calls_during_completion` is always zero: Sections E-G never call the pricing
-oracle). Never mutates `master`; the caller adds the JuMP constraint and handles the
-`:completion_infeasible` fallback to the standard cut.
+oracle). Never mutates `master`; the caller adds the JuMP constraint. A non-`:ok` completion is
+fatal because falling back to a restricted-pool standard cut would discard the certification
+guarantee.
 """
 function _restricted_mw_optimality_cut(
     data::StationSelectionData,
@@ -674,10 +675,9 @@ end
 
 Adds one optimality cut for `cut_id` to `master`, dispatching on `solver.cut_derivation`.
 `:standard` reproduces the pre-existing subgradient cut exactly (byte-identical). The two
-restricted-completion modes attempt `_restricted_mw_optimality_cut` and fall back to the
-standard cut (with a `@warn`) if the completion LP comes back infeasible or the derivation
-throws -- this keeps the outer BendersY loop making progress even on iterations where the
-restricted completion isn't feasible, per the spec's explicit anticipation of that case.
+restricted-completion modes require `_restricted_mw_optimality_cut` to certify and construct
+the requested cut. Certification, construction, or tightness failures are fatal because a
+standard-cut fallback would silently change the requested algorithm and may be unsound.
 Returns a diagnostics `NamedTuple` for the caller's iteration log.
 """
 function _add_aggregate_od_route_benders_y_optimality_cut!(
@@ -712,32 +712,27 @@ function _add_aggregate_od_route_benders_y_optimality_cut!(
         )
     end
 
-    # If the caller's own certified-Q_bar attempt (used for the gating decision) already failed
-    # this (iteration, cut_id), retrying here would just repeat the identical, deterministic CG
-    # certification failure -- skip straight to the standard-cut fallback instead of paying for
-    # a second, doomed CG solve.
+    certification_already_failed && throw(ErrorException(
+        "BendersY restricted cut cannot be constructed after Q_bar certification failed"
+    ))
     objective_mode = solver.cut_derivation == :restricted_mw_fixed_pi ? :maximize_core : :zero
-    mw_result = certification_already_failed ? nothing : try
+    mw_result = try
         _restricted_mw_optimality_cut(
             data, model, solver, group_requests, feasible_pairs, y_hat, assignments,
             open_stations, y_core.y, optimizer_env, objective_mode;
             certified=certified, Q_bar=Q_bar,
         )
     catch err
-        @warn "BendersY restricted-MW cut derivation failed; falling back to the standard cut " *
-            "for this (iteration, cut_id)" cut_id error = err
-        nothing
+        throw(ErrorException(
+            "BendersY restricted cut derivation failed for cut_id=$(cut_id); refusing to fall " *
+            "back to an uncertified standard cut: " * sprint(showerror, err)
+        ))
     end
 
-    if isnothing(mw_result) || mw_result.status != :ok
-        alpha = v_hat - sum(rho[j] * y_hat[j] for j in 1:n)
-        @constraint(master, theta[cut_id] >= alpha + sum(rho[j] * y[j] for j in 1:n))
-        return (
-            mode=solver.cut_derivation, mw_status=isnothing(mw_result) ? :error : mw_result.status,
-            Q_bar=v_hat, phi_core=NaN, phi_core_baseline=NaN, completion_runtime_sec=0.0,
-            n_routes=0, n_cg_iterations=0, fallback=true,
-        )
-    end
+    mw_result.status == :ok || throw(ErrorException(
+        "BendersY restricted cut derivation returned status=$(mw_result.status) for cut_id=$(cut_id); " *
+        "refusing to fall back to an uncertified standard cut"
+    ))
 
     cut_constant = mw_result.cut_constant
     beta = mw_result.beta

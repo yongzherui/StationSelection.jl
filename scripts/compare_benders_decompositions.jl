@@ -51,7 +51,7 @@ Environment variables (with defaults):
     CS_INNER_CG_MAX_ITERS     = 200     inner column-generation iteration cap (priming CG)
     CS_INNER_PRICING_TIME     = 30      inner CG per-iteration pricing time limit (seconds)
     CS_INNER_IP_TIME_LIMIT    = 30      inner CG final MIP time limit (seconds)
-    CS_MAX_REPRICE_ROUNDS     = 30      cap on repricing rounds per subproblem LP
+    CS_MAX_REPRICE_ROUNDS     = 10000   safety cap on repricing rounds per subproblem LP
     CS_N_SCENARIOS            = 3
     CS_MAX_WALKING_DISTANCE   = 600     walking distance cap (seconds)
     CS_MAX_WAIT_TIME          = 900     vehicle wait budget from depot (seconds)
@@ -89,7 +89,7 @@ if _RUN_AS_MAIN
     const INNER_CG_MAX_ITERS  = parse(Int,     get(ENV, "CS_INNER_CG_MAX_ITERS",  "200"))
     const INNER_PRICING_TIME  = parse(Float64, get(ENV, "CS_INNER_PRICING_TIME",  "30"))
     const INNER_IP_TIME_LIMIT = parse(Float64, get(ENV, "CS_INNER_IP_TIME_LIMIT", "30"))
-    const MAX_REPRICE_ROUNDS  = parse(Int,     get(ENV, "CS_MAX_REPRICE_ROUNDS",  "30"))
+    const MAX_REPRICE_ROUNDS  = parse(Int,     get(ENV, "CS_MAX_REPRICE_ROUNDS",  "10000"))
     const N_SCENARIOS         = parse(Int,     get(ENV, "CS_N_SCENARIOS",         "3"))
     const MAX_WALK_ENV        = get(ENV, "CS_MAX_WALKING_DISTANCE", "600")
     const MAX_WAIT_TIME       = parse(Float64, get(ENV, "CS_MAX_WAIT_TIME",       "900"))

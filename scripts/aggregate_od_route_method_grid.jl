@@ -5,7 +5,7 @@ Shared instance-grid and method-list definitions for the full method comparison
 experiment on `AggregateODRouteModel` under
 `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)`:
 
-  - Direct solve (enumerate-then-MIP), max_stops=4
+  - Direct solve (enumerate-then-MIP), max_stops in {3, 4}
   - Plain column generation (no Benders), max_stops in {4, uncapped}
   - Benders decomposition on BendersY / BendersYZ / BendersYZH, each with
     {standard+no-reprice, standard+reprice, zero_completion, mw_cut (where
@@ -57,7 +57,7 @@ struct MethodSpec
     decomposition::Any            # StationSelection.BendersY()/BendersYZ()/BendersYZH(), or nothing
     cut_derivation::Symbol        # :standard | :zero_completion | :restricted_mw_fixed_pi (benders only)
     reprice::Bool                 # benders only
-    max_stops_mode::Symbol        # :ms4 | :uncapped
+    max_stops_mode::Symbol        # :ms4 | :ms3 | :uncapped
 end
 
 function _benders_variants(label_prefix::String, decomposition; include_mw::Bool)
@@ -80,6 +80,11 @@ end
 
 const METHODS = MethodSpec[
     MethodSpec("direct_ms4",   :direct, nothing, :standard, false, :ms4),
+    # direct_ms3 (max_stops=3): a cheaper fallback enumeration point kept alongside
+    # direct_ms4 so Direct still has a comparison point at instance sizes where
+    # ms4 enumeration blows past its time/memory budget (see CS_DIRECT_MAX_ROUTES /
+    # CS_DIRECT_TIME_LIMIT in run_method_compare_task.jl).
+    MethodSpec("direct_ms3",   :direct, nothing, :standard, false, :ms3),
     MethodSpec("cg_ms4",       :cg,     nothing, :standard, false, :ms4),
     # cg_uncapped (plain CG with max_stops=typemax(Int)) dropped: with y unfixed
     # (unlike Benders' inner CG, which solves a y-fixed RouteCoveringProblem --
@@ -111,6 +116,7 @@ uncapped path; on a 10-station grid instance this hung column generation past
 """
 function resolve_max_stops(mode::Symbol, n_stations::Int)::Int
     mode == :ms4 && return 4
+    mode == :ms3 && return 3
     mode == :uncapped && return typemax(Int)
     error("unknown max_stops_mode=$mode")
 end

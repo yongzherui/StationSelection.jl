@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=08:00:00
+#SBATCH --time=03:00:00
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
@@ -99,7 +99,7 @@ cd "$PROJECT_ROOT"
 
 echo "===== Running ====="
 set +e
-julia --startup-file=no \
+stdbuf -o0 -e0 julia --startup-file=no \
       --project="$PROJECT_ROOT" \
       "$PROJECT_ROOT/scripts/run_method_compare_task.jl" \
       "$BASE_OUTDIR" "$DATA_DIR" "$FAMILY" "$N_STATIONS" "$L" "$N_PAIRS" "$SEED" "$METHOD"

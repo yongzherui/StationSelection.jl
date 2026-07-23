@@ -2,6 +2,34 @@
 Core label-DP primitives for AggregateODRouteModel pricing: label creation,
 extension, and dominance. `search.jl` orchestrates these into a full pricing
 pass; this file is the one to audit for "is the label search correct".
+
+# Operational contract of the column being priced
+
+This is deliberately **not** a finite-capacity passenger-loading problem. A
+column is one unlimited-capacity vehicle route under the following synchronized
+service assumptions:
+
+- the route clock and every passenger's wait clock start at `t = 0`;
+- a visit to origin station `j` can pick up every relevant `(j,k)` passenger
+  when the visit's arrival time is at most `max_wait_time`;
+- after that pickup, `(j,k)` is certified by a later visit to `k` when elapsed
+  onboard time is at most `detour_factor * routing_cost(j,k)`; and
+- certifying one pair consumes no capacity and does not prevent the same route
+  from certifying any other pair whose independent wait/detour tests pass.
+
+Accordingly, `station_age[j]` is the elapsed time since the most recent eligible
+pickup visit to `j`, not a vehicle-load state. `served_pairs` is the set of all
+pairs independently certified by the stop sequence. It can be broad: for
+example, `[1,2,3,4]` can certify all six forward pairs when their time tests
+pass. This high overlap is intended model behavior and is also why the route
+master has a potentially large set-covering LP/IP gap: pricing gives a column
+the sum of the dual rewards of every pair it certifies, whereas the final MIP
+must purchase the whole route.
+
+Do not add load resources or capacity dominance rules here unless the model's
+operational semantics are intentionally being changed. Conversely, any future
+finite-capacity version must add passenger quantities and leg-by-leg onboard
+load state; pair certification alone is not a capacity formulation.
 """
 
 export initial_aggregate_od_route_pricing_labels

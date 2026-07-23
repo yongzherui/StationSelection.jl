@@ -149,6 +149,9 @@
                     max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
                     final_ip_time_limit_sec=30.0,
                 )
+                restricted_cut_supported = style == :big_m_nearest &&
+                    !model.allow_walk_only && isnothing(model.unmet_demand_penalty)
+                selected_cut_derivation = restricted_cut_supported ? :zero_completion : :standard
 
                 # reprice_subproblem=true closes BendersY's premature-convergence /
                 # stale-cut soundness gap (notes/2026-07-15_bendersy_stale_cut_soundness.md):
@@ -161,7 +164,7 @@
                     BendersSolver(
                         config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                         decomposition=BendersY(), inner_solver=inner_cg, max_iterations=50,
-                        reprice_subproblem=true,
+                        reprice_subproblem=true, cut_derivation=selected_cut_derivation,
                     ),
                 )
                 @test benders_y.termination_status == MOI.OPTIMAL
@@ -192,21 +195,22 @@
                         BendersSolver(
                             config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                             decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
-                            reprice_subproblem=true,
+                            reprice_subproblem=true, cut_derivation=selected_cut_derivation,
                         ),
                     )
                     @test benders_yz.termination_status == MOI.OPTIMAL
                     @test isapprox(benders_yz.objective_value, ground_truth.objective_value; atol=1e-6)
                     assert_nearest_open_assignments(data, benders_yz)
 
-                    # BendersYZH (master = y,z,h; subproblem = θ only) -- h is fixed
-                    # fully in its subproblem (unlike BendersYZ's z-only fixing), so
-                    # unlike BendersYZ it needs no reprice_subproblem to be exact.
+                    # BendersYZH uses the certified zero-completion default where supported;
+                    # diagnostic standard cuts for other endpoint modes still require repricing.
                     benders_yzh = run_opt(
                         data, model,
                         BendersSolver(
                             config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                             decomposition=BendersYZH(), inner_solver=inner_cg, max_iterations=50,
+                            reprice_subproblem=!restricted_cut_supported,
+                            cut_derivation=selected_cut_derivation,
                         ),
                     )
                     @test benders_yzh.termination_status == MOI.OPTIMAL
@@ -373,7 +377,7 @@
                     BendersSolver(
                         config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                         decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
-                        reprice_subproblem=true,
+                        reprice_subproblem=true, cut_derivation=:standard,
                     ),
                 )
                 @test benders_yz.termination_status == MOI.OPTIMAL

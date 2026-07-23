@@ -110,7 +110,7 @@
             BendersSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                 decomposition=BendersY(), inner_solver=inner_cg, max_iterations=50,
-                reprice_subproblem=true,
+                reprice_subproblem=true, cut_derivation=:standard,
             ),
         )
         @test benders_y.termination_status == MOI.OPTIMAL
@@ -132,7 +132,7 @@
             BendersSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                 decomposition=BendersYZ(), inner_solver=inner_cg, max_iterations=50,
-                reprice_subproblem=true,
+                reprice_subproblem=true, cut_derivation=:standard,
             ),
         )
         @test benders_yz.termination_status == MOI.OPTIMAL
@@ -144,6 +144,7 @@
             BendersSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                 decomposition=BendersYZH(), inner_solver=inner_cg, max_iterations=50,
+                reprice_subproblem=true, cut_derivation=:standard,
             ),
         )
         @test benders_yzh.termination_status == MOI.OPTIMAL

@@ -27,7 +27,7 @@ scripts/compare_benders_decompositions.jl and scripts/run_single_instance.jl):
                                       failure rate dominated by "did not converge within
                                       max_iterations"), so 500 gives more room before concluding a
                                       run is genuinely non-convergent vs. just iteration-starved
-    CS_MAX_REPRICE_ROUNDS  = 30      cap on repricing rounds per subproblem LP
+    CS_MAX_REPRICE_ROUNDS  = 10000   safety cap on repricing rounds per subproblem LP
     CS_INNER_CG_MAX_ITERS  = 200     inner (priming) column-generation iteration cap
     CS_INNER_PRICING_TIME  = 120     inner CG per-iteration pricing time limit (seconds)
     CS_INNER_IP_TIME_LIMIT = 60      inner CG final MIP time limit (seconds)
@@ -37,7 +37,10 @@ scripts/compare_benders_decompositions.jl and scripts/run_single_instance.jl):
                                       more time to exhaust (or prove no improving column exists)
                                       once max_visits_per_node is unrestricted
     CS_CG_IP_TIME_LIMIT    = 300     plain CG final MIP time limit (seconds)
-    CS_DIRECT_MAX_ROUTES   = 50000   max enumerated routes for Direct solve
+    CS_DIRECT_MAX_ROUTES   = typemax(Int)   max enumerated routes for Direct solve; effectively
+                                      unbounded by default so Direct can only fail via
+                                      CS_DIRECT_TIME_LIMIT or actually exhausting node memory,
+                                      not an arbitrary route-count ceiling
     CS_DIRECT_TIME_LIMIT   = 300     max enumeration wall time for Direct solve (seconds)
     CS_DETOUR_FACTOR       = 2.0     allowed detour ratio over direct route time
     CS_MAX_WAIT_TIME       = 900     vehicle wait budget from depot (seconds)
@@ -79,14 +82,14 @@ if _RUN_AS_MAIN
         # (not just this gap) is what would trip that check.
         mip_gap             = parse(Float64, get(ENV, "CS_MIP_GAP",             "1e-4")),
         benders_max_iters   = parse(Int,     get(ENV, "CS_BENDERS_MAX_ITERS",   "500")),
-        max_reprice_rounds  = parse(Int,     get(ENV, "CS_MAX_REPRICE_ROUNDS",  "30")),
+        max_reprice_rounds  = parse(Int,     get(ENV, "CS_MAX_REPRICE_ROUNDS",  "10000")),
         inner_cg_max_iters  = parse(Int,     get(ENV, "CS_INNER_CG_MAX_ITERS",  "200")),
         inner_pricing_time  = parse(Float64, get(ENV, "CS_INNER_PRICING_TIME",  "120")),
         inner_ip_time_limit = parse(Float64, get(ENV, "CS_INNER_IP_TIME_LIMIT", "60")),
         cg_max_iters        = parse(Int,     get(ENV, "CS_CG_MAX_ITERS",        "10000")),
         cg_pricing_time     = parse(Float64, get(ENV, "CS_CG_PRICING_TIME",     "120")),
         cg_ip_time_limit    = parse(Float64, get(ENV, "CS_CG_IP_TIME_LIMIT",    "300")),
-        direct_max_routes   = parse(Int,     get(ENV, "CS_DIRECT_MAX_ROUTES",   "50000")),
+        direct_max_routes   = parse(Int,     get(ENV, "CS_DIRECT_MAX_ROUTES",   string(typemax(Int)))),
         direct_time_limit   = parse(Float64, get(ENV, "CS_DIRECT_TIME_LIMIT",   "300")),
         detour_factor       = parse(Float64, get(ENV, "CS_DETOUR_FACTOR",       "2.0")),
         max_wait_time       = parse(Float64, get(ENV, "CS_MAX_WAIT_TIME",       "900")),
@@ -169,6 +172,7 @@ function build_solver(method::MethodSpec, cfg::NamedTuple, log_dir::String)
             inner_solver=inner_cg,
             max_iterations=cfg.benders_max_iters,
             log_dir=log_dir,
+            log_subiteration_details=false,
             reprice_subproblem=method.reprice,
             max_reprice_rounds=cfg.max_reprice_rounds,
             cut_derivation=method.cut_derivation,

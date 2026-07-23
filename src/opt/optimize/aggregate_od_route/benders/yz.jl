@@ -156,10 +156,10 @@ suboptimal-but-correctly-costed `y` on the real-data alignment fixture).
 Reuses `_extract_nearest_open_y_subproblem_coverage_duals` unchanged since
 `cover_cons` has the identical `(request, pair) => ConstraintRef` shape. Like
 `_solve_nearest_open_y_subproblem_lp_with_repricing`, this is a certification
-check for dual-basis degeneracy: newly priced columns may appear under the LP's
-chosen duals, but after adding them the LP objective must remain unchanged. If
-the objective improves, the restricted subproblem value used for the cut was not
-certified and this routine throws.
+check for dual-basis degeneracy. The priming solve already established the activated assignment's
+objective, so newly priced columns may change the dual basis but must not improve that objective.
+An improvement indicates a pricing or formulation-alignment defect, and this routine throws.
+Successful return also requires an exhaustive pricing pass with no negative columns.
 """
 function _solve_yz_route_subproblem_lp_with_repricing(
     data::StationSelectionData,
@@ -171,7 +171,7 @@ function _solve_yz_route_subproblem_lp_with_repricing(
     z_hat::Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}},
     optimizer_env,
     silent::Bool;
-    max_reprice_rounds::Int=20,
+    max_reprice_rounds::Int=10_000,
 )
     pool = copy(columns)
     v_hat = NaN
@@ -180,7 +180,7 @@ function _solve_yz_route_subproblem_lp_with_repricing(
     rho = Dict{Tuple{_AggregateODRouteEndpointChainKey, Int}, Float64}()
     n_new_columns_total = 0
     rounds = 0
-    fully_exhausted = true
+    fully_exhausted = false
     for round in 1:max_reprice_rounds
         rounds = round
         m, fix_cons, cover_cons = _build_yz_route_subproblem_lp(
@@ -227,8 +227,17 @@ function _solve_yz_route_subproblem_lp_with_repricing(
             append!(all_new_columns, new_columns_s)
             next_column_id += length(new_columns_s)
         end
-        fully_exhausted = pricing_exhausted
-        isempty(all_new_columns) && break
+        if isempty(all_new_columns)
+            if pricing_exhausted
+                fully_exhausted = true
+                break
+            end
+            round == max_reprice_rounds && throw(ArgumentError(
+                "BendersYZ repricing did not exhaust pricing within max_reprice_rounds=$(max_reprice_rounds); " *
+                "no cut can be certified from the current duals."
+            ))
+            continue
+        end
         pricing_exhausted ||
             @warn "BendersYZ subproblem repricing: pricing hit its time limit before exhausting the search " *
                 "while new columns were still being found -- completeness not fully proven this round" round
@@ -236,7 +245,13 @@ function _solve_yz_route_subproblem_lp_with_repricing(
             "for this subproblem's own dual structure (dual degeneracy or genuine pool gap)" round n_new=length(all_new_columns)
         n_new_columns_total += length(all_new_columns)
         pool = _deduplicate_aggregate_od_route_columns(vcat(pool, all_new_columns))
+        round == max_reprice_rounds && throw(ArgumentError(
+            "BendersYZ repricing found negative route columns in the final allowed round " *
+            "max_reprice_rounds=$(max_reprice_rounds); the expanded LP must be re-solved and " *
+            "re-priced to exhaustion before its cut is valid."
+        ))
     end
+    fully_exhausted || throw(ArgumentError("BendersYZ repricing terminated without pricing exhaustion"))
     return v_hat, rho, pool, n_new_columns_total, rounds, fully_exhausted, max_objective_delta
 end
 
@@ -332,7 +347,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersYZ master failed with status $(termination_status(master))"))
-        lower_bound = objective_value(master)
+        lower_bound = objective_bound(master)
         assert_endpoint_chain_near_binary(master)
 
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
@@ -480,9 +495,11 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                     )
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
-                    certification_already_failed = true
-                    @warn "BendersYZ restricted cut_derivation: certified Q_bar computation failed; " *
-                        "falling back to the plain (possibly stale) v_hat for this (iteration, cut_id)" iteration cut_id error = err
+                    throw(ErrorException(
+                        "BendersYZ restricted cut certification failed at iteration=$(iteration), " *
+                        "cut_id=$(cut_id); refusing to fall back to an uncertified standard cut: " *
+                        sprint(showerror, err)
+                    ))
                 end
             end
 
@@ -531,7 +548,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         )
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(best_result, Dict{String, Any}(
+            return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersYZ",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -552,7 +569,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(cg_result.generated_columns),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
-            ))
+            ), solver)
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersYZ did not find a feasible incumbent"))

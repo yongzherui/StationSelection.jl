@@ -29,6 +29,63 @@ function _aggregate_od_route_label_reduced_cost(
     return pricing_data.route_regularization_weight * (tau + pricing_data.repositioning_time) - dual_credit
 end
 
+"""
+Resolve the finite route-length ceiling shared by pricing and exhaustive
+enumeration. With unbounded `max_stops` and a finite per-node visit limit,
+`n_nodes * max_visits_per_node` is the exact combinatorial ceiling. If both
+limits are unbounded, exhaustive enumeration (no dominance, no reduced-cost
+pruning) has no finite DFS depth and cannot terminate -- that case is a hard
+error here. Label-setting pricing does not share this requirement; see
+`_resolve_aggregate_od_route_pricing_max_stops` below.
+"""
+function _resolve_aggregate_od_route_max_stops(
+    max_stops::Int,
+    max_visits_per_node::Int,
+    n_nodes::Int,
+)::Int
+    max_stops != typemax(Int) && return max_stops
+    max_visits_per_node != typemax(Int) || throw(ArgumentError(
+        "AggregateODRouteModel route search requires a finite max_stops or " *
+        "max_visits_per_node; both are currently unbounded",
+    ))
+    try
+        return Base.Checked.checked_mul(n_nodes, max_visits_per_node)
+    catch err
+        err isa OverflowError || rethrow()
+        throw(ArgumentError(
+            "aggregate OD route-length bound n_nodes * max_visits_per_node overflows Int",
+        ))
+    end
+end
+
+"""
+Resolve the route-length ceiling for label-setting pricing. Unlike exhaustive
+enumeration, the labeling search in `search.jl` terminates via label dominance
+and reduced-cost pruning even with no depth ceiling at all -- `bounded_max_stops`
+already tells the dominance/comparison code to ignore route_length when
+`max_stops` is unbounded (see `labels.jl`), so `route_length >=
+pricing_data.max_stops` at the top of the search loop only needs to be a
+no-op in that case, not an error. Both limits unbounded is therefore a
+legitimate "run pricing with no artificial route-length cap" configuration,
+not a misconfiguration.
+"""
+function _resolve_aggregate_od_route_pricing_max_stops(
+    max_stops::Int,
+    max_visits_per_node::Int,
+    n_nodes::Int,
+)::Int
+    max_stops != typemax(Int) && return max_stops
+    max_visits_per_node == typemax(Int) && return typemax(Int)
+    try
+        return Base.Checked.checked_mul(n_nodes, max_visits_per_node)
+    catch err
+        err isa OverflowError || rethrow()
+        throw(ArgumentError(
+            "aggregate OD route-length bound n_nodes * max_visits_per_node overflows Int",
+        ))
+    end
+end
+
 function create_aggregate_od_route_pricing_data(
     model::AnyAggregateODRouteModel,
     data::StationSelectionData,
@@ -64,7 +121,11 @@ function create_aggregate_od_route_pricing_data(
     end
 
     bounded_max_stops = model.max_stops != typemax(Int)
-    max_stops = model.max_stops == typemax(Int) ? length(nodes) : model.max_stops
+    max_stops = _resolve_aggregate_od_route_pricing_max_stops(
+        model.max_stops,
+        model.max_visits_per_node,
+        length(nodes),
+    )
     return AggregateODRoutePricingData(
         scenario,
         nodes,

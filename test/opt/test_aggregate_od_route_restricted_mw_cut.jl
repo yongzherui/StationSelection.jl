@@ -48,6 +48,7 @@
             assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
             max_walking_distance=5.0,
             route_regularization_weight=0.1,
+            walk_cost_weight=0.37,
             repositioning_time=0.0,
             max_stops=3,
             max_wait_time=1000.0,
@@ -118,6 +119,16 @@
 
     y_bar = [1.0, 1.0, 0.0, 1.0, 1.0]   # closes the decoy station 3 -- the true optimum
     Q_bar_truth = true_values[y_bar]
+
+    # The singleton-only map is deliberately incomplete for this broader subproblem. With only
+    # one allowed round, repricing must reject the still-unresolved negative columns rather than
+    # return the pre-expansion LP solution as certified.
+    y_requires_repricing = [0.0, 1.0, 1.0, 1.0, 1.0]
+    @test_throws ArgumentError StationSelection._solve_nearest_open_y_subproblem_lp_with_repricing(
+        data, model, mapping, requests, demand, feasible_pairs,
+        mapping.columns, y_requires_repricing, optimizer_env, true;
+        max_reprice_rounds=1,
+    )
 
     solver = BendersSolver(
         config=SolverConfig(optimizer_env=optimizer_env, silent=true, mip_gap=0.0),

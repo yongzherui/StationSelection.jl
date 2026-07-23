@@ -757,6 +757,10 @@ function _solve_fixed_route_covering_by_cg(
             max_enumeration_time_sec=inner.max_enumeration_time_sec,
         )
         final_result = run_opt(data, route_problem, direct_solver)
+        final_result.termination_status == MOI.OPTIMAL || throw(ArgumentError(
+            "RouteCoveringProblem direct final IP did not solve to optimality; " *
+            "status=$(final_result.termination_status)"
+        ))
         status = final_result.termination_status == MOI.OPTIMAL ? :optimal :
             final_result.termination_status == MOI.INFEASIBLE ? :infeasible :
             final_result.termination_status == MOI.TIME_LIMIT ? :timeout : :error
@@ -803,15 +807,15 @@ function _solve_fixed_route_covering_by_cg(
         reduced_cost_tol=inner.reduced_cost_tol,
         pricing_time_limit_sec=inner.pricing_time_limit_sec,
         ip_time_limit_sec=inner.final_ip_time_limit_sec,
-        cg_log_path=isnothing(iteration) ? nothing : _aggregate_od_route_cg_log_path(
+        cg_log_path=(isnothing(iteration) || !solver.log_subiteration_details) ? nothing : _aggregate_od_route_cg_log_path(
             solver,
             "aggregate_od_route_benders_subiter$(iteration)_cg_iterations.csv",
         ),
-        column_log_path=isnothing(iteration) ? nothing : _aggregate_od_route_cg_log_path(
+        column_log_path=(isnothing(iteration) || !solver.log_subiteration_details) ? nothing : _aggregate_od_route_cg_log_path(
             solver,
             "aggregate_od_route_benders_subiter$(iteration)_cg_columns.csv",
         ),
-        dual_log_path=isnothing(iteration) ? nothing : _aggregate_od_route_cg_log_path(
+        dual_log_path=(isnothing(iteration) || !solver.log_subiteration_details) ? nothing : _aggregate_od_route_cg_log_path(
             solver,
             "aggregate_od_route_benders_subiter$(iteration)_cg_duals.csv",
         ),
@@ -820,6 +824,10 @@ function _solve_fixed_route_covering_by_cg(
     )
     cg_result.cg_stop_reason == :optimality_proven ||
         throw(ArgumentError("RouteCoveringProblem CG did not prove pricing exhaustion; stop_reason=$(cg_result.cg_stop_reason)"))
+    cg_result.final_result.termination_status == MOI.OPTIMAL || throw(ArgumentError(
+        "RouteCoveringProblem CG final IP did not solve to optimality; " *
+        "status=$(cg_result.final_result.termination_status)"
+    ))
     return cg_result
 end
 
@@ -871,6 +879,43 @@ function _opt_result_from_benders(
     )
 end
 
+function _finalize_benders_result(
+    final_result::OptResult,
+    metadata::Dict{String, Any},
+    solver::BendersSolver,
+)
+    gap = get(metadata, "benders_outer_gap_relative", nothing)
+    lower_bound = get(metadata, "benders_lower_bound", nothing)
+    incumbent = get(metadata, "benders_incumbent_objective", nothing)
+    bound_inverted = lower_bound isa Number && incumbent isa Number &&
+        isfinite(lower_bound) && isfinite(incumbent) &&
+        lower_bound > incumbent + solver.optimality_tol * max(1.0, abs(incumbent))
+    if bound_inverted
+        @warn(
+            "Benders master lower bound exceeds the feasible incumbent; the cut/bound calculation is inconsistent",
+            decomposition=get(metadata, "benders_decomposition", "unknown"),
+            lower_bound=lower_bound,
+            incumbent_objective=incumbent,
+            bound_violation=lower_bound - incumbent,
+        )
+    end
+    if gap isa Number && isfinite(gap) && gap > solver.outer_gap_warning_tol
+        @warn(
+            "Benders returned its best feasible incumbent, but the outer optimality gap exceeds the expected tolerance",
+            decomposition=get(metadata, "benders_decomposition", "unknown"),
+            outer_gap_relative=gap,
+            outer_gap_warning_tol=solver.outer_gap_warning_tol,
+            lower_bound=lower_bound,
+            incumbent_objective=incumbent,
+        )
+    end
+    metadata["benders_outer_gap_warning_tol"] = solver.outer_gap_warning_tol
+    metadata["benders_bound_inverted"] = bound_inverted
+    metadata["benders_outer_gap_within_warning_tol"] =
+        !bound_inverted && gap isa Number && isfinite(gap) && gap <= solver.outer_gap_warning_tol
+    return _opt_result_from_benders(final_result, metadata)
+end
+
 function _benders_log_path(solver::BendersSolver)
     isnothing(solver.log_dir) && return nothing
     return joinpath(solver.log_dir, "aggregate_od_route_benders_iterations.csv")
@@ -918,7 +963,7 @@ end
 
 function _outer_gap_absolute(lb::Float64, ub::Float64)
     isfinite(lb) && isfinite(ub) || return nothing
-    return ub - lb
+    return abs(ub - lb)
 end
 
 function _outer_gap_relative(lb::Float64, ub::Float64)

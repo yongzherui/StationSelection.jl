@@ -71,7 +71,7 @@ function solve_benders_y_subproblem(
     reprice::Bool=false,
     optimizer_env=nothing,
     silent::Bool=true,
-    max_reprice_rounds::Int=20,
+    max_reprice_rounds::Int=10_000,
 )::BendersSubproblemResult
     mapping, requests, demand, feasible_pairs = _benders_subproblem_api_setup(data, model)
     env = isnothing(optimizer_env) ? Gurobi.Env() : optimizer_env
@@ -131,7 +131,7 @@ function solve_benders_yz_subproblem(
     reprice::Bool=false,
     optimizer_env=nothing,
     silent::Bool=true,
-    max_reprice_rounds::Int=20,
+    max_reprice_rounds::Int=10_000,
 )::BendersSubproblemResult
     mapping, requests, demand, feasible_pairs = _benders_subproblem_api_setup(data, model)
     env = isnothing(optimizer_env) ? Gurobi.Env() : optimizer_env

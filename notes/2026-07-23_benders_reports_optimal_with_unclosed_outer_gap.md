@@ -71,6 +71,45 @@ converged. Nothing anywhere checks `outer_gap` against `optimality_tol` before r
 subproblem (consistent with CG's own internal LP/IP gap on the same case, 10.29% -- see the
 conversation log for the full derivation), not an artifact of the two bugs above.
 
+### Why this formulation naturally produces highly overlapping route columns
+
+This gap should not be interpreted as evidence that the model is missing a finite vehicle-capacity
+constraint. The aggregate route model intentionally assumes **unlimited vehicle capacity**. It also
+uses a synchronized service model:
+
+- every route starts at time `t=0`;
+- every passenger is available at `t=0` and must be picked up by the common maximum-wait deadline
+  `W = max_wait_time`; and
+- after pickup, a passenger assigned to station pair `(j,k)` need only reach `k` within
+  `detour_factor * routing_cost(j,k)` of their pickup time.
+
+Consequently, certifying one station pair does not consume capacity or otherwise compete directly
+with certifying another pair. A route certifies `(j,k)` whenever it visits `j` early enough and
+later visits `k` within that pair's detour limit. A single stop sequence can therefore certify many
+origin-destination pairs simultaneously. For example, a route visiting `[1,2,3,4]` may certify all
+six forward pairs `(1,2)`, `(1,3)`, `(1,4)`, `(2,3)`, `(2,4)`, and `(3,4)` when their wait and
+detour tests pass. Nearby alternative sequences certify different but strongly overlapping subsets.
+
+The fixed-assignment subproblem therefore has a dense weighted set-covering matrix:
+
+```
+minimize    sum_r cost[r] * theta[r]
+subject to  sum_{r certifies pair p} theta[r] >= 1    for every required pair p
+```
+
+In the integer problem, selecting any route incurs its entire travel and repositioning cost. In the
+LP relaxation, several broad overlapping routes can each be purchased fractionally; their fractions
+add to one on every required pair while the objective pays only the same fractions of their route
+costs. There need not be any corresponding whole-route selection of comparable cost. Unlimited
+capacity and the synchronized time assumptions make broad overlap especially likely, while the
+fractional set-covering relaxation turns that overlap into a potentially large LP/IP gap.
+
+Thus a passenger-loading polytope is not the missing ingredient for this particular model: there is
+no finite onboard capacity to enforce. The pathology is the intended service semantics producing
+very broad, overlapping feasible sets, combined with an LP relaxation that can buy fractions of
+those indivisible routes. A capacity-constrained model could reduce overlap, but it would be a
+different operational model and would not in general eliminate the fixed-charge/set-covering gap.
+
 **Why fixing just the stopping rule/status isn't enough on its own**: a standard Benders optimality
 cut is derived from the subproblem's *LP dual* -- it's a valid inequality for the LP relaxation's
 value function, not the true integer one. No matter how many such cuts get added, the strongest

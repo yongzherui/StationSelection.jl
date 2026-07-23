@@ -432,8 +432,8 @@ end
 
 `BendersYZ` analogue of `_add_aggregate_od_route_benders_y_optimality_cut!`: dispatches on
 `solver.cut_derivation`. `:standard` reproduces the pre-existing subgradient cut exactly. The two
-restricted-completion modes attempt `_restricted_yz_optimality_cut` and fall back to the standard
-cut (with a `@warn`) if the completion LP comes back infeasible or the derivation throws.
+restricted-completion modes require `_restricted_yz_optimality_cut` to certify and construct the
+requested cut; any certification, construction, or tightness failure is fatal.
 """
 function _add_aggregate_od_route_benders_yz_optimality_cut!(
     master::Model,
@@ -468,28 +468,26 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     end
 
     objective_mode = solver.cut_derivation == :restricted_mw_fixed_pi ? :maximize_core : :zero
-    yz_result = certification_already_failed ? nothing : try
+    certification_already_failed && throw(ErrorException(
+        "BendersYZ restricted cut cannot be constructed after Q_bar certification failed"
+    ))
+    yz_result = try
         _restricted_yz_optimality_cut(
             data, model, solver, group_requests, feasible_pairs, z_hat, assignments,
             open_stations, z_core, optimizer_env, objective_mode;
             certified=certified, Q_bar=Q_bar,
         )
     catch err
-        @warn "BendersYZ restricted cut derivation failed; falling back to the standard cut " *
-            "for this (iteration, cut_id)" cut_id error = err
-        nothing
+        throw(ErrorException(
+            "BendersYZ restricted cut derivation failed for cut_id=$(cut_id); refusing to fall " *
+            "back to an uncertified standard cut: " * sprint(showerror, err)
+        ))
     end
 
-    if isnothing(yz_result) || yz_result.status != :ok
-        @constraint(master, theta[cut_id] >= v_hat + sum(
-            rho[(key, i)] * (chain_cache[key][i] - z_hat[key][i]) for (key, i) in keys(rho)
-        ))
-        return (
-            mode=solver.cut_derivation, mw_status=isnothing(yz_result) ? :error : yz_result.status,
-            Q_bar=v_hat, phi_core=NaN, phi_core_baseline=NaN, completion_runtime_sec=0.0,
-            n_routes=0, n_cg_iterations=0, fallback=true,
-        )
-    end
+    yz_result.status == :ok || throw(ErrorException(
+        "BendersYZ restricted cut derivation returned status=$(yz_result.status) for cut_id=$(cut_id); " *
+        "refusing to fall back to an uncertified standard cut"
+    ))
 
     cut_constant = yz_result.cut_constant
     beta = yz_result.beta

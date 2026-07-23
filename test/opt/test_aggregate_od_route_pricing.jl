@@ -38,6 +38,29 @@
         return only(filter(label -> label.current == current, labels))
     end
 
+    @testset "unbounded max_stops uses the finite visit ceiling" begin
+        @test StationSelection._resolve_aggregate_od_route_max_stops(
+            typemax(Int), 3, 4,
+        ) == 12
+        @test StationSelection._resolve_aggregate_od_route_max_stops(7, 3, 4) == 7
+        @test_throws ArgumentError StationSelection._resolve_aggregate_od_route_max_stops(
+            typemax(Int), typemax(Int), 4,
+        )
+    end
+
+    @testset "pricing max_stops resolution allows fully unbounded search" begin
+        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(
+            typemax(Int), 3, 4,
+        ) == 12
+        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(7, 3, 4) == 7
+        # unlike enumeration's resolver, both limits unbounded is a legitimate
+        # pricing configuration (dominance/reduced-cost bound the search instead
+        # of a route-length ceiling), not an error.
+        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(
+            typemax(Int), typemax(Int), 4,
+        ) == typemax(Int)
+    end
+
     @testset "initial labels remember pickup station age" begin
         pricing_data = line_pricing_data()
         duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
@@ -46,6 +69,120 @@
         @test isempty(initial_1.served_pairs)
         @test initial_1.station_age == Dict(1 => 0.0)
         @test initial_1.reduced_cost == 0.0
+    end
+
+    @testset "pickup eligibility ends at max_wait_time" begin
+        duals = AggregateODRoutePricingDuals(Dict((2, 4) => 10.0))
+
+        at_cutoff = line_pricing_data(
+            active_pairs=[(2, 4)],
+            max_wait_time=1.0,
+            detour_factor=2.0,
+            max_stops=3,
+        )
+        initial_1 = AggregateODRoutePricingLabel(
+            1, [1], 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
+        )
+        pickup_at_cutoff = only(extend_aggregate_od_route_pricing_label(initial_1, 2, at_cutoff, duals))
+        @test pickup_at_cutoff.time == 1.0
+        @test pickup_at_cutoff.station_age[2] == 0.0
+        served_at_cutoff = only(extend_aggregate_od_route_pricing_label(pickup_at_cutoff, 4, at_cutoff, duals))
+        @test (2, 4) in served_at_cutoff.served_pairs
+
+        after_cutoff = line_pricing_data(
+            active_pairs=[(2, 4)],
+            max_wait_time=0.5,
+            detour_factor=2.0,
+            max_stops=3,
+        )
+        initial_1_late = AggregateODRoutePricingLabel(
+            1, [1], 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
+        )
+        late_visit = only(extend_aggregate_od_route_pricing_label(initial_1_late, 2, after_cutoff, duals))
+        @test late_visit.time == 1.0
+        @test !haskey(late_visit.station_age, 2)
+        not_served = only(extend_aggregate_od_route_pricing_label(late_visit, 4, after_cutoff, duals))
+        @test (2, 4) ∉ not_served.served_pairs
+    end
+
+    @testset "enumeration matches independent bounded brute force" begin
+        stations = DataFrame(
+            id=[1, 2, 3],
+            lon=[0.0, 1.0, 2.0],
+            lat=[0.0, 0.0, 0.0],
+        )
+        requests = DataFrame(
+            id=[1, 2],
+            start_station_id=[1, 2],
+            end_station_id=[3, 3],
+            request_time=[DateTime(2024, 1, 1, 8), DateTime(2024, 1, 1, 8, 1)],
+        )
+        walking_costs = Dict((i, j) => (i == j ? 0.0 : 100.0) for i in 1:3, j in 1:3)
+        routing_costs = Dict((i, j) => Float64(abs(i - j)) for i in 1:3, j in 1:3)
+        data = create_station_selection_data(
+            stations,
+            requests,
+            walking_costs;
+            routing_costs=routing_costs,
+        )
+        active_pairs = [(1, 3), (2, 3)]
+
+        function brute_signature_costs(max_wait_time::Float64, max_stops::Int, max_visits::Int)
+            best = Dict{Tuple{Vararg{Tuple{Int, Int}}}, Float64}()
+            function visit!(route::Vector{Int}, times::Vector{Float64})
+                if length(route) >= 2
+                    served = Tuple{Int, Int}[]
+                    for pair in active_pairs
+                        j, k = pair
+                        feasible = any(
+                            route[p] == j && times[p] <= max_wait_time + 1e-9 &&
+                            route[q] == k &&
+                            times[q] - times[p] <= 2.0 * routing_costs[(j, k)] + 1e-9
+                            for p in 1:(length(route) - 1) for q in (p + 1):length(route)
+                        )
+                        feasible && push!(served, pair)
+                    end
+                    if !isempty(served)
+                        signature = Tuple(sort!(served))
+                        best[signature] = min(get(best, signature, Inf), times[end])
+                    end
+                end
+                length(route) >= max_stops && return
+                for next_node in 1:3
+                    next_node == route[end] && continue
+                    count(==(next_node), route) < max_visits || continue
+                    visit!(vcat(route, next_node), vcat(times, times[end] + routing_costs[(route[end], next_node)]))
+                end
+            end
+            for start in 1:3
+                visit!([start], [0.0])
+            end
+            return best
+        end
+
+        for max_wait_time in (0.5, 1.0, 10.0), max_stops in (3, 4)
+            model = AggregateODRouteModel(
+                3;
+                assignment_policy=NearestOpenAggregateODAssignmentPolicy(),
+                max_walking_distance=0.0,
+                max_wait_time=max_wait_time,
+                detour_factor=2.0,
+                max_stops=max_stops,
+                max_visits_per_node=2,
+                repositioning_time=0.0,
+            )
+            columns = enumerate_aggregate_od_route_columns(
+                model,
+                data;
+                max_routes=10_000,
+                time_limit_sec=5.0,
+            )
+            actual = Dict(
+                Tuple(sort(column.od_pairs)) => column.tau
+                for column in columns
+            )
+            @test actual == brute_signature_costs(max_wait_time, max_stops, 2)
+        end
     end
 
     @testset "extension certifies destination visits and updates reduced cost" begin
@@ -572,6 +709,8 @@
         @test result.metadata["optimality_cuts_added"] >= 1
         @test result.metadata["inner_cg_iterations"] >= 1
         @test result.metadata["feasibility_cut_style"] == "big_m_nearest"
+        @test result.metadata["benders_outer_gap_warning_tol"] == 0.03
+        @test result.metadata["benders_outer_gap_within_warning_tol"] isa Bool
         y = value.(result.model[:y])
         x = result.model[:x]
         mapping = result.mapping
@@ -593,6 +732,17 @@
         @test BendersSolver().decomposition isa BendersY
         @test BendersSolver().cut_mode isa MultiCut
         @test BendersSolver().inner_solver isa ColumnGenerationSolver
+        @test BendersSolver().cut_derivation == :zero_completion
+        @test BendersSolver().outer_gap_warning_tol == 0.03
+        @test BendersSolver().max_reprice_rounds == 10_000
+        @test_throws ArgumentError BendersSolver(outer_gap_warning_tol=-0.01)
+        @test StationSelection._outer_gap_absolute(12.0, 10.0) == 2.0
+        @test StationSelection._outer_gap_relative(12.0, 10.0) == 0.2
+        diagnostic_solver = BendersSolver(cut_derivation=:standard, reprice_subproblem=false)
+        @test_logs (:warn, r"diagnostics only") begin
+            @test StationSelection._warn_if_uncertified_standard_cut(diagnostic_solver)
+        end
+        @test !StationSelection._warn_if_uncertified_standard_cut(BendersSolver())
         @test BendersSolver(inner_solver=DirectSolver(silent=true)).inner_solver isa DirectSolver
         xy_result = run_opt(
             data,

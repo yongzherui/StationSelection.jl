@@ -65,6 +65,7 @@
             assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
             max_walking_distance=5.0,
             route_regularization_weight=0.1,
+            walk_cost_weight=0.37,
             repositioning_time=0.0,
             max_stops=3,
             max_wait_time=1000.0,

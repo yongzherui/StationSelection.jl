@@ -267,7 +267,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersXY master failed with status $(termination_status(master))"))
-        lower_bound = objective_value(master)
+        lower_bound = objective_bound(master)
         # No-op unless an endpoint nearest-open style built zp/zd indicators
         # on this master (via _add_nearest_open_endpoint_master_x!).
         assert_endpoint_chain_near_binary(master)
@@ -337,7 +337,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
         _flush_benders_iteration_log!(solver, benders_rows)
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(best_result, Dict{String, Any}(
+            return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersXY",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -358,7 +358,7 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(cg_result.generated_columns),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
-            ))
+            ), solver)
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersXY did not find a feasible incumbent"))
@@ -412,7 +412,7 @@ function _run_aggregate_od_route_free_benders_xy(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersXY master failed with status $(termination_status(master))"))
-        lower_bound = objective_value(master)
+        lower_bound = objective_bound(master)
 
         x_hat = Dict(key => round(value(var)) for (key, var) in x)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
@@ -477,7 +477,7 @@ function _run_aggregate_od_route_free_benders_xy(
         _flush_benders_iteration_log!(solver, benders_rows)
 
         if cuts_added_this_iteration == 0
-            return _opt_result_from_benders(best_result, Dict{String, Any}(
+            return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersXY",
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
@@ -497,7 +497,7 @@ function _run_aggregate_od_route_free_benders_xy(
                 "best_upper_bound" => best_ub,
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(cg_result.generated_columns),
-            ))
+            ), solver)
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersXY did not find a feasible incumbent"))
