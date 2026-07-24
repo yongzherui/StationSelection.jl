@@ -21,7 +21,6 @@ function _build_aggregate_od_route_core!(
     m[:aggregate_od_route_walk_cost_weight] = base_model.walk_cost_weight
     m[:aggregate_od_route_repositioning_time] = base_model.repositioning_time
     m[:aggregate_od_route_relax_integrality] = relax_integrality
-    m[:aggregate_od_route_unmet_demand_penalty] = base_model.unmet_demand_penalty
     m[:aggregate_od_route_station_budget] = base_model.l
     m[:aggregate_od_route_max_wait_time] = base_model.max_wait_time
     m[:aggregate_od_route_detour_factor] = base_model.detour_factor
@@ -125,13 +124,6 @@ function _relax_aggregate_od_route_station_and_assignment!(m::Model)
         for x_vec in values(scenario_dict)
             for x_var in x_vec
                 unset_integer(x_var)
-            end
-        end
-    end
-    if haskey(m, :u) && m[:u] !== nothing
-        for scenario_dict in m[:u]
-            for u_var in values(scenario_dict)
-                unset_integer(u_var)
             end
         end
     end

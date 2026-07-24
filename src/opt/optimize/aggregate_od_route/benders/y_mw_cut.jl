@@ -272,9 +272,21 @@ end
 struct _RestrictedMWChain
     side::Symbol
     stations::Vector{Int}
-    costs::Vector{Float64}
+    costs::Vector{Float64}  # tie-broken (see _big_m_tie_break_costs), NOT raw walking costs
 end
 
+"""
+    _sorted_endpoint_chain(data, endpoint, max_walking_distance, side) -> (key, sorted_stations, tb_costs)
+
+Reconstructs one `:big_m_nearest` chain's sorted stations and **tie-broken** costs, matching
+exactly what `_endpoint_big_m_variable!` builds into the real primal. `key` is computed from the
+raw (pre-tie-break) sorted costs, matching `_endpoint_chain_key`'s convention elsewhere -- only
+the returned `tb_costs` (used downstream for the actual dual-completion algebra) needs the
+perturbation. Calls `_big_m_tie_break_costs` (`aggregate_od_route.jl`) rather than recomputing the
+perturbation locally -- see that function's docstring for why a second, independent
+implementation here previously caused real (non-numerical-noise) dual-feasibility violations in
+the restricted-MW completion LP.
+"""
 function _sorted_endpoint_chain(
     data::StationSelectionData,
     endpoint::Int,
@@ -290,7 +302,8 @@ function _sorted_endpoint_chain(
     sorted_stations = candidates[order]
     sorted_costs = costs[order]
     key = _endpoint_chain_key(side, sorted_stations, sorted_costs)
-    return key, sorted_stations, sorted_costs
+    tb_costs = _big_m_tie_break_costs(sorted_costs)
+    return key, sorted_stations, tb_costs
 end
 
 """
@@ -415,11 +428,14 @@ function _restricted_mw_completion_lp(
     end
 
     # x-dual constraints: alpha[p] - rhoO - rhoD + sigma - pi_full <= c_walk
+    # DEBUG: constraint refs captured for IIS cross-referencing (temporary instrumentation).
+    x_dual_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
     for p in requests, pair in feasible_pairs[p]
         is_walk_only_pair(pair) && continue
         c_walk = _assignment_pair_cost(data, p, pair; weight=base.walk_cost_weight)
         pi_val = pi_full[(p, pair)]
-        @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
+        x_dual_cons[(p, pair)] =
+            @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
     end
 
     # Precompute, per (chain key, rank), the (request, pair) terms that reference that z index --
@@ -434,6 +450,8 @@ function _restricted_mw_completion_lp(
     end
 
     # z-dual constraints: lambda - mu - cost*sum(nu over chain) + role-specific (rhoO/rhoD - sigma) <= 0
+    # DEBUG: constraint refs captured for IIS cross-referencing (temporary instrumentation).
+    z_dual_cons = Dict{Tuple{Any, Int}, ConstraintRef}()
     for (key, chain) in chains
         max_cost = maximum(chain.costs)
         nu_sum = sum(nu[(key, idx2)] for idx2 in eachindex(chain.stations))
@@ -453,13 +471,13 @@ function _restricted_mw_completion_lp(
                 end
                 add_to_expression!(expr, -1.0, sigma[(p, pair)])
             end
-            @constraint(m, expr <= 0.0)
+            z_dual_cons[(key, idx)] = @constraint(m, expr <= 0.0)
         end
     end
 
     phi_core_expr = _restricted_mw_phi_expr(y_core, chains, lambda, mu, nu, alpha, sigma, requests, feasible_pairs)
     phi_ybar_expr = _restricted_mw_phi_expr(y_hat, chains, lambda, mu, nu, alpha, sigma, requests, feasible_pairs)
-    @constraint(m, phi_ybar_expr == Q_bar)
+    tightness_con = @constraint(m, phi_ybar_expr == Q_bar)
 
     if objective_mode == :maximize_core
         @objective(m, Max, phi_core_expr)
@@ -470,6 +488,7 @@ function _restricted_mw_completion_lp(
     return (
         model=m, lambda=lambda, mu=mu, nu=nu, alpha=alpha, rhoO=rhoO, rhoD=rhoD, sigma=sigma,
         chains=chains, phi_core_expr=phi_core_expr, phi_ybar_expr=phi_ybar_expr,
+        x_dual_cons=x_dual_cons, z_dual_cons=z_dual_cons, tightness_con=tightness_con,
     )
 end
 
@@ -503,6 +522,84 @@ function _solve_restricted_mw_completion(
     optimize!(built.model)
     runtime = time() - start
     if primal_status(built.model) != MOI.FEASIBLE_POINT
+        # DEBUG (temporary instrumentation, 2026-07-24): dump diagnostics and run Gurobi's IIS
+        # conflict refiner to identify exactly which dual-feasibility rows are jointly infeasible.
+        println(stderr, "="^80)
+        println(stderr, "COMPLETION_INFEASIBLE DEBUG DUMP")
+        println(stderr, "objective_mode=$(objective_mode)  Q_bar=$(Q_bar)")
+        println(stderr, "n_requests=$(length(requests))  n_chains=$(length(built.chains))")
+        println(stderr, "termination_status=$(termination_status(built.model))  primal_status=$(primal_status(built.model))")
+        n_pi_zero = count(v -> abs(v) < 1e-9, values(pi_full))
+        n_pi_nonzero = length(pi_full) - n_pi_zero
+        println(stderr, "pi_full: n=$(length(pi_full))  n_nonzero=$(n_pi_nonzero)  n_zero=$(n_pi_zero)  sum=$(sum(values(pi_full); init=0.0))")
+        for (key, chain) in built.chains
+            println(stderr, "  chain $(key): side=$(chain.side) n_stations=$(length(chain.stations)) costs=$(chain.costs)")
+        end
+        try
+            compute_conflict!(built.model)
+            if MOI.get(built.model, MOI.ConflictStatus()) == MOI.CONFLICT_FOUND
+                println(stderr, "--- IIS (irreducible infeasible subsystem) members ---")
+                for ((p, pair), con) in built.x_dual_cons
+                    if MOI.get(built.model, MOI.ConstraintConflictStatus(), con) == MOI.IN_CONFLICT
+                        println(stderr, "  x-dual IIS member: request=$(p) pair=$(pair) pi_full=$(pi_full[(p,pair)]) c_walk=$(_assignment_pair_cost(data, p, pair; weight=_base_aggregate_od_route_model(model).walk_cost_weight))")
+                    end
+                end
+                for ((key, idx), con) in built.z_dual_cons
+                    if MOI.get(built.model, MOI.ConstraintConflictStatus(), con) == MOI.IN_CONFLICT
+                        chain = built.chains[key]
+                        println(stderr, "  z-dual IIS member: chain=$(key) idx=$(idx) station=$(chain.stations[idx]) cost=$(chain.costs[idx])")
+                    end
+                end
+                if MOI.get(built.model, MOI.ConstraintConflictStatus(), built.tightness_con) == MOI.IN_CONFLICT
+                    println(stderr, "  tightness (phi_ybar == Q_bar) IS in IIS")
+                else
+                    println(stderr, "  tightness (phi_ybar == Q_bar) is NOT in IIS -- infeasibility is purely among dual-feasibility rows")
+                end
+            else
+                println(stderr, "compute_conflict! did not find a conflict (status=$(MOI.get(built.model, MOI.ConflictStatus())))")
+            end
+        catch iis_err
+            println(stderr, "IIS computation failed: $(sprint(showerror, iis_err))")
+        end
+        # DEBUG: disambiguate "Q_bar unreachable" (Section C/D bug) vs. "the dual-feasibility
+        # rows themselves are broken" (row-construction bug) by dropping the tightness pin and
+        # re-checking feasibility of the inequality system alone. Run AFTER the IIS computation
+        # above, since this mutates the model.
+        try
+            delete(built.model, built.tightness_con)
+            optimize!(built.model)
+            println(stderr, "WITHOUT tightness constraint: primal_status=$(primal_status(built.model))  " *
+                "(FEASIBLE_POINT here means the dual-feasibility rows are fine and Q_bar/pi_full is the " *
+                "problem; NO_SOLUTION/infeasible here means the row construction itself is broken)")
+            if primal_status(built.model) == MOI.FEASIBLE_POINT
+                achieved_phi_ybar = value(built.phi_ybar_expr)
+                println(stderr, "  achieved phi_ybar_expr=$(achieved_phi_ybar) vs. required Q_bar=$(Q_bar) " *
+                    "(diff=$(achieved_phi_ybar - Q_bar))")
+                # Find the TRUE achievable ceiling/floor of phi_ybar_expr over the dual-feasible
+                # region (the point above was arbitrary, from a flat Max-0 objective).
+                @objective(built.model, Max, built.phi_ybar_expr)
+                optimize!(built.model)
+                if primal_status(built.model) == MOI.FEASIBLE_POINT
+                    println(stderr, "  MAX achievable phi_ybar_expr=$(objective_value(built.model)) " *
+                        "(termination=$(termination_status(built.model)))")
+                else
+                    println(stderr, "  phi_ybar_expr is UNBOUNDED above (status=$(termination_status(built.model))) " *
+                        "-- Q_bar=$(Q_bar) should always be reachable if so; something else is wrong")
+                end
+                @objective(built.model, Min, built.phi_ybar_expr)
+                optimize!(built.model)
+                if primal_status(built.model) == MOI.FEASIBLE_POINT
+                    println(stderr, "  MIN achievable phi_ybar_expr=$(objective_value(built.model)) " *
+                        "(termination=$(termination_status(built.model)))")
+                else
+                    println(stderr, "  phi_ybar_expr is UNBOUNDED below (status=$(termination_status(built.model)))")
+                end
+            end
+        catch feas_err
+            println(stderr, "feasibility-only re-check failed: $(sprint(showerror, feas_err))")
+        end
+        println(stderr, "="^80)
+        flush(stderr)
         return AggregateODRouteRestrictedMWCompletion(:infeasible, NaN, Dict{Int, Float64}(), NaN, NaN, runtime)
     end
 

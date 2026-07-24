@@ -149,8 +149,7 @@
                     max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
                     final_ip_time_limit_sec=30.0,
                 )
-                restricted_cut_supported = style == :big_m_nearest &&
-                    !model.allow_walk_only && isnothing(model.unmet_demand_penalty)
+                restricted_cut_supported = style == :big_m_nearest && !model.allow_walk_only
                 selected_cut_derivation = restricted_cut_supported ? :zero_completion : :standard
 
                 # reprice_subproblem=true closes BendersY's premature-convergence /

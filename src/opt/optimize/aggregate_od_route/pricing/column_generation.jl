@@ -132,7 +132,6 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
-        unmet_demand_penalty        = model.unmet_demand_penalty,
     )
 end
 
@@ -157,7 +156,6 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
-        unmet_demand_penalty        = model.unmet_demand_penalty,
     )
 end
 

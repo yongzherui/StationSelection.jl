@@ -180,16 +180,8 @@ function _apply_route_covering_assignments!(
         for ((o, d), demand) in q_s
             demand > 0 || continue
             key = (s, o, d)
-            if !haskey(model.fixed_assignments, key)
-                # Under "always feasible" mode, a caller (e.g. Benders CG-priming)
-                # may deliberately omit an OD it decided is unserved (u=0) rather
-                # than throw -- leave valid_jk_pairs[(o,d)] as originally computed
-                # so this sub-solve's own u lands on 0 too, consistently. Without
-                # unmet_demand_penalty, a missing entry is always a real bug.
-                isnothing(model.unmet_demand_penalty) &&
-                    throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
-                continue
-            end
+            haskey(model.fixed_assignments, key) ||
+                throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
             assigned = model.fixed_assignments[key]
             is_walk_only_pair(assigned) ||
                 assigned[1] in open_set && assigned[2] in open_set ||

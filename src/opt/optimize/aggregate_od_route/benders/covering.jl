@@ -20,15 +20,13 @@ enough to live directly in `yzh.jl`). `dispatch.jl` holds the top-level
 
 `_add_default_endpoint_coverage_constraints!`/`_check_aggregate_od_route_endpoint_feasibility!`
 below, together with `allow_same_station=true` always being in effect (`create_map`), make the
-subproblem provably always feasible under the default model configuration
-(`unmet_demand_penalty === nothing`): every physical endpoint any request touches has some open
+subproblem provably always feasible: every physical endpoint any request touches has some open
 candidate baked into the master as a hard constraint, so `_fixed_assignments_from_y` can never
-place a request in its `infeasible` list -- the `if !isempty(infeasible) &&
-isnothing(model.unmet_demand_penalty)` guard in `y.jl`/`yz.jl`'s outer loops is a correctness
-assertion (throws if it's ever hit), not reactive cut-derivation. The reactive feasibility-cut
-helpers this used to call (`_add_endpoint_nearest_feasibility_cuts!` and friends) have been
-removed -- recoverable from git history if a future configuration needs them restored. See
-`notes/2026-07-22_endpoint_coverage_feasibility_guarantee.md` for the full argument.
+place a request in its `infeasible` list -- the `if !isempty(infeasible)` guard in `y.jl`/`yz.jl`'s
+outer loops is a correctness assertion (throws if it's ever hit), not reactive cut-derivation. The
+reactive feasibility-cut helpers this used to call (`_add_endpoint_nearest_feasibility_cuts!` and
+friends) have been removed -- recoverable from git history if a future configuration needs them
+restored. See `notes/2026-07-22_endpoint_coverage_feasibility_guarantee.md` for the full argument.
 """
 
 function _base_aggregate_od_route_model(model::AnyAggregateODRouteModel)::AggregateODRouteModel
@@ -60,7 +58,6 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
-        unmet_demand_penalty=model.unmet_demand_penalty,
     )
 end
 
@@ -87,7 +84,6 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
-        unmet_demand_penalty=model.unmet_demand_penalty,
     )
 end
 
@@ -352,13 +348,9 @@ Procedural nearest-open assignment given a fixed binary `y_hat`, used both to
 prime `RouteCoveringProblem` CG subproblems and as an independent assertion
 oracle (`_assert_x_matches_nearest_open`) against the LP's own resolved `x`.
 
-`allow_same_station` (`AggregateODRouteModel(unmet_demand_penalty=...)`) makes
-a same-station collision resolve to the real pair `(j*,j*)` instead of
-`infeasible`, mirroring the model's own relaxed `sum(z)<=1`/`sum(x)==u`
-constraints. A request can still land in `infeasible` when `allow_same_station`
-is on -- no open candidate at all on one side -- and callers under "always
-feasible" mode must treat that as "genuinely unserved (`u=0`)", not as
-grounds for a feasibility cut.
+`allow_same_station` makes a same-station collision resolve to the real pair
+`(j*,j*)` instead of `infeasible`. A request can still land in `infeasible`
+when `allow_same_station` is on -- no open candidate at all on one side.
 
 `style == :pair_chain` ranks each request's
 feasible station *pairs* jointly by combined walking cost and picks the
@@ -422,27 +414,6 @@ function _add_endpoint_open_feasibility_cut!(
 end
 
 """
-    _endpoint_coverage_applicable(base::AggregateODRouteModel)::Bool
-
-Whether "some open station within `max_walking_distance` of every request
-endpoint" is a *necessary* condition for subproblem feasibility, and so safe
-to bake into the master as a hard constraint. False only under
-`unmet_demand_penalty !== nothing` ("always feasible" mode): an uncovered
-endpoint is then a legitimate genuinely-unserved outcome (`u=0`), not an
-infeasibility, so forcing coverage would remove that relaxation's whole
-point. Applies unconditionally otherwise -- including `allow_walk_only`
-models: every physical endpoint gets a real open candidate, so `sum(z)==1`/
-`sum(x)==1` stay hard-required everywhere (see `_endpoint_chain_variable!`/
-`_endpoint_big_m_variable!`) rather than needing a per-request relaxation;
-`WALK_ONLY_PAIR` remains available as a genuinely *cheaper* option once a
-station happens to be open nearby, it's just no longer load-bearing for
-feasibility.
-"""
-function _endpoint_coverage_applicable(base::AggregateODRouteModel)::Bool
-    return isnothing(base.unmet_demand_penalty)
-end
-
-"""
     _aggregate_od_route_endpoint_candidate_sets(data, requests, max_walking_distance)
         -> Dict{Tuple{Int, Symbol}, Vector{Int}}
 
@@ -484,9 +455,7 @@ always being in effect (`create_map`), this is also *sufficient*: every
 request then always resolves to a real pair (possibly same-station), so
 `_fixed_assignments_from_y` can never report a request infeasible and the
 reactive feasibility-cut machinery in the outer loop becomes structurally
-unreachable, not just less likely. No-op (returns 0) when
-`!_endpoint_coverage_applicable(base_model)`. Returns the number of
-constraints added.
+unreachable, not just less likely. Returns the number of constraints added.
 """
 function _add_default_endpoint_coverage_constraints!(
     master::Model,
@@ -496,7 +465,6 @@ function _add_default_endpoint_coverage_constraints!(
     requests::Vector{NTuple{3, Int}},
 )::Int
     base = _base_aggregate_od_route_model(model)
-    _endpoint_coverage_applicable(base) || return 0
     sets = _aggregate_od_route_endpoint_candidate_sets(data, requests, base.max_walking_distance)
     for candidates in values(sets)
         _add_endpoint_open_feasibility_cut!(master, y, candidates)
@@ -516,8 +484,7 @@ superset of this trivial model's constraints, so if this fails, the real
 master can never be feasible either -- fail fast with a targeted diagnostic
 instead of letting that surface as a generic "master failed with status ..."
 deep inside the outer Benders loop, after `create_map`/CG setup have already
-run. No-op when `!_endpoint_coverage_applicable(base_model)` (nothing to
-check: an uncovered endpoint isn't an infeasibility under that relaxation).
+run.
 """
 function _check_aggregate_od_route_endpoint_feasibility!(
     data::StationSelectionData,
@@ -527,7 +494,6 @@ function _check_aggregate_od_route_endpoint_feasibility!(
     silent::Bool,
 )::Nothing
     base = _base_aggregate_od_route_model(model)
-    _endpoint_coverage_applicable(base) || return nothing
     m = Model(() -> Gurobi.Optimizer(optimizer_env))
     silent && set_silent(m)
     @variable(m, y[1:data.n_stations], Bin)
@@ -538,7 +504,7 @@ function _check_aggregate_od_route_endpoint_feasibility!(
         "AggregateODRouteModel Benders pre-flight check failed: no y with sum(y)==$(base.l) can open a " *
         "station within max_walking_distance=$(base.max_walking_distance) of every request's pickup and " *
         "dropoff endpoint -- the full Benders master can never be feasible either. Increase l or " *
-        "max_walking_distance, or set unmet_demand_penalty for an always-feasible relaxation."
+        "max_walking_distance."
     ))
     return nothing
 end
@@ -599,7 +565,6 @@ function _route_covering_problem_from_assignments(
         pricing_time_limit_sec=base.pricing_time_limit_sec,
         reduced_cost_tol=base.reduced_cost_tol,
         allow_walk_only=base.allow_walk_only,
-        unmet_demand_penalty=base.unmet_demand_penalty,
     )
 end
 

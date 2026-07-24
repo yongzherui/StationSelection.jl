@@ -33,7 +33,7 @@ A real (non-`WALK_ONLY_PAIR`) station pair `(j, j)`: pickup and dropoff both
 resolve to the same open station `j`, so no vehicle trip is needed (the same
 reason `WALK_ONLY_PAIR` needs none), but unlike `WALK_ONLY_PAIR` it still
 requires station `j` itself to be open. Only produced by `compute_valid_jk_pairs`
-when `allow_same_station=true` (`AggregateODRouteModel(unmet_demand_penalty=...)`).
+when `allow_same_station=true`.
 """
 is_same_station_pair(pair::Tuple{Int, Int}) = pair[1] == pair[2] && !is_walk_only_pair(pair)
 

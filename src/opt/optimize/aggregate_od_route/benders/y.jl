@@ -24,14 +24,11 @@ function _build_nearest_open_y_subproblem_lp(
         set_optimizer_attribute(m, "Method", 1)
         set_optimizer_attribute(m, "Presolve", 0)
     end
-    m[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
-    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
-
     @variable(m, 0 <= y[1:data.n_stations] <= 1)
     fix_cons = Dict(j => @constraint(m, y[j] == y_hat[j]) for j in 1:data.n_stations)
 
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    u = unmet_demand_active ? Dict{NTuple{3, Int}, VariableRef}() : nothing
+    m[:debug_sum_x_cons] = Dict{NTuple{3, Int}, ConstraintRef}()  # DEBUG (temporary instrumentation)
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         for request in requests
             _s, o, d = request
@@ -39,17 +36,13 @@ function _build_nearest_open_y_subproblem_lp(
             for pair in pairs
                 x[(request, pair)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
             end
-            if unmet_demand_active
-                u[request] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
-                @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == u[request])
-            else
-                @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
-            end
+            m[:debug_sum_x_cons][request] = @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
             x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
             _add_nearest_open_endpoint_linked_x!(
                 m, data, y, o, d, pairs, x_by_pair, model.max_walking_distance;
                 binary=false, allow_walk_only=model.allow_walk_only,
                 selector_style=model.assignment_policy.feasibility_cut_style,
+                debug_key_prefix=request,
             )
         end
     else
@@ -95,10 +88,6 @@ function _build_nearest_open_y_subproblem_lp(
         for pair in feasible_pairs[request]
             add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
         end
-        if unmet_demand_active
-            add_to_expression!(obj, model.unmet_demand_penalty)
-            add_to_expression!(obj, -model.unmet_demand_penalty, u[request])
-        end
     end
     for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
         add_to_expression!(
@@ -112,7 +101,6 @@ function _build_nearest_open_y_subproblem_lp(
         )
     end
     @objective(m, Min, obj)
-    m[:u] = u
     return m, fix_cons, x, cover_cons
 end
 
@@ -127,14 +115,6 @@ independently computed by `_fixed_assignments_from_y` (the same routine
 `_run_aggregate_od_route_nearest_open_benders_y` uses to fix assignments for
 priming CG). Throws `ArgumentError` naming the first mismatch found, rather
 than silently trusting the chain-constraint encoding.
-
-Under "always feasible" mode (`unmet_demand_penalty !== nothing`), a request
-independently computed as infeasible (no open candidate on some side) is
-expected to have *zero* positive `x` and `u≈0` -- checked directly rather
-than via the `expected[request]` lookup, since there's no assignment to
-compare against. `assert_service_near_binary` is the caller's job (it reads
-the whole model, not per-request); this function only checks the specific
-request/pair correspondence.
 """
 function _assert_x_matches_nearest_open(
     x::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef},
@@ -144,9 +124,7 @@ function _assert_x_matches_nearest_open(
     y_hat::Vector{Float64},
     model::AnyAggregateODRouteModel;
     atol::Float64=1e-6,
-    u::Union{Nothing, Dict{NTuple{3, Int}, VariableRef}}=nothing,
 )::Nothing
-    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     expected, infeasible = _fixed_assignments_from_y(
         data, collect(requests), feasible_pairs, y_hat;
         style=model.assignment_policy.feasibility_cut_style,
@@ -154,24 +132,12 @@ function _assert_x_matches_nearest_open(
         allow_walk_only=model.allow_walk_only,
         allow_same_station=true,
     )
-    (unmet_demand_active || isempty(infeasible)) || throw(ArgumentError(
+    isempty(infeasible) || throw(ArgumentError(
         "nearest-open subproblem LP check: y_hat=$(y_hat) leaves requests infeasible: $(infeasible)"
     ))
-    infeasible_set = Set(infeasible)
     for request in requests
         ranked = _ranked_request_pairs(data, request, feasible_pairs[request])
         positive = [(pair, value(x[(request, pair)])) for pair in ranked if value(x[(request, pair)]) > atol]
-        if request in infeasible_set
-            isempty(positive) || throw(ArgumentError(
-                "nearest-open subproblem LP check failed for request $(request): independently computed " *
-                "as unservable at y_hat=$(y_hat), but LP has positive x $(positive)"
-            ))
-            isnothing(u) || isapprox(value(u[request]), 0.0; atol=atol) || throw(ArgumentError(
-                "nearest-open subproblem LP check failed for request $(request): independently computed " *
-                "as unservable at y_hat=$(y_hat), but u=$(value(u[request])) is not ~0"
-            ))
-            continue
-        end
         length(positive) == 1 || throw(ArgumentError(
             "nearest-open subproblem LP check failed for request $(request): expected exactly one " *
             "positive x at y_hat=$(y_hat), got $(positive)"
@@ -208,10 +174,9 @@ function _solve_nearest_open_y_subproblem_lp(
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersY full LP subproblem failed with status $(termination_status(m))"))
-    _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat, model; u=m[:u])
-        # No-op unless an endpoint nearest-open style built zp/zd indicators above.
-        assert_endpoint_chain_near_binary(m)
-        assert_service_near_binary(m)
+    _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat, model)
+    # No-op unless an endpoint nearest-open style built zp/zd indicators above.
+    assert_endpoint_chain_near_binary(m)
     return objective_value(m), Dict(j => dual(con) for (j, con) in fix_cons)
 end
 
@@ -310,9 +275,8 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
         optimize!(m)
         primal_status(m) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersY repricing subproblem LP failed with status $(termination_status(m))"))
-        _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat, model; u=m[:u])
+        _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat, model)
         assert_endpoint_chain_near_binary(m)
-        assert_service_near_binary(m)
         v_hat = objective_value(m)
         if isnothing(baseline_v_hat)
             baseline_v_hat = v_hat
@@ -387,12 +351,6 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     mapping = create_map(model, data)
     model.assignment_policy.feasibility_cut_style == :pair_chain &&
         assert_no_walk_only_pairs(mapping, "AggregateODRouteModel Benders (BendersY, NearestOpen, :pair_chain)")
-    !isnothing(model.unmet_demand_penalty) && model.assignment_policy.feasibility_cut_style == :pair_chain &&
-        throw(ArgumentError(
-            "BendersY does not support unmet_demand_penalty with feasibility_cut_style=:pair_chain -- " *
-            "\"always feasible\" mode relies on the endpoint-nearest z chain's own relaxation, which " *
-            ":pair_chain has no equivalent of"
-        ))
     requests, demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
     _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
@@ -408,12 +366,6 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             ))
         model.allow_walk_only && throw(ArgumentError(
             "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
-        ))
-        !isnothing(model.unmet_demand_penalty) && throw(ArgumentError(
-            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support unmet_demand_penalty -- " *
-            "the restricted dual-completion LP in aggregate_od_route_benders_y_mw_cut.jl does not yet " *
-            "account for the relaxed z/x/u constraints \"always feasible\" mode uses; use " *
-            "cut_derivation=:standard with unmet_demand_penalty for now"
         ))
     end
     y_core_point = solver.cut_derivation == :standard ? nothing :
@@ -455,6 +407,13 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         master_solve_seconds = time() - master_start
         primal_status(master) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersY master failed with status $(termination_status(master))"))
+        # Captured here, not at the log push below: this iteration's cuts get added to `master`
+        # further down (before the log row is built), and JuMP resets a solved model's cached
+        # termination status to OPTIMIZE_NOT_CALLED as soon as it's mutated. Reading
+        # `termination_status(master)` at the log push would therefore always report
+        # OPTIMIZE_NOT_CALLED regardless of how the solve actually went -- capture the real status
+        # right after `optimize!` instead.
+        master_termination_status = termination_status(master)
         lower_bound = objective_bound(master)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
@@ -466,22 +425,15 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             allow_walk_only=model.allow_walk_only,
             allow_same_station=true,
         )
-        # Under "always feasible" mode, a request left in `infeasible` means genuinely
-        # unserved (u=0), not a reason to cut y_hat; it's simply excluded from
-        # `assignments`, and `_apply_route_covering_assignments!`/`_solve_fixed_route_covering_by_cg`
-        # already tolerate a missing entry under this mode. Outside that mode, the master's
-        # own eager `_add_default_endpoint_coverage_constraints!` (every physical endpoint has
-        # some open candidate, combined with `allow_same_station=true`) makes every request
-        # resolve to a real pair by construction -- `infeasible` can never be non-empty here,
-        # so this is a correctness assertion, not reactive cut-derivation machinery.
-        if !isempty(infeasible) && isnothing(model.unmet_demand_penalty)
-            throw(ArgumentError(
-                "BendersY: y_hat=$(y_hat) left requests infeasible ($(infeasible)) under " *
-                "unmet_demand_penalty=nothing; this should be structurally impossible given the " *
-                "master's eager endpoint-coverage constraints -- check max_walking_distance, l, " *
-                "and _add_default_endpoint_coverage_constraints!"
-            ))
-        end
+        # The master's own eager `_add_default_endpoint_coverage_constraints!` (every physical
+        # endpoint has some open candidate, combined with `allow_same_station=true`) makes every
+        # request resolve to a real pair by construction -- `infeasible` can never be non-empty
+        # here, so this is a correctness assertion, not reactive cut-derivation machinery.
+        isempty(infeasible) || throw(ArgumentError(
+            "BendersY: y_hat=$(y_hat) left requests infeasible ($(infeasible)); this should be " *
+            "structurally impossible given the master's eager endpoint-coverage constraints -- " *
+            "check max_walking_distance, l, and _add_default_endpoint_coverage_constraints!"
+        ))
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
@@ -582,6 +534,9 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             if solver.cut_derivation != :standard
                 try
                     certified_for_cut, qbar_for_cut = _certified_qbar(data, model, cg_result, group_requests, assignments)
+                    println(stderr, "DEBUG cut_id=$(cut_id): v_hat(broad LP, pre-min)=$(v_hat)  qbar_for_cut(R(x_bar) LP)=$(qbar_for_cut)  diff=$(qbar_for_cut - v_hat)")
+                    flush(stderr)
+
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
                     throw(ErrorException(
@@ -634,7 +589,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         total_reprice_rounds += reprice_rounds_total
         push!(benders_rows, (
             iteration=iteration,
-            master_status=string(termination_status(master)),
+            master_status=string(master_termination_status),
             lower_bound=lower_bound,
             incumbent_objective=isfinite(best_ub) ? best_ub : nothing,
             outer_gap=_outer_gap(lower_bound, best_ub),

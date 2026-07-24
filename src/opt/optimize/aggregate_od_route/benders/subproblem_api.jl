@@ -2,13 +2,7 @@
 Public API for testing AggregateODRouteModel's Benders decomposition
 master/subproblem builders directly, without going through the full outer
 `run_opt(..., ::BendersSolver)` loop (no cut accumulation, no master
-iteration). Exists specifically so "always feasible" mode
-(`AggregateODRouteModel(unmet_demand_penalty=...)`) -- and in particular
-whether the service indicator `u` always resolves to exactly 0/1 -- can be
-exercised directly against a caller-supplied `y_hat`, including adversarial
-inputs a real master would never propose (e.g. `y_hat` opening nothing at
-all). The internal `_build_*`/`_solve_*` functions these wrap are untouched;
-this is purely an additive public layer.
+iteration).
 """
 
 export BendersSubproblemResult
@@ -23,11 +17,9 @@ Flat result type for the public Benders subproblem/master API (mirrors
 `OptResult`'s style, `src/utils/core/results.jl`).
 
 - `decomposition`: `:y`, `:yz`, or `:yzh_master`.
-- `objective_value`: includes the `unmet_demand_penalty` term when active.
+- `objective_value`: the subproblem/master's own objective value.
 - `assignment`: `x`/`h` values, keyed like the corresponding internal dict
   (`(request,pair)` for `:y`/`:yz`, `(physical_pair,pair)` for `:yzh_master`).
-- `service`: `u` values, same keys as `assignment` collapsed to the request/
-  physical-pair level; `nothing` when `unmet_demand_penalty` is off.
 - `duals`: the `rho` values used for Benders cuts (fix_cons duals); empty for
   `:yzh_master` (no cut is derived here, this solves the whole master).
 """
@@ -35,7 +27,6 @@ struct BendersSubproblemResult
     decomposition::Symbol
     objective_value::Float64
     assignment::Dict{Any, Float64}
-    service::Union{Nothing, Dict{Any, Float64}}
     duals::Dict{Any, Float64}
     termination_status::MOI.TerminationStatusCode
     metadata::Dict{String, Any}
@@ -94,7 +85,7 @@ function solve_benders_y_subproblem(
         )
         rho_out = Dict{Any, Float64}(j => v for (j, v) in rho)
     end
-    # Re-solve once more to read x/u off a live model (the functions above only
+    # Re-solve once more to read x off a live model (the functions above only
     # return the objective/duals) -- cheap relative to the LP solve itself, and
     # keeps this API's result self-contained rather than requiring a second call.
     m, _fix_cons, x, _cover_cons = _build_nearest_open_y_subproblem_lp(
@@ -102,11 +93,8 @@ function solve_benders_y_subproblem(
     )
     optimize!(m)
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in x)
-    service = haskey(m, :u) && !isnothing(m[:u]) ?
-        Dict{Any, Float64}(request => value(var) for (request, var) in m[:u]) :
-        nothing
     return BendersSubproblemResult(
-        :y, objective_value, assignment, service, rho_out, termination_status(m), metadata,
+        :y, objective_value, assignment, rho_out, termination_status(m), metadata,
     )
 end
 
@@ -139,7 +127,6 @@ function solve_benders_yz_subproblem(
 
     zm = Model(() -> Gurobi.Optimizer(env))
     silent && set_silent(zm)
-    zm[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(zm, 0 <= y[1:data.n_stations] <= 1)
     for j in 1:data.n_stations
         fix(y[j], y_hat_f[j]; force=true)
@@ -178,24 +165,20 @@ function solve_benders_yz_subproblem(
     )
     optimize!(m)
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in m[:x])
-    service = haskey(m, :u) && !isnothing(m[:u]) ?
-        Dict{Any, Float64}(request => value(var) for (request, var) in m[:u]) :
-        nothing
     return BendersSubproblemResult(
-        :yz, objective_value, assignment, service, rho_out, termination_status(m), metadata,
+        :yz, objective_value, assignment, rho_out, termination_status(m), metadata,
     )
 end
 
 """
     solve_benders_yzh_master(data, model; optimizer_env=nothing, silent=true) -> BendersSubproblemResult
 
-Builds and solves `BendersYZH`'s full master (`y,z,h,u`) directly, with no
+Builds and solves `BendersYZH`'s full master (`y,z,h`) directly, with no
 `θ`/cut machinery at all (there is nothing to cut yet -- this solves the
-master's own assignment-cost objective, `Σ occurrence_count[p]·cost·h[p] +
-Σ occurrence_count[p]·penalty·(1-u[p])`, standalone). Unlike
-`solve_benders_y_subproblem`/`solve_benders_yz_subproblem`, there is no
-`y_hat` to fix: `y` is chosen by the solve itself (`sum(y)==model.l`), since
-`h`/`u` live in the master alongside `y` for this decomposition -- see
+master's own assignment-cost objective, `Σ occurrence_count[p]·cost·h[p]`,
+standalone). Unlike `solve_benders_y_subproblem`/`solve_benders_yz_subproblem`,
+there is no `y_hat` to fix: `y` is chosen by the solve itself (`sum(y)==model.l`),
+since `h` lives in the master alongside `y` for this decomposition -- see
 `_add_nearest_open_master_h!`'s docstring for why (`h` is fixed fully in the
 subproblem, unlike `BendersYZ`'s `x`).
 """
@@ -212,7 +195,6 @@ function solve_benders_yzh_master(
 
     m = Model(() -> Gurobi.Optimizer(env))
     silent && set_silent(m)
-    m[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(m, y[1:data.n_stations], Bin)
     @constraint(m, sum(y) == model.l)
     _add_default_endpoint_coverage_constraints!(m, y, data, model, requests)
@@ -220,31 +202,21 @@ function solve_benders_yzh_master(
         m, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,
         model.assignment_policy.feasibility_cut_style,
     )
-    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
-    u = unmet_demand_active ? m[:u] : nothing
 
     obj = AffExpr(0.0)
     for p in physical_pairs, pair in feasible_pairs_by_p[p]
         o, d = p
         add_to_expression!(obj, occurrence_count[p] * model.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
     end
-    if unmet_demand_active
-        for p in physical_pairs
-            add_to_expression!(obj, occurrence_count[p] * model.unmet_demand_penalty)
-            add_to_expression!(obj, -occurrence_count[p] * model.unmet_demand_penalty, u[p])
-        end
-    end
     @objective(m, Min, obj)
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("solve_benders_yzh_master failed with status $(termination_status(m))"))
     assert_endpoint_chain_near_binary(m)
-    assert_service_near_binary(m)
 
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in h)
-    service = unmet_demand_active ? Dict{Any, Float64}(p => value(var) for (p, var) in u) : nothing
     return BendersSubproblemResult(
-        :yzh_master, objective_value(m), assignment, service, Dict{Any, Float64}(), termination_status(m),
+        :yzh_master, objective_value(m), assignment, Dict{Any, Float64}(), termination_status(m),
         Dict{String, Any}("open_stations" => _open_station_values([round(value(y[j])) for j in 1:data.n_stations])),
     )
 end

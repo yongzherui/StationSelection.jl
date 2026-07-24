@@ -269,4 +269,58 @@
             ),
         )
     end
+
+    @testset "restricted completion under unrestricted-walking degenerate chains (regression)" begin
+        # Regression test for a 2026-07-24 bug: `_sorted_endpoint_chain` (this file's dual
+        # derivation) built its endpoint-chain "key" from raw, un-perturbed sorted costs, while
+        # the real primal's Big-M row (`_endpoint_big_m_variable!` in
+        # src/opt/constraints/aggregate_od_route.jl) is built from TIE-BROKEN costs
+        # (`_big_m_tie_break_costs`). The two silently disagreed whenever an endpoint had many
+        # candidate stations at (or near) the same walking cost -- exactly what happens once
+        # `max_walking_distance` is wide enough that every station is a candidate for every
+        # request endpoint. That mismatch made the completion LP dualize a slightly different
+        # primal than the one Gurobi actually solved, so `_restricted_mw_optimality_cut` could
+        # spuriously report `:completion_infeasible` even though the true completion LP is
+        # feasible. Fixed by routing all three call sites (`_endpoint_big_m_variable!`,
+        # `_sorted_endpoint_chain`, `_yz_joint_core_point`) through the single canonical
+        # `_big_m_tie_break_costs`, applied exactly once, as early as possible in the chain.
+        # This tiny 6-station grid (unrestricted `max_walking_distance` = the grid diagonal, so
+        # every station is a candidate for every endpoint) reliably reproduced
+        # `completion_infeasible` before the fix and must converge cleanly after it.
+        nx, ny, n_pairs = 2, 3, 3
+        grid_instance = generate_grid_instance(nx, ny, n_pairs; endpoint_overlap=2.0, seed=42)
+        max_walk = Float64(nx + ny)
+        grid_data = create_grid_problem_data(grid_instance; max_walking_distance=max_walk)
+        grid_model = AggregateODRouteModel(
+            3;
+            assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
+            route_regularization_weight=10.0,
+            walk_cost_weight=0.1,
+            repositioning_time=20.0,
+            max_walking_distance=max_walk,
+            max_wait_time=900.0,
+            detour_factor=2.0,
+            max_stops=4,
+        )
+
+        for cut_derivation in (:zero_completion, :restricted_mw_fixed_pi)
+            @testset "cut_derivation=$cut_derivation" begin
+                result = run_opt(
+                    grid_data, grid_model,
+                    BendersSolver(
+                        config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=1e-4),
+                        decomposition=BendersY(),
+                        inner_solver=ColumnGenerationSolver(
+                            config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=1e-4),
+                            max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
+                            final_ip_time_limit_sec=60.0,
+                        ),
+                        max_iterations=200,
+                        cut_derivation=cut_derivation,
+                    ),
+                )
+                @test result.termination_status == MOI.OPTIMAL
+            end
+        end
+    end
 end

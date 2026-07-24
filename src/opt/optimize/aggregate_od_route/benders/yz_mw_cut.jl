@@ -97,8 +97,9 @@ function _yz_joint_core_point(
         # Matches `_endpoint_big_m_variable!` (aggregate_od_route.jl) exactly, including its
         # tie-break perturbation -- this must be the identical row family the real master builds,
         # not merely an equivalent-looking one, for the resulting core point to mean anything.
-        tie_break_scale = max(1e-4, maximum(abs, chain.costs; init=0.0) * 1e-6)
-        tb_costs = [chain.costs[idx] + tie_break_scale * (idx - 1) for idx in 1:n_chain]
+        # `chain.costs` (from `_restricted_mw_chains`/`_sorted_endpoint_chain`) is ALREADY
+        # tie-broken -- do NOT reapply `_big_m_tie_break_costs` here, that would perturb twice.
+        tb_costs = chain.costs
         max_cost = maximum(tb_costs)
         selected_cost = sum(tb_costs[idx] * zvar[idx] for idx in 1:n_chain)
         for (idx, station) in enumerate(chain.stations)

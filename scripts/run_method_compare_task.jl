@@ -164,12 +164,11 @@ function _write_benders_station_selection_csv!(result, station_ids::Vector{Int},
 end
 
 function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple)
-    # allow_walk_only left at its default (false) and unmet_demand_penalty left
-    # unset (nothing): the zero_completion / restricted_mw_fixed_pi cut
-    # derivations only apply under allow_walk_only=false, unmet_demand_penalty
-    # === nothing (see BendersSolver docs) -- and every method in METHODS must
-    # solve the SAME model for the objective-value comparison to be meaningful,
-    # so this can't vary by method.
+    # allow_walk_only left at its default (false): the zero_completion /
+    # restricted_mw_fixed_pi cut derivations only apply under allow_walk_only=false
+    # (see BendersSolver docs) -- and every method in METHODS must solve the SAME
+    # model for the objective-value comparison to be meaningful, so this can't
+    # vary by method.
     #
     # max_visits_per_node is also left at the model's own default (typemax(Int),
     # unrestricted) rather than capped: capping it forces every label to track a

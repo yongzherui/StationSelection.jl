@@ -143,8 +143,8 @@ Controls how `BendersY`'s, `BendersYZ`'s, and `BendersYZH`'s optimality cuts are
   exactly with `:zero_completion`.
 
 For all three decompositions that honor this field, the non-`:standard` modes are only supported
-for `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` with `allow_walk_only=false`,
-`unmet_demand_penalty === nothing`, and `inner_solver isa ColumnGenerationSolver`. Any
+for `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` with `allow_walk_only=false`
+and `inner_solver isa ColumnGenerationSolver`. Any
 completion/certification failure is fatal; the solver never substitutes a standard cut. See
 `notes/2026-07-17_restricted_mw_cut_benders_y.md` (the `BendersY` derivation) and
 `benders/yz_mw_cut.jl`/`benders/yzh.jl` (the `BendersYZ`/`BendersYZH` analogues).

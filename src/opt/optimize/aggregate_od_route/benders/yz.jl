@@ -51,21 +51,14 @@ function _build_yz_route_subproblem_lp(
         zvar
     end
 
-    unmet_demand_active = !isnothing(model.unmet_demand_penalty)
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    u = unmet_demand_active ? Dict{NTuple{3, Int}, VariableRef}() : nothing
     for request in requests
         _s, o, d = request
         pairs = feasible_pairs[request]
         for pair in pairs
             x[(request, pair)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
         end
-        if unmet_demand_active
-            u[request] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
-            @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == u[request])
-        else
-            @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
-        end
+        @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
         x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
 
         pickup_key, sorted_pickups, _pickup_costs = _sorted_endpoint_chain(data, o, model.max_walking_distance, :pickup)
@@ -99,10 +92,6 @@ function _build_yz_route_subproblem_lp(
         for pair in feasible_pairs[request]
             add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
         end
-        if unmet_demand_active
-            add_to_expression!(obj, model.unmet_demand_penalty)
-            add_to_expression!(obj, -model.unmet_demand_penalty, u[request])
-        end
     end
     for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
         add_to_expression!(
@@ -116,7 +105,6 @@ function _build_yz_route_subproblem_lp(
         )
     end
     @objective(m, Min, obj)
-    m[:u] = u
     m[:x] = x
     return m, fix_cons, cover_cons
 end
@@ -137,7 +125,6 @@ function _solve_yz_route_subproblem_lp(
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersYZ route LP subproblem failed with status $(termination_status(m))"))
-    assert_service_near_binary(m)
     return objective_value(m), Dict(key => dual(con) for (key, con) in fix_cons)
 end
 
@@ -190,7 +177,6 @@ function _solve_yz_route_subproblem_lp_with_repricing(
         primal_status(m) == MOI.FEASIBLE_POINT ||
             throw(ArgumentError("BendersYZ repricing subproblem LP failed with status $(termination_status(m))"))
         assert_endpoint_chain_near_binary(m)
-        assert_service_near_binary(m)
         v_hat = objective_value(m)
         if isnothing(baseline_v_hat)
             baseline_v_hat = v_hat
@@ -311,11 +297,6 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         model.allow_walk_only && throw(ArgumentError(
             "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
         ))
-        !isnothing(model.unmet_demand_penalty) && throw(ArgumentError(
-            "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support unmet_demand_penalty -- " *
-            "the restricted dual-completion LP in yz_mw_cut.jl does not yet account for the relaxed z/x/u " *
-            "constraints \"always feasible\" mode uses; use cut_derivation=:standard with unmet_demand_penalty for now"
-        ))
     end
     z_core_point = solver.cut_derivation == :standard ? nothing :
         _yz_joint_core_point(data, model, requests, optimizer_env, cfg.silent)
@@ -323,7 +304,6 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    master[:aggregate_od_route_unmet_demand_penalty] = model.unmet_demand_penalty
     @variable(master, y[1:data.n_stations], Bin)
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
@@ -361,19 +341,15 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             allow_walk_only=model.allow_walk_only,
             allow_same_station=true,
         )
-        # Under "always feasible" mode, `infeasible` requests are genuinely unserved (u=0),
-        # not grounds for a feasibility cut. Outside that mode, the master's own eager
-        # `_add_default_endpoint_coverage_constraints!` makes every request resolve to a real
-        # pair by construction -- see BendersY's outer loop for the identical reasoning; this is
-        # a correctness assertion, not reactive cut-derivation machinery.
-        if !isempty(infeasible) && isnothing(model.unmet_demand_penalty)
-            throw(ArgumentError(
-                "BendersYZ: y_hat=$(y_hat) left requests infeasible ($(infeasible)) under " *
-                "unmet_demand_penalty=nothing; this should be structurally impossible given the " *
-                "master's eager endpoint-coverage constraints -- check max_walking_distance, l, " *
-                "and _add_default_endpoint_coverage_constraints!"
-            ))
-        end
+        # The master's own eager `_add_default_endpoint_coverage_constraints!` makes every
+        # request resolve to a real pair by construction -- see BendersY's outer loop for the
+        # identical reasoning; this is a correctness assertion, not reactive cut-derivation
+        # machinery.
+        isempty(infeasible) || throw(ArgumentError(
+            "BendersYZ: y_hat=$(y_hat) left requests infeasible ($(infeasible)); this should be " *
+            "structurally impossible given the master's eager endpoint-coverage constraints -- " *
+            "check max_walking_distance, l, and _add_default_endpoint_coverage_constraints!"
+        ))
 
         z_hat = Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}}(
             key => round.(value.(vars)) for (key, vars) in master[:nearest_endpoint_chain_cache]
@@ -442,11 +418,8 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             # `cg_stop_reason == :optimality_proven` regardless of how it was seeded, so its own
             # per-request duals are the certification -- no separate re-derivation needed. See
             # notes/2026-07-17_restricted_mw_cut_benders_y.md.
-            # `assignments_for_group` is only built when actually needed: under
-            # `unmet_demand_penalty` (where `:standard` is the only allowed mode, enforced above),
-            # `assignments` legitimately omits genuinely-unserved requests, so an unconditional
-            # per-group restriction here would `KeyError` even though the `:standard` cut branch
-            # never touches `assignments`.
+            # `assignments_for_group` is only built when actually needed, since the `:standard`
+            # cut branch never touches `assignments`.
             certified_for_cut = nothing
             qbar_for_cut = nothing
             certification_already_failed = false

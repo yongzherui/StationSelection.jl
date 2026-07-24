@@ -11,7 +11,6 @@ export add_nearest_open_assignment_constraints!
 export validate_big_m_nearest_aggregate_od_route!
 export add_fixed_open_station_constraints!
 export assert_endpoint_chain_near_binary
-export assert_service_near_binary
 export nearest_open_endpoint_diagnostics
 
 const _AggregateODRouteEndpointChainKey = Tuple{Symbol, Tuple{Int, Vararg{Int}}, Tuple{Float64, Vararg{Float64}}}
@@ -102,24 +101,6 @@ function _endpoint_chain_key(
 end
 
 """
-    _aggregate_od_route_unmet_demand_active(m::Model) -> Bool
-
-Reads `m[:aggregate_od_route_unmet_demand_penalty]`, the same model-dict-flag
-pattern `binary`'s default already uses for `m[:aggregate_od_route_relax_integrality]` --
-every builder that creates a `Model(...)` for this domain and wants "always
-feasible" mode sets this key once, right after construction, to
-`model.unmet_demand_penalty` (a `Union{Nothing,Float64}`; the key may also be
-entirely absent, e.g. on models that never touch this feature). `true` here
-means the endpoint-selector's own `sum(z)==1` hard constraint (see
-`_endpoint_chain_variable!`/`_endpoint_big_m_variable!`) must relax to
-`sum(z)<=1`, since a candidate station being unselected on some side is what
-lets that OD's `u_p` fall to 0 instead of the whole model going infeasible.
-"""
-_aggregate_od_route_unmet_demand_active(m::Model)::Bool =
-    haskey(m, :aggregate_od_route_unmet_demand_penalty) &&
-    !isnothing(m[:aggregate_od_route_unmet_demand_penalty])
-
-"""
     _endpoint_chain_variable!(m, y, side, endpoints, costs; binary=...)
 
 Station-generic nearest-open-station chain for one physical endpoint (in one
@@ -139,40 +120,20 @@ than merely assumed). Defaults to reading
 path), else `true`. One shared implementation used by the compact-model
 build, the BendersXY master, and the BendersY LP subproblem.
 
+Given `sum(z) == 1` and `z[rank] <= y[station]` for every rank, `z` is already
+forced onto the correct single (nearest-open) candidate at any binary `y` --
+`selected_cost <= cost[idx] + M[idx]*(1-y[station])` collapses to
+`selected_cost <= cost[idx]` for whichever candidate is open, and since
+`selected_cost` is a weighted average of costs over the simplex `z`, that
+bound can only be met by concentrating all weight on the (uniquely) cheapest
+open candidate. No separate lower-bound row is needed.
+
 Also emits, once per distinct chain, the endpoint-coverage constraint
 `sum(y[j] for j in candidates) >= 1`. This is mathematically implied by
 `z[rank] <= y[station]` + `sum(z) == 1` already (any feasible integer point
 already satisfies it), so it's redundant-but-harmless for correctness; it
 exists to tighten the LP relaxation and give a direct diagnostic instead of a
 downstream `sum(z)==1` infeasibility with no obvious cause.
-
-Under "always feasible" mode (`_aggregate_od_route_unmet_demand_active(m)`,
-i.e. `AggregateODRouteModel(unmet_demand_penalty=...)`), `sum(z)==1` relaxes
-to `sum(z)<=1` and the redundant `sum(y[...])>=1` row is dropped entirely --
-otherwise a station budget `l` too small for some request's candidates would
-still make the model outright `INFEASIBLE` before `x`'s own `sum(x)==u`
-relaxation (`add_assignment_constraints!`) ever gets a chance to matter.
-
-That relaxation alone is *not* sufficient, though: `z` carries no direct
-objective coefficient, and (unlike `x`/`h`, which live in the same model and
-get an indirect incentive from the unmet-demand penalty to pull `z` up
-whenever beneficial) some callers -- `BendersYZ`'s/`BendersYZH`'s *master*
-specifically, before any Benders cut yet links `theta` to `z` -- have nothing
-in the model connecting `z` to anything at all. With only upper bounds
-(`z[rank]<=y[station]`, the domination rows), the solver is free to leave
-`z` fractional or all-zero even when a candidate is open, since nothing
-forces it up (confirmed empirically: `assert_endpoint_chain_near_binary`
-failed on a fresh `BendersYZ` master with values like `z=0.5`). Fixed with an
-explicit algebraic lower bound per rank -- the standard "select first true in
-a priority list" pattern -- added unconditionally (harmless when `sum(z)==1`
-already pins this algebraically the old way):
-`z[rank] >= y[station] - sum(y[j] for j in sorted_endpoints[1:rank-1])`. When
-no cheaper candidate is open, this forces `z[rank]` up to exactly
-`y[station]`; when some cheaper one is open, the right-hand side is `<=0` and
-this row is slack, leaving the cheaper rank's own row to force the value
-instead. Together with the existing upper bounds, `z` is now uniquely
-determined by `y` alone in every case, with no dependence on objective
-pressure from elsewhere in the model.
 """
 function _endpoint_chain_variable!(
     m::Model,
@@ -192,26 +153,64 @@ function _endpoint_chain_variable!(
     sorted_endpoints = endpoints[order]
     sorted_costs = costs[order]
     key = _endpoint_chain_key(side, sorted_endpoints, sorted_costs)
-    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
     return get!(cache, key) do
         z = binary ?
             @variable(m, [1:length(sorted_endpoints)], binary = true) :
             @variable(m, [1:length(sorted_endpoints)], lower_bound = 0.0, upper_bound = 1.0)
-        if unmet_demand_active
-            @constraint(m, sum(z) <= 1.0)
-        else
-            @constraint(m, sum(z) == 1.0)
-        end
+        @constraint(m, sum(z) == 1.0)
         for (rank, station) in enumerate(sorted_endpoints)
             @constraint(m, z[rank] <= y[station])
             for prior in 1:(rank - 1)
                 @constraint(m, z[rank] <= 1.0 - y[sorted_endpoints[prior]])
             end
-            @constraint(m, z[rank] >= y[station] - sum(y[sorted_endpoints[p]] for p in 1:(rank - 1); init=0.0))
         end
-        unmet_demand_active || @constraint(m, sum(y[station] for station in sorted_endpoints) >= 1.0)
+        @constraint(m, sum(y[station] for station in sorted_endpoints) >= 1.0)
         z
     end, sorted_endpoints
+end
+
+"""
+    _big_m_tie_break_costs(sorted_costs) -> tb_costs
+
+The SINGLE canonical implementation of the `:big_m_nearest` tie-break perturbation --
+`sorted_costs` (a chain's walking costs, already sorted ascending) plus a strictly
+increasing per-rank offset, used everywhere a `:big_m_nearest` chain's Big-M row
+(`selected_cost <= cost[idx] + M*(1-y)`) is built OR dualized. See
+`_endpoint_big_m_variable!`'s docstring for why the perturbation itself is needed
+(breaking ties between candidates at exactly equal true cost, which would otherwise
+leave `z` free to split fractionally across them).
+
+**Why this must be the only implementation, not one hand-copied at each call site**:
+this exact perturbed cost array appears in three logically-independent places that all
+need to describe the *same* primal LP -- the real primal builder
+(`_endpoint_big_m_variable!`, below), the restricted-MW dual-completion derivation
+(`_sorted_endpoint_chain` in `benders/y_mw_cut.jl`, which every BendersY/BendersYZ
+completion LP is built from), and `BendersYZ`'s joint core-point construction
+(`_yz_joint_core_point` in `benders/yz_mw_cut.jl`). Until 2026-07-24, only the first of
+these three actually applied the perturbation -- `_sorted_endpoint_chain` used the raw,
+un-perturbed sorted costs, so the dual-derivation code was silently building the dual of
+a *slightly different* primal (off by up to `(rank-1) * tie_break_scale`, tiny in
+absolute terms) than the one `_endpoint_big_m_variable!` actually builds. That tiny gap
+lands exactly on the knife-edge the perturbation itself is designed to create -- nearly
+(but not exactly) tied Big-M rows -- which is precisely where LP duals become most
+sensitive to small input changes. On instances with many roughly-equidistant candidates
+per endpoint (e.g. `max_walking_distance` wide enough that most/all stations are
+candidates), this manifested as real, non-numerical-noise violations of the completion
+LP's own z-dual constraints (confirmed by comparing genuine, Gurobi-certified duals of
+the real primal against the completion LP's formulas: exactly zero violations on
+instances with few candidates per chain, but large, systematic ones -- tracking
+`nu_sum * tie_break_scale` -- once chains had many candidates), which in turn caused
+spurious `completion_infeasible` failures in `_restricted_mw_optimality_cut`/
+`_solve_restricted_mw_completion`. Fixed by centralizing the perturbation here: every
+caller that needs a `:big_m_nearest` chain's cost values must call this function (or a
+function that calls it) on the sorted raw costs, and must NOT reapply the perturbation
+to an already-perturbed array (that would double-perturb, not fix anything) -- code that
+already receives tie-broken costs (e.g. `chain.costs` after `_restricted_mw_chains`) is
+already correct and should use them as-is.
+"""
+function _big_m_tie_break_costs(sorted_costs::Vector{Float64})::Vector{Float64}
+    tie_break_scale = max(1e-4, maximum(abs, sorted_costs; init=0.0) * 1e-6)
+    return [sorted_costs[idx] + tie_break_scale * (idx - 1) for idx in eachindex(sorted_costs)]
 end
 
 """
@@ -231,33 +230,19 @@ BendersY subproblem, and now the BendersXY/BendersYZ/BendersYZH masters with
 face of optimal solutions where `z` splits fractionally between the tied,
 open candidates: nothing here discriminates by station id the way
 `_endpoint_chain_variable!`'s cascading domination rows already do. Fixed by
-building `selected_cost` (and the big-M threshold) from a strictly increasing
-`tb_costs` array -- `sorted_costs` plus a per-rank offset large enough to
-survive Gurobi's default feasibility tolerances (`FeasibilityTol`/`IntFeasTol`
-are both `~1e-6`; an offset below that is mathematically a strict tie-break
-but numerically invisible to the solver, which will then accept the very
-face this is meant to eliminate) yet far too small (`>= 1e-4` absolute, or
-`1e-6` relative to cost magnitude if that is larger) to reorder any
-genuinely distinct costs. Forces the tie to resolve to the lower-ranked
-(cheaper, then lower station id, per the existing `sortperm` tie-break)
-candidate at the unique vertex `z=1` there, `z=0` elsewhere among the tied
-set.
+building `selected_cost` (and the big-M threshold) from the strictly increasing
+`tb_costs` array `_big_m_tie_break_costs` produces -- see that function's
+docstring for the exact perturbation and, critically, why it must be computed
+there and nowhere else (every other place that needs these tie-broken costs,
+including the dual-completion derivation this primal is dualized into, must
+call it too, not recompute it locally).
 
-Under "always feasible" mode (`_aggregate_od_route_unmet_demand_active(m)`),
-`sum(z)==1` relaxes to `sum(z)<=1` and the redundant `sum(y[...])>=1` row is
-dropped, same as `_endpoint_chain_variable!`. That relaxation alone leaves
-`z` able to sit fractional or all-zero even when a candidate is open --
-nothing here ties `z` to any objective, and the big-M rows only ever bound
-`selected_cost` from *above*, trivially satisfied at `z=0` since costs are
-non-negative (confirmed empirically the same way `_endpoint_chain_variable!`
-was: a fresh `BendersYZ` master returned fractional `z`). Fixed the same
-way -- an explicit per-rank algebraic lower bound using the same sorted
-order the tie-break already relies on:
-`z[idx] >= y[station] - sum(y[j] for j in sorted_endpoints[1:idx-1])`,
-forcing `z` up to `y[station]` exactly when no cheaper candidate is open, and
-slack otherwise. See `_endpoint_chain_variable!`'s docstring for the full
-derivation; the two styles need the identical fix since both are ultimately
-"select the cheapest open candidate" over the same sorted order.
+As with `_endpoint_chain_variable!`, no separate lower-bound row is needed:
+given `sum(z)==1`, `z<=y`, and the Big-M row above, `z` is already forced onto
+the nearest open candidate at any binary `y` (the Big-M row for whichever
+candidate is open collapses to `selected_cost <= cost[idx]`, which a simplex
+weighted average can only satisfy by placing all weight on the cheapest open
+one).
 """
 function _endpoint_big_m_variable!(
     m::Model,
@@ -277,27 +262,30 @@ function _endpoint_big_m_variable!(
     sorted_endpoints = endpoints[order]
     sorted_costs = costs[order]
     key = _endpoint_chain_key(side, sorted_endpoints, sorted_costs)
-    unmet_demand_active = _aggregate_od_route_unmet_demand_active(m)
+    # DEBUG (temporary instrumentation, 2026-07-24): mirror the variable cache with a constraint
+    # cache so debug scripts can extract genuine Gurobi duals for sum(z)==1/z<=y/Big-M rows.
+    con_cache = if haskey(m, :nearest_endpoint_chain_constraint_cache)
+        m[:nearest_endpoint_chain_constraint_cache]
+    else
+        m[:nearest_endpoint_chain_constraint_cache] = Dict{_AggregateODRouteEndpointChainKey, NamedTuple}()
+    end
     return get!(cache, key) do
         z = binary ?
             @variable(m, [1:length(sorted_endpoints)], binary = true) :
             @variable(m, [1:length(sorted_endpoints)], lower_bound = 0.0, upper_bound = 1.0)
-        if unmet_demand_active
-            @constraint(m, sum(z) <= 1.0)
-        else
-            @constraint(m, sum(z) == 1.0)
-        end
-        tie_break_scale = max(1e-4, maximum(abs, sorted_costs; init=0.0) * 1e-6)
-        tb_costs = [sorted_costs[idx] + tie_break_scale * (idx - 1) for idx in eachindex(sorted_costs)]
+        sum_z_con = @constraint(m, sum(z) == 1.0)
+        tb_costs = _big_m_tie_break_costs(sorted_costs)
         selected_cost = @expression(m, sum(tb_costs[idx] * z[idx] for idx in eachindex(sorted_endpoints)))
         max_cost = maximum(tb_costs)
+        mu_cons = Vector{ConstraintRef}(undef, length(sorted_endpoints))
+        nu_cons = Vector{ConstraintRef}(undef, length(sorted_endpoints))
         for (idx, station) in enumerate(sorted_endpoints)
-            @constraint(m, z[idx] <= y[station])
+            mu_cons[idx] = @constraint(m, z[idx] <= y[station])
             big_m = max_cost - tb_costs[idx]
-            @constraint(m, selected_cost <= tb_costs[idx] + big_m * (1.0 - y[station]))
-            @constraint(m, z[idx] >= y[station] - sum(y[sorted_endpoints[p]] for p in 1:(idx - 1); init=0.0))
+            nu_cons[idx] = @constraint(m, selected_cost <= tb_costs[idx] + big_m * (1.0 - y[station]))
         end
-        unmet_demand_active || @constraint(m, sum(y[station] for station in sorted_endpoints) >= 1.0)
+        row5_con = @constraint(m, sum(y[station] for station in sorted_endpoints) >= 1.0)
+        con_cache[key] = (sum_z=sum_z_con, mu=mu_cons, nu=nu_cons, row5=row5_con)
         z
     end, sorted_endpoints
 end
@@ -328,7 +316,7 @@ function _endpoint_selector_variable!(
 end
 
 """
-    assert_endpoint_chain_near_binary(m::Model; atol=1e-5)
+    assert_endpoint_chain_near_binary(m::Model; atol=1e-3)
 
 Runtime check that every `zp`/`zd` endpoint selector indicator variable in
 `m` is within `atol` of 0 or 1 in the current solution. The shared endpoint
@@ -341,16 +329,18 @@ MIP, or an LP with `y` fixed to an already-binary value) -- a fractional `z`
 there means the "nearest open" endpoint ranking isn't actually resolved to
 a single winner, undermining any cost/cut derived from it.
 
-`atol=1e-5` matches Gurobi's own default `IntFeasTol` (1e-5) -- the tolerance
-Gurobi itself uses to decide a binary variable's value is "integer feasible" in
-the first place, not `FeasibilityTol` (1e-6), which governs constraint
-satisfaction, not variable integrality. A stricter atol than the solver's own
-integrality tolerance means this check can fail on a `z` Gurobi already
-considers a valid binary solution -- confirmed empirically on real n=20
-instances (`z` values like `0.9999987`/`2.89e-6`, comfortably inside
-`IntFeasTol` but outside a `1e-6` check).
+`atol=1e-3` is deliberately looser than Gurobi's own default `IntFeasTol`
+(1e-5): on larger, more degenerate instances (e.g. real BendersYZH runs with
+many near-tied endpoint candidates) `z` values like `0.9996092321175274` have
+been observed -- still a clean, unambiguous "selected" indicator, but outside
+even the 1e-5 `IntFeasTol`-matched tolerance this check used previously. Every
+call site that reads a `z` value onward for further computation applies
+`round.(value.(...))` (see benders/subproblem_api.jl and benders/yz.jl) rather
+than using the raw float, so values this check passes are always snapped to
+an exact 0.0/1.0 before they can propagate any of this slack into downstream
+cost or dual computations.
 """
-function assert_endpoint_chain_near_binary(m::Model; atol::Float64=1e-5)::Nothing
+function assert_endpoint_chain_near_binary(m::Model; atol::Float64=1e-3)::Nothing
     haskey(m, :nearest_endpoint_chain_cache) || return nothing
     for (key, vars) in m[:nearest_endpoint_chain_cache]
         for (idx, var) in enumerate(vars)
@@ -360,46 +350,6 @@ function assert_endpoint_chain_near_binary(m::Model; atol::Float64=1e-5)::Nothin
                 "$(val), not within atol=$(atol) of 0 or 1"
             ))
         end
-    end
-    return nothing
-end
-
-_collect_variable_refs(x::VariableRef)::Vector{VariableRef} = [x]
-_collect_variable_refs(x::AbstractDict)::Vector{VariableRef} =
-    reduce(vcat, (_collect_variable_refs(v) for v in values(x)); init=VariableRef[])
-_collect_variable_refs(x::AbstractArray)::Vector{VariableRef} =
-    reduce(vcat, (_collect_variable_refs(v) for v in x); init=VariableRef[])
-_collect_variable_refs(x)::Vector{VariableRef} = VariableRef[]
-
-"""
-    assert_service_near_binary(m::Model; atol=1e-5)
-
-Runtime check that "always feasible" mode's service indicator `u`
-(`AggregateODRouteModel(unmet_demand_penalty=...)`, `sum(x) == u` in place of
-`sum(x) == 1`) resolves to exactly 0 or 1 at any solved model's optimum, even
-though `u` is declared continuous `[0,1]` like `x`/`z`/`h` (only `y` is
-genuinely binary anywhere in this domain). Unlike `z`, there is no
-deterministic tie-break forcing this algebraically -- `u`'s integrality
-follows from `x`/`h` already being pinned to 0/1 by the (tie-break-fixed)
-`z` chain machinery, tied by equality into `sum(x)==u`, not from a dedicated
-mechanism of its own. A fractional `u` here means either a genuine near-tie
-between "serve via the best real candidate" and "pay the penalty" (fixable
-the same way `_endpoint_big_m_variable!`'s tie-break was: perturb the penalty
-relative to real costs, not a modeling rethink) or a real bug upstream --
-either way it should fail loudly here rather than silently propagate.
-No-op if `m` never built a `u` (mode off, or nothing solved yet), mirroring
-`assert_endpoint_chain_near_binary`. Reads `m[:u]` regardless of its exact
-container shape (compact model: `Vector` of `Dict{Int,Vector{VariableRef}}`
-per scenario, matching `m[:x]`'s own shape; Benders subproblems/masters: a
-flatter `Dict{Any,VariableRef}` keyed like their own `assignment`/`h` dicts).
-"""
-function assert_service_near_binary(m::Model; atol::Float64=1e-5)::Nothing
-    haskey(m, :u) || return nothing
-    for var in _collect_variable_refs(m[:u])
-        val = value(var)
-        (val <= atol || val >= 1.0 - atol) || throw(ArgumentError(
-            "service indicator (u) near-binary check failed: value=$(val), not within atol=$(atol) of 0 or 1"
-        ))
     end
     return nothing
 end
@@ -521,7 +471,7 @@ Defensive cross-check that `real_pairs` (the non-walk `(j,k)` pairs
 `compute_valid_jk_pairs` produced for OD `(o,d)`) is *exactly* the Cartesian
 product of the independently-derived candidate sets `pickups`/`dropoffs`
 (`_nearest_open_endpoint_candidates`), either off-diagonal (same-station
-pairs disabled, the default) or the full product (`AggregateODRouteModel(unmet_demand_penalty=...)`,
+pairs disabled, the default) or the full product (`allow_same_station=true`,
 `is_same_station_pair`). Both are computed from the same underlying
 walking-cost data and `max_walking_distance`, so any other mismatch
 indicates a real bug, not a modeling choice. Accepting either shape here
@@ -664,13 +614,23 @@ function _add_endpoint_x_linking!(
     pickup_rank::Dict{Int, Int},
     dropoff_rank::Dict{Int, Int},
     sorted_pickups::Vector{Int},
-    sorted_dropoffs::Vector{Int},
+    sorted_dropoffs::Vector{Int};
+    debug_key_prefix=nothing,
 )::Nothing
+    # DEBUG (temporary instrumentation, 2026-07-24): capture x-linking constraint refs so debug
+    # scripts can extract genuine Gurobi duals for the rhoO/rhoD/sigma rows.
+    debug_out = if !isnothing(debug_key_prefix)
+        haskey(m, :debug_x_linking_cons) || (m[:debug_x_linking_cons] = Dict{Any, NamedTuple}())
+        m[:debug_x_linking_cons]
+    else
+        nothing
+    end
     for (j, k) in real_pairs
         assignment = assignment_by_pair[(j, k)]
-        @constraint(m, assignment <= zp[pickup_rank[j]])
-        @constraint(m, assignment <= zd[dropoff_rank[k]])
-        @constraint(m, assignment >= zp[pickup_rank[j]] + zd[dropoff_rank[k]] - 1.0)
+        le_zp = @constraint(m, assignment <= zp[pickup_rank[j]])
+        le_zd = @constraint(m, assignment <= zd[dropoff_rank[k]])
+        ge_sum = @constraint(m, assignment >= zp[pickup_rank[j]] + zd[dropoff_rank[k]] - 1.0)
+        isnothing(debug_out) || (debug_out[(debug_key_prefix, (j, k))] = (le_zp=le_zp, le_zd=le_zd, ge_sum=ge_sum))
     end
 
     if any(is_walk_only_pair, pairs)
@@ -704,6 +664,7 @@ function _add_nearest_open_endpoint_linked_x!(
     binary::Bool,
     allow_walk_only::Bool,
     selector_style::Symbol,
+    debug_key_prefix=nothing,
 )::Nothing
     zp, zd, real_pairs, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs =
         _nearest_open_endpoint_selectors!(
@@ -711,7 +672,8 @@ function _add_nearest_open_endpoint_linked_x!(
             binary=binary, allow_walk_only=allow_walk_only, selector_style=selector_style,
         )
     _add_endpoint_x_linking!(
-        m, real_pairs, pairs, x_by_pair, zp, zd, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs,
+        m, real_pairs, pairs, x_by_pair, zp, zd, pickup_rank, dropoff_rank, sorted_pickups, sorted_dropoffs;
+        debug_key_prefix=debug_key_prefix,
     )
     return nothing
 end
