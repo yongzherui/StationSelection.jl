@@ -368,8 +368,13 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
         ))
     end
+    # Under lifted_walking_objective, every subproblem/pricing/cut-derivation call below uses
+    # `subproblem_model` (walk_cost_weight=0, route_regularization_weight=1) instead of `model` --
+    # see benders/lifted_walking.jl. `model` itself is kept for everything master-side (station
+    # count, feasibility/candidate structure, and the master's own walking-cost/theta terms).
+    subproblem_model = solver.lifted_walking_objective ? _unit_weighted_routing_model(model) : model
     y_core_point = solver.cut_derivation == :standard ? nothing :
-        _y_master_core_point(data, model, requests, optimizer_env, cfg.silent)
+        _y_master_core_point(data, subproblem_model, requests, optimizer_env, cfg.silent)
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
@@ -380,7 +385,12 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     end
-    @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
+    if solver.lifted_walking_objective
+        walking_cost_expr = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
+        @objective(master, Min, model.route_regularization_weight * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+    else
+        @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
+    end
 
     best_result = nothing
     best_open_stations = nothing
@@ -437,15 +447,30 @@ function _run_aggregate_od_route_nearest_open_benders_y(
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
-            data, model, assignments, solver, iteration, _open_station_values(y_hat);
+            data, subproblem_model, assignments, solver, iteration, _open_station_values(y_hat);
             seed_columns=shared_pool,
         )
         priming_cg_seconds = time() - cg_start
         inner_cg_iters += cg_result.n_cg_iters
         final_result = cg_result.final_result
-        if !isnothing(final_result.objective_value) && final_result.objective_value < best_ub
-            best_ub = final_result.objective_value
-            best_result = final_result
+        # Under lifted_walking_objective, `cg_result`/`final_result` were solved against
+        # `subproblem_model` (zero walking cost, unit route weight), so `final_result.objective_value`
+        # is the unweighted routing value Q^route(y_hat) only. Reconstruct the true combined
+        # objective walk(y_hat) + β*Q^route(y_hat) here -- exact, not an approximation, since the
+        # optimal route selection is invariant to a uniform positive rescaling of its own cost.
+        walking_cost_hat = solver.lifted_walking_objective ? _lifted_walking_cost(data, model, assignments) : 0.0
+        incumbent_objective_value = if isnothing(final_result.objective_value)
+            nothing
+        elseif solver.lifted_walking_objective
+            walking_cost_hat + model.route_regularization_weight * final_result.objective_value
+        else
+            final_result.objective_value
+        end
+        if !isnothing(incumbent_objective_value) && incumbent_objective_value < best_ub
+            best_ub = incumbent_objective_value
+            best_result = solver.lifted_walking_objective ?
+                _with_objective_value(final_result, incumbent_objective_value) :
+                final_result
             best_open_stations = _open_station_values(y_hat)
             println(
                 "  [BendersY iteration $iteration] new best incumbent: obj=$(round(best_ub, digits=2))  ",
@@ -480,7 +505,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 v_hat, rho, repriced_pool, n_new, reprice_rounds, reprice_exhausted, reprice_objective_delta =
                     _solve_nearest_open_y_subproblem_lp_with_repricing(
                         data,
-                        model,
+                        subproblem_model,
                         mapping,
                         group_requests,
                         demand,
@@ -503,7 +528,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             else
                 v_hat, rho = _solve_nearest_open_y_subproblem_lp(
                     data,
-                    model,
+                    subproblem_model,
                     mapping,
                     group_requests,
                     demand,
@@ -533,7 +558,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             certification_already_failed = false
             if solver.cut_derivation != :standard
                 try
-                    certified_for_cut, qbar_for_cut = _certified_qbar(data, model, cg_result, group_requests, assignments)
+                    certified_for_cut, qbar_for_cut = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments)
                     println(stderr, "DEBUG cut_id=$(cut_id): v_hat(broad LP, pre-min)=$(v_hat)  qbar_for_cut(R(x_bar) LP)=$(qbar_for_cut)  diff=$(qbar_for_cut - v_hat)")
                     flush(stderr)
 
@@ -553,7 +578,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 ip_start = time()
                 v_hat_ip = _solve_nearest_open_y_subproblem_ip(
                     data,
-                    model,
+                    subproblem_model,
                     mapping,
                     group_requests,
                     demand,
@@ -572,7 +597,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             end
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
                 cut_diag = _add_aggregate_od_route_benders_y_optimality_cut!(
-                    master, y, theta, cut_id, data, model, solver,
+                    master, y, theta, cut_id, data, subproblem_model, solver,
                     group_requests, feasible_pairs, y_hat, assignments, _open_station_values(y_hat),
                     y_core_point, optimizer_env, v_hat, rho;
                     certified=certified_for_cut, Q_bar=qbar_for_cut,

@@ -298,8 +298,13 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
         ))
     end
+    # Under lifted_walking_objective, every subproblem/pricing/cut-derivation call below uses
+    # `subproblem_model` (walk_cost_weight=0, route_regularization_weight=1) instead of `model` --
+    # see benders/lifted_walking.jl. `model` itself is kept for everything master-side (station
+    # count, feasibility/candidate structure, and the master's own walking-cost/theta terms).
+    subproblem_model = solver.lifted_walking_objective ? _unit_weighted_routing_model(model) : model
     z_core_point = solver.cut_derivation == :standard ? nothing :
-        _yz_joint_core_point(data, model, requests, optimizer_env, cfg.silent)
+        _yz_joint_core_point(data, subproblem_model, requests, optimizer_env, cfg.silent)
     z_core = isnothing(z_core_point) ? nothing : z_core_point.z
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
@@ -308,11 +313,16 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
-    _add_nearest_open_master_z!(
-        master, data, y, requests, feasible_pairs, model.max_walking_distance, model.allow_walk_only,
-        model.assignment_policy.feasibility_cut_style,
-    )
-    @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
+    if solver.lifted_walking_objective
+        walking_cost_expr = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
+        @objective(master, Min, model.route_regularization_weight * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+    else
+        _add_nearest_open_master_z!(
+            master, data, y, requests, feasible_pairs, model.max_walking_distance, model.allow_walk_only,
+            model.assignment_policy.feasibility_cut_style,
+        )
+        @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
+    end
 
     best_result = nothing
     best_open_stations = nothing
@@ -357,14 +367,27 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
-            data, model, assignments, solver, iteration, _open_station_values(y_hat)
+            data, subproblem_model, assignments, solver, iteration, _open_station_values(y_hat)
         )
         priming_cg_seconds = time() - cg_start
         inner_cg_iters += cg_result.n_cg_iters
         final_result = cg_result.final_result
-        if !isnothing(final_result.objective_value) && final_result.objective_value < best_ub
-            best_ub = final_result.objective_value
-            best_result = final_result
+        # See the identical comment in benders/y.jl: under lifted_walking_objective,
+        # `final_result.objective_value` is the unweighted routing value only; reconstruct the
+        # true combined objective exactly.
+        walking_cost_hat = solver.lifted_walking_objective ? _lifted_walking_cost(data, model, assignments) : 0.0
+        incumbent_objective_value = if isnothing(final_result.objective_value)
+            nothing
+        elseif solver.lifted_walking_objective
+            walking_cost_hat + model.route_regularization_weight * final_result.objective_value
+        else
+            final_result.objective_value
+        end
+        if !isnothing(incumbent_objective_value) && incumbent_objective_value < best_ub
+            best_ub = incumbent_objective_value
+            best_result = solver.lifted_walking_objective ?
+                _with_objective_value(final_result, incumbent_objective_value) :
+                final_result
             best_open_stations = _open_station_values(y_hat)
             println(
                 "  [BendersYZ iteration $iteration] new best incumbent: obj=$(round(best_ub, digits=2))  ",
@@ -385,7 +408,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             if solver.reprice_subproblem
                 v_hat, rho, _pool, _n_new, _rounds, exhausted, _delta = _solve_yz_route_subproblem_lp_with_repricing(
                     data,
-                    model,
+                    subproblem_model,
                     mapping,
                     group_requests,
                     feasible_pairs,
@@ -400,7 +423,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             else
                 v_hat, rho = _solve_yz_route_subproblem_lp(
                     data,
-                    model,
+                    subproblem_model,
                     group_requests,
                     feasible_pairs,
                     cg_result.generated_columns,
@@ -427,7 +450,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             if solver.cut_derivation != :standard
                 assignments_for_group = Dict(request => assignments[request] for request in group_requests)
                 try
-                    certified_for_cut, qbar_for_cut = _certified_qbar(data, model, cg_result, group_requests, assignments_for_group)
+                    certified_for_cut, qbar_for_cut = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments_for_group)
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
                     throw(ErrorException(
@@ -442,7 +465,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             iteration_lp_value += v_hat
             if theta_hat[cut_id] < v_hat - solver.optimality_tol
                 cut_diag = _add_aggregate_od_route_benders_yz_optimality_cut!(
-                    master, theta, cut_id, data, model, solver,
+                    master, theta, cut_id, data, subproblem_model, solver,
                     group_requests, feasible_pairs, z_hat, assignments_for_group, _open_station_values(y_hat),
                     z_core, optimizer_env, v_hat, rho;
                     certified=certified_for_cut, Q_bar=qbar_for_cut,

@@ -153,6 +153,22 @@ completion/certification failure is fatal; the solver never substitutes a standa
 a warning because its restricted-pool cuts are not correctness-certified. A completed solve also
 warns when its recorded relative outer gap exceeds `outer_gap_warning_tol` (default `0.03`). The
 incumbent is still returned, and the threshold/check result are recorded in result metadata.
+
+# `lifted_walking_objective`
+
+Only supported for `decomposition isa Union{BendersY, BendersYZ}` (checked here) with
+`AggregateODRouteModel`'s `NearestOpenAggregateODAssignmentPolicy` and
+`feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` (checked in
+`_run_aggregate_od_route_nearest_open_benders_y`/`_yz`, since the policy/style live on the model,
+not the solver). When `true`, walking cost is moved entirely out of the Benders subproblem/cuts
+and into the master (computed exactly via the same nearest-open chain/linking machinery, now built
+once in the master instead of fresh per iteration in the subproblem), and
+`route_regularization_weight` (this package's `β`) is applied once, in the master, as the
+coefficient of `theta`, instead of being baked into route-column costs inside the subproblem and
+pricing. The subproblem, its duals, and its stored cuts are all in unweighted routing-cost units
+regardless of `route_regularization_weight`'s value -- see `benders/lifted_walking.jl`. Defaults
+to `false`, reproducing prior behavior exactly (walking cost and `route_regularization_weight`
+both inside the subproblem, as today).
 """
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
@@ -168,6 +184,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
     max_reprice_rounds::Int
     cut_derivation::Symbol
     outer_gap_warning_tol::Float64
+    lifted_walking_objective::Bool
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
@@ -188,6 +205,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
         max_reprice_rounds::Int=10_000,
         cut_derivation::Symbol=:zero_completion,
         outer_gap_warning_tol::Number=0.03,
+        lifted_walking_objective::Bool=false,
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -196,6 +214,10 @@ struct BendersSolver <: AbstractStationSelectionSolver
         decomposition isa BendersYZH && cut_derivation == :restricted_mw_fixed_pi && throw(ArgumentError(
             "BendersYZH has no free dual block left to optimize once h is fixed fully -- " *
             "cut_derivation=:restricted_mw_fixed_pi would coincide exactly with :zero_completion; use that instead"
+        ))
+        lifted_walking_objective && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
+            "lifted_walking_objective is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
+            "got $(typeof(decomposition))"
         ))
         resolved_tol = isnothing(optimality_tol) ?
             (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
@@ -229,6 +251,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
             max_reprice_rounds,
             cut_derivation,
             resolved_outer_gap_warning_tol,
+            lifted_walking_objective,
         )
     end
 end
