@@ -307,6 +307,18 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         _yz_joint_core_point(data, subproblem_model, requests, optimizer_env, cfg.silent)
     z_core = isnothing(z_core_point) ? nothing : z_core_point.z
 
+    # See BendersSolver's `route_regularization_weight_schedule` docstring: a single implicit
+    # stage at model.route_regularization_weight reproduces today's behavior exactly. The
+    # constructor already requires lifted_walking_objective=true whenever a schedule is given.
+    beta_schedule = solver.lifted_walking_objective && !isnothing(solver.route_regularization_weight_schedule) ?
+        solver.route_regularization_weight_schedule : [model.route_regularization_weight]
+    isapprox(beta_schedule[end], model.route_regularization_weight; atol=1e-9) || throw(ArgumentError(
+        "route_regularization_weight_schedule must end at model.route_regularization_weight " *
+        "($(model.route_regularization_weight)); got $(beta_schedule[end])"
+    ))
+    stage_idx = 1
+    current_beta = beta_schedule[stage_idx]
+
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
     @variable(master, y[1:data.n_stations], Bin)
@@ -315,7 +327,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     if solver.lifted_walking_objective
         walking_cost_expr = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
-        @objective(master, Min, model.route_regularization_weight * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+        @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
     else
         _add_nearest_open_master_z!(
             master, data, y, requests, feasible_pairs, model.max_walking_distance, model.allow_walk_only,
@@ -331,6 +343,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     optimality_cuts = 0
     inner_cg_iters = 0
     benders_rows = NamedTuple[]
+    stage_log = NamedTuple[]
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -374,12 +387,12 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         final_result = cg_result.final_result
         # See the identical comment in benders/y.jl: under lifted_walking_objective,
         # `final_result.objective_value` is the unweighted routing value only; reconstruct the
-        # true combined objective exactly.
+        # true combined objective exactly. `current_beta` is the active schedule stage's weight.
         walking_cost_hat = solver.lifted_walking_objective ? _lifted_walking_cost(data, model, assignments) : 0.0
         incumbent_objective_value = if isnothing(final_result.objective_value)
             nothing
         elseif solver.lifted_walking_objective
-            walking_cost_hat + model.route_regularization_weight * final_result.objective_value
+            walking_cost_hat + current_beta * final_result.objective_value
         else
             final_result.objective_value
         end
@@ -499,14 +512,36 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             mw_fallback_count=mw_fallback_count,
             mw_completion_seconds=mw_completion_seconds,
             mw_phi_core=mw_last_phi_core,
+            route_regularization_weight=current_beta,
         ))
         _flush_benders_iteration_log!(
             solver, benders_rows;
-            extra_headers=[:cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core],
+            extra_headers=[
+                :cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core, :route_regularization_weight,
+            ],
         )
+
+        if cuts_added_this_iteration == 0 && stage_idx < length(beta_schedule)
+            stage_idx += 1
+            current_beta = beta_schedule[stage_idx]
+            @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+            # An incumbent optimal for the previous stage's beta is not comparable once beta
+            # changes (same y_hat, different weighted total) -- only the master (with its
+            # accumulated cuts) and the CG-priming pool carry forward into the next stage.
+            best_ub, best_result, best_open_stations = Inf, nothing, nothing
+            push!(stage_log, (stage=stage_idx, route_regularization_weight=current_beta, iterations_to_reach=iteration))
+            println(
+                "  [BendersYZ] route_regularization_weight_schedule: advancing to stage ",
+                "$stage_idx/$(length(beta_schedule)) (β=$current_beta) at iteration $iteration",
+            )
+            flush(stdout)
+            continue
+        end
 
         if cuts_added_this_iteration == 0
             return _finalize_benders_result(best_result, Dict{String, Any}(
+                "route_regularization_weight_schedule" => beta_schedule,
+                "route_regularization_weight_stage_log" => stage_log,
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersYZ",
                 "benders_open_stations" => best_open_stations,

@@ -169,6 +169,21 @@ pricing. The subproblem, its duals, and its stored cuts are all in unweighted ro
 regardless of `route_regularization_weight`'s value -- see `benders/lifted_walking.jl`. Defaults
 to `false`, reproducing prior behavior exactly (walking cost and `route_regularization_weight`
 both inside the subproblem, as today).
+
+# `route_regularization_weight_schedule`
+
+Only supported when `lifted_walking_objective=true`: since the subproblem's cuts are then stored
+in unweighted-routing units regardless of `route_regularization_weight` (see above), the *same*
+accumulated cuts, shared route-column pool, and master remain valid across any `β =
+route_regularization_weight` -- only the master's coefficient on `theta` needs to change. When
+set to a `Vector{Float64}` `[β_1 < β_2 < ... < β_T]` (must end at the model's own
+`route_regularization_weight`), the outer loop solves stage `β_1` to full Benders convergence,
+then reuses the same master/cuts/pool and bumps `theta`'s coefficient to `β_2`, and so on, in one
+continuous run bounded by the single `max_iterations` budget -- not `T` independent solves.
+Motivation: when walking cost dominates the objective, low-`β` stages converge in very few
+iterations and the cuts they find remain useful once `β` is ramped up, so this can reach the same
+`β_T` result with less total work than solving at `β_T` directly. Defaults to `nothing`
+(single implicit stage at `model.route_regularization_weight`, i.e. today's behavior).
 """
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
@@ -185,6 +200,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
     cut_derivation::Symbol
     outer_gap_warning_tol::Float64
     lifted_walking_objective::Bool
+    route_regularization_weight_schedule::Union{Nothing, Vector{Float64}}
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
@@ -206,6 +222,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
         cut_derivation::Symbol=:zero_completion,
         outer_gap_warning_tol::Number=0.03,
         lifted_walking_objective::Bool=false,
+        route_regularization_weight_schedule::Union{AbstractVector{<:Number}, Nothing}=nothing,
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -219,6 +236,22 @@ struct BendersSolver <: AbstractStationSelectionSolver
             "lifted_walking_objective is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
             "got $(typeof(decomposition))"
         ))
+        resolved_schedule = isnothing(route_regularization_weight_schedule) ?
+            nothing : Float64.(route_regularization_weight_schedule)
+        if !isnothing(resolved_schedule)
+            lifted_walking_objective || throw(ArgumentError(
+                "route_regularization_weight_schedule requires lifted_walking_objective=true -- " *
+                "cuts are only guaranteed valid across route_regularization_weight values in that mode"
+            ))
+            !isempty(resolved_schedule) || throw(ArgumentError(
+                "route_regularization_weight_schedule must not be empty"
+            ))
+            all(resolved_schedule .> 0) || throw(ArgumentError(
+                "route_regularization_weight_schedule entries must all be positive"
+            ))
+            all(resolved_schedule[i] < resolved_schedule[i + 1] for i in 1:(length(resolved_schedule) - 1)) ||
+                throw(ArgumentError("route_regularization_weight_schedule must be strictly increasing"))
+        end
         resolved_tol = isnothing(optimality_tol) ?
             (isnothing(reduced_cost_tol) ? 1e-6 : Float64(reduced_cost_tol)) :
             Float64(optimality_tol)
@@ -252,6 +285,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
             cut_derivation,
             resolved_outer_gap_warning_tol,
             lifted_walking_objective,
+            resolved_schedule,
         )
     end
 end
