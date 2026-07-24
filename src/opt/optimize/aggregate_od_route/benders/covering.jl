@@ -778,6 +778,7 @@ function _solve_fixed_route_covering_by_cg(
             NamedTuple[],
             NamedTuple[],
             NamedTuple[],
+            nothing,
         )
     end
     cfg = inner.config

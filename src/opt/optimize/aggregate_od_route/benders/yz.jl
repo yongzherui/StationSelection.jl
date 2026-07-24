@@ -335,6 +335,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
 
     best_result = nothing
+    best_open_stations = nothing
     best_ub = Inf
     feasibility_cuts = 0
     optimality_cuts = 0
@@ -435,6 +436,12 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         if !isnothing(final_result.objective_value) && final_result.objective_value < best_ub
             best_ub = final_result.objective_value
             best_result = final_result
+            best_open_stations = _open_station_values(y_hat)
+            println(
+                "  [BendersYZ iteration $iteration] new best incumbent: obj=$(round(best_ub, digits=2))  ",
+                "stations=$(sort([mapping.array_idx_to_station_id[i] for i in best_open_stations]))",
+            )
+            flush(stdout)
         end
 
         iteration_lp_value = 0.0
@@ -476,13 +483,17 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
             # For the restricted-completion cut modes, `v_hat` above is only as good as
             # `cg_result.generated_columns`'s completeness at this `z_hat` when
-            # `reprice_subproblem=false` -- tighten it with `_certified_qbar`'s independently
-            # certified value before the gating decision, exactly mirroring BendersY. See
+            # `reprice_subproblem=false` -- tighten it with `_certified_qbar(cg_result, ...)`'s
+            # certified value before the gating decision, exactly mirroring BendersY. `cg_result`
+            # (this iteration's own priming CG solve) already ran pricing to
+            # `cg_stop_reason == :optimality_proven` regardless of how it was seeded, so its own
+            # per-request duals are the certification -- no separate re-derivation needed. See
             # notes/2026-07-17_restricted_mw_cut_benders_y.md.
-            # Only built when actually needed: under `unmet_demand_penalty` (where `:standard`
-            # is the only allowed mode, enforced above), `assignments` legitimately omits
-            # genuinely-unserved requests, so an unconditional per-group restriction here would
-            # `KeyError` even though the `:standard` cut branch never touches `assignments`.
+            # `assignments_for_group` is only built when actually needed: under
+            # `unmet_demand_penalty` (where `:standard` is the only allowed mode, enforced above),
+            # `assignments` legitimately omits genuinely-unserved requests, so an unconditional
+            # per-group restriction here would `KeyError` even though the `:standard` cut branch
+            # never touches `assignments`.
             certified_for_cut = nothing
             qbar_for_cut = nothing
             certification_already_failed = false
@@ -490,9 +501,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             if solver.cut_derivation != :standard
                 assignments_for_group = Dict(request => assignments[request] for request in group_requests)
                 try
-                    certified_for_cut, qbar_for_cut = _certified_qbar(
-                        data, model, solver, group_requests, assignments_for_group, _open_station_values(y_hat),
-                    )
+                    certified_for_cut, qbar_for_cut = _certified_qbar(data, model, cg_result, group_requests, assignments_for_group)
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
                     throw(ErrorException(
@@ -551,6 +560,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersYZ",
+                "benders_open_stations" => best_open_stations,
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
                 "benders_iterations" => iteration,
                 "benders_lower_bound" => lower_bound,

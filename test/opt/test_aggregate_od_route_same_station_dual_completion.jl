@@ -108,9 +108,10 @@
     )
 
     @testset "certification tolerates a same-station assigned pair (no throw, no KeyError)" begin
-        certified, Q_bar = StationSelection._certified_qbar(
-            data, model, solver, requests, assignments_bar, open_stations_bar,
+        cg_result_bar = StationSelection._solve_fixed_route_covering_by_cg(
+            data, model, assignments_bar, solver, nothing, open_stations_bar,
         )
+        certified, Q_bar = StationSelection._certified_qbar(data, model, cg_result_bar, requests, assignments_bar)
         @test certified.exact
         @test isfinite(Q_bar)
         pi_full = StationSelection._zero_extended_pi(requests, feasible_pairs, assignments_bar, certified.pi_by_request)

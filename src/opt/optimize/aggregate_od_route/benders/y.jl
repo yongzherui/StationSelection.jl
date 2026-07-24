@@ -431,6 +431,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
 
     best_result = nothing
+    best_open_stations = nothing
     best_ub = Inf
     feasibility_cuts = 0
     optimality_cuts = 0
@@ -552,6 +553,12 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         if !isnothing(final_result.objective_value) && final_result.objective_value < best_ub
             best_ub = final_result.objective_value
             best_result = final_result
+            best_open_stations = _open_station_values(y_hat)
+            println(
+                "  [BendersY iteration $iteration] new best incumbent: obj=$(round(best_ub, digits=2))  ",
+                "stations=$(sort([mapping.array_idx_to_station_id[i] for i in best_open_stations]))",
+            )
+            flush(stdout)
         end
         # Absorb this iteration's complete restricted pool (seed columns +
         # everything CG discovered on top of them) back into the shared pool,
@@ -616,24 +623,24 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 pool_for_ip_check = shared_pool
             end
 
-            # For the restricted-completion cut modes, `v_hat` above is only as good as
+            # For the restricted-completion cut modes, `v_hat` above (from
+            # `_solve_nearest_open_y_subproblem_lp[_with_repricing]`) is only as good as
             # `shared_pool`'s completeness at this `y_hat` when `reprice_subproblem=false` -- an
             # incomplete pool can only ever inflate `v_hat` (fewer columns can't reduce covering
             # cost), so an inflated `v_hat` can make the `theta_hat < v_hat - tol` gate below
             # believe convergence has already happened, before the cut-derivation code ever runs.
-            # `_certified_qbar`'s Section-C CG solve is independent of `shared_pool`/
-            # `reprice_subproblem` (always certified exactly from scratch), so tightening `v_hat`
-            # with it here closes that gap for these modes without requiring
-            # `reprice_subproblem=true`. See notes/2026-07-17_restricted_mw_cut_benders_y.md.
+            # `cg_result` (this iteration's own priming CG solve above) already ran its own
+            # pricing to `cg_stop_reason == :optimality_proven` regardless of how it was seeded,
+            # so `_certified_qbar(cg_result, ...)`'s `Q_bar` is a genuinely certified bound for
+            # this `y_hat` -- tightening `v_hat` with it here closes the gap for these modes
+            # without requiring `reprice_subproblem=true`. See
+            # notes/2026-07-17_restricted_mw_cut_benders_y.md.
             certified_for_cut = nothing
             qbar_for_cut = nothing
             certification_already_failed = false
             if solver.cut_derivation != :standard
-                assignments_for_group = Dict(request => assignments[request] for request in group_requests)
                 try
-                    certified_for_cut, qbar_for_cut = _certified_qbar(
-                        data, model, solver, group_requests, assignments_for_group, _open_station_values(y_hat),
-                    )
+                    certified_for_cut, qbar_for_cut = _certified_qbar(data, model, cg_result, group_requests, assignments)
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
                     throw(ErrorException(
@@ -723,6 +730,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             return _finalize_benders_result(best_result, Dict{String, Any}(
                 "solve_method" => "benders",
                 "benders_decomposition" => "BendersY",
+                "benders_open_stations" => best_open_stations,
                 "benders_cut_mode" => _benders_cut_mode_name(solver),
                 "benders_iterations" => iteration,
                 "benders_lower_bound" => lower_bound,

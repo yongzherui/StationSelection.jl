@@ -145,8 +145,11 @@
     open_stations_bar = StationSelection._open_station_values(y_bar)
 
     @testset "zero-completion rho: tightness and global validity" begin
+        cg_result_bar = StationSelection._solve_fixed_route_covering_by_cg(
+            data, model, assignments_bar, solver, nothing, open_stations_bar,
+        )
         Q_bar, rho, certified = StationSelection._zero_completion_yzh_rho(
-            data, model, solver, requests, feasible_pairs_by_p, assignments_bar, open_stations_bar,
+            data, model, cg_result_bar, requests, feasible_pairs_by_p, assignments_bar,
         )
         @test certified.exact
         @test isapprox(Q_bar, Q_bar_truth; atol=1e-5)

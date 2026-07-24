@@ -392,7 +392,8 @@ function _restricted_yz_optimality_cut(
         throw(ArgumentError("restricted YZ cut derivation does not support allow_walk_only=true"))
 
     if isnothing(certified) || isnothing(Q_bar)
-        certified, Q_bar = _certified_qbar(data, model, solver, requests, assignments, open_stations)
+        cg_result = _solve_fixed_route_covering_by_cg(data, model, assignments, solver, nothing, open_stations)
+        certified, Q_bar = _certified_qbar(data, model, cg_result, requests, assignments)
     end
     pi_full = _zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
 

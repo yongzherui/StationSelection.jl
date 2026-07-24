@@ -13,8 +13,16 @@ Usage:
         <base_outdir> <data_dir> <family> <n_stations> <l> <n_pairs> <seed> <method_label>
 
 Output:
-    <base_outdir>/results/<instance>__<method_label>.csv   -- one summary row
+    <base_outdir>/results/<instance>__<method_label>.csv   -- one summary row (includes
+                                                              selected_stations, the real
+                                                              station IDs open in the final
+                                                              incumbent)
     <base_outdir>/iters/<instance>__<method_label>/...     -- Benders/CG iteration logs (if applicable)
+    <base_outdir>/iters/<instance>__<method_label>/variable_exports/...
+                                                            -- station_selection.csv, route_columns.csv,
+                                                               route_activations.csv, etc. (via
+                                                               StationSelection.export_variables;
+                                                               only written when the solve succeeds)
 
 Environment variables (all optional; defaults mirror
 scripts/compare_benders_decompositions.jl and scripts/run_single_instance.jl):
@@ -109,6 +117,50 @@ function _last_iteration_row(log_path::String)
     df = CSV.read(log_path, DataFrame)
     nrow(df) == 0 && return nothing
     return df[end, :]
+end
+
+"""
+    _selected_station_ids(result, method) -> Vector{Int}
+
+Real station IDs (not array indices) open in `result`'s final incumbent.
+Direct/CG solve the joint model, which has its own `y` variable; Benders'
+returned model is the *fixed-y* route-covering sub-MIP and has no `y` at all,
+so its open-station set comes from `metadata["benders_open_stations"]`
+(threaded through from the outer loop's accepted incumbent -- see
+`best_open_stations` in benders/{y,yz,yzh}.jl), stored as array indices there
+and translated to station IDs here via the same `array_idx_to_station_id`
+`export_variables` itself uses.
+"""
+function _selected_station_ids(result, method::MethodSpec)::Vector{Int}
+    id_map = result.mapping.array_idx_to_station_id
+    if method.kind == :benders
+        idxs = get(result.metadata, "benders_open_stations", nothing)
+        isnothing(idxs) && return Int[]
+        return sort([id_map[i] for i in idxs])
+    end
+    haskey(result.model.obj_dict, :y) || return Int[]
+    y = result.model[:y]
+    return sort([id_map[i] for i in 1:length(y) if round(value(y[i])) == 1])
+end
+
+"""
+    _write_benders_station_selection_csv!(result, station_ids, export_dir)
+
+`export_variables` writes an empty/zero `station_selection.csv` for Benders
+(its model has no `y`), so overwrite it with the real incumbent station set,
+in the same schema (`array_idx, station_id, selected, value`) the common
+exporter uses for Direct/CG, so downstream analysis doesn't need to special-case
+the solver kind.
+"""
+function _write_benders_station_selection_csv!(result, station_ids::Vector{Int}, export_dir::String)
+    id_map = result.mapping.array_idx_to_station_id
+    open_set = Set(station_ids)
+    rows = [
+        (array_idx = i, station_id = id_map[i], selected = (id_map[i] in open_set ? 1 : 0),
+         value = (id_map[i] in open_set ? 1.0 : 0.0))
+        for i in 1:length(id_map)
+    ]
+    CSV.write(joinpath(export_dir, "station_selection.csv"), DataFrame(rows))
 end
 
 function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple)
@@ -221,6 +273,21 @@ function main()
     end
     wall_time = time() - t0
 
+    selected_stations = Int[]
+    if !isnothing(result)
+        try
+            StationSelection.export_variables(result, log_dir)
+            selected_stations = _selected_station_ids(result, method)
+            method.kind == :benders && _write_benders_station_selection_csv!(
+                result, selected_stations, joinpath(log_dir, "variable_exports"),
+            )
+            println("  [$METHOD_LABEL] final incumbent: obj=$(result.objective_value)  stations=$selected_stations")
+            flush(stdout)
+        catch err
+            @warn "failed to export solution variables for $METHOD_LABEL on $INST_NAME" exception=(err, catch_backtrace())
+        end
+    end
+
     n_iterations = ""
     final_lower_bound = ""
     final_outer_gap = ""
@@ -258,6 +325,8 @@ function main()
         n_iterations       = n_iterations,
         final_lower_bound  = final_lower_bound,
         final_outer_gap    = final_outer_gap,
+        n_stations_selected = length(selected_stations),
+        selected_stations  = string(selected_stations),
         iters_log_path     = log_dir,
     )
 

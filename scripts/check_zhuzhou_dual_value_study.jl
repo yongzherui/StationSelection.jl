@@ -127,7 +127,7 @@ function main()
     duals_repriced = SS._extract_nearest_open_y_subproblem_coverage_duals(cover_cons_repriced)
 
     # (c) R(x_bar) certified per-request duals (Section C), zero-extended.
-    certified, qbar = SS._certified_qbar(data, model, solver, requests, assignments, open_stations)
+    certified, qbar = SS._certified_qbar(data, model, cg_seed, requests, assignments)
     pi_full = SS._zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
     println("R(x_bar): r_value(=Q_bar)=", certified.r_value, " n_cg_iters=", certified.n_cg_iterations, " n_pool=", length(certified.pool))
 

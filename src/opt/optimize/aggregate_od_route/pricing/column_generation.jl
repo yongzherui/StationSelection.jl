@@ -20,6 +20,13 @@ struct AggregateODRouteColumnGenerationResult
     iteration_rows::Vector{NamedTuple}
     column_log_rows::Vector{NamedTuple}
     dual_log_rows::Vector{NamedTuple}
+    # Per-request route-covering coverage duals from the LP relaxation that itself proved
+    # `cg_stop_reason == :optimality_proven` (nothing when that's not what happened, or when
+    # `model` isn't a RouteCoveringProblem -- e.g. the plain joint :cg method, which has no
+    # single fixed (j,k) per request to attribute credit to). This is the SAME dual the CG loop's
+    # own convergence already certified -- callers deriving a Benders cut from it must NOT
+    # re-solve/re-certify from scratch; see `_extract_route_covering_pi_by_request`.
+    pi_by_request::Union{Nothing, Dict{NTuple{3, Int}, Float64}}
 end
 
 function _aggregate_od_route_coverage_summary(result::OptResult)::Dict{NTuple{3, Int}, Int}
@@ -152,6 +159,60 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         allow_walk_only             = model.allow_walk_only,
         unmet_demand_penalty        = model.unmet_demand_penalty,
     )
+end
+
+"""
+    _extract_route_covering_pi_by_request(m, model, mapping) -> Dict{NTuple{3,Int}, Float64}
+
+Per-request route-covering coverage duals, read directly off `m` -- the LP relaxation whose
+OWN pricing pass already proved `cg_stop_reason == :optimality_proven` -- with no new solve of
+any kind. `model.fixed_assignments` gives each request's single active (j,k) pair; that pair's
+coverage-constraint row (`add_aggregate_od_route_coverage_constraints!`, one row per
+`(j, k, s, od_idx, pair_idx)`) carries its dual credit.
+
+When two or more requests share the same active `(j, k, s)`, their rows are structurally
+duplicates of the exact same `expr - x_od[pair_idx] >= 0` constraint (same `expr`, since the
+same routes cover `(j, k)` regardless of which request is asking) -- an LP can split the total
+dual credit across duplicate rows arbitrarily depending on which optimal vertex the solver
+lands on, so no individual row's dual is meaningful in isolation. This sums the group's total
+credit onto one deterministic representative (its `minimum`, for reproducibility) and zeroes
+the rest -- still a valid completion, since a single route serving `(j, k)` covers every request
+in the group at once, so attributing the full shared credit to one of them and none to the
+others doesn't change what's actually being certified.
+"""
+function _extract_route_covering_pi_by_request(
+    m::Model,
+    model::RouteCoveringProblem,
+    mapping::AggregateODRouteMap,
+)::Dict{NTuple{3, Int}, Float64}
+    coverage = m[:aggregate_od_route_coverage_constraints]
+    by_active_jks = Dict{Tuple{Int, Int, Int}, Vector{NTuple{3, Int}}}()
+    pi_by_request = Dict{NTuple{3, Int}, Float64}()
+    for (request, pair) in model.fixed_assignments
+        if requires_no_vehicle_route(pair)
+            pi_by_request[request] = 0.0
+            continue
+        end
+        s, _o, _d = request
+        push!(get!(() -> NTuple{3, Int}[], by_active_jks, (pair[1], pair[2], s)), request)
+    end
+
+    for ((j, k, s), group) in by_active_jks
+        total = 0.0
+        for request in group
+            _s, o, d = request
+            od_idx = findfirst(==((o, d)), mapping.Omega_s[s])
+            pair_idx = findfirst(==((j, k)), get_valid_jk_pairs(mapping, o, d))
+            con = (isnothing(od_idx) || isnothing(pair_idx)) ? nothing :
+                get(coverage, (j, k, s, od_idx, pair_idx), nothing)
+            isnothing(con) || (total += dual(con))
+        end
+        representative = minimum(group)
+        for request in group
+            pi_by_request[request] = request == representative ? total : 0.0
+        end
+    end
+    return pi_by_request
 end
 
 function run_aggregate_od_route_column_generation(
@@ -372,6 +433,9 @@ function run_aggregate_od_route_column_generation(
         ))
     end
 
+    pi_by_request = (model isa RouteCoveringProblem && cg_stop_reason == :optimality_proven) ?
+        _extract_route_covering_pi_by_request(m, model, mapping) : nothing
+
     _flush_aggregate_od_route_cg_log!(logger)
     !isnothing(column_log_path) && _write_aggregate_od_route_cg_log_csv(
         String(column_log_path),
@@ -441,6 +505,7 @@ function run_aggregate_od_route_column_generation(
         copy(logger.iteration_rows),
         column_log_rows,
         dual_log_rows,
+        pi_by_request,
     )
 end
 

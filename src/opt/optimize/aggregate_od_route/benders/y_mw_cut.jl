@@ -561,38 +561,54 @@ struct AggregateODRouteRestrictedMWCutResult
 end
 
 """
-    _certified_qbar(data, model, solver, requests, assignments, open_stations)
+    _certified_qbar(data, model, cg_result, requests, assignments) -> (certified, Q_bar)
 
-Section C's certified `R(x_bar)` solve plus `Q_bar = sum(c_walk*x_bar) + R(x_bar)`, split out
-from `_restricted_mw_optimality_cut` so the caller can compute the *true*, pool-complete value
-of a fixed `y_hat` **before** deciding whether a cut is even needed. This matters: the
-pre-existing `theta_hat < v_hat - tol` gate uses `v_hat` from
-`_solve_nearest_open_y_subproblem_lp` (or its repriced variant), which is only as good as
-`shared_pool`'s completeness *for that specific `y_hat`* when `reprice_subproblem=false` --
-an incomplete pool can only ever *inflate* `v_hat` (fewer columns can't reduce covering cost),
-never deflate it, so an inflated `v_hat` can make the master think it has already converged
-(`theta_hat >= v_hat - tol`) when it has not, and the cut-derivation code below this point never
-even runs. `Q_bar` here is independent of `shared_pool`/`reprice_subproblem` -- it is *always*
-backed by a from-scratch, exactly-certified CG solve on the narrower, fixed-assignment
-`R(x_bar)` -- so replacing `v_hat` with `min(v_hat, Q_bar)` for the gating decision closes that
-gap for the `:zero_completion`/`:restricted_mw_fixed_pi` modes without requiring
-`reprice_subproblem=true`. See notes/2026-07-17_restricted_mw_cut_benders_y.md.
+Takes the ALREADY-CONVERGED `RouteCoveringProblem` CG result from the caller's own priming
+solve (`_solve_fixed_route_covering_by_cg`, run once per outer Benders iteration over the FULL
+request set) and reads `requests`' per-request coverage duals directly off it -- no new CG loop,
+no re-solved LP, no re-run pricing pass. `cg_result.cg_stop_reason == :optimality_proven` is
+itself the certification: that solve's own pricing pass already proved no column outside its
+pool has negative reduced cost against its own duals, which is exactly the property a
+from-scratch re-derivation used to re-check (and, being a second/third/fourth independent solve
+of a degenerate set-covering LP, could land on a *different* dual vertex than the one actually
+being certified -- see notes/2026-07-23_restricted_mw_cut_no_resolve.md for the failure this
+replaces).
+
+`requests` is often a strict SUBSET of `cg_result`'s full request set -- under `MultiCut()`,
+`_benders_cut_groups` partitions requests one group per scenario, and this gets called once per
+cut group. `Q_bar` must therefore be `requests`' own share of the LP value, NOT
+`cg_result.lp_bound` (that solve's GLOBAL total across every group) -- using the global total
+here would charge every group's cut for every OTHER group's cost too, producing a wildly too
+strong cut. By LP strong duality, a group's own share is exactly its own walking-cost sum (a
+plain additive constant, trivially separable per request) plus the sum of its own certified
+per-request coverage duals (which the completion/rho derivation downstream already assumes when
+it sums `pi_full`/`rho` over just this group's requests -- `Q_bar` needs the same scoping to
+stay consistent with it).
 """
 function _certified_qbar(
     data::StationSelectionData,
-    model::AggregateODRouteModel,
-    solver::BendersSolver,
+    model::AnyAggregateODRouteModel,
+    cg_result::AggregateODRouteColumnGenerationResult,
     requests::Vector{NTuple{3, Int}},
     assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
-    open_stations::Vector{Int},
 )::Tuple{AggregateODRouteCertifiedRouteCoveringDuals, Float64}
-    certified = _certified_route_covering_pi(data, model, assignments, open_stations, requests, solver)
-    # `certified.r_value` is `RouteCoveringProblem`'s own LP objective value, which -- via the
-    # *same* `set_aggregate_od_route_objective!` every AggregateODRouteModel build uses -- already
-    # sums BOTH the (forced-constant, since x is fixed to `assignments`) walking-cost terms AND
-    # the route-covering terms. It is already `Q_bar = sum(c_walk*x_bar) + R(x_bar)`, not `R(x_bar)`
-    # alone; adding the walking-cost sum again here would double-count it.
-    Q_bar = certified.r_value
+    isnothing(cg_result.pi_by_request) && throw(ArgumentError(
+        "restricted cut derivation requires a RouteCoveringProblem CG result that reached " *
+        "cg_stop_reason=:optimality_proven (got cg_stop_reason=$(cg_result.cg_stop_reason)); " *
+        "that solve's own pricing pass already IS the certification, so there is nothing to " *
+        "derive when it didn't converge"
+    ))
+    pi_by_request = Dict(request => cg_result.pi_by_request[request] for request in requests)
+    route_cost_share = sum(values(pi_by_request); init=0.0)
+    walking_cost_share = sum(
+        _assignment_pair_cost(data, request, assignments[request]; weight=model.walk_cost_weight)
+        for request in requests;
+        init=0.0,
+    )
+    Q_bar = route_cost_share + walking_cost_share
+    certified = AggregateODRouteCertifiedRouteCoveringDuals(
+        pi_by_request, Q_bar, cg_result.generated_columns, cg_result.n_cg_iters, true,
+    )
     return certified, Q_bar
 end
 
@@ -635,7 +651,8 @@ function _restricted_mw_optimality_cut(
         throw(ArgumentError("restricted MW cut derivation does not support allow_walk_only=true"))
 
     if isnothing(certified) || isnothing(Q_bar)
-        certified, Q_bar = _certified_qbar(data, model, solver, requests, assignments, open_stations)
+        cg_result = _solve_fixed_route_covering_by_cg(data, model, assignments, solver, nothing, open_stations)
+        certified, Q_bar = _certified_qbar(data, model, cg_result, requests, assignments)
     end
     pi_full = _zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
 
