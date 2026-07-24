@@ -328,7 +328,7 @@ function _endpoint_selector_variable!(
 end
 
 """
-    assert_endpoint_chain_near_binary(m::Model; atol=1e-6)
+    assert_endpoint_chain_near_binary(m::Model; atol=1e-5)
 
 Runtime check that every `zp`/`zd` endpoint selector indicator variable in
 `m` is within `atol` of 0 or 1 in the current solution. The shared endpoint
@@ -340,8 +340,17 @@ after `optimize!(m)` on what should be an integer-valued solve (a genuine
 MIP, or an LP with `y` fixed to an already-binary value) -- a fractional `z`
 there means the "nearest open" endpoint ranking isn't actually resolved to
 a single winner, undermining any cost/cut derived from it.
+
+`atol=1e-5` matches Gurobi's own default `IntFeasTol` (1e-5) -- the tolerance
+Gurobi itself uses to decide a binary variable's value is "integer feasible" in
+the first place, not `FeasibilityTol` (1e-6), which governs constraint
+satisfaction, not variable integrality. A stricter atol than the solver's own
+integrality tolerance means this check can fail on a `z` Gurobi already
+considers a valid binary solution -- confirmed empirically on real n=20
+instances (`z` values like `0.9999987`/`2.89e-6`, comfortably inside
+`IntFeasTol` but outside a `1e-6` check).
 """
-function assert_endpoint_chain_near_binary(m::Model; atol::Float64=1e-6)::Nothing
+function assert_endpoint_chain_near_binary(m::Model; atol::Float64=1e-5)::Nothing
     haskey(m, :nearest_endpoint_chain_cache) || return nothing
     for (key, vars) in m[:nearest_endpoint_chain_cache]
         for (idx, var) in enumerate(vars)
@@ -363,7 +372,7 @@ _collect_variable_refs(x::AbstractArray)::Vector{VariableRef} =
 _collect_variable_refs(x)::Vector{VariableRef} = VariableRef[]
 
 """
-    assert_service_near_binary(m::Model; atol=1e-6)
+    assert_service_near_binary(m::Model; atol=1e-5)
 
 Runtime check that "always feasible" mode's service indicator `u`
 (`AggregateODRouteModel(unmet_demand_penalty=...)`, `sum(x) == u` in place of
@@ -384,7 +393,7 @@ container shape (compact model: `Vector` of `Dict{Int,Vector{VariableRef}}`
 per scenario, matching `m[:x]`'s own shape; Benders subproblems/masters: a
 flatter `Dict{Any,VariableRef}` keyed like their own `assignment`/`h` dicts).
 """
-function assert_service_near_binary(m::Model; atol::Float64=1e-6)::Nothing
+function assert_service_near_binary(m::Model; atol::Float64=1e-5)::Nothing
     haskey(m, :u) || return nothing
     for var in _collect_variable_refs(m[:u])
         val = value(var)
