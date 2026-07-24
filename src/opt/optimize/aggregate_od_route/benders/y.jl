@@ -466,80 +466,21 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             allow_walk_only=model.allow_walk_only,
             allow_same_station=true,
         )
-        # Under "always feasible" mode, a request left in `infeasible` (no open
-        # candidate at all on some side -- should be unreachable given the
-        # master's own relaxed chain constraints, but the procedural resolution
-        # still checks defensively) means genuinely unserved (u=0), not a
-        # reason to cut y_hat; it's simply excluded from `assignments`, and
-        # `_apply_route_covering_assignments!`/`_solve_fixed_route_covering_by_cg`
-        # already tolerate a missing entry under this mode.
+        # Under "always feasible" mode, a request left in `infeasible` means genuinely
+        # unserved (u=0), not a reason to cut y_hat; it's simply excluded from
+        # `assignments`, and `_apply_route_covering_assignments!`/`_solve_fixed_route_covering_by_cg`
+        # already tolerate a missing entry under this mode. Outside that mode, the master's
+        # own eager `_add_default_endpoint_coverage_constraints!` (every physical endpoint has
+        # some open candidate, combined with `allow_same_station=true`) makes every request
+        # resolve to a real pair by construction -- `infeasible` can never be non-empty here,
+        # so this is a correctness assertion, not reactive cut-derivation machinery.
         if !isempty(infeasible) && isnothing(model.unmet_demand_penalty)
-            feasibility_before = feasibility_cuts
-            open_set = Set(_open_station_values(y_hat))
-            for request in infeasible
-                endpoint_cuts_added = _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style) ?
-                    _add_endpoint_nearest_feasibility_cuts!(
-                        master, y, data, request, model.max_walking_distance, open_set,
-                    ) : 0
-                if endpoint_cuts_added > 0
-                    feasibility_cuts += endpoint_cuts_added
-                else
-                    cut_pairs = _feasibility_cut_candidate_pairs(
-                        data, request, feasible_pairs[request],
-                        model.assignment_policy.feasibility_cut_style, model.max_walking_distance,
-                    )
-                    if _pair_open_cut_satisfied_by_y(cut_pairs, open_set)
-                        # In endpoint nearest-open styles, a request can be infeasible even when
-                        # both endpoint sides have an open candidate: the independently
-                        # nearest pickup/dropoff endpoints may collide at the same
-                        # station while walk-only is disabled. The endpoint-open
-                        # cuts and pair-open cut are then already satisfied. Cut
-                        # that collision structurally without excluding the whole
-                        # station set.
-                        _add_endpoint_collision_feasibility_cut!(
-                            master, y, data, request, model.max_walking_distance, open_set,
-                        )
-                    else
-                        _add_pair_open_feasibility_cut!(master, y, cut_pairs)
-                    end
-                    feasibility_cuts += 1
-                end
-            end
-            push!(benders_rows, (
-                iteration=iteration,
-                master_status=string(termination_status(master)),
-                lower_bound=lower_bound,
-                incumbent_objective=isfinite(best_ub) ? best_ub : nothing,
-                outer_gap=_outer_gap(lower_bound, best_ub),
-                outer_gap_absolute=_outer_gap_absolute(lower_bound, best_ub),
-                outer_gap_relative=_outer_gap_relative(lower_bound, best_ub),
-                master_solve_seconds=master_solve_seconds,
-                priming_cg_seconds=0.0,
-                subproblem_lp_seconds=0.0,
-                cuts_added=feasibility_cuts - feasibility_before,
-                feasibility_cuts_added=feasibility_cuts,
-                optimality_cuts_added=optimality_cuts,
-                selected_assignment_count=length(assignments),
-                generated_column_pool_size=0,
-                inner_cg_iterations=inner_cg_iters,
-                subproblem_ip_seconds=0.0,
-                lp_ip_gap=nothing,
-                reprice_objective_delta=0.0,
-                reprice_columns_found=0,
-                reprice_rounds=0,
-                cut_derivation=string(solver.cut_derivation),
-                mw_fallback_count=0,
-                mw_completion_seconds=0.0,
-                mw_phi_core=nothing,
+            throw(ArgumentError(
+                "BendersY: y_hat=$(y_hat) left requests infeasible ($(infeasible)) under " *
+                "unmet_demand_penalty=nothing; this should be structurally impossible given the " *
+                "master's eager endpoint-coverage constraints -- check max_walking_distance, l, " *
+                "and _add_default_endpoint_coverage_constraints!"
             ))
-            _flush_benders_iteration_log!(
-                solver, benders_rows;
-                extra_headers=[
-                    :subproblem_ip_seconds, :lp_ip_gap, :reprice_objective_delta, :reprice_columns_found, :reprice_rounds,
-                    :cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core,
-                ],
-            )
-            continue
         end
 
         cg_start = time()

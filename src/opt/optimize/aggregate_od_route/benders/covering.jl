@@ -2,9 +2,9 @@
 Route-covering solve paths for aggregate OD route models: DirectSolver/
 ColumnGenerationSolver dispatch, plus infrastructure shared across every
 Benders decomposition (`BendersY`/`BendersXY`/`BendersYZ`/`BendersYZH`) --
-request/physical-pair grouping, feasibility-cut helpers, nearest-open
-assignment resolution, the fixed-assignment route-covering CG wrapper, and
-Benders bookkeeping (logging, gap computation, result wrapping).
+request/physical-pair grouping, nearest-open assignment resolution, the
+fixed-assignment route-covering CG wrapper, and Benders bookkeeping (logging,
+gap computation, result wrapping).
 
 These helpers adapt the exploration route-covering ideas to this package's
 aggregate scenario-OD representation. A positive-demand `(scenario, o, d)` OD
@@ -21,11 +21,14 @@ enough to live directly in `yzh.jl`). `dispatch.jl` holds the top-level
 `_add_default_endpoint_coverage_constraints!`/`_check_aggregate_od_route_endpoint_feasibility!`
 below, together with `allow_same_station=true` always being in effect (`create_map`), make the
 subproblem provably always feasible under the default model configuration
-(`allow_walk_only=false`, `unmet_demand_penalty === nothing`) -- the reactive feasibility-cut
-helpers in this file (`_add_endpoint_nearest_feasibility_cuts!` and friends) are kept as a
-defensive fallback for configurations outside that guarantee, but are no longer reachable in the
-default path. See `notes/2026-07-22_endpoint_coverage_feasibility_guarantee.md` for the full
-argument and what's deliberately out of scope.
+(`unmet_demand_penalty === nothing`): every physical endpoint any request touches has some open
+candidate baked into the master as a hard constraint, so `_fixed_assignments_from_y` can never
+place a request in its `infeasible` list -- the `if !isempty(infeasible) &&
+isnothing(model.unmet_demand_penalty)` guard in `y.jl`/`yz.jl`'s outer loops is a correctness
+assertion (throws if it's ever hit), not reactive cut-derivation. The reactive feasibility-cut
+helpers this used to call (`_add_endpoint_nearest_feasibility_cuts!` and friends) have been
+removed -- recoverable from git history if a future configuration needs them restored. See
+`notes/2026-07-22_endpoint_coverage_feasibility_guarantee.md` for the full argument.
 """
 
 function _base_aggregate_od_route_model(model::AnyAggregateODRouteModel)::AggregateODRouteModel
@@ -410,27 +413,6 @@ function _fixed_assignments_from_y(
     return assignments, infeasible
 end
 
-function _add_pair_open_feasibility_cut!(
-    master::Model,
-    y,
-    pairs::Vector{Tuple{Int, Int}},
-)::ConstraintRef
-    w = @variable(master, [1:length(pairs)], lower_bound = 0.0, upper_bound = 1.0)
-    for (idx, (j, k)) in enumerate(pairs)
-        @constraint(master, w[idx] <= y[j])
-        @constraint(master, w[idx] <= y[k])
-        @constraint(master, w[idx] >= y[j] + y[k] - 1.0)
-    end
-    return @constraint(master, sum(w) >= 1.0)
-end
-
-function _pair_open_cut_satisfied_by_y(
-    pairs::Vector{Tuple{Int, Int}},
-    open_stations::Set{Int},
-)::Bool
-    return any(pair -> (pair[1] in open_stations && pair[2] in open_stations), pairs)
-end
-
 function _add_endpoint_open_feasibility_cut!(
     master::Model,
     y,
@@ -559,106 +541,6 @@ function _check_aggregate_od_route_endpoint_feasibility!(
         "max_walking_distance, or set unmet_demand_penalty for an always-feasible relaxation."
     ))
     return nothing
-end
-
-function _prior_endpoint_candidates_by_rank(
-    data::StationSelectionData,
-    endpoint::Int,
-    candidates::Vector{Int},
-    selected::Int,
-    side::Symbol,
-)::Vector{Int}
-    selected_cost = side == :pickup ?
-        get_walking_cost(data, endpoint, selected) :
-        get_walking_cost(data, selected, endpoint)
-    return [
-        j for j in candidates
-        if begin
-            cost = side == :pickup ? get_walking_cost(data, endpoint, j) : get_walking_cost(data, j, endpoint)
-            (cost, j) < (selected_cost, selected)
-        end
-    ]
-end
-
-function _add_endpoint_collision_feasibility_cut!(
-    master::Model,
-    y,
-    data::StationSelectionData,
-    request::NTuple{3, Int},
-    max_walking_distance::Float64,
-    open_set::Set{Int},
-)::ConstraintRef
-    _s, o, d = request
-    pickups = _nearest_open_endpoint_candidates(data, o, max_walking_distance, :pickup)
-    dropoffs = _nearest_open_endpoint_candidates(data, d, max_walking_distance, :dropoff)
-    j_star = _first_open_by_cost(data, o, pickups, open_set, :pickup)
-    k_star = _first_open_by_cost(data, d, dropoffs, open_set, :dropoff)
-    (!isnothing(j_star) && j_star == k_star) || throw(ArgumentError(
-        "endpoint collision cut requested for $(request), but resolved endpoints are pickup=$(j_star), dropoff=$(k_star)"
-    ))
-    prior_pickups = _prior_endpoint_candidates_by_rank(data, o, pickups, j_star, :pickup)
-    prior_dropoffs = _prior_endpoint_candidates_by_rank(data, d, dropoffs, k_star, :dropoff)
-    return @constraint(
-        master,
-        y[j_star] <= sum(y[j] for j in prior_pickups; init=0.0) +
-                     sum(y[k] for k in prior_dropoffs; init=0.0)
-    )
-end
-
-"""
-    _feasibility_cut_candidate_pairs(data, request, pairs, style, max_walking_distance)
-
-`pairs` (a request's `feasible_pairs` entry) may contain the `WALK_ONLY_PAIR`
-sentinel `(0,0)`, which is not a valid `(y[j], y[k])` pair for
-`_add_pair_open_feasibility_cut!` (there is no station `0`). Strips it, and
-    -- for endpoint nearest-open styles with direct walking available -- replaces it with a
-self-pair `(j,j)` for every station `j` common to both endpoints' candidate
-sets, since opening any *one* such station alone (not a distinct pair) is
-what makes direct walking feasible;
-`_add_pair_open_feasibility_cut!`'s `(j,j)` case degrades correctly to
-`w >= y[j] - ... ` with `y[j]` binary. A no-op (returns `pairs` unchanged)
-    whenever no walk-only entry is present (`:pair_chain`, or an endpoint style
-without `allow_walk_only`).
-"""
-function _feasibility_cut_candidate_pairs(
-    data::StationSelectionData,
-    request::NTuple{3, Int},
-    pairs::Vector{Tuple{Int, Int}},
-    style::Symbol,
-    max_walking_distance::Float64,
-)::Vector{Tuple{Int, Int}}
-    any(is_walk_only_pair, pairs) || return pairs
-    real_pairs = filter(!is_walk_only_pair, pairs)
-    _is_endpoint_nearest_style(style) || return real_pairs
-    _s, o, d = request
-    pickups = _nearest_open_endpoint_candidates(data, o, max_walking_distance, :pickup)
-    dropoffs = _nearest_open_endpoint_candidates(data, d, max_walking_distance, :dropoff)
-    common = intersect(Set(pickups), Set(dropoffs))
-    return vcat(real_pairs, [(j, j) for j in common])
-end
-
-function _add_endpoint_nearest_feasibility_cuts!(
-    master::Model,
-    y,
-    data::StationSelectionData,
-    request::NTuple{3, Int},
-    max_walking_distance::Float64,
-    open_set::Set{Int},
-)::Int
-    _s, o, d = request
-    cuts_added = 0
-    pickups = _nearest_open_endpoint_candidates(data, o, max_walking_distance, :pickup)
-    dropoffs = _nearest_open_endpoint_candidates(data, d, max_walking_distance, :dropoff)
-
-    if !any(j -> j in open_set, pickups)
-        _add_endpoint_open_feasibility_cut!(master, y, pickups)
-        cuts_added += 1
-    end
-    if !any(k -> k in open_set, dropoffs)
-        _add_endpoint_open_feasibility_cut!(master, y, dropoffs)
-        cuts_added += 1
-    end
-    return cuts_added
 end
 
 """

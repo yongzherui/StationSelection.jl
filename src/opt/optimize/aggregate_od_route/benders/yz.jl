@@ -361,65 +361,18 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             allow_walk_only=model.allow_walk_only,
             allow_same_station=true,
         )
-        # Under "always feasible" mode, `infeasible` requests are genuinely
-        # unserved (u=0), not grounds for a feasibility cut -- see BendersY's
-        # outer loop for the identical reasoning.
+        # Under "always feasible" mode, `infeasible` requests are genuinely unserved (u=0),
+        # not grounds for a feasibility cut. Outside that mode, the master's own eager
+        # `_add_default_endpoint_coverage_constraints!` makes every request resolve to a real
+        # pair by construction -- see BendersY's outer loop for the identical reasoning; this is
+        # a correctness assertion, not reactive cut-derivation machinery.
         if !isempty(infeasible) && isnothing(model.unmet_demand_penalty)
-            feasibility_before = feasibility_cuts
-            open_set = Set(_open_station_values(y_hat))
-            for request in infeasible
-                endpoint_cuts_added = _add_endpoint_nearest_feasibility_cuts!(
-                    master, y, data, request, model.max_walking_distance, open_set,
-                )
-                if endpoint_cuts_added > 0
-                    feasibility_cuts += endpoint_cuts_added
-                else
-                    cut_pairs = _feasibility_cut_candidate_pairs(
-                        data, request, feasible_pairs[request],
-                        model.assignment_policy.feasibility_cut_style, model.max_walking_distance,
-                    )
-                    if _pair_open_cut_satisfied_by_y(cut_pairs, open_set)
-                        # Both endpoint sides have an open candidate, but they
-                        # independently resolved to the same station (a
-                        # collision) with allow_walk_only=false -- see the
-                        # BendersYZ struct docstring. Cut that collision
-                        # structurally rather than excluding the whole station set.
-                        _add_endpoint_collision_feasibility_cut!(
-                            master, y, data, request, model.max_walking_distance, open_set,
-                        )
-                    else
-                        _add_pair_open_feasibility_cut!(master, y, cut_pairs)
-                    end
-                    feasibility_cuts += 1
-                end
-            end
-            push!(benders_rows, (
-                iteration=iteration,
-                master_status=string(termination_status(master)),
-                lower_bound=lower_bound,
-                incumbent_objective=isfinite(best_ub) ? best_ub : nothing,
-                outer_gap=_outer_gap(lower_bound, best_ub),
-                outer_gap_absolute=_outer_gap_absolute(lower_bound, best_ub),
-                outer_gap_relative=_outer_gap_relative(lower_bound, best_ub),
-                master_solve_seconds=master_solve_seconds,
-                priming_cg_seconds=0.0,
-                subproblem_lp_seconds=0.0,
-                cuts_added=feasibility_cuts - feasibility_before,
-                feasibility_cuts_added=feasibility_cuts,
-                optimality_cuts_added=optimality_cuts,
-                selected_assignment_count=length(assignments),
-                generated_column_pool_size=0,
-                inner_cg_iterations=inner_cg_iters,
-                cut_derivation=string(solver.cut_derivation),
-                mw_fallback_count=0,
-                mw_completion_seconds=0.0,
-                mw_phi_core=nothing,
+            throw(ArgumentError(
+                "BendersYZ: y_hat=$(y_hat) left requests infeasible ($(infeasible)) under " *
+                "unmet_demand_penalty=nothing; this should be structurally impossible given the " *
+                "master's eager endpoint-coverage constraints -- check max_walking_distance, l, " *
+                "and _add_default_endpoint_coverage_constraints!"
             ))
-            _flush_benders_iteration_log!(
-                solver, benders_rows;
-                extra_headers=[:cut_derivation, :mw_fallback_count, :mw_completion_seconds, :mw_phi_core],
-            )
-            continue
         end
 
         z_hat = Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}}(
