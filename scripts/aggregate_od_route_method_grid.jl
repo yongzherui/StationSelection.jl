@@ -61,8 +61,12 @@ struct MethodSpec
 end
 
 function _benders_variants(label_prefix::String, decomposition; include_mw::Bool)
+    # std_noreprice (cut_derivation=:standard, reprice=false) dropped: it only ever
+    # reproduces the known premature-convergence bug (see
+    # notes/2026-07-17_restricted_mw_cut_benders_y.md), so it isn't a useful
+    # comparison point going forward -- std_reprice remains as the correct
+    # "standard" baseline.
     variants = [
-        ("std_noreprice", :standard, false),
         ("std_reprice",   :standard, true),
         ("zerocomp",      :zero_completion, false),
     ]
@@ -115,8 +119,10 @@ uncapped path; on a 10-station grid instance this hung column generation past
 100s of wall time where the true uncapped path converges in seconds.
 """
 function resolve_max_stops(mode::Symbol, n_stations::Int)::Int
-    mode == :ms4 && return 4
     mode == :ms3 && return 3
+    mode == :ms4 && return 4
+    mode == :ms5 && return 5
+    mode == :ms6 && return 6
     mode == :uncapped && return typemax(Int)
     error("unknown max_stops_mode=$mode")
 end
