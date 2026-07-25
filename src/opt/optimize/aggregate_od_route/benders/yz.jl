@@ -344,6 +344,18 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     inner_cg_iters = 0
     benders_rows = NamedTuple[]
     stage_log = NamedTuple[]
+    # Grows across the whole outer loop, mirroring BendersY's `shared_pool` (`y.jl`) -- without
+    # this, `_solve_fixed_route_covering_by_cg` below re-derives every route from scratch each
+    # iteration via a single from-scratch CG pass. That pass's own `cg_stop_reason==
+    # :optimality_proven` check only certifies no improving column exists against whichever dual
+    # vertex *that* pass's restricted LP happened to settle at -- a weaker guarantee than global
+    # exhaustion under dual degeneracy (see `_solve_nearest_open_y_subproblem_lp_with_repricing`'s
+    # docstring for the same phenomenon elsewhere). Confirmed empirically: without a seeded pool,
+    # BendersYZ can converge to a real, positive-valued incumbent gap on the SAME y_hat that
+    # BendersY's seeded pool prices exactly (off by a fixed, reproducible amount, not noise).
+    shared_pool = isnothing(model.initial_columns) ?
+        AggregateODRouteColumn[] :
+        copy(model.initial_columns)
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -380,7 +392,8 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
-            data, subproblem_model, assignments, solver, iteration, _open_station_values(y_hat)
+            data, subproblem_model, assignments, solver, iteration, _open_station_values(y_hat);
+            seed_columns=shared_pool,
         )
         priming_cg_seconds = time() - cg_start
         inner_cg_iters += cg_result.n_cg_iters
@@ -408,6 +421,12 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             )
             flush(stdout)
         end
+        # Absorb this iteration's complete restricted pool (seed columns + everything CG
+        # discovered on top of them) back into the shared pool -- see BendersY's identical
+        # comment in y.jl for why this must grow across the whole outer loop, never reset.
+        shared_pool = _deduplicate_aggregate_od_route_columns(
+            vcat(shared_pool, final_result.mapping.columns)
+        )
 
         iteration_lp_value = 0.0
         cuts_added_this_iteration = 0
@@ -419,18 +438,19 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             group_requests = cut_groups[cut_id]
             lp_start = time()
             if solver.reprice_subproblem
-                v_hat, rho, _pool, _n_new, _rounds, exhausted, _delta = _solve_yz_route_subproblem_lp_with_repricing(
+                v_hat, rho, repriced_pool, n_new, _rounds, exhausted, _delta = _solve_yz_route_subproblem_lp_with_repricing(
                     data,
                     subproblem_model,
                     mapping,
                     group_requests,
                     feasible_pairs,
-                    cg_result.generated_columns,
+                    shared_pool,
                     z_hat,
                     optimizer_env,
                     cfg.silent;
                     max_reprice_rounds=solver.max_reprice_rounds,
                 )
+                n_new > 0 && (shared_pool = _deduplicate_aggregate_od_route_columns(vcat(shared_pool, repriced_pool)))
                 exhausted ||
                     @warn "BendersYZ subproblem repricing hit max_reprice_rounds without pricing exhaustion" iteration cut_id
             else
@@ -439,7 +459,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                     subproblem_model,
                     group_requests,
                     feasible_pairs,
-                    cg_result.generated_columns,
+                    shared_pool,
                     z_hat,
                     optimizer_env,
                     cfg.silent,
@@ -506,7 +526,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             feasibility_cuts_added=feasibility_cuts,
             optimality_cuts_added=optimality_cuts,
             selected_assignment_count=length(assignments),
-            generated_column_pool_size=length(cg_result.generated_columns),
+            generated_column_pool_size=length(shared_pool),
             inner_cg_iterations=inner_cg_iters,
             cut_derivation=string(solver.cut_derivation),
             mw_fallback_count=mw_fallback_count,
@@ -561,7 +581,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 "benders_lp_value" => iteration_lp_value,
                 "best_upper_bound" => best_ub,
                 "selected_assignment_count" => length(assignments),
-                "generated_column_pool_size" => length(cg_result.generated_columns),
+                "generated_column_pool_size" => length(shared_pool),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
             ), solver)
         end

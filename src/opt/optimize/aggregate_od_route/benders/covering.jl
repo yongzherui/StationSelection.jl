@@ -147,6 +147,25 @@ function _run_direct_enumerated_aggregate_od_route(
     )
     result.metadata["solve_method"] = "route_enumeration"
     result.metadata["enumerated_routes"] = length(columns)
+    # Same enumerated route universe as the IP solve above, just with lambda/theta (and, under
+    # relax_integrality=true, the endpoint-chain z selectors too) relaxed to [0,1] -- gives a
+    # genuine LP relaxation of the FULL (enumerated) route set, independent of whatever a separate
+    # ColumnGenerationSolver's own pricing-based LP bound would report. Always computed (not
+    # opt-in): DirectSolver enumerations are already the expensive part of a call, and leaving
+    # `lp_bound`/`"lp_relaxation_objective"` populated with the IP value instead (the old behavior)
+    # is actively misleading, not just incomplete. Built and solved directly (not via
+    # `_run_opt_impl`) because that helper unconditionally calls
+    # `assert_endpoint_chain_near_binary` on any MOI.OPTIMAL solve -- correct for the IP solve
+    # above (z genuinely must resolve near-binary there), but wrong here: a real LP relaxation is
+    # expected to leave z fractional, and asserting otherwise would throw on exactly the cases
+    # this is meant to measure.
+    enumerated_lp = _copy_with_initial_columns(formulation, columns; relax_integrality=true)
+    lp_build = build_model(enumerated_lp, instance; optimizer_env=cfg.optimizer_env)
+    lp_m = lp_build.model
+    cfg.silent && set_silent(lp_m)
+    optimize!(lp_m)
+    result.metadata["lp_relaxation_objective"] = primal_status(lp_m) == MOI.FEASIBLE_POINT ?
+        Float64(objective_value(lp_m)) : NaN
     return result
 end
 
@@ -612,7 +631,9 @@ function _solve_fixed_route_covering_by_cg(
             final_result.termination_status == MOI.INFEASIBLE ? :infeasible :
             final_result.termination_status == MOI.TIME_LIMIT ? :timeout : :error
         pool = copy(final_result.mapping.columns)
-        lp_bound = final_result.objective_value isa Number ? Float64(final_result.objective_value) : NaN
+        # Genuine LP relaxation of the full enumerated route set -- always populated by
+        # _run_direct_enumerated_aggregate_od_route now, not aliased to the IP objective.
+        lp_bound = Float64(final_result.metadata["lp_relaxation_objective"])
         return AggregateODRouteColumnGenerationResult(
             status,
             final_result,

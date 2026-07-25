@@ -207,9 +207,32 @@ function that calls it) on the sorted raw costs, and must NOT reapply the pertur
 to an already-perturbed array (that would double-perturb, not fix anything) -- code that
 already receives tie-broken costs (e.g. `chain.costs` after `_restricted_mw_chains`) is
 already correct and should use them as-is.
+
+**Sizing `tie_break_scale`** (fixed 2026-07-24, second fix on this function the same day --
+see the n=15 method-compare sweep's `assert_endpoint_chain_near_binary` failures this
+replaces): each Big-M row is `selected_cost <= tb_costs[idx] + big_m*(1 - y[station])` with
+`big_m <= max_cost`. Gurobi only guarantees a `Bin` variable within `IntFeasTol` (default
+1e-5) of its bound, so at a "clean", accepted MIP solution `(1 - y[station])` can still be
+as large as `IntFeasTol` -- turning that row's slack into `big_m * IntFeasTol`, not 0. Since
+`z` is a simplex-weighted average of `tb_costs` bounded by that slack, an open-but-near-tied
+candidate can absorb up to `(big_m * IntFeasTol) / tie_break_scale` of `z`'s mass without
+violating anything. The previous `1e-6` coefficient was smaller than `IntFeasTol` itself, so
+it gave essentially no protection -- confirmed by reproducing a live failure
+(`grid_n15_p8_s123`, BendersYZ) where `y[7] = 0.9999966` (well inside `IntFeasTol`) let the
+Big-M row for a 3-way-tied dropoff chain absorb `z=0.897/0.103` between two candidates, with
+every constraint satisfied to ~1e-9 -- a genuine alternate LP optimum, not solver noise.
+Solving `tie_break_scale >= max_cost * IntFeasTol / target_drift` for a `target_drift` an
+order of magnitude under `assert_endpoint_chain_near_binary`'s `atol=1e-3` (i.e.
+`target_drift=1e-4`) gives `tie_break_scale >= max_cost * 0.1` -- hence the `0.1` coefficient
+below. This is safe against mis-ordering candidates despite being a much larger perturbation:
+`sorted_costs` is already sorted ascending before this function ever runs, and the offset
+added per rank is strictly positive and increasing, so it can only widen the gap between
+ranks, never reorder them. Its only real cost is a larger (but still small relative to
+genuine routing costs) bias baked into the MW/zero-completion duals derived from these rows
+-- a cut-tightness/performance concern, not a correctness one.
 """
 function _big_m_tie_break_costs(sorted_costs::Vector{Float64})::Vector{Float64}
-    tie_break_scale = max(1e-4, maximum(abs, sorted_costs; init=0.0) * 1e-6)
+    tie_break_scale = max(1e-4, maximum(abs, sorted_costs; init=0.0) * 0.1)
     return [sorted_costs[idx] + tie_break_scale * (idx - 1) for idx in eachindex(sorted_costs)]
 end
 
