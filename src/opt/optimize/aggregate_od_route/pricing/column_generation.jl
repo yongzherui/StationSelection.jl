@@ -556,7 +556,7 @@ function run_aggregate_od_route_column_generation(
     )
 end
 
-function run_opt(
+function _run_aggregate_od_route_column_generation_opt(
     instance::StationSelectionData,
     formulation::AnyAggregateODRouteModel,
     solver::ColumnGenerationSolver,
@@ -580,6 +580,14 @@ function run_opt(
         silent=cfg.silent,
     )
     return result.final_result
+end
+
+function run_opt(
+    instance::StationSelectionData,
+    formulation::AnyAggregateODRouteModel,
+    solver::ColumnGenerationSolver,
+)
+    return _run_aggregate_od_route_column_generation_opt(instance, formulation, solver)
 end
 
 function run_opt(

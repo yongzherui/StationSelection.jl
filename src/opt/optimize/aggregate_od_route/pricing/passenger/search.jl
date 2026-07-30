@@ -82,37 +82,28 @@ function _passenger_free_assignment_remaining_reward_bound(
     label::PassengerFreeAssignmentPricingLabel,
     label_bs::PassengerFreeAssignmentLabelBitsets,
     pricing_data::PassengerFreeAssignmentPricingData,
-    node_index::Dict{Int, Int},
-    travel_matrix::Matrix{Float64},
-    opp_dest_idx::Vector{Int},
-    opp_ride_limit::Vector{Float64},
-    opp_layer_mask::Vector{RewardLayerBitset},
-    opps_by_origin_idx::Vector{Vector{Int}},
-    origin_union_mask::Vector{RewardLayerBitset},
-    scratch::RewardLayerBitset,
-    node_mask::Vector{RewardLayerBitset},
-    touched_nodes::Vector{Int},
-    nodes_by_travel::Vector{Vector{Int}},
+    index::PassengerFreeAssignmentSearchIndex,
+    workspace::PassengerFreeAssignmentBoundWorkspace,
 )::Float64
     past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
-    current_idx = node_index[label.current]
+    current_idx = index.node_index[label.current]
     activated = label.activated_reward_layers
     beta = pricing_data.route_regularization_weight
     layer_weight = pricing_data.layer_weight
 
-    empty!(touched_nodes)
+    empty!(workspace.touched_nodes)
 
     # live origins: age-dependent, so still per-opportunity -- but only theirs.
     # Booked against the destination that would certify them.
     @inbounds for t in eachindex(label_bs.age_idx)
         origin_idx = Int(label_bs.age_idx[t])
         age = label_bs.age_val[t]
-        for i in opps_by_origin_idx[origin_idx]
-            issubset(opp_layer_mask[i], activated) && continue
-            dest_idx = opp_dest_idx[i]
-            age + travel_matrix[current_idx, dest_idx] <= opp_ride_limit[i] + 1e-9 || continue
-            isempty(node_mask[dest_idx]) && push!(touched_nodes, dest_idx)
-            union!(node_mask[dest_idx], opp_layer_mask[i])
+        for i in index.opps_by_origin_idx[origin_idx]
+            issubset(index.opp_layer_mask[i], activated) && continue
+            dest_idx = index.opp_dest_idx[i]
+            age + index.travel_matrix[current_idx, dest_idx] <= index.opp_ride_limit[i] + 1e-9 || continue
+            isempty(workspace.node_mask[dest_idx]) && push!(workspace.touched_nodes, dest_idx)
+            union!(workspace.node_mask[dest_idx], index.opp_layer_mask[i])
         end
     end
 
@@ -120,37 +111,37 @@ function _passenger_free_assignment_remaining_reward_bound(
     # Booked against the origin, which must be reached before any of its
     # opportunities can even start.
     if !past_pickup_cutoff
-        @inbounds for origin_idx in eachindex(origin_union_mask)
-            isempty(origin_union_mask[origin_idx]) && continue
-            label.time + travel_matrix[current_idx, origin_idx] <=
+        @inbounds for origin_idx in eachindex(index.origin_union_mask)
+            isempty(index.origin_union_mask[origin_idx]) && continue
+            label.time + index.travel_matrix[current_idx, origin_idx] <=
                 pricing_data.max_wait_time + 1e-9 || continue
-            isempty(node_mask[origin_idx]) && push!(touched_nodes, origin_idx)
-            union!(node_mask[origin_idx], origin_union_mask[origin_idx])
+            isempty(workspace.node_mask[origin_idx]) && push!(workspace.touched_nodes, origin_idx)
+            union!(workspace.node_mask[origin_idx], index.origin_union_mask[origin_idx])
         end
     end
 
     best = 0.0
-    if !isempty(touched_nodes)
-        empty!(scratch)
+    if !isempty(workspace.touched_nodes)
+        empty!(workspace.layer_scratch)
         acc_weight = 0.0
-        remaining = length(touched_nodes)
-        @inbounds for x in nodes_by_travel[current_idx]
-            mask = node_mask[x]
+        remaining = length(workspace.touched_nodes)
+        @inbounds for x in index.nodes_by_travel[current_idx]
+            mask = workspace.node_mask[x]
             isempty(mask) && continue
             for layer in mask
-                (layer in activated || layer in scratch) && continue
-                push!(scratch, layer)
+                (layer in activated || layer in workspace.layer_scratch) && continue
+                push!(workspace.layer_scratch, layer)
                 acc_weight += layer_weight[layer]
             end
-            gain = acc_weight - beta * travel_matrix[current_idx, x]
+            gain = acc_weight - beta * index.travel_matrix[current_idx, x]
             gain > best && (best = gain)
             remaining -= 1
             remaining == 0 && break
         end
     end
 
-    @inbounds for x in touched_nodes
-        empty!(node_mask[x])
+    @inbounds for x in workspace.touched_nodes
+        empty!(workspace.node_mask[x])
     end
     return best
 end
@@ -169,42 +160,12 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     dominance_buckets = Dict{Int, PassengerFreeAssignmentDominanceBucket}()
     best_by_signature = Dict{Any, PassengerFreeAssignmentPricingLabel}()
 
-    node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
     n_nodes = length(pricing_data.nodes)
-    opp_origin_idx = [node_index[opp.origin] for opp in pricing_data.opportunities]
-    opp_dest_idx = [node_index[opp.destination] for opp in pricing_data.opportunities]
-    opp_ride_limit = [opp.ride_limit for opp in pricing_data.opportunities]
-    opp_layer_mask = [opp.layer_mask for opp in pricing_data.opportunities]
-    # Opportunities grouped by origin, plus each origin's union mask -- both
-    # dual-independent within a pricing call, so built once here rather than
-    # rescanned per label. See `_passenger_free_assignment_remaining_reward_bound`.
-    opps_by_origin_idx = [Int[] for _ in 1:n_nodes]
-    origin_union_mask = [RewardLayerBitset() for _ in 1:n_nodes]
-    for i in eachindex(pricing_data.opportunities)
-        oi = opp_origin_idx[i]
-        push!(opps_by_origin_idx[oi], i)
-        union!(origin_union_mask[oi], opp_layer_mask[i])
-    end
-    bound_scratch = RewardLayerBitset()
-    travel_matrix = fill(Inf, n_nodes, n_nodes)
-    for (i, u) in enumerate(pricing_data.nodes), (j, v) in enumerate(pricing_data.nodes)
-        i == j && (travel_matrix[i, j] = 0.0; continue)
-        haskey(pricing_data.travel_cost, (u, v)) &&
-            (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
-    end
-    # Per-label scratch for `_passenger_free_assignment_remaining_reward_bound`:
-    # reward booked against each node, plus the nodes actually touched (so the
-    # masks can be cleared in O(#touched) rather than O(n_nodes) per call).
-    bound_node_mask = [RewardLayerBitset() for _ in 1:n_nodes]
-    bound_touched_nodes = Int[]
+    search_index = _build_passenger_free_assignment_search_index(pricing_data)
+    bound_workspace = _create_passenger_free_assignment_bound_workspace(n_nodes)
     # Reused across every bucket insertion: indices of the entries the incoming
     # label dominates, in ascending order.
     dominated_scratch = Int[]
-    # Nodes in increasing travel distance from each node, precomputed once: the
-    # bound's prefix scan needs this order for every label, and it depends only on
-    # `travel_matrix`.
-    nodes_by_travel = [sortperm(@view travel_matrix[i, :]) for i in 1:n_nodes]
-
     exhausted = true
     t_start = time()
     next_label_id = 1
@@ -221,10 +182,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
 
     remaining_reward_bound(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
         _passenger_free_assignment_remaining_reward_bound(
-            label, label_bs, pricing_data, node_index, travel_matrix,
-            opp_dest_idx, opp_ride_limit, opp_layer_mask,
-            opps_by_origin_idx, origin_union_mask, bound_scratch,
-            bound_node_mask, bound_touched_nodes, nodes_by_travel,
+            label, label_bs, pricing_data, search_index, bound_workspace,
         )
 
     label_priority(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
@@ -235,7 +193,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         next_label_id += 1
         labels_generated += 1
         live_labels[label_id] = label
-        label_bs = _make_passenger_free_assignment_label_bitsets(label, node_index, n_nodes)
+        label_bs = _make_passenger_free_assignment_label_bitsets(label, search_index.node_index, n_nodes)
         bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
         inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
@@ -314,7 +272,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
                 next_label_id += 1
                 labels_generated += 1
                 live_labels[child_id] = child
-                child_bs = _make_passenger_free_assignment_label_bitsets(child, node_index, n_nodes)
+                child_bs = _make_passenger_free_assignment_label_bitsets(child, search_index.node_index, n_nodes)
                 bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
                 t0 = profile ? time_ns() : UInt64(0)
                 inserted, removed = _add_passenger_free_assignment_label_to_bucket!(

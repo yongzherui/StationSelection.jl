@@ -43,6 +43,7 @@ export PassengerFreeAssignmentCGResult
 export run_passenger_free_assignment_column_generation
 
 struct PassengerFreeAssignmentCGResult
+    final_result::OptResult
     status::Symbol
     cg_stop_reason::Symbol
     lp_bound::Float64
@@ -284,7 +285,7 @@ always runs unbounded. `certification_time_limit_sec` bounds that pass -- if it
 times out, optimality is *not* claimed.
 """
 function run_passenger_free_assignment_column_generation(
-    model::AnyAggregateODRouteModel,
+    model::AggregateODRouteModel,
     data::StationSelectionData;
     optimizer_env=nothing,
     max_cg_iters::Int=1000,
@@ -294,6 +295,9 @@ function run_passenger_free_assignment_column_generation(
     pricing_time_limit_sec::Float64=60.0,
     certification_time_limit_sec::Float64=600.0,
     ip_time_limit_sec::Float64=600.0,
+    mip_gap::Union{Float64, Nothing}=nothing,
+    iteration_log_path::Union{Nothing, AbstractString}=nothing,
+    column_log_path::Union{Nothing, AbstractString}=nothing,
     # Total budget for the CG phases (excludes the final MIP, which has its own
     # limit). Guards scaling runs against a case that keeps finding columns for
     # thousands of iterations and starves every later case of wall clock.
@@ -315,6 +319,10 @@ function run_passenger_free_assignment_column_generation(
     verbose::Bool=true,
     silent::Bool=!verbose,
 )::PassengerFreeAssignmentCGResult
+    model.assignment_policy isa FreeAggregateODAssignmentPolicy || throw(ArgumentError(
+        "passenger free-assignment column generation requires " *
+        "FreeAggregateODAssignmentPolicy, got $(typeof(model.assignment_policy))",
+    ))
     max_cg_iters > 0 || throw(ArgumentError("max_cg_iters must be positive"))
     n_candidates > 0 || throw(ArgumentError("n_candidates must be positive"))
     pricing_time_limit_sec > 0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
@@ -330,7 +338,7 @@ function run_passenger_free_assignment_column_generation(
     )
     master = build_passenger_free_assignment_master(master_data, optimizer_env; relax_integrality=true)
     m = master.model
-    set_silent(m)
+    silent && set_silent(m)
 
     verbose && println(
         "passenger free-assignment CG: $(length(master_data.passengers)) passengers, " *
@@ -560,6 +568,7 @@ function run_passenger_free_assignment_column_generation(
         set_binary(x_var)
     end
     set_optimizer_attribute(m, "TimeLimit", ip_time_limit_sec)
+    isnothing(mip_gap) || set_optimizer_attribute(m, "MIPGap", mip_gap)
     optimize!(m)
     mip_term = termination_status(m)
     mip_obj = mip_term == MOI.OPTIMAL ? objective_value(m) : nothing
@@ -578,17 +587,143 @@ function run_passenger_free_assignment_column_generation(
         mip_term == MOI.TIME_LIMIT ? :timeout :
         mip_term == MOI.INFEASIBLE ? :infeasible : :error
 
+    column_rows = [(
+        column_id=id,
+        scenario=Int(get(column.metadata, "scenario", 0)),
+        tau=column.tau,
+        reduced_cost=get(column.metadata, "reduced_cost", nothing),
+        route=join(column.route, "-"),
+        assignments=join(("$p:$j:$k" for (p, j, k) in column.assignments), ";"),
+    ) for (id, column) in sort!(collect(master.columns); by=first)]
+    !isnothing(iteration_log_path) && _write_aggregate_od_route_cg_log_csv(
+        String(iteration_log_path), iteration_rows,
+    )
+    !isnothing(column_log_path) && _write_aggregate_od_route_cg_log_csv(
+        String(column_log_path), column_rows,
+    )
+
+    counts = ModelCounts(
+        Dict(
+            "y" => length(master.y),
+            "v" => length(master.v),
+            "x_same" => length(master.x_same),
+            "theta" => length(master.theta),
+        ),
+        Dict(
+            "coverage" => length(master.coverage),
+            "pickup_link" => length(master.pickup_link),
+            "dropoff_link" => length(master.dropoff_link),
+            "station_budget" => 1,
+        ),
+        Dict(
+            "passengers" => length(master_data.passengers),
+            "columns" => length(master.columns),
+            "cg_iterations" => n_iters,
+            "cg_rounds" => n_rounds,
+        ),
+    )
+
+    solution = nothing
+    if mip_term == MOI.OPTIMAL
+        assignment_values = (
+            route_columns=Dict(id => value(var) for (id, var) in master.theta),
+            same_station=Dict(key => value(var) for (key, var) in master.x_same),
+            unserved=Dict(p => value(var) for (p, var) in master.v),
+        )
+        solution = (assignment_values, value.(master.y))
+    end
+    total_seconds = time() - t_start
+    final_result = OptResult(
+        mip_term,
+        mip_obj,
+        solution,
+        total_seconds,
+        m,
+        mapping,
+        nothing,
+        counts,
+        nothing,
+        Dict{String, Any}(
+            "solve_method" => "column_generation",
+            "column_generation_formulation" => "passenger_free_assignment",
+            "assignment_policy" => "FreeAggregateODAssignmentPolicy",
+            "cg_status" => String(status),
+            "cg_stop_reason" => String(cg_stop_reason),
+            "lp_bound" => lp_bound,
+            "lp_bound_certified" => lp_bound_certified,
+            "cg_iterations" => n_iters,
+            "cg_rounds" => n_rounds,
+            "generated_columns" => length(master.theta),
+            "passengers" => length(master_data.passengers),
+            "master_rows" => length(master.coverage) + length(master.pickup_link) + length(master.dropoff_link),
+            "open_stations" => open_stations,
+            "unserved_passengers" => unserved,
+            "certification_seconds" => certification_seconds,
+            "certification_exhausted" => cert_exhausted,
+            "pricing_seconds" => total_pricing_seconds,
+            "lp_seconds" => total_lp_seconds,
+            "labels_generated" => total_labels,
+            "iteration_rows" => copy(iteration_rows),
+            "column_rows" => column_rows,
+            "selector_logs" => copy(selector_logs),
+            "selector_seconds" => total_selector_seconds,
+            "selector_iterations_used" => selector_used_count,
+            "mean_positive_rho_used" => (pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples),
+            "mean_raw_positive_rho" => (pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples),
+            "iteration_log_path" => isnothing(iteration_log_path) ? nothing : String(iteration_log_path),
+            "column_log_path" => isnothing(column_log_path) ? nothing : String(column_log_path),
+        ),
+    )
+
     return PassengerFreeAssignmentCGResult(
-        status, cg_stop_reason, lp_bound, lp_bound_certified,
+        final_result, status, cg_stop_reason, lp_bound, lp_bound_certified,
         mip_obj, mip_term, n_iters, n_rounds, length(master.theta),
         length(master_data.passengers),
         length(master.coverage) + length(master.pickup_link) + length(master.dropoff_link),
         open_stations, unserved,
         certification_seconds, cert_exhausted,
         total_pricing_seconds, total_lp_seconds, total_labels,
-        iteration_rows, time() - t_start,
+        iteration_rows, total_seconds,
         selector_logs, total_selector_seconds, selector_used_count,
         pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples,
         pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples,
     )
+end
+
+"""
+Route free-assignment aggregate-OD models through the passenger-level master and
+label-setting pricer. Other assignment policies continue to use the aggregate
+station-pair column-generation implementation.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    formulation::AggregateODRouteModel,
+    solver::ColumnGenerationSolver,
+)
+    if !(formulation.assignment_policy isa FreeAggregateODAssignmentPolicy)
+        return _run_aggregate_od_route_column_generation_opt(instance, formulation, solver)
+    end
+
+    cfg = solver.config
+    result = run_passenger_free_assignment_column_generation(
+        formulation,
+        instance;
+        optimizer_env=cfg.optimizer_env,
+        max_cg_iters=solver.max_iterations,
+        n_candidates=solver.n_candidates,
+        max_new_columns=solver.max_columns_per_iteration,
+        reduced_cost_tol=solver.reduced_cost_tol,
+        pricing_time_limit_sec=solver.pricing_time_limit_sec,
+        ip_time_limit_sec=solver.final_ip_time_limit_sec,
+        mip_gap=cfg.mip_gap,
+        iteration_log_path=_aggregate_od_route_cg_log_path(
+            solver, "passenger_free_assignment_cg_iterations.csv",
+        ),
+        column_log_path=_aggregate_od_route_cg_log_path(
+            solver, "passenger_free_assignment_cg_columns.csv",
+        ),
+        verbose=!cfg.silent,
+        silent=cfg.silent,
+    )
+    return result.final_result
 end

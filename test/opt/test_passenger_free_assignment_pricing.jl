@@ -332,16 +332,7 @@
         n = 4
         nodes = collect(1:n)
         travel = line_travel_cost(n)
-        node_index = Dict(nd => i for (i, nd) in enumerate(nodes))
         n_nodes = length(nodes)
-        travel_matrix = fill(Inf, n_nodes, n_nodes)
-        for (i, u) in enumerate(nodes), (j, v) in enumerate(nodes)
-            if i == j
-                travel_matrix[i, j] = 0.0
-            elseif haskey(travel, (u, v))
-                travel_matrix[i, j] = travel[(u, v)]
-            end
-        end
 
         checked = 0
         trial = 0
@@ -363,16 +354,8 @@
             )
             isempty(pricing_data.opportunities) && continue
 
-            opp_origin_idx = [node_index[o.origin] for o in pricing_data.opportunities]
-            opp_dest_idx = [node_index[o.destination] for o in pricing_data.opportunities]
-            opp_ride_limit = [o.ride_limit for o in pricing_data.opportunities]
-            opp_layer_mask = [o.layer_mask for o in pricing_data.opportunities]
-            opps_by_origin_idx = [Int[] for _ in 1:n_nodes]
-            origin_union_mask = [RewardLayerBitset() for _ in 1:n_nodes]
-            for i in eachindex(pricing_data.opportunities)
-                push!(opps_by_origin_idx[opp_origin_idx[i]], i)
-                union!(origin_union_mask[opp_origin_idx[i]], opp_layer_mask[i])
-            end
+            search_index = StationSelection._build_passenger_free_assignment_search_index(pricing_data)
+            bound_workspace = StationSelection._create_passenger_free_assignment_bound_workspace(n_nodes)
 
             labels0 = initial_passenger_free_assignment_pricing_labels(pricing_data)
             isempty(labels0) && continue
@@ -383,13 +366,11 @@
                 label = only(extend_passenger_free_assignment_pricing_label(label, rand(rng, next_nodes), pricing_data))
             end
 
-            label_bs = StationSelection._make_passenger_free_assignment_label_bitsets(label, node_index, n_nodes)
-            nodes_by_travel = [sortperm(travel_matrix[i, :]) for i in 1:n_nodes]
+            label_bs = StationSelection._make_passenger_free_assignment_label_bitsets(
+                label, search_index.node_index, n_nodes,
+            )
             bound = StationSelection._passenger_free_assignment_remaining_reward_bound(
-                label, label_bs, pricing_data, node_index, travel_matrix,
-                opp_dest_idx, opp_ride_limit, opp_layer_mask,
-                opps_by_origin_idx, origin_union_mask, RewardLayerBitset(),
-                [RewardLayerBitset() for _ in 1:n_nodes], Int[], nodes_by_travel,
+                label, label_bs, pricing_data, search_index, bound_workspace,
             )
 
             # The bound is on *net* gain (reward minus the route-regularization cost

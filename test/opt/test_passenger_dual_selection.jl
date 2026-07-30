@@ -231,6 +231,43 @@
         )
         @test plain.cg_stop_reason == :optimality_proven
         @test isapprox(plain.lp_bound, z_full; atol=1e-4)
+        @test plain.final_result isa OptResult
+        @test plain.final_result.termination_status == plain.mip_termination
+        @test plain.final_result.metadata["column_generation_formulation"] ==
+            "passenger_free_assignment"
+
+        # Public solver dispatch must select this passenger-level formulation for
+        # AggregateODRouteModel + free assignment + column generation, while
+        # returning the framework-standard OptResult rather than the CG wrapper.
+        dispatch_log_dir = mktempdir()
+        dispatched = run_opt(
+            data,
+            model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=DS_ENV, silent=true),
+                max_iterations=500,
+                max_columns_per_iteration=3,
+                n_candidates=3,
+                pricing_time_limit_sec=20.0,
+                final_ip_time_limit_sec=60.0,
+                log_dir=dispatch_log_dir,
+            ),
+        )
+        @test dispatched isa OptResult
+        @test dispatched.metadata["assignment_policy"] == "FreeAggregateODAssignmentPolicy"
+        @test dispatched.metadata["column_generation_formulation"] ==
+            "passenger_free_assignment"
+        @test isapprox(dispatched.objective_value, plain.final_result.objective_value; atol=1e-4)
+        @test dispatched.counts isa ModelCounts
+        @test dispatched.counts.variables["theta"] > 0
+        @test haskey(JuMP.object_dictionary(dispatched.model), :theta)
+        @test haskey(JuMP.object_dictionary(dispatched.model), :v)
+        @test haskey(JuMP.object_dictionary(dispatched.model), :x_same)
+        @test haskey(JuMP.object_dictionary(dispatched.model), :passenger_coverage)
+        @test !isempty(dispatched.metadata["iteration_rows"])
+        @test !isempty(dispatched.metadata["column_rows"])
+        @test isfile(joinpath(dispatch_log_dir, "passenger_free_assignment_cg_iterations.csv"))
+        @test isfile(joinpath(dispatch_log_dir, "passenger_free_assignment_cg_columns.csv"))
 
         # CG with pricing-aware dual selection
         sel_cfg = PassengerDualSelectorConfig(use_pricing_aware_dual_selection=true)

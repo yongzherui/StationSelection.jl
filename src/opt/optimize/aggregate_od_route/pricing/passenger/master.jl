@@ -305,12 +305,12 @@ function build_passenger_free_assignment_master(
     for p in master_data.passengers
         v[p.id] = @variable(m, lower_bound = 0.0, base_name = "v[$(p.id)]")
     end
+    m[:v] = v
 
     coverage = Dict{Int, ConstraintRef}()
     for p in master_data.passengers
         coverage[p.id] = @constraint(m, v[p.id] >= 1)
     end
-
     pickup_link = Dict{Tuple{Int, Int}, ConstraintRef}()
     dropoff_link = Dict{Tuple{Int, Int}, ConstraintRef}()
     # Written as `-y <= 0` rather than `0 <= y` so the normalized form JuMP stores
@@ -345,19 +345,28 @@ function build_passenger_free_assignment_master(
             haskey(dropoff_link, (p.id, j)) && set_normalized_coefficient(dropoff_link[(p.id, j)], x, 1.0)
         end
     end
+    m[:x_same] = x_same
 
-    @constraint(m, sum(y) == master_data.l)
+    station_budget = @constraint(m, sum(y) == master_data.l)
+    m[:station_budget] = station_budget
     @objective(m, Min,
         sum(master_data.unserved_penalty * v[p.id] for p in master_data.passengers; init = 0.0) +
         sum(master_data.walk_cost_weight * master_data.same_station_walk_cost[key] * var
             for (key, var) in x_same; init = 0.0),
     )
 
+    theta = Dict{Int, VariableRef}()
+    columns = Dict{Int, PassengerFreeAssignmentRouteColumn}()
+    m[:theta] = theta
+    m[:passenger_coverage] = coverage
+    m[:passenger_pickup_link] = pickup_link
+    m[:passenger_dropoff_link] = dropoff_link
+
     return PassengerFreeAssignmentMaster(
         m, master_data, y, v, x_same,
-        Dict{Int, VariableRef}(),
+        theta,
         coverage, pickup_link, dropoff_link,
-        Dict{Int, PassengerFreeAssignmentRouteColumn}(),
+        columns,
         Dict{Any, Int}(),
     )
 end
