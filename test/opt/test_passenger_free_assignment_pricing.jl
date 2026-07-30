@@ -139,6 +139,7 @@
         )
         label0 = PassengerFreeAssignmentPricingLabel(
             1, [1], 0.0, Dict(1 => 0.0), RewardLayerBitset(), 0.0, 0.0, 1,
+            pricing_data.station_bit[1],
         )
         late_visit = only(extend_passenger_free_assignment_pricing_label(label0, 2, pricing_data))
         @test late_visit.time == 1.0
@@ -146,6 +147,81 @@
 
         not_certified = only(extend_passenger_free_assignment_pricing_label(late_visit, 3, pricing_data))
         @test isempty(not_certified.activated_reward_layers)
+    end
+
+    @testset "station budget cap (max_distinct_stations)" begin
+        travel = line_travel_cost(4)
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 2, 100.0, 10.0),
+            PassengerAssignmentCandidate(2, 3, 4, 100.0, 10.0),
+        ]
+
+        @testset "uncapped: nothing is restricted" begin
+            pd = create_passenger_free_assignment_pricing_data(
+                1, [1, 2, 3, 4], travel, candidates;
+                route_regularization_weight=1.0, max_wait_time=100.0,
+            )
+            @test !pd.bounded_distinct_stations
+            label = only_at(initial_passenger_free_assignment_pricing_labels(pd), 1)
+            @test StationSelection._passenger_free_assignment_station_budget_allows(label, 3, pd)
+        end
+
+        @testset "capped: a new station is refused once the budget is spent" begin
+            pd = create_passenger_free_assignment_pricing_data(
+                1, [1, 2, 3, 4], travel, candidates;
+                route_regularization_weight=1.0, max_wait_time=100.0,
+                max_distinct_stations=2,
+            )
+            @test pd.bounded_distinct_stations
+            label = only_at(initial_passenger_free_assignment_pricing_labels(pd), 1)
+            at2 = only(extend_passenger_free_assignment_pricing_label(label, 2, pd))
+            @test count_ones(at2.visited_mask) == 2
+            # Budget is spent: a third distinct station is refused...
+            @test !StationSelection._passenger_free_assignment_station_budget_allows(at2, 3, pd)
+            # ...but revisiting one already paid for is always free.
+            @test StationSelection._passenger_free_assignment_station_budget_allows(at2, 1, pd)
+            @test 3 ∉ StationSelection._passenger_free_assignment_candidate_next_nodes(at2, pd)
+        end
+
+        @testset "capped search never exceeds the budget, and matches brute force under it" begin
+            pd_capped = create_passenger_free_assignment_pricing_data(
+                1, [1, 2, 3, 4], travel, candidates;
+                route_regularization_weight=0.1, max_wait_time=100.0,
+                max_stops=4, max_visits_per_node=2, max_distinct_stations=2,
+            )
+            cols, _exhausted, _stats = passenger_free_assignment_pricing_by_label_setting(
+                pd_capped, PassengerFreeAssignmentRouteColumn[];
+                next_column_id=1, max_new_columns=50, n_candidates=1000, time_limit=30.0,
+            )
+            @test !isempty(cols)
+            for c in cols
+                @test length(unique(c.route)) <= 2
+            end
+
+            # The capped search must attain the best reduced cost over exactly the
+            # routes the cap permits -- checked against explicit enumeration, since
+            # the cap is a restriction and cannot be validated against the
+            # unrestricted optimum.
+            best_allowed = Inf
+            nodes = [1, 2, 3, 4]
+            function visit!(route)
+                if length(route) >= 2
+                    _a, _t, rc = StationSelection._passenger_free_assignment_column_from_route(route, pd_capped)
+                    isempty(_a) || (best_allowed = min(best_allowed, rc))
+                end
+                length(route) >= 4 && return
+                for nd in nodes
+                    nd == route[end] && continue
+                    count(==(nd), route) < 2 || continue
+                    length(unique(vcat(route, nd))) <= 2 || continue
+                    visit!(vcat(route, nd))
+                end
+            end
+            for start in nodes
+                visit!([start])
+            end
+            @test minimum(c.metadata["reduced_cost"] for c in cols) ≈ best_allowed
+        end
     end
 
     @testset "dominance" begin
@@ -163,7 +239,10 @@
         layer_high = pricing_data.assignment_layer_mask[(1, 1, 3)]  # {1, 2}
 
         mklabel(current, time, station_age, layers, rc) =
-            PassengerFreeAssignmentPricingLabel(current, [current], time, station_age, layers, time, rc, 1)
+            PassengerFreeAssignmentPricingLabel(
+                current, [current], time, station_age, layers, time, rc, 1,
+                pricing_data.station_bit[current],
+            )
 
         @testset "dominates when time/rc/layers/station-ages are all no worse" begin
             a = mklabel(2, 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
@@ -227,7 +306,10 @@
                 t = rand(rng) * 5
                 rc = rand(rng) * 10 - 5
                 route_length = rand(rng, 1:4)
-                return PassengerFreeAssignmentPricingLabel(current, [current], t, station_age, layers, t, rc, route_length)
+                return PassengerFreeAssignmentPricingLabel(
+                    current, [current], t, station_age, layers, t, rc, route_length,
+                    UInt64(1) << (node_index[current] - 1),
+                )
             end
 
             for _ in 1:200

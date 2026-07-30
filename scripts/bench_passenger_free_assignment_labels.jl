@@ -42,9 +42,14 @@ const DETOUR_FACTOR = 2.0
 const WALK_COST_WEIGHT = 0.1
 const BASE_VALUE = 5000.0
 const MAX_VISITS_PER_NODE = 3
-const TIME_LIMIT_SEC = 900.0
+const TIME_LIMIT_SEC = parse(Float64, get(ENV, "PFA_TIME_LIMIT", "900"))
 # Exhaustive: never let the driver's own early-return fire.
 const N_CANDIDATES = 1_000_000_000
+# Station budget l. `_l_for(n) = ceil(n/2)` is the sweep convention; the cap only
+# constrains anything when it is below `max_stops`, since a route cannot visit
+# more distinct stations than it has stops.
+_l_for(n::Int) = max(2, ceil(Int, n / 2))
+const MAX_DISTINCT = parse(Int, get(ENV, "PFA_MAX_DISTINCT", "0"))
 
 function build_scenario_candidates(data::StationSelectionData, n_stations::Int, s::Int)
     candidates = PassengerAssignmentCandidate[]
@@ -68,7 +73,17 @@ function build_scenario_candidates(data::StationSelectionData, n_stations::Int, 
     return candidates
 end
 
-function run_case(n_stations::Int, max_stops::Int)
+"""
+`max_stops <= 0` means unbounded (`typemax(Int)`), which also sets
+`bounded_max_stops=false` and so drops the route-length condition from dominance.
+This is the regime the station-budget cap exists for: with stops unbounded,
+nothing else limits how many distinct stations a route may visit.
+"""
+function run_case(n_stations::Int, raw_max_stops::Int)
+    max_stops = raw_max_stops <= 0 ? typemax(Int) : raw_max_stops
+    ms_label = raw_max_stops <= 0 ? "unb" : string(raw_max_stops)
+    max_distinct = MAX_DISTINCT == 0 ? typemax(Int) :
+        (MAX_DISTINCT < 0 ? _l_for(n_stations) : MAX_DISTINCT)
     data, _meta = generate_zhuzhou_data(
         DATA_DIR, n_stations, N_PAIRS; n_scenarios=N_SCENARIOS, seed=SEED,
     )
@@ -91,6 +106,7 @@ function run_case(n_stations::Int, max_stops::Int)
             repositioning_time=REPOSITIONING_TIME,
             max_stops=max_stops,
             max_visits_per_node=MAX_VISITS_PER_NODE,
+            max_distinct_stations=max_distinct,
         )
 
         t0 = time()
@@ -104,15 +120,16 @@ function run_case(n_stations::Int, max_stops::Int)
         best_route = isempty(columns) ? Int[] : columns[1].route
 
         @printf(
-            "RESULT\tn=%d\tms=%d\ts=%d\texhausted=%s\twall=%.3f\tlabels=%d\trejected=%d\tremoved=%d\tstale=%d\tmax_live=%d\tbest_rc=%.6f\troute=%s\n",
-            n_stations, max_stops, s, exhausted, wall,
+            "RESULT\tn=%d\tms=%s\tl=%s\ts=%d\texhausted=%s\twall=%.3f\tlabels=%d\trejected=%d\tremoved=%d\tstale=%d\tmax_live=%d\tbest_rc=%.6f\troute=%s\n",
+            n_stations, ms_label,
+            max_distinct == typemax(Int) ? "none" : string(max_distinct), s, exhausted, wall,
             stats.labels_generated, stats.labels_rejected_by_dominance,
             stats.labels_removed_by_dominance, stats.stale_pops,
             stats.max_live_labels, best_rc, string(best_route),
         )
         @printf(
-            "PROFILE\tn=%d\tms=%d\ts=%d\tdominance=%.3f\tqueue=%.3f\tcandidates=%.3f\textension=%.3f\n",
-            n_stations, max_stops, s,
+            "PROFILE\tn=%d\tms=%s\ts=%d\tdominance=%.3f\tqueue=%.3f\tcandidates=%.3f\textension=%.3f\n",
+            n_stations, ms_label, s,
             stats.t_dominance_sec, stats.t_queue_sec,
             stats.t_candidates_sec, stats.t_extension_sec,
         )

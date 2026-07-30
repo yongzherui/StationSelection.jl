@@ -62,6 +62,13 @@ struct PassengerFreeAssignmentPricingData
     max_stops::Int
     max_visits_per_node::Int
     bounded_max_stops::Bool
+    # Station-budget cap: no route may visit more than this many DISTINCT stations.
+    # See `_passenger_free_assignment_station_budget_allows` for why this is valid.
+    # `typemax(Int)` disables it; it is also disabled (with a warning) above 64
+    # stations, since `visited_mask` is a `UInt64`.
+    max_distinct_stations::Int
+    bounded_distinct_stations::Bool
+    station_bit::Dict{Int, UInt64}
     n_layers::Int
     layer_weight::Vector{Float64}
     assignment_layer_mask::Dict{Tuple{Int, Int, Int}, RewardLayerBitset}
@@ -91,6 +98,10 @@ struct PassengerFreeAssignmentPricingLabel
     tau::Float64
     reduced_cost::Float64
     route_length::Int
+    # Distinct stations visited so far, one bit per station index. Only meaningful
+    # when `pricing_data.bounded_distinct_stations`; maintained unconditionally
+    # because it is a single OR per extension.
+    visited_mask::UInt64
 end
 
 const PassengerFreeAssignmentLabelId = Int

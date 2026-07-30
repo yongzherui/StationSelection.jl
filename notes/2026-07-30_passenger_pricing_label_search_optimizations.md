@@ -59,6 +59,7 @@ Each variant is cumulative on the one before it.
 | v3 | compensated layer dominance | 6.57s | 33.0s | **2.5-3.9x, kept** |
 | v4 | inline label into bucket entry | 5.91s | 31.2s | 1.1-1.15x, kept |
 | v5 | `Vector` bucket instead of `SortedDict` | 4.38s | 20.7s | 1.3-1.5x, kept |
+| v6 | station-budget cap at `l` (+ `U` dominance) | -- | -- | valid but slower; **default off**, see below |
 
 End to end, on the standard grid:
 
@@ -75,7 +76,8 @@ End to end, on the standard grid:
 | n=20 ms=5 s=3 | 219.7s | 34.1s | **6.4x** |
 
 `best_rc` was bit-identical to baseline in every case at every variant; the
-focused unit tests (460 assertions) passed at v3, v4 and v5; and
+focused unit tests passed at every variant (460 assertions through v5, 471 once
+the station-budget cap added its own); and
 `diag_passenger_free_assignment_vs_direct.jl` still matched brute-force
 enumeration on every n=10/n=12 scenario at v2 and v5.
 
@@ -189,50 +191,96 @@ filtered by `origin_layer_mask` plus cutoff reachability, and
 `_has_useful_live_passenger_free_assignment_origin` kills dead-end labels
 outright. Nothing left to add.
 
-### "At most L distinct service stations" -- IP-valid only, and not exactly enforceable on a label
+### "At most L distinct service stations" (+ `U_a subseteq U_b` dominance) -- valid, implemented, but does not pay for itself
 
-Two independent problems.
+**This section previously rejected the cap on two grounds. Both were wrong**, and
+the corrected analysis is recorded here because the wrong version is the
+intuitive one.
 
-*It invalidates the LP bound.* The master links `theta_r <= y_j` per `(p, j)`
-with `sum(y) == l` and `y in [0,1]` relaxed (`master.jl`). A route using `m > l`
-distinct stations is not LP-infeasible; it is merely capped at
-`theta_r <= l/m > 0`. Excluding such columns restricts the LP, which for this
-minimisation *raises* the RMP objective -- so `lp_bound` would stop being a
-lower bound on the true LP, which is precisely what
-`cg_stop_reason == :optimality_proven` certifies.
+*It does not invalidate the LP bound; it tightens it.* The mistake was treating
+the restriction as arbitrary. It is not: with `P' = {r : |A_r| <= l}`, an integer
+`theta_r >= 1` forces `y_j = 1` at every assignment-carrying station of `r`, so
+`|A_r| <= sum(y) = l`. The removed columns are unusable by *any* integer
+solution, hence
 
-*The label cannot enforce it exactly.* Only stations carrying an *assignment*
-need to be open, and which those are is resolved at route replay, not during
-expansion. A label's visited-station set (or its certified-station set)
-over-approximates the final assignment-station set, so pruning on
-`|U| > l` can discard routes that would have been feasible. An exact cap needs a
-lower bound on the final count, which the label does not carry.
+    IP(P') = IP(P),   LP(P') <= IP(P') = IP(P),   LP(P') >= LP(P)
 
-Both are surmountable only by making it an opt-in, IP-only option with the
-`lp_bound` certificate explicitly disabled. Not adopted.
+-- still a valid lower bound on the IP, and no weaker than before.
 
-### "Compatibility components" -- measured, and the graph does not split
+*The label can enforce it, on visited stations.* The worry was that a route may
+visit a station carrying no assignment after replay, so the visited set
+over-approximates `A_r`. True, but such a station can always be deleted from the
+route: by the triangle inequality removing `k` lowers `tau` and makes every later
+arrival earlier, which only relaxes ride limits and opens more pickup clocks, so
+reward cannot fall. Hence every column with `|A_r| <= l` has a counterpart with
+reduced cost no worse whose route visits only assignment-carrying stations, and
+pricing over `{|visited| <= l}` attains the same minimum as over `{|A_r| <= l}`.
 
-`scripts/diag_passenger_free_assignment_components.jl` builds the positive-reward
-station graph (an edge `j -- k` per opportunity `(p, j, k)`) and reports its
-connected components. Result across every scenario at n=10, 15 and 20:
+Implemented as `max_distinct_stations` on the pricing data (a `UInt64`
+`visited_mask` per label, disabled above 64 stations), with `station_budget_cap`
+on the CG entry point wiring it to `master_data.l`. Its soundness companion --
+the `U_a subseteq U_b` condition in dominance, without which a label that has
+spent more station budget could stand in for one that has spent less -- is gated
+on the cap being active, so it costs nothing when the cap is off.
 
-```
-components=1   largest_share=1.000   mean_stations_per_passenger=4.8-9.6 of 10-20
-```
+**Measured, with `max_stops` unbounded (the regime the cap exists for):**
 
-One component, every time, holding 100% of opportunities -- against the "worth
-doing only below ~80%" threshold from the design discussion. Passengers can reach
-roughly half the stations within the walking radius, so the graph is one blob.
-Decomposition is dead here, and so is the adaptive station core (#7), which needs
-the same structure plus a subset bound to certify the omitted region.
+| case | no cap | cap at `l` | labels | max_live |
+| --- | --- | --- | --- | --- |
+| n=15 s=1 (l=8) | 7.07s | 6.93s | 137k -> 271k | 23k -> 62k |
+| n=15 s=2 (l=8) | 3.58s | 6.15s | 110k -> 238k | 19k -> 61k |
+| n=15 s=3 (l=8) | 11.73s | 9.78s | 215k -> 339k | 34k -> 74k |
+| n=10 s=1 (l=5) | 1.53s | 1.60s | 11.9k -> 10.2k | 3.4k -> 4.4k |
 
-### "Used-station-set dominance `U_a subseteq U_b`" -- a slowdown on its own
+Neutral to 1.7x *slower*. The domination rate falls from 80.7% to 74.4% because
+of `U_a subseteq U_b`, so more labels survive, buckets grow, and the dominance
+scan -- still ~90% of runtime -- costs more than the branch pruning saves.
 
-Adding a required condition makes dominance fire *less* often. It is only
-meaningful as the correctness companion to the `L`-cap above (without which `U`
-is not a consumed resource at all), so it is one package with a proposal that was
-not adopted, not an independent win.
+It binds weakly for a structural reason: ride limits and the pickup window
+already hold the best routes to 6-8 distinct stations at n=15, so `l = 8`
+constrains almost nothing. It bites hardest at n=10/`l=5`, which is also the only
+place label counts actually fell.
+
+`best_rc` changes where the cap binds (n=10 s=1: `-53591.86 -> -53578.05`). That
+is the cap working, not a bug -- the excluded route used 6 distinct stations
+against `l = 5`. Because of this the feature cannot be validated against the
+unrestricted optimum, so it carries its own brute-force test asserting it attains
+the best reduced cost *over the routes the cap permits*.
+
+**The metric that should have decided it was bound quality, not pricing speed.**
+The point of `LP(P') >= LP(P)` is a tighter bound, and the motivating failure mode
+was `project_lp_mip_gap_hub_routes`: "CG picks broad hub routes for dual credit;
+MIP pays full travel cost for unused certified pairs; 21.6% gap" -- broad hub
+routes being exactly the many-station columns the cap forbids. Measured end to
+end through the CG loop (`scripts/passenger_free_assignment_cg_scaling.jl`,
+`PFA_STATION_BUDGET_CAP=1` vs `=0`, unbounded stops, 1 scenario, both reaching
+`optimality_proven`):
+
+| n | lp_bound (off) | lp_bound (on) | gap% off | gap% on | wall off | wall on |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 | 18974.94480755 | 18974.94480755 | 0.524 | 0.525 | 7.55s | 7.97s |
+| 15 | 16107.42403670 | 16107.42403670 | 0.000 | 0.000 | 5.73s | 7.86s |
+
+**The LP bound is identical to ten decimal places.** The LP optimum never wanted a
+column spanning more than `l` stations, so the cap removes nothing that was
+binding -- while still costing 5-37% more wall time and generating *more* columns
+(436 -> 453, 459 -> 537).
+
+Why the motivating pathology does not appear here: the hub-route gap was measured
+on the **aggregate** pricer, whose reward sums over independently-certified
+station pairs, so a route can buy extra dual credit merely by touching more
+stations. The passenger free-assignment reward is a per-passenger *maximum*
+(that is what the layer encoding enforces), so touching more stations for the
+same passenger earns nothing extra. The formulation is structurally immune to the
+gap the cap was meant to close, which is also why its LP-IP gap here is already
+0.0-0.5%.
+
+**Verdict: kept, default off.** Exact, tested, and correct -- worth having for
+instances where feasibility does *not* already bound distinct stations below `l`
+(short ride limits and a wide pickup window would be the case to try) -- but inert
+and mildly costly on everything measured here. Do not enable it expecting a
+better bound without re-measuring `lp_bound` on the target instance.
+
 
 ## Related
 

@@ -73,6 +73,11 @@ const USE_DUAL_SELECTOR = get(ENV, "PFA_DUAL_SELECTOR", "0") in ("1", "true", "y
 # Concurrent per-scenario pricing. Exact and deterministic either way; set to 0 to
 # force the sequential path for an A/B timing comparison.
 const PARALLEL_SCENARIOS = get(ENV, "PFA_PARALLEL_SCENARIOS", "1") in ("1", "true", "yes")
+# Restrict pricing to columns with at most `l` distinct stations. Slower to price,
+# but excludes the broad multi-station "hub" columns that earn LP dual credit
+# while being unusable in any integer solution -- so the metric to watch here is
+# `lp_mip_gap_pct`, not wall time.
+const STATION_BUDGET_CAP = get(ENV, "PFA_STATION_BUDGET_CAP", "0") in ("1", "true", "yes")
 # Selector objective weights. Defaults follow the original design (stabilization
 # dominant). Measured result: stabilization makes the duals DENSER, raising the
 # positive-rho count and hence pricing cost -- so inverting these is the direct
@@ -133,6 +138,7 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
             ip_time_limit_sec=IP_TIME,
             total_time_limit_sec=CASE_TIME,
             parallel_scenarios=PARALLEL_SCENARIOS,
+            station_budget_cap=STATION_BUDGET_CAP,
             dual_selector=PassengerDualSelectorConfig(
                 use_pricing_aware_dual_selection=USE_DUAL_SELECTOR,
                 dual_selector_stabilization_weight=SEL_STAB_W,

@@ -227,7 +227,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         t0 = profile ? time_ns() : UInt64(0)
         inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
             bucket, live_labels, label, label_id, label_bs,
-            pricing_data.layer_weight, pricing_data.bounded_max_stops, dominated_scratch,
+            pricing_data.layer_weight, pricing_data.bounded_max_stops,
+            pricing_data.bounded_distinct_stations, dominated_scratch,
         )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
@@ -303,7 +304,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
                 t0 = profile ? time_ns() : UInt64(0)
                 inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
                     bucket, live_labels, child, child_id, child_bs,
-                    pricing_data.layer_weight, pricing_data.bounded_max_stops, dominated_scratch,
+                    pricing_data.layer_weight, pricing_data.bounded_max_stops,
+            pricing_data.bounded_distinct_stations, dominated_scratch,
                 )
                 profile && (t_dominance += time_ns() - t0)
                 labels_removed_by_dominance += removed

@@ -124,6 +124,7 @@ function _price_one_passenger_scenario(
     max_new_columns::Int,
     time_limit::Float64,
     reduced_cost_tol::Float64,
+    station_budget_cap::Bool=false,
 )
     md = master.master_data
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
@@ -136,6 +137,15 @@ function _price_one_passenger_scenario(
         repositioning_time=md.repositioning_time,
         max_stops=md.max_stops,
         max_visits_per_node=md.max_visits_per_node,
+        # Restrict pricing to columns an integer solution could actually use: with
+        # `theta_r >= 1` forcing `y_j = 1` at every assignment-carrying station,
+        # `|A_r| <= sum(y) = l`. This leaves the IP optimum untouched while making
+        # `lp_bound` tighter -- it directly excludes the broad multi-station "hub"
+        # columns that earn dual credit in the LP but are unusable in the IP.
+        # Costs pricing time (see the note in
+        # notes/2026-07-30_passenger_pricing_label_search_optimizations.md), so it
+        # is opt-in and judged on bound quality, not pricing speed.
+        max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
     )
     isempty(pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
 
@@ -177,6 +187,7 @@ function _price_passenger_scenarios(
     reduced_cost_tol::Float64,
     verify_reduced_costs::Bool,
     parallel_scenarios::Bool=true,
+    station_budget_cap::Bool=false,
 )
     md = master.master_data
     scenarios = sort!(collect(keys(md.passengers_by_scenario)))
@@ -213,6 +224,7 @@ function _price_passenger_scenarios(
                 get(existing_by_scenario, scenarios[i], empty_pool);
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
+                station_budget_cap=station_budget_cap,
             )
         end
     else
@@ -222,6 +234,7 @@ function _price_passenger_scenarios(
                 get(existing_by_scenario, scenarios[i], empty_pool);
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
+                station_budget_cap=station_budget_cap,
             )
         end
     end
@@ -290,6 +303,11 @@ function run_passenger_free_assignment_column_generation(
     # Run the per-scenario label searches concurrently. Exact and deterministic
     # (see `_price_passenger_scenarios`); a no-op with one thread or one scenario.
     parallel_scenarios::Bool=true,
+    # Restrict pricing to columns with at most `l` distinct stations -- the most
+    # any integer solution can open. Exact for the IP and tightens `lp_bound`, but
+    # slows pricing (the soundness companion `U_a subseteq U_b` weakens dominance);
+    # see notes/2026-07-30_passenger_pricing_label_search_optimizations.md.
+    station_budget_cap::Bool=false,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -397,6 +415,7 @@ function run_passenger_free_assignment_column_generation(
                 reduced_cost_tol=reduced_cost_tol,
                 verify_reduced_costs=verify_reduced_costs,
                 parallel_scenarios=parallel_scenarios,
+                station_budget_cap=station_budget_cap,
             )
             pricing_seconds = time() - t_price
             total_pricing_seconds += pricing_seconds
@@ -471,6 +490,7 @@ function run_passenger_free_assignment_column_generation(
             reduced_cost_tol=reduced_cost_tol,
             verify_reduced_costs=verify_reduced_costs,
             parallel_scenarios=parallel_scenarios,
+            station_budget_cap=station_budget_cap,
         )
         round_cert_seconds = time() - t_cert
         certification_seconds += round_cert_seconds

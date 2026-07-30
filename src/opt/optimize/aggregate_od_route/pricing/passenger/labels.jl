@@ -59,9 +59,52 @@ function initial_passenger_free_assignment_pricing_labels(
             0.0,
             pricing_data.route_regularization_weight * pricing_data.repositioning_time,
             1,
+            get(pricing_data.station_bit, node, UInt64(0)),
         ))
     end
     return labels
+end
+
+"""
+    _passenger_free_assignment_station_budget_allows(label, next_node, pricing_data)
+
+Whether extending to `next_node` keeps the route inside the station budget
+`l` (`max_distinct_stations`), i.e. `|U(route) ∪ {next_node}| <= l`. Revisiting
+an already-used station is always free.
+
+# Why capping *visited* stations is valid
+
+Only stations that end up carrying an assignment need `y_j = 1`, and in an
+integer master `theta_r >= 1` forces `y_j = 1` for each of them, so
+`|A_r| <= sum(y) = l`: columns above that are unusable by any integer solution.
+Dropping them leaves the IP optimum untouched and *tightens* the LP bound (the
+LP over the restricted pool is still a relaxation of the same IP, so it remains a
+valid lower bound while being no smaller).
+
+Capping *visited* stations rather than assignment-carrying ones is a stronger
+restriction, and it is still lossless for pricing. A visited station that carries
+no assignment in the replayed column can be deleted from the route: by the
+triangle inequality `travel(a, b) <= travel(a, k) + travel(k, b)`, removing `k`
+lowers `tau` and makes every later arrival *earlier*, which only relaxes ride
+limits and opens more pickup clocks -- so reward cannot fall and reduced cost
+cannot rise. Hence for every column with `|A_r| <= l` there is one with reduced
+cost no worse whose route visits only assignment-carrying stations, and searching
+`{|visited| <= l}` attains the same pricing minimum as searching `{|A_r| <= l}`.
+
+The cap is what makes the extra dominance condition in
+`_dominates_passenger_free_assignment_label` necessary: once station budget is a
+consumed resource, a label that has spent more of it cannot stand in for one that
+has spent less.
+"""
+function _passenger_free_assignment_station_budget_allows(
+    label::PassengerFreeAssignmentPricingLabel,
+    next_node::Int,
+    pricing_data::PassengerFreeAssignmentPricingData,
+)::Bool
+    pricing_data.bounded_distinct_stations || return true
+    bit = pricing_data.station_bit[next_node]
+    label.visited_mask & bit != 0 && return true  # revisit costs no budget
+    return count_ones(label.visited_mask) < pricing_data.max_distinct_stations
 end
 
 function _has_useful_live_passenger_free_assignment_origin(
@@ -135,6 +178,10 @@ function _passenger_free_assignment_candidate_next_nodes(
         filter!(node -> get(visit_counts, node, 0) < max_visits_per_node, candidate_nodes)
     end
 
+    if pricing_data.bounded_distinct_stations
+        filter!(node -> _passenger_free_assignment_station_budget_allows(label, node, pricing_data), candidate_nodes)
+    end
+
     return sort!(collect(candidate_nodes))
 end
 
@@ -188,6 +235,7 @@ function extend_passenger_free_assignment_pricing_label(
         new_tau,
         label.reduced_cost + pricing_data.route_regularization_weight * travel_time - reward,
         label.route_length + 1,
+        label.visited_mask | get(pricing_data.station_bit, next_node, UInt64(0)),
     )
 
     return PassengerFreeAssignmentPricingLabel[child]
@@ -303,9 +351,14 @@ function _dominates_passenger_free_assignment_label(
     b::PassengerFreeAssignmentPricingLabel,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
+    bounded_distinct_stations::Bool=false,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
+    # Station budget is a consumed resource once capped: any suffix feasible for
+    # `b` must also be feasible for `a`, which needs `U_a subseteq U_b`. Skipped
+    # entirely when uncapped, since it would only weaken dominance for nothing.
+    (!bounded_distinct_stations || a.visited_mask & ~b.visited_mask == 0) || return false
     a.time <= b.time + 1e-9 || return false
     budget = b.reduced_cost - a.reduced_cost + 1e-9
     budget >= 0.0 || return false
@@ -326,9 +379,13 @@ function _dominates_passenger_free_assignment_label(
     bbs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
+    bounded_distinct_stations::Bool=false,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
+    # See the 4-argument method: `U_a subseteq U_b`, one instruction, and only
+    # when the station budget is actually capped.
+    (!bounded_distinct_stations || a.visited_mask & ~b.visited_mask == 0) || return false
     a.time <= b.time + 1e-9 || return false
     # See the 4-argument method for why the reward test is a compensated
     # reduced-cost budget rather than `issubset`. There is no `length` prefilter
@@ -381,6 +438,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
     label_bs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
+    bounded_distinct_stations::Bool,
     dominated::Vector{Int},
 )
     inserted = true
@@ -392,7 +450,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
         existing_label = entry.label
 
         if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops)
+            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops, bounded_distinct_stations)
                 inserted = false
                 break
             end
@@ -400,7 +458,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops)
+        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops, bounded_distinct_stations)
             push!(dominated, i)
         end
     end
