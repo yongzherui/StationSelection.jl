@@ -142,9 +142,11 @@ function _price_one_passenger_scenario(
         # `|A_r| <= sum(y) = l`. This leaves the IP optimum untouched while making
         # `lp_bound` tighter -- it directly excludes the broad multi-station "hub"
         # columns that earn dual credit in the LP but are unusable in the IP.
-        # Costs pricing time (see the note in
-        # notes/2026-07-30_passenger_pricing_label_search_optimizations.md), so it
-        # is opt-in and judged on bound quality, not pricing speed.
+        # MEASURED and left OFF: the LP bound came out identical to ten decimal
+        # places at n=10 and n=15 (the LP optimum never wanted a wider column),
+        # while pricing ran 5-37% slower and generated MORE columns. See
+        # notes/2026-07-30_passenger_pricing_label_search_optimizations.md before
+        # enabling this expecting a better bound.
         max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
     )
     isempty(pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
@@ -304,9 +306,9 @@ function run_passenger_free_assignment_column_generation(
     # (see `_price_passenger_scenarios`); a no-op with one thread or one scenario.
     parallel_scenarios::Bool=true,
     # Restrict pricing to columns with at most `l` distinct stations -- the most
-    # any integer solution can open. Exact for the IP and tightens `lp_bound`, but
-    # slows pricing (the soundness companion `U_a subseteq U_b` weakens dominance);
-    # see notes/2026-07-30_passenger_pricing_label_search_optimizations.md.
+    # any integer solution can open. Exact for the IP and cannot loosen `lp_bound`,
+    # but measured inert on bound quality here and slower to price; see
+    # notes/2026-07-30_passenger_pricing_label_search_optimizations.md.
     station_budget_cap::Bool=false,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,

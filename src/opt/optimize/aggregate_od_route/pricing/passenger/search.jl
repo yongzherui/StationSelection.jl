@@ -17,11 +17,16 @@ regularization cost of the travel needed to collect it) still available to
 cost of every completion of `label`, used both to order the frontier and to
 prune at pop time.
 
-Rewritten from an `O(|opportunities|)` scan (every opportunity re-tested for
-every label) to `O(#live origins' opportunities + n_nodes)`, which is the single
-biggest cost in the search: `|opportunities| ~ P * n^2`, so the old form made
-per-label cost grow with `n^2` and drove measured time to ~`n^5.5-7.6` while
-label counts only grew ~`n^3.4`.
+Rewritten once from an `O(|opportunities|)` scan (every opportunity re-tested for
+every label) to `O(#live origins' opportunities + n_nodes)`: `|opportunities| ~
+P * n^2`, so the old form made per-label cost grow with `n^2` and drove measured
+time to ~`n^5.5-7.6` while label counts only grew ~`n^3.4`.
+
+That rewrite is why this is **no longer** a hot spot, and the claim that it is
+"the single biggest cost in the search" -- which this docstring used to make --
+has been false ever since. Profiling on 2026-07-30 put this bound at ~0.6% of
+wall time against ~90% in the dominance scan. Do not spend effort tightening it
+for speed; see `notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
 
 Two structurally different sources of future reward, handled separately:
 
@@ -64,6 +69,14 @@ summed -- a sum would still be a valid over-estimate, but a needlessly loose one
 
 Nodes are walked via `nodes_by_travel[current_idx]`, precomputed once per pricing
 call, so no per-label sorting is needed.
+
+MEASURED: **no effect** -- label counts moved by under 0.2% and wall time was flat.
+At cold-start duals the bound sums 10+ passenger rewards of ~5000 each while one
+hop costs `beta * travel ~ 4000`, so discounting one hop essentially never flips
+the pruning test. Retained because it is exact, strictly tighter, and should bite
+under converged CG duals where most `rho_pjk` are near zero and `beta * travel` is
+comparable to the entire remaining reward -- a regime this benchmark could not
+reproduce. Do not assume it helps without measuring on the target duals.
 """
 function _passenger_free_assignment_remaining_reward_bound(
     label::PassengerFreeAssignmentPricingLabel,
@@ -254,8 +267,10 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         # `dequeue_pair!` hands back the priority the label was enqueued with, which
         # is exactly `label_priority(label, label_bs)`. Labels are immutable and their
         # bitsets never change after insertion, so recomputing it here would redo the
-        # `remaining_reward_bound` scan -- the single most expensive operation in the
-        # search -- for a value we already have.
+        # `remaining_reward_bound` scan for a value we already have.
+        #
+        # MEASURED: no speedup (~0.05s of a 33s run). The bound is ~0.6% of runtime,
+        # so halving it buys nothing. Kept only because it is strictly less work.
         label_id, popped_priority = dequeue_pair!(frontier)
         profile && (t_queue += time_ns() - t0)
         if !haskey(live_labels, label_id)

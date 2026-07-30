@@ -33,6 +33,32 @@ certifying anyone else's, so there is nothing to branch on beyond the physical
 route itself. The concrete `(j, k)` a passenger is ultimately assigned to is
 reconstructed only for finished, negative-reduced-cost routes (`search.jl`'s
 route replay) -- not tracked while labels are being extended.
+
+# Where the time actually goes (read before optimizing)
+
+Profiled 2026-07-30: **the dominance scan is ~85-90% of wall time.** Everything
+else -- the remaining-reward bound, candidate generation, label extension, the
+priority queue -- is together under 2%. Optimizations that do not either shrink
+the live-label population or make the bucket walk cheaper have consistently
+measured as no-ops here, however sound they look on paper.
+
+Scoreboard of what was tried, each measured on its own
+(`scripts/bench_passenger_free_assignment_labels.jl`; full write-up in
+`notes/2026-07-30_passenger_pricing_label_search_optimizations.md`):
+
+| change | result |
+| --- | --- |
+| compensated layer dominance (this file) | **2.5-3.9x** -- halves `max_live` |
+| `Vector` dominance buckets (`types.jl`) | **1.3-1.5x** |
+| label inlined into bucket entry (`types.jl`) | **1.1-1.15x** |
+| reuse popped priority (`search.jl`) | no effect; the bound is ~0.6% of runtime |
+| travel-discounted reward bound (`search.jl`) | no effect at cold-start duals |
+| station-budget cap at `l` (this file) | **off by default** -- slower, and the LP bound did not move |
+| compatibility-component decomposition | not built: the reward graph is one component holding 100% of opportunities |
+
+Any exact change must leave the benchmark's `best_rc` bit-identical; the
+station-budget cap is the one deliberate exception, since it restricts the column
+set on purpose.
 """
 
 export initial_passenger_free_assignment_pricing_labels
@@ -95,6 +121,22 @@ The cap is what makes the extra dominance condition in
 `_dominates_passenger_free_assignment_label` necessary: once station budget is a
 consumed resource, a label that has spent more of it cannot stand in for one that
 has spent less.
+
+MEASURED: **default off, because it does not pay on either metric it was meant
+to.** Pricing is neutral to 1.7x *slower* with stops unbounded -- the `U_a ⊆ U_b`
+companion drops the domination rate 80.7% -> 74.4%, so buckets grow and the
+dominance scan costs more than the branch pruning saves. And through the full CG
+loop the LP bound is identical to ten decimal places at n=10 and n=15: the LP
+optimum never wanted a wider column.
+
+Two structural reasons it binds so weakly, both worth knowing before re-enabling
+it: ride limits plus the pickup window already hold the best routes to 6-8
+distinct stations at n=15 (so `l = 8` constrains nothing), and the per-passenger
+*maximum* reward structure means a route cannot buy extra dual credit by touching
+more stations -- unlike the aggregate pricer, whose summed per-pair reward is what
+produced the hub-route LP-IP gap this cap was meant to close. Worth revisiting
+only where feasibility does not already bound distinct stations below `l`, and
+only after re-measuring `lp_bound` there.
 """
 function _passenger_free_assignment_station_budget_allows(
     label::PassengerFreeAssignmentPricingLabel,
@@ -345,6 +387,18 @@ so this only ever adds dominations. It never weakens the `rc_a <= rc_b`
 precondition either, since the compensation is non-negative -- which is what
 keeps `_add_passenger_free_assignment_label_to_bucket!`'s reduced-cost-ordered
 scan valid.
+
+MEASURED: **the single biggest win in this pricer, 2.5-3.9x.** `max_live` roughly
+halves (58,260 -> 21,917 at n=15/max_stops=6; 117,950 -> 52,461 at n=20), and
+because the dominance scan is linear in bucket size *per insertion*, halving the
+live population quarters the work. The speedup grows with instance size. See
+`notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
+
+Cost control matters here: the element-wise scan in
+`_passenger_free_assignment_compensation` is more expensive than the `issubset`
+it replaces, so that function tries `issubset` first and bails the scan as soon
+as the running weight exceeds the budget. Removing either guard gives back the
+win.
 """
 function _dominates_passenger_free_assignment_label(
     a::PassengerFreeAssignmentPricingLabel,

@@ -135,6 +135,11 @@ Keeping only a label id here and looking the label and its bitsets up in two sid
 `Dict`s cost two hash probes per entry, which dominated the actual dominance
 predicate (mostly short-circuiting scalar comparisons). Inlining them makes the
 scan a straight walk over the sorted container.
+
+MEASURED: 1.1-1.15x, with labels and `max_live` bit-identical (it is a pure
+data-layout change). Less than the two-hash-probe estimate predicted, and that
+shortfall is what pointed at the container itself -- see
+`PassengerFreeAssignmentDominanceBucket` below.
 """
 struct PassengerFreeAssignmentBucketEntry
     id::PassengerFreeAssignmentLabelId
@@ -157,6 +162,9 @@ The trade is that insertion and eviction become `O(bucket)` memmoves rather than
 `O(log bucket)` tree surgery -- but there is exactly one insertion per label
 against a full-bucket scan, and a memmove of a few thousand small structs runs at
 memory bandwidth, so it is not close.
+
+MEASURED: 1.3-1.5x, again with labels and `max_live` bit-identical. See
+`notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
 """
 const PassengerFreeAssignmentDominanceBucket = Vector{PassengerFreeAssignmentBucketEntry}
 

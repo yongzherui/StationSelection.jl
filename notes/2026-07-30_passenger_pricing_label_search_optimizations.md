@@ -4,6 +4,28 @@ Evaluation of eight proposed pruning/dominance improvements to
 `src/opt/optimize/aggregate_od_route/pricing/passenger/`, each implemented and
 measured separately rather than adopted as a batch.
 
+## Verdict summary
+
+Net result: **4-6x faster exhaustive pricing**, essentially all of it from one
+change.
+
+| change | result | status |
+| --- | --- | --- |
+| compensated layer dominance | **2.5-3.9x** -- halves `max_live` | kept, on |
+| `Vector` dominance buckets instead of `SortedDict` | **1.3-1.5x** | kept, on |
+| label + bitsets inlined into the bucket entry | **1.1-1.15x** | kept, on |
+| reuse the popped priority | no effect (bound is ~0.6% of runtime) | kept, on |
+| travel-discounted remaining-reward bound | no effect at cold-start duals | kept, on |
+| station-budget cap at `l` (+ `U_a ⊆ U_b`) | slower; LP bound did not move | kept, **off** |
+| useful-stop / post-`W` elimination | already implemented | n/a |
+| compatibility-component decomposition | graph is 1 component, 100% of opportunities | not built |
+| adaptive station core | needs the decomposition above | not built |
+
+The one thing to take away before optimizing this further: **the dominance scan
+is ~85-90% of wall time** and everything else together is under 2%. Every change
+that did not shrink the live-label population or cheapen the bucket walk measured
+as a no-op, regardless of how sound it looked on paper.
+
 ## Measurement setup
 
 `scripts/bench_passenger_free_assignment_labels.jl` runs the label search to
