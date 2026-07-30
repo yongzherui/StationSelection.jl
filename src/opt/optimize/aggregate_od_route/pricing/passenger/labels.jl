@@ -218,8 +218,7 @@ function _passenger_free_assignment_label_order_key(
     )
 end
 
-_create_passenger_free_assignment_dominance_bucket() =
-    SortedDict{PassengerFreeAssignmentLabelOrderKey, PassengerFreeAssignmentLabelId}()
+_create_passenger_free_assignment_dominance_bucket() = PassengerFreeAssignmentDominanceBucket()
 
 function _make_passenger_free_assignment_label_bitsets(
     label::PassengerFreeAssignmentPricingLabel,
@@ -241,16 +240,78 @@ function _make_passenger_free_assignment_label_bitsets(
     )
 end
 
+"""
+Weight of the layers `a` has activated that `b` has not.
+
+This is the "catch-up" term in the dominance rule below: those layers are reward
+`b` can still bank off a suffix the two labels share, while `a`, having already
+banked them, gets nothing more for re-reaching them.
+
+Bails out as soon as the running total exceeds `budget`, because the only use is
+the test `compensation <= budget`. In practice `budget` is a small reduced-cost
+difference while individual layer weights are large, so the common failing case
+exits after one layer.
+"""
+function _passenger_free_assignment_compensation(
+    a_layers::RewardLayerBitset,
+    b_layers::RewardLayerBitset,
+    layer_weight::Vector{Float64},
+    budget::Float64,
+)::Float64
+    # Word-wise and much cheaper than the element loop; also the single most
+    # common case (it is exactly the old, uncompensated dominance rule).
+    issubset(a_layers, b_layers) && return 0.0
+    total = 0.0
+    @inbounds for layer in a_layers
+        layer in b_layers && continue
+        total += layer_weight[layer]
+        total > budget && return total
+    end
+    return total
+end
+
+"""
+    _dominates_passenger_free_assignment_label(a, b, layer_weight, bounded_max_stops)
+
+`a` dominates `b`: every completion of `b` has a counterpart from `a` that is at
+least as good, so `b` can be discarded.
+
+The reward condition is **compensated** rather than a plain subset test. For a
+suffix `sigma` feasible from `b`, `a`'s no-worse station ages and elapsed time
+mean everything `sigma` certifies for `b` it also certifies for `a`
+(`reach_b ⊆ reach_a`), and since
+`reach_b ∖ A_b ⊆ (reach_a ∖ A_a) ∪ (A_a ∖ A_b)` we get
+`reward_b(sigma) <= reward_a(sigma) + w(A_a ∖ A_b)`. Both completions pay the
+same travel, so `a`'s final reduced cost is no worse as long as
+
+    rc_a + w(A_a ∖ A_b) <= rc_b.
+
+Note the direction: `a` pays for the layers **`a`** holds and `b` lacks, not the
+other way round. Charging `w(A_b ∖ A_a)` instead would be unsound -- it would let
+a label that has already banked a large layer dominate one that has not, even
+though the shared suffix can still pay that layer out to the second label and
+overtake the first.
+
+Requiring `A_a ⊆ A_b` (the previous rule) is the special case `w(A_a ∖ A_b) = 0`,
+so this only ever adds dominations. It never weakens the `rc_a <= rc_b`
+precondition either, since the compensation is non-negative -- which is what
+keeps `_add_passenger_free_assignment_label_to_bucket!`'s reduced-cost-ordered
+scan valid.
+"""
 function _dominates_passenger_free_assignment_label(
     a::PassengerFreeAssignmentPricingLabel,
     b::PassengerFreeAssignmentPricingLabel,
+    layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
-    a.reduced_cost <= b.reduced_cost + 1e-9 || return false
-    issubset(a.activated_reward_layers, b.activated_reward_layers) || return false
+    budget = b.reduced_cost - a.reduced_cost + 1e-9
+    budget >= 0.0 || return false
+    _passenger_free_assignment_compensation(
+        a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
+    ) <= budget || return false
     all_stations = union(keys(a.station_age), keys(b.station_age), (a.current, b.current))
     for station in all_stations
         get(a.station_age, station, Inf) <= get(b.station_age, station, Inf) + 1e-9 || return false
@@ -263,16 +324,21 @@ function _dominates_passenger_free_assignment_label(
     b::PassengerFreeAssignmentPricingLabel,
     abs::PassengerFreeAssignmentLabelBitsets,
     bbs::PassengerFreeAssignmentLabelBitsets,
+    layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
-    a.reduced_cost <= b.reduced_cost + 1e-9 || return false
-    # Cheap necessary condition before the (more expensive) subset test: a's mask
-    # cannot be a subset of b's if it has more bits set.
-    length(abs.activated_bits) <= length(bbs.activated_bits) || return false
-    issubset(abs.activated_bits, bbs.activated_bits) || return false
+    # See the 4-argument method for why the reward test is a compensated
+    # reduced-cost budget rather than `issubset`. There is no `length` prefilter
+    # here any more: `a` holding *more* layers than `b` is now a legitimate
+    # domination whenever `a`'s reduced-cost advantage covers their weight.
+    budget = b.reduced_cost - a.reduced_cost + 1e-9
+    budget >= 0.0 || return false
+    _passenger_free_assignment_compensation(
+        abs.activated_bits, bbs.activated_bits, layer_weight, budget,
+    ) <= budget || return false
     # `dom(age_b) subseteq dom(age_a)` and `age_a(j) <= age_b(j)` for all j in
     # dom(age_b) -- exactly equivalent to the dense "all stations, missing = Inf"
     # rule (a live age absent from `a` compares as Inf and always fails; one
@@ -292,25 +358,41 @@ function _dominates_passenger_free_assignment_label(
     return true
 end
 
+"""
+Insert `label` into its dominance bucket, unless an incumbent dominates it, and
+evict the incumbents it dominates.
+
+The bucket is ordered by `(reduced_cost, time, route_length, id)`, and domination
+in either direction requires `rc_dominator <= rc_dominated` -- true of the
+compensated rule too, since the compensation is non-negative. So the walk splits
+at the new label's reduced cost: below it only an incumbent can dominate the new
+label (and finding one ends the walk), above it only the new label can dominate
+incumbents.
+
+Dominated entries are collected as bucket *indices*, which the walk produces in
+ascending order, so eviction is a single `deleteat!` and nothing is mutated while
+the bucket is being scanned.
+"""
 function _add_passenger_free_assignment_label_to_bucket!(
-    bucket::SortedDict{PassengerFreeAssignmentLabelOrderKey, PassengerFreeAssignmentLabelId},
+    bucket::PassengerFreeAssignmentDominanceBucket,
     live_labels::Dict{Int, PassengerFreeAssignmentPricingLabel},
-    label_bitsets::Dict{Int, PassengerFreeAssignmentLabelBitsets},
     label::PassengerFreeAssignmentPricingLabel,
     label_id::Int,
     label_bs::PassengerFreeAssignmentLabelBitsets,
+    layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
+    dominated::Vector{Int},
 )
     inserted = true
-    dominated_ids = Int[]
+    empty!(dominated)
     switched = false
 
-    for (_existing_key, existing_id) in pairs(bucket)
-        existing_label = live_labels[existing_id]
-        existing_bs = label_bitsets[existing_id]
+    @inbounds for i in eachindex(bucket)
+        entry = bucket[i]
+        existing_label = entry.label
 
         if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_label(existing_label, label, existing_bs, label_bs, bounded_max_stops)
+            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops)
                 inserted = false
                 break
             end
@@ -318,21 +400,24 @@ function _add_passenger_free_assignment_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, existing_bs, bounded_max_stops)
-            push!(dominated_ids, existing_id)
+        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops)
+            push!(dominated, i)
         end
     end
 
+    n_dominated = length(dominated)
     if inserted
-        for id in dominated_ids
-            delete!(bucket, _passenger_free_assignment_label_order_key(live_labels[id], id))
-            delete!(live_labels, id)
-            delete!(label_bitsets, id)
+        @inbounds for i in dominated
+            delete!(live_labels, bucket[i].id)
         end
-        bucket[_passenger_free_assignment_label_order_key(label, label_id)] = label_id
-        label_bitsets[label_id] = label_bs
+        deleteat!(bucket, dominated)
+        new_entry = PassengerFreeAssignmentBucketEntry(label_id, label, label_bs)
+        # The search value must be an entry, not a bare key: `searchsortedfirst`
+        # applies `by` to it as well as to the elements.
+        pos = searchsortedfirst(bucket, new_entry; by=_passenger_free_assignment_entry_order_key)
+        insert!(bucket, pos, new_entry)
     end
-    return inserted, length(dominated_ids)
+    return inserted, n_dominated
 end
 
 function _passenger_free_assignment_column_signature(assignments)::Tuple{Vararg{Tuple{Int, Int, Int}}}

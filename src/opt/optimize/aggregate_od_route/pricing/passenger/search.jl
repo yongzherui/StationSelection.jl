@@ -11,7 +11,11 @@ accepted routes into candidate columns
 export passenger_free_assignment_pricing_by_label_setting
 
 """
-Admissible bound on additional reward still collectable from `label`.
+Admissible bound on the additional *net* gain (reward minus the route
+regularization cost of the travel needed to collect it) still available to
+`label`. `label.reduced_cost - bound` is therefore a lower bound on the reduced
+cost of every completion of `label`, used both to order the frontier and to
+prune at pop time.
 
 Rewritten from an `O(|opportunities|)` scan (every opportunity re-tested for
 every label) to `O(#live origins' opportunities + n_nodes)`, which is the single
@@ -25,17 +29,41 @@ Two structurally different sources of future reward, handled separately:
     opportunities, but only those whose ride limit survives `age + travel(current, k)`.
     That test needs the actual age, so it stays per-opportunity -- but only over
     opportunities of origins that are *actually live*, which pruning keeps small.
+    Such an opportunity is booked against its *destination* `k`, the node the
+    vehicle must reach to collect it.
 
   - **refreshable origins** -- if still inside the pickup window, any origin
     reachable before the cutoff could be visited to open a fresh clock. The old
     code tested this per opportunity but its condition depends only on the
     *origin*, so the whole origin's union mask (`origin_union_mask`) can be OR'd
-    in at once.
+    in at once. Such a mask is booked against the *origin* `j`, the node the
+    vehicle must reach first.
 
-Equivalence with the old form: the old loop skipped opportunities whose mask was
-already a subset of the activated set, whereas `origin_union_mask` folds them in
--- but the closing `setdiff(reachable, activated)` removes exactly those layers,
-so the returned value is identical.
+# Why the travel discount is valid
+
+The previous version returned the raw reward `R` of everything still reachable,
+silently pretending it were free. But collecting a layer booked against node `x`
+requires physically reaching `x`, which costs at least `travel(current, x)` --
+the same minimum-additional-time argument `_passenger_free_assignment_age_is_useful`
+already relies on, and which holds because routing costs are shortest-path
+distances and so obey the triangle inequality (detouring only adds more).
+
+So for any completion that collects the layers booked against a node set `S`,
+`travel >= max_{x in S} travel(current, x)`, giving net gain
+`R(S) - beta * max_{x in S} travel(current, x)`. For a fixed travel budget the
+best `S` is "every node within that radius", so scanning nodes in increasing
+distance from `current` and taking the running maximum of
+`R(prefix) - beta * travel(current, node)` maximises over all `S` in one pass --
+no subset enumeration. `max(0.0, ...)` covers "stop here and collect nothing",
+which is always available.
+
+`R(prefix)` is the weight of the *union* of the prefix's masks minus `activated`,
+accumulated incrementally in `acc`, so layers shared between nodes (the same
+passenger certifiable at several destinations) are counted once rather than
+summed -- a sum would still be a valid over-estimate, but a needlessly loose one.
+
+Nodes are walked via `nodes_by_travel[current_idx]`, precomputed once per pricing
+call, so no per-label sorting is needed.
 """
 function _passenger_free_assignment_remaining_reward_bound(
     label::PassengerFreeAssignmentPricingLabel,
@@ -49,35 +77,69 @@ function _passenger_free_assignment_remaining_reward_bound(
     opps_by_origin_idx::Vector{Vector{Int}},
     origin_union_mask::Vector{RewardLayerBitset},
     scratch::RewardLayerBitset,
+    node_mask::Vector{RewardLayerBitset},
+    touched_nodes::Vector{Int},
+    nodes_by_travel::Vector{Vector{Int}},
 )::Float64
     past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
     current_idx = node_index[label.current]
-    empty!(scratch)
     activated = label.activated_reward_layers
+    beta = pricing_data.route_regularization_weight
+    layer_weight = pricing_data.layer_weight
 
-    # live origins: age-dependent, so still per-opportunity -- but only theirs
+    empty!(touched_nodes)
+
+    # live origins: age-dependent, so still per-opportunity -- but only theirs.
+    # Booked against the destination that would certify them.
     @inbounds for t in eachindex(label_bs.age_idx)
         origin_idx = Int(label_bs.age_idx[t])
         age = label_bs.age_val[t]
         for i in opps_by_origin_idx[origin_idx]
             issubset(opp_layer_mask[i], activated) && continue
-            age + travel_matrix[current_idx, opp_dest_idx[i]] <= opp_ride_limit[i] + 1e-9 || continue
-            union!(scratch, opp_layer_mask[i])
+            dest_idx = opp_dest_idx[i]
+            age + travel_matrix[current_idx, dest_idx] <= opp_ride_limit[i] + 1e-9 || continue
+            isempty(node_mask[dest_idx]) && push!(touched_nodes, dest_idx)
+            union!(node_mask[dest_idx], opp_layer_mask[i])
         end
     end
 
-    # refreshable origins: condition depends only on the origin, so OR whole masks
+    # refreshable origins: condition depends only on the origin, so OR whole masks.
+    # Booked against the origin, which must be reached before any of its
+    # opportunities can even start.
     if !past_pickup_cutoff
         @inbounds for origin_idx in eachindex(origin_union_mask)
             isempty(origin_union_mask[origin_idx]) && continue
             label.time + travel_matrix[current_idx, origin_idx] <=
                 pricing_data.max_wait_time + 1e-9 || continue
-            union!(scratch, origin_union_mask[origin_idx])
+            isempty(node_mask[origin_idx]) && push!(touched_nodes, origin_idx)
+            union!(node_mask[origin_idx], origin_union_mask[origin_idx])
         end
     end
 
-    setdiff!(scratch, activated)
-    return _sum_layer_weights(pricing_data, scratch)
+    best = 0.0
+    if !isempty(touched_nodes)
+        empty!(scratch)
+        acc_weight = 0.0
+        remaining = length(touched_nodes)
+        @inbounds for x in nodes_by_travel[current_idx]
+            mask = node_mask[x]
+            isempty(mask) && continue
+            for layer in mask
+                (layer in activated || layer in scratch) && continue
+                push!(scratch, layer)
+                acc_weight += layer_weight[layer]
+            end
+            gain = acc_weight - beta * travel_matrix[current_idx, x]
+            gain > best && (best = gain)
+            remaining -= 1
+            remaining == 0 && break
+        end
+    end
+
+    @inbounds for x in touched_nodes
+        empty!(node_mask[x])
+    end
+    return best
 end
 
 function _enumerate_passenger_free_assignment_pricing_labels(
@@ -91,7 +153,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
 )
     frontier = PriorityQueue{Int, Float64}()
     live_labels = Dict{Int, PassengerFreeAssignmentPricingLabel}()
-    dominance_buckets = Dict{Int, SortedDict{PassengerFreeAssignmentLabelOrderKey, PassengerFreeAssignmentLabelId}}()
+    dominance_buckets = Dict{Int, PassengerFreeAssignmentDominanceBucket}()
     best_by_signature = Dict{Any, PassengerFreeAssignmentPricingLabel}()
 
     node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
@@ -117,7 +179,18 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         haskey(pricing_data.travel_cost, (u, v)) &&
             (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
     end
-    label_bitsets = Dict{Int, PassengerFreeAssignmentLabelBitsets}()
+    # Per-label scratch for `_passenger_free_assignment_remaining_reward_bound`:
+    # reward booked against each node, plus the nodes actually touched (so the
+    # masks can be cleared in O(#touched) rather than O(n_nodes) per call).
+    bound_node_mask = [RewardLayerBitset() for _ in 1:n_nodes]
+    bound_touched_nodes = Int[]
+    # Reused across every bucket insertion: indices of the entries the incoming
+    # label dominates, in ascending order.
+    dominated_scratch = Int[]
+    # Nodes in increasing travel distance from each node, precomputed once: the
+    # bound's prefix scan needs this order for every label, and it depends only on
+    # `travel_matrix`.
+    nodes_by_travel = [sortperm(@view travel_matrix[i, :]) for i in 1:n_nodes]
 
     exhausted = true
     t_start = time()
@@ -138,6 +211,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
             label, label_bs, pricing_data, node_index, travel_matrix,
             opp_dest_idx, opp_ride_limit, opp_layer_mask,
             opps_by_origin_idx, origin_union_mask, bound_scratch,
+            bound_node_mask, bound_touched_nodes, nodes_by_travel,
         )
 
     label_priority(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
@@ -152,8 +226,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
         inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
-            bucket, live_labels, label_bitsets, label, label_id, label_bs,
-            pricing_data.bounded_max_stops,
+            bucket, live_labels, label, label_id, label_bs,
+            pricing_data.layer_weight, pricing_data.bounded_max_stops, dominated_scratch,
         )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
@@ -176,14 +250,18 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        label_id = dequeue!(frontier)
+        # `dequeue_pair!` hands back the priority the label was enqueued with, which
+        # is exactly `label_priority(label, label_bs)`. Labels are immutable and their
+        # bitsets never change after insertion, so recomputing it here would redo the
+        # `remaining_reward_bound` scan -- the single most expensive operation in the
+        # search -- for a value we already have.
+        label_id, popped_priority = dequeue_pair!(frontier)
         profile && (t_queue += time_ns() - t0)
         if !haskey(live_labels, label_id)
             stale_pops += 1
             continue
         end
         label = live_labels[label_id]
-        label_bs = label_bitsets[label_id]
 
         if !isempty(label.activated_reward_layers)
             signature = _passenger_free_assignment_layer_signature(label)
@@ -199,7 +277,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
 
         label.route_length >= pricing_data.max_stops && continue
         if use_reduced_cost_pruning
-            label_priority(label, label_bs) >= -reduced_cost_tol && continue
+            popped_priority >= -reduced_cost_tol && continue
         end
 
         t0 = profile ? time_ns() : UInt64(0)
@@ -224,8 +302,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
                 bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
                 t0 = profile ? time_ns() : UInt64(0)
                 inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
-                    bucket, live_labels, label_bitsets, child, child_id, child_bs,
-                    pricing_data.bounded_max_stops,
+                    bucket, live_labels, child, child_id, child_bs,
+                    pricing_data.layer_weight, pricing_data.bounded_max_stops, dominated_scratch,
                 )
                 profile && (t_dominance += time_ns() - t0)
                 labels_removed_by_dominance += removed

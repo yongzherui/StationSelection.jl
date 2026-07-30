@@ -115,6 +115,44 @@ struct PassengerFreeAssignmentLabelBitsets
 end
 
 """
+Everything the dominance scan needs about one live label, stored *in* the
+dominance bucket.
+
+The scan is the hot loop of the whole search -- measured at ~90% of wall time on
+n=15/max_stops=6 -- and it visits every entry of the bucket on every insertion.
+Keeping only a label id here and looking the label and its bitsets up in two side
+`Dict`s cost two hash probes per entry, which dominated the actual dominance
+predicate (mostly short-circuiting scalar comparisons). Inlining them makes the
+scan a straight walk over the sorted container.
+"""
+struct PassengerFreeAssignmentBucketEntry
+    id::PassengerFreeAssignmentLabelId
+    label::PassengerFreeAssignmentPricingLabel
+    bitsets::PassengerFreeAssignmentLabelBitsets
+end
+
+"""
+A dominance bucket: entries kept sorted by
+`(reduced_cost, time, route_length, id)`.
+
+A **`Vector`, not a `SortedDict`**. The scan visits every entry of the bucket on
+every insertion, and buckets run to a few thousand entries, so this loop is the
+hot path of the search. A balanced search tree makes each step a pointer chase
+into unrelated cache lines; measured cost was ~76ns per entry, far more than the
+mostly-short-circuiting comparisons in the dominance predicate could account for.
+A sorted `Vector` walks contiguous memory instead.
+
+The trade is that insertion and eviction become `O(bucket)` memmoves rather than
+`O(log bucket)` tree surgery -- but there is exactly one insertion per label
+against a full-bucket scan, and a memmove of a few thousand small structs runs at
+memory bandwidth, so it is not close.
+"""
+const PassengerFreeAssignmentDominanceBucket = Vector{PassengerFreeAssignmentBucketEntry}
+
+_passenger_free_assignment_entry_order_key(entry::PassengerFreeAssignmentBucketEntry) =
+    (entry.label.reduced_cost, entry.label.time, entry.label.route_length, entry.id)
+
+"""
     PassengerFreeAssignmentRouteColumn(id, route, assignments, tau; metadata)
 
 A priced column: a physical station route paired with the concrete per-passenger

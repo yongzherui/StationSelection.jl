@@ -168,17 +168,29 @@
         @testset "dominates when time/rc/layers/station-ages are all no worse" begin
             a = mklabel(2, 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
             b = mklabel(2, 2.0, Dict(1 => 2.0), RewardLayerBitset(), 0.0)
-            @test StationSelection._dominates_passenger_free_assignment_label(a, b, false)
-            @test !StationSelection._dominates_passenger_free_assignment_label(b, a, false)
+            @test StationSelection._dominates_passenger_free_assignment_label(a, b, pricing_data.layer_weight, false)
+            @test !StationSelection._dominates_passenger_free_assignment_label(b, a, pricing_data.layer_weight, false)
         end
 
-        @testset "a non-subset reward-layer mask breaks dominance" begin
+        @testset "extra activated layers must be paid for out of the reduced-cost gap" begin
+            # a holds {1,2} (worth 10), b holds {1} (worth 4), so a's compensation
+            # w(A_a \ A_b) is the incremental layer 2, worth 10 - 4 = 6. At equal
+            # reduced cost a cannot cover it: a shared suffix that certifies layer 2
+            # pays b 6 and pays a nothing, so b can still overtake a.
             a = mklabel(2, 1.0, Dict{Int, Float64}(), layer_high, -1.0)
             b = mklabel(2, 1.0, Dict{Int, Float64}(), layer_low, -1.0)
-            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, false)
-            # b's mask (low) IS a subset of a's mask (high), so b can be dominated by a
-            # once a is also no worse on time/rc/ages -- here it is.
-            @test StationSelection._dominates_passenger_free_assignment_label(b, a, false)
+            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, pricing_data.layer_weight, false)
+            # b's mask (low) IS a subset of a's mask (high), so its compensation is
+            # zero and b dominates a once it is no worse on time/rc/ages.
+            @test StationSelection._dominates_passenger_free_assignment_label(b, a, pricing_data.layer_weight, false)
+
+            # Give a a reduced-cost advantage that *does* cover the 6, and the same
+            # pair now dominates in the direction the plain subset rule could never
+            # express. 6.5 > 6 clears it; 5.5 < 6 does not.
+            a_cheap = mklabel(2, 1.0, Dict{Int, Float64}(), layer_high, -7.5)
+            @test StationSelection._dominates_passenger_free_assignment_label(a_cheap, b, pricing_data.layer_weight, false)
+            a_not_cheap_enough = mklabel(2, 1.0, Dict{Int, Float64}(), layer_high, -6.5)
+            @test !StationSelection._dominates_passenger_free_assignment_label(a_not_cheap_enough, b, pricing_data.layer_weight, false)
         end
 
         @testset "a live origin the candidate lacks breaks dominance" begin
@@ -186,13 +198,13 @@
             b = mklabel(2, 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
             # a has no live origins at all, b still has station 1 live -- a must not
             # claim to dominate b, since b retains an option a has already lost.
-            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, false)
+            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, pricing_data.layer_weight, false)
         end
 
         @testset "worse station age breaks dominance" begin
             a = mklabel(2, 1.0, Dict(1 => 5.0), RewardLayerBitset(), -1.0)
             b = mklabel(2, 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
-            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, false)
+            @test !StationSelection._dominates_passenger_free_assignment_label(a, b, pricing_data.layer_weight, false)
         end
 
         @testset "plain and bitset dominance implementations agree (randomized)" begin
@@ -200,6 +212,9 @@
             nodes = [1, 2, 3, 4]
             node_index = Dict(n => i for (i, n) in enumerate(nodes))
             n_nodes = length(nodes)
+            # Labels below activate layer ids drawn from 1:5; uneven weights make the
+            # compensation term discriminate rather than collapse to a bit count.
+            layer_weight = [1.0, 2.5, 0.5, 4.0, 3.0]
 
             function rand_label(rng, current)
                 n_ages = rand(rng, 0:3)
@@ -222,8 +237,8 @@
                 a_bs = StationSelection._make_passenger_free_assignment_label_bitsets(a, node_index, n_nodes)
                 b_bs = StationSelection._make_passenger_free_assignment_label_bitsets(b, node_index, n_nodes)
                 for bounded in (true, false)
-                    plain = StationSelection._dominates_passenger_free_assignment_label(a, b, bounded)
-                    bitset = StationSelection._dominates_passenger_free_assignment_label(a, b, a_bs, b_bs, bounded)
+                    plain = StationSelection._dominates_passenger_free_assignment_label(a, b, layer_weight, bounded)
+                    bitset = StationSelection._dominates_passenger_free_assignment_label(a, b, a_bs, b_bs, layer_weight, bounded)
                     @test plain == bitset
                 end
             end
@@ -287,27 +302,32 @@
             end
 
             label_bs = StationSelection._make_passenger_free_assignment_label_bitsets(label, node_index, n_nodes)
+            nodes_by_travel = [sortperm(travel_matrix[i, :]) for i in 1:n_nodes]
             bound = StationSelection._passenger_free_assignment_remaining_reward_bound(
                 label, label_bs, pricing_data, node_index, travel_matrix,
                 opp_dest_idx, opp_ride_limit, opp_layer_mask,
                 opps_by_origin_idx, origin_union_mask, RewardLayerBitset(),
+                [RewardLayerBitset() for _ in 1:n_nodes], Int[], nodes_by_travel,
             )
 
-            base_weight = StationSelection._sum_layer_weights(pricing_data, label.activated_reward_layers)
-            best_additional = Ref(0.0)
+            # The bound is on *net* gain (reward minus the route-regularization cost
+            # of the travel that collects it), so the invariant it has to satisfy is
+            # exactly the one the search relies on: `label.rc - bound` never exceeds
+            # the reduced cost of any descendant. Equivalently, `bound` is at least
+            # the best reduction in reduced cost any completion achieves.
+            best_gain = Ref(0.0)
             function dfs!(l, depth)
                 depth <= 0 && return
                 for nd in nodes
                     haskey(travel, (l.current, nd)) || continue
                     child = only(extend_passenger_free_assignment_pricing_label(l, nd, pricing_data))
-                    extra = StationSelection._sum_layer_weights(pricing_data, child.activated_reward_layers) - base_weight
-                    best_additional[] = max(best_additional[], extra)
+                    best_gain[] = max(best_gain[], label.reduced_cost - child.reduced_cost)
                     dfs!(child, depth - 1)
                 end
             end
             dfs!(label, 3)
 
-            @test bound >= best_additional[] - 1e-9
+            @test bound >= best_gain[] - 1e-9
             checked += 1
         end
         @test checked > 0
