@@ -38,14 +38,36 @@ abstract type AbstractAggregateODAssignmentPolicy end
 
 struct FreeAggregateODAssignmentPolicy <: AbstractAggregateODAssignmentPolicy end
 
+"""
+    NearestOpenAggregateODAssignmentPolicy(feasibility_cut_style=:big_m_nearest)
+
+`feasibility_cut_style ∈ (:big_m_nearest, :endpoint_chain, :pair_chain, :direct_ly)`.
+
+`:big_m_nearest`/`:endpoint_chain` build a `z` chain per physical endpoint and link it to an
+assignment variable `x` (see `_add_nearest_open_endpoint_linked_x!`). `:pair_chain` ranks
+station pairs jointly with no `z`, but keeps `x`. `:direct_ly` has **no `x`** — station
+pairs are ranked jointly (like `:pair_chain`) and linked directly to `y`/`θ` via a real
+per-request `γ`-chain (`add_gamma_chain_nearest_open_coverage!`), modeled on
+`StationARC.jl`'s `nearest_open_shared.jl`/`build_nearest_open_master_lp` γ-chain construction
+— note `StationARC.jl`'s own ARC-LY (free assignment, no nearest-open) and its nearest-open
+γ-chain models (which keep `x`, linked to `γ`) are two separate, never-combined families
+there; `:direct_ly` synthesizes ARC-LY's elimination style (fold `x`'s defining equality
+directly into the route-coverage row) with the γ-chain's actual tightness (kept as a real
+variable — an earlier, fully-eliminated attempt with no `γ`/`z` at all had a provably loose,
+in practice `lp_bound=0`-collapsing LP relaxation once `z`'s conservation property was gone).
+`γ` carries walking cost cleanly via its own differences, so `walk_cost_weight` works
+normally here. Does not currently support `allow_walk_only`.
+"""
 struct NearestOpenAggregateODAssignmentPolicy <: AbstractAggregateODAssignmentPolicy
     feasibility_cut_style::Symbol
 
     function NearestOpenAggregateODAssignmentPolicy(
         feasibility_cut_style::Symbol=:big_m_nearest,
     )
-        feasibility_cut_style in (:big_m_nearest, :endpoint_chain, :pair_chain) ||
-            throw(ArgumentError("feasibility_cut_style must be :big_m_nearest, :endpoint_chain, or :pair_chain"))
+        feasibility_cut_style in (:big_m_nearest, :endpoint_chain, :pair_chain, :direct_ly) ||
+            throw(ArgumentError(
+                "feasibility_cut_style must be :big_m_nearest, :endpoint_chain, :pair_chain, or :direct_ly"
+            ))
         new(feasibility_cut_style)
     end
 end
@@ -77,6 +99,11 @@ Column-generation-ready restricted master problem.
   including the NearestOpen Benders paths. `NearestOpenAggregateODAssignmentPolicy(:pair_chain)`
   still rejects walk-only assignments because it ranks station pairs jointly
   and has no station-free endpoint-collision representation.
+- `use_station_simple`: if true, price columns with the elementary-route
+  (station-simple) label search instead of the revisit-tolerant station-age
+  search. Station-simple routes never revisit a station, so an OD reward
+  settles the first (and only) time its destination is visited; this trades
+  revisit tolerance for a much smaller, exact-match dominance signature.
 """
 struct AggregateODRouteModel <: AbstractODModel
     l::Int
@@ -96,6 +123,7 @@ struct AggregateODRouteModel <: AbstractODModel
     relax_integrality::Bool
     assignment_policy::AbstractAggregateODAssignmentPolicy
     allow_walk_only::Bool
+    use_station_simple::Bool
 
     function AggregateODRouteModel(
             l::Int;
@@ -115,6 +143,7 @@ struct AggregateODRouteModel <: AbstractODModel
             relax_integrality::Bool=false,
             assignment_policy::AbstractAggregateODAssignmentPolicy=FreeAggregateODAssignmentPolicy(),
             allow_walk_only::Bool=false,
+            use_station_simple::Bool=false,
         )
         l > 0 || throw(ArgumentError("l must be positive"))
         route_regularization_weight >= 0 ||
@@ -160,6 +189,7 @@ struct AggregateODRouteModel <: AbstractODModel
             relax_integrality,
             assignment_policy,
             allow_walk_only,
+            use_station_simple,
         )
     end
 end

@@ -58,6 +58,49 @@ function _selected_aggregate_od_route_column_ids(result::OptResult)::Vector{Int}
     return sort!(collect(ids))
 end
 
+"""
+Dispatches to whichever pricer `use_station_simple` selects. The station-simple
+pricer has no `max_visits_per_node` concept (elementary routes never revisit a
+station at all), so that kwarg is only forwarded to the revisit-tolerant pricer.
+"""
+function _aggregate_od_route_price_columns(
+    use_station_simple::Bool,
+    pricing_data::AggregateODRoutePricingData,
+    existing_columns::Vector{AggregateODRouteColumn},
+    pricing_duals::AggregateODRoutePricingDuals;
+    next_column_id::Int,
+    reduced_cost_tol::Float64,
+    max_new_columns::Int,
+    n_candidates::Int,
+    time_limit::Float64,
+    max_visits_per_node::Int=pricing_data.max_visits_per_node,
+    profile::Bool=false,
+)
+    use_station_simple && return aggregate_od_route_pricing_by_station_simple_label_setting(
+        pricing_data,
+        existing_columns,
+        pricing_duals;
+        next_column_id=next_column_id,
+        reduced_cost_tol=reduced_cost_tol,
+        max_new_columns=max_new_columns,
+        n_candidates=n_candidates,
+        time_limit=time_limit,
+        profile=profile,
+    )
+    return aggregate_od_route_pricing_by_label_setting(
+        pricing_data,
+        existing_columns,
+        pricing_duals;
+        next_column_id=next_column_id,
+        reduced_cost_tol=reduced_cost_tol,
+        max_new_columns=max_new_columns,
+        n_candidates=n_candidates,
+        time_limit=time_limit,
+        max_visits_per_node=max_visits_per_node,
+        profile=profile,
+    )
+end
+
 function generate_aggregate_od_route_columns(
     master_state::BuildResult,
     duals::AggregateODRouteCoverageDuals,
@@ -79,6 +122,7 @@ function generate_aggregate_od_route_columns(
         pricing_time_limit_sec=Float64(m[:aggregate_od_route_pricing_time_limit_sec]),
         reduced_cost_tol=Float64(m[:aggregate_od_route_reduced_cost_tol]),
         relax_integrality=Bool(m[:aggregate_od_route_relax_integrality]),
+        use_station_simple=Bool(m[:aggregate_od_route_use_station_simple]),
     )
 
     next_column_id = isempty(mapping.column_ids) ? 1 : maximum(mapping.column_ids) + 1
@@ -86,7 +130,8 @@ function generate_aggregate_od_route_columns(
     for s in 1:n_scenarios(data)
         pricing_duals = _scenario_pricing_duals(duals, s)
         pricing_data = create_aggregate_od_route_pricing_data(model, data, mapping, s, pricing_duals)
-        new_columns, _exhausted, _stats = aggregate_od_route_pricing_by_label_setting(
+        new_columns, _exhausted, _stats = _aggregate_od_route_price_columns(
+            model.use_station_simple,
             pricing_data,
             mapping.columns,
             pricing_duals;
@@ -132,6 +177,7 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
+        use_station_simple          = model.use_station_simple,
     )
 end
 
@@ -156,6 +202,7 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         relax_integrality           = false,
         assignment_policy           = model.assignment_policy,
         allow_walk_only             = model.allow_walk_only,
+        use_station_simple          = model.use_station_simple,
     )
 end
 
@@ -230,6 +277,7 @@ function run_aggregate_od_route_column_generation(
     pricing_time_limit_sec::Float64=model.pricing_time_limit_sec,
     pricing_initial_sec::Float64=pricing_time_limit_sec,
     pricing_ramp_factor::Float64=1.0,
+    use_station_simple::Bool=model.use_station_simple,
     profile_pricing::Bool=false,
     ip_time_limit_sec::Float64=3600.0,
     mip_gap::Union{Float64, Nothing}=nothing,
@@ -333,7 +381,8 @@ function run_aggregate_od_route_column_generation(
                 max_visits_per_node,
                 pricing_data.bounded_max_stops,
             )
-            new_columns_s, exhausted_s, stats_s = aggregate_od_route_pricing_by_label_setting(
+            new_columns_s, exhausted_s, stats_s = _aggregate_od_route_price_columns(
+                use_station_simple,
                 pricing_data,
                 mapping.columns,
                 pricing_duals;

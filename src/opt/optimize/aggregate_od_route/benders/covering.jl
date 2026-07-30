@@ -58,6 +58,7 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
+        use_station_simple=model.use_station_simple,
     )
 end
 
@@ -84,6 +85,7 @@ function _copy_with_initial_columns(
         relax_integrality=relax_integrality,
         assignment_policy=model.assignment_policy,
         allow_walk_only=model.allow_walk_only,
+        use_station_simple=model.use_station_simple,
     )
 end
 
@@ -296,6 +298,22 @@ end
 
 function _open_station_values(y_values)::Vector{Int}
     return sort!([j for j in eachindex(y_values) if y_values[j] > 0.5])
+end
+
+"""
+    _benders_y_hat_signature(mapping, open_stations) -> String
+
+Deterministic string identity for a master-solved `y_hat`, built from real
+station ids (not array indices, which are only stable within one `mapping`)
+so it can be compared across iterations and read directly from the iteration
+log. Used to tell whether the Benders outer loop's lower-bound master is
+revisiting the same first-stage candidate iteration after iteration (theta
+alone tightening around a fixed y) or actively jumping between distinct
+candidates as cuts accumulate -- see `_BENDERS_ITERATION_LOG_BASE_HEADERS`'s
+`y_hat_changed`/`y_hat_repeat_streak` columns.
+"""
+function _benders_y_hat_signature(mapping::AggregateODRouteMap, open_stations::Vector{Int})::String
+    return join(sort([mapping.array_idx_to_station_id[i] for i in open_stations]), ",")
 end
 
 """
@@ -584,6 +602,7 @@ function _route_covering_problem_from_assignments(
         pricing_time_limit_sec=base.pricing_time_limit_sec,
         reduced_cost_tol=base.reduced_cost_tol,
         allow_walk_only=base.allow_walk_only,
+        use_station_simple=base.use_station_simple,
     )
 end
 
@@ -751,7 +770,8 @@ end
 function _finalize_benders_result(
     final_result::OptResult,
     metadata::Dict{String, Any},
-    solver::BendersSolver,
+    solver::BendersSolver;
+    phase1_guided::Bool=false,
 )
     gap = get(metadata, "benders_outer_gap_relative", nothing)
     lower_bound = get(metadata, "benders_lower_bound", nothing)
@@ -759,7 +779,15 @@ function _finalize_benders_result(
     bound_inverted = lower_bound isa Number && incumbent isa Number &&
         isfinite(lower_bound) && isfinite(incumbent) &&
         lower_bound > incumbent + solver.optimality_tol * max(1.0, abs(incumbent))
-    if bound_inverted
+    # Under `direct_enumeration_guide`'s phase 1, the master's own objective/bound
+    # deliberately double-counts routing cost (both `theta` and the exact
+    # `theta_direct` term are costed simultaneously -- see `direct_enumeration_guide.jl`),
+    # so the master's reported bound is *expected* to exceed the true incumbent whenever
+    # `theta`'s cut floor is nonzero. That is by design, not a cut/bound defect, so these
+    # two warnings (both driven by the same inflated bound) are suppressed for phase 1 --
+    # phase 1's result is never the certified answer (only phase 2's, run without
+    # `phase1_guided`, is), and its bound-vs-incumbent relationship isn't meaningful.
+    if bound_inverted && !phase1_guided
         @warn(
             "Benders master lower bound exceeds the feasible incumbent; the cut/bound calculation is inconsistent",
             decomposition=get(metadata, "benders_decomposition", "unknown"),
@@ -768,7 +796,7 @@ function _finalize_benders_result(
             bound_violation=lower_bound - incumbent,
         )
     end
-    if gap isa Number && isfinite(gap) && gap > solver.outer_gap_warning_tol
+    if gap isa Number && isfinite(gap) && gap > solver.outer_gap_warning_tol && !phase1_guided
         @warn(
             "Benders returned its best feasible incumbent, but the outer optimality gap exceeds the expected tolerance",
             decomposition=get(metadata, "benders_decomposition", "unknown"),
@@ -807,6 +835,9 @@ const _BENDERS_ITERATION_LOG_BASE_HEADERS = [
     :selected_assignment_count,
     :generated_column_pool_size,
     :inner_cg_iterations,
+    :y_hat_signature,
+    :y_hat_changed,
+    :y_hat_repeat_streak,
 ]
 
 function _flush_benders_iteration_log!(

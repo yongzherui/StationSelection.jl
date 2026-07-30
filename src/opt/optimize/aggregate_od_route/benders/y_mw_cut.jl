@@ -822,7 +822,7 @@ function _add_aggregate_od_route_benders_y_optimality_cut!(
         return (
             mode=:standard, mw_status=:not_attempted, Q_bar=v_hat, phi_core=NaN,
             phi_core_baseline=NaN, completion_runtime_sec=0.0, n_routes=0,
-            n_cg_iterations=0, fallback=false,
+            n_cg_iterations=0, fallback=false, cut_constant=alpha, coeffs=rho,
         )
     end
 
@@ -856,5 +856,6 @@ function _add_aggregate_od_route_benders_y_optimality_cut!(
         phi_core_baseline=isnothing(mw_result.phi_core_baseline) ? NaN : mw_result.phi_core_baseline,
         completion_runtime_sec=mw_result.completion_runtime_sec, n_routes=mw_result.n_routes,
         n_cg_iterations=mw_result.n_cg_iterations, fallback=false,
+        cut_constant=cut_constant, coeffs=beta,
     )
 end

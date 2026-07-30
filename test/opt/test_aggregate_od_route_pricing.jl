@@ -443,6 +443,7 @@
         build_result.model[:aggregate_od_route_pricing_time_limit_sec] = model.pricing_time_limit_sec
         build_result.model[:aggregate_od_route_reduced_cost_tol] = model.reduced_cost_tol
         build_result.model[:aggregate_od_route_relax_integrality] = true
+        build_result.model[:aggregate_od_route_use_station_simple] = model.use_station_simple
 
         columns = generate_aggregate_od_route_columns(build_result, duals, data)
 
@@ -987,5 +988,209 @@
         )
         @test route_direct_result.termination_status == MOI.OPTIMAL
         @test route_direct_result.metadata["solve_method"] == "route_enumeration"
+    end
+
+    @testset "station-simple label-setting pricing" begin
+        @testset "initial labels only open positive-dual origins" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (2, 4)])
+            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
+            labels = StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals)
+
+            label_1 = only(filter(label -> label.current == 1, labels))
+            label_2 = only(filter(label -> label.current == 2, labels))
+            @test label_1.live_origin_age == Dict(1 => 0.0)
+            @test isempty(label_2.live_origin_age)
+            @test label_1.visited == Set([1])
+            @test isempty(label_1.served_pairs)
+            @test label_1.reduced_cost == 0.0
+        end
+
+        @testset "extension cannot revisit a station" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3)])
+            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
+            label = only(
+                filter(
+                    label -> label.current == 1,
+                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                ),
+            )
+            @test_throws ArgumentError StationSelection._extend_aggregate_od_route_station_simple_label(
+                label, 1, pricing_data, duals,
+            )
+        end
+
+        @testset "extension certifies destination visits and updates reduced cost" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (2, 4)])
+            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
+            initial_1 = only(
+                filter(
+                    label -> label.current == 1,
+                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                ),
+            )
+            child_3 = StationSelection._extend_aggregate_od_route_station_simple_label(initial_1, 3, pricing_data, duals)
+
+            @test child_3.current == 3
+            @test child_3.route == [1, 3]
+            @test child_3.visited == Set([1, 3])
+            @test child_3.time == 2.0
+            @test child_3.tau == 2.0
+            @test child_3.served_pairs == Set([(1, 3)])
+            @test child_3.reduced_cost == -8.0
+        end
+
+        @testset "expired opportunities are pruned before certification" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3)], detour_factor=1.0)
+            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
+            initial_1 = only(
+                filter(
+                    label -> label.current == 1,
+                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                ),
+            )
+            expired_child = StationSelection._extend_aggregate_od_route_station_simple_label(initial_1, 4, pricing_data, duals)
+
+            @test (1, 3) ∉ expired_child.served_pairs
+            @test !haskey(expired_child.live_origin_age, 1)
+        end
+
+        @testset "dominance requires an exact visited match and live-origin domination" begin
+            same_visited_better = AggregateODRouteStationSimpleLabel(
+                2, [1, 2], Set([1, 2]), 1.0, Dict(1 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
+            )
+            same_visited_worse = AggregateODRouteStationSimpleLabel(
+                2, [1, 2], Set([1, 2]), 2.0, Dict(1 => 2.0), Set{Tuple{Int, Int}}(), 1.0, -1.0,
+            )
+            different_visited = AggregateODRouteStationSimpleLabel(
+                2, [3, 2], Set([3, 2]), 1.0, Dict(3 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
+            )
+            different_current = AggregateODRouteStationSimpleLabel(
+                3, [1, 3], Set([1, 3]), 1.0, Dict(1 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
+            )
+
+            node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
+            better_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_better, node_index, 4)
+            worse_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_worse, node_index, 4)
+            different_visited_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_visited, node_index, 4)
+            different_current_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_current, node_index, 4)
+
+            @test StationSelection._dominates_aggregate_od_route_station_simple_label(
+                same_visited_better, same_visited_worse, better_bs, worse_bs,
+            )
+            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+                same_visited_worse, same_visited_better, worse_bs, better_bs,
+            )
+            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+                same_visited_better, different_visited, better_bs, different_visited_bs,
+            )
+            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+                same_visited_better, different_current, better_bs, different_current_bs,
+            )
+        end
+
+        @testset "candidate generation never offers a visited station" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], detour_factor=3.0, max_wait_time=10.0)
+            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (3, 4) => 10.0))
+            label = AggregateODRouteStationSimpleLabel(
+                1, [1], Set([1]), 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0,
+            )
+            candidates = StationSelection._aggregate_od_route_station_simple_candidate_next_nodes(label, pricing_data, duals)
+            @test 1 ∉ candidates
+            @test 3 in candidates
+        end
+
+        @testset "pricing returns improving columns whose routes never repeat a station" begin
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4), (1, 4)])
+            existing = AggregateODRouteColumn[
+                AggregateODRouteColumn(1, [(1, 3)], 2.0),
+                AggregateODRouteColumn(2, [(3, 4)], 1.0),
+                AggregateODRouteColumn(3, [(1, 4)], 3.0),
+            ]
+            duals = AggregateODRoutePricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
+
+            columns, exhausted, stats = aggregate_od_route_pricing_by_station_simple_label_setting(
+                pricing_data,
+                existing,
+                duals;
+                next_column_id=10,
+                max_new_columns=5,
+                n_candidates=5,
+                time_limit=5.0,
+            )
+
+            @test exhausted
+            @test stats.labels_generated > 0
+            @test !isempty(columns)
+            @test any(column -> Set(column.od_pairs) == Set([(1, 3), (3, 4), (1, 4)]), columns)
+            @test all(columns) do column
+                route = column.metadata["route"]
+                length(unique(route)) == length(route)
+            end
+        end
+
+        @testset "station-simple pricing wires through the CG loop via use_station_simple" begin
+            gurobi_available = try
+                using Gurobi
+                true
+            catch
+                false
+            end
+            if !gurobi_available
+                @warn "Gurobi not available, skipping use_station_simple CG wiring test"
+                @test true
+                return
+            end
+
+            stations = DataFrame(id=[1, 2, 3, 4], lon=[0.0, 1.0, 2.0, 3.0], lat=[0.0, 0.0, 0.0, 0.0])
+            requests = DataFrame(
+                id=[1],
+                start_station_id=[1],
+                end_station_id=[4],
+                request_time=[DateTime(2024, 1, 1, 8)],
+            )
+            walking_costs = Dict{Tuple{Int, Int}, Float64}()
+            routing_costs = Dict{Tuple{Int, Int}, Float64}()
+            for i in 1:4, j in 1:4
+                walking_costs[(i, j)] = i == j ? 0.0 : 100.0
+                routing_costs[(i, j)] = abs(i - j) + 1.0
+            end
+            data = create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
+            model = AggregateODRouteModel(
+                4;
+                max_walking_distance=1000.0,
+                route_regularization_weight=1.0,
+                repositioning_time=0.0,
+                max_stops=4,
+                max_wait_time=100.0,
+                max_new_columns=5,
+                n_candidates=5,
+                use_station_simple=true,
+            )
+            @test model.use_station_simple
+
+            cg_result = run_aggregate_od_route_column_generation(
+                model,
+                data;
+                verbose=false,
+                max_cg_iters=2,
+                pricing_time_limit_sec=5.0,
+            )
+
+            @test cg_result isa AggregateODRouteColumnGenerationResult
+            @test cg_result.final_result.termination_status == MOI.OPTIMAL
+            @test !isempty(cg_result.generated_columns)
+            # `generated_columns` is the full restricted-master pool at the end of CG (see
+            # `run_aggregate_od_route_column_generation`'s return, `copy(mapping.columns)`), so it
+            # also holds the initial singleton seed columns (metadata `"initialization" =>
+            # "singleton"`, no `"route"` key) alongside anything actually priced. This single-request
+            # toy instance isn't guaranteed to make a non-direct route pay off for either pricer
+            # (the dedicated pricer-level test above already proves station-simple routes are
+            # elementary); this just checks whatever the pool ends up with stays elementary.
+            @test all(cg_result.generated_columns) do column
+                haskey(column.metadata, "route") || return true
+                route = column.metadata["route"]
+                length(unique(route)) == length(route)
+            end
+        end
     end
 end

@@ -19,6 +19,8 @@ function run_opt(
     solver::BendersSolver,
 )
     _warn_if_uncertified_standard_cut(solver)
+    solver.direct_enumeration_guide &&
+        return _run_direct_enumeration_guided_benders(instance, formulation, solver)
     if formulation.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
         solver.decomposition isa BendersY &&
             return _run_aggregate_od_route_nearest_open_benders_y(instance, formulation, solver)

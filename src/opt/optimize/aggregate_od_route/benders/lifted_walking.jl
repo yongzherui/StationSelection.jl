@@ -26,7 +26,9 @@ Two pieces:
   the existing `z_hat` extraction is unaffected.
 """
 
-function _unit_weighted_routing_model(model::AggregateODRouteModel)::AggregateODRouteModel
+function _unit_weighted_routing_model(
+    model::AggregateODRouteModel; max_stops::Union{Int, Nothing}=model.max_stops,
+)::AggregateODRouteModel
     return AggregateODRouteModel(
         model.l;
         route_regularization_weight=1.0,
@@ -35,7 +37,7 @@ function _unit_weighted_routing_model(model::AggregateODRouteModel)::AggregateOD
         max_walking_distance=model.max_walking_distance,
         max_wait_time=model.max_wait_time,
         detour_factor=model.detour_factor,
-        max_stops=model.max_stops,
+        max_stops=max_stops,
         max_visits_per_node=model.max_visits_per_node,
         max_new_columns=model.max_new_columns,
         n_candidates=model.n_candidates,
@@ -49,16 +51,20 @@ function _unit_weighted_routing_model(model::AggregateODRouteModel)::AggregateOD
 end
 
 """
-    _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs) -> AffExpr
+    _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs) -> (AffExpr, Dict)
 
 Builds, once in the master, the same per-request `x`/chain-selector structure
 `_build_nearest_open_y_subproblem_lp`/`_build_yz_route_subproblem_lp` build fresh every
-iteration (`_add_nearest_open_endpoint_linked_x!`), and returns
+iteration (`_add_nearest_open_endpoint_linked_x!`), and returns a tuple
+`(walking_cost, x_by_pair_full)`: `walking_cost` is
 `sum(_assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight) * x[request, pair])`
-as a `JuMP.AffExpr` for the caller to fold into the master's objective. Requires
-`feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` -- `:pair_chain` ranks station pairs
-jointly with no addressable per-side chain to reuse (mirrors the existing restriction that
-non-`:standard` `cut_derivation` already requires `:big_m_nearest`).
+as a `JuMP.AffExpr` for the caller to fold into the master's objective; `x_by_pair_full` is
+every request's `x` variable, keyed `(request, pair)` (the same shape used by
+`_build_nearest_open_y_subproblem_lp`'s own `x` dict), for callers that need to reference the
+master's exact assignment structure directly (e.g. `direct_enumeration_guide.jl`'s route-covering
+linking constraints). Requires `feasibility_cut_style in (:big_m_nearest, :endpoint_chain)` --
+`:pair_chain` ranks station pairs jointly with no addressable per-side chain to reuse (mirrors the
+existing restriction that non-`:standard` `cut_derivation` already requires `:big_m_nearest`).
 """
 function _add_nearest_open_master_walking_cost!(
     master::Model,
@@ -67,12 +73,13 @@ function _add_nearest_open_master_walking_cost!(
     y,
     requests::Vector{NTuple{3, Int}},
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
-)::AffExpr
+)::Tuple{AffExpr, Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}}
     model.assignment_policy.feasibility_cut_style == :pair_chain && throw(ArgumentError(
         "lifted_walking_objective has no addressable per-side chain to reuse under " *
         ":pair_chain -- use :big_m_nearest or :endpoint_chain"
     ))
     walking_cost = AffExpr(0.0)
+    x_by_pair_full = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
         _s, o, d = request
         pairs = feasible_pairs[request]
@@ -89,9 +96,10 @@ function _add_nearest_open_master_walking_cost!(
                 _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight),
                 x_by_pair[pair],
             )
+            x_by_pair_full[(request, pair)] = x_by_pair[pair]
         end
     end
-    return walking_cost
+    return walking_cost, x_by_pair_full
 end
 
 """

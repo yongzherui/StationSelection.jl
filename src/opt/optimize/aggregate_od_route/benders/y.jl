@@ -66,7 +66,7 @@ function _build_nearest_open_y_subproblem_lp(
 
     lambda = lambda_binary ?
         @variable(m, [1:length(columns), 1:n_scenarios(data)], Bin) :
-        @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
+        @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
     cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
     for request in requests
         s, _o, _d = request
@@ -344,7 +344,10 @@ end
 function _run_aggregate_od_route_nearest_open_benders_y(
     data::StationSelectionData,
     model::AggregateODRouteModel,
-    solver::BendersSolver,
+    solver::BendersSolver;
+    direct_enumeration_pool::Union{Nothing, Vector{AggregateODRouteColumn}}=nothing,
+    seed_cuts::Vector{<:NamedTuple}=NamedTuple[],
+    harvested_cuts::Union{Nothing, Vector{<:NamedTuple}}=nothing,
 )
     cfg = solver.config
     optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
@@ -397,9 +400,17 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     end
+    isempty(seed_cuts) || _seed_y_cuts!(master, y, theta, seed_cuts)
+    direct_cost_expr = AffExpr(0.0)
     if solver.lifted_walking_objective
-        walking_cost_expr = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
-        @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+        walking_cost_expr, x_by_pair_full = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
+        if !isnothing(direct_enumeration_pool)
+            direct_cost_expr = _add_direct_enumeration_guide!(
+                master, data, model, requests, feasible_pairs, x_by_pair_full, direct_enumeration_pool;
+                relax_integrality=solver.direct_enumeration_relax_integrality,
+            )
+        end
+        @objective(master, Min, current_beta * (sum(theta[cut_id] for cut_id in cut_ids) + direct_cost_expr) + walking_cost_expr)
     else
         @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
     end
@@ -423,6 +434,8 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         copy(model.initial_columns)
     total_reprice_columns_found = 0
     total_reprice_rounds = 0
+    previous_y_hat_signature = nothing
+    y_hat_repeat_streak = 0
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -440,6 +453,18 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         lower_bound = objective_bound(master)
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
+
+        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
+        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
+        if y_hat_changed && !isnothing(previous_y_hat_signature)
+            println(
+                "  [BendersY iteration $iteration] master lower-bound y changed (lower_bound=",
+                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+            )
+            flush(stdout)
+        end
+        previous_y_hat_signature = y_hat_signature
 
         assignments, infeasible = _fixed_assignments_from_y(
             data, requests, feasible_pairs, y_hat;
@@ -623,6 +648,10 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 cut_diag.fallback && (mw_fallback_count += 1)
                 mw_completion_seconds += cut_diag.completion_runtime_sec
                 isnan(cut_diag.phi_core) || (mw_last_phi_core = cut_diag.phi_core)
+                isnothing(harvested_cuts) || push!(
+                    harvested_cuts,
+                    (cut_id=cut_id, cut_constant=cut_diag.cut_constant, coeffs=cut_diag.coeffs),
+                )
             end
         end
         total_reprice_columns_found += reprice_columns_found
@@ -654,6 +683,9 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             mw_completion_seconds=mw_completion_seconds,
             mw_phi_core=mw_last_phi_core,
             route_regularization_weight=current_beta,
+            y_hat_signature=y_hat_signature,
+            y_hat_changed=y_hat_changed,
+            y_hat_repeat_streak=y_hat_repeat_streak,
         ))
         _flush_benders_iteration_log!(
             solver, benders_rows;
@@ -666,7 +698,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
         if cuts_added_this_iteration == 0 && stage_idx < length(beta_schedule)
             stage_idx += 1
             current_beta = beta_schedule[stage_idx]
-            @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+            @objective(master, Min, current_beta * (sum(theta[cut_id] for cut_id in cut_ids) + direct_cost_expr) + walking_cost_expr)
             # An incumbent optimal for the previous stage's beta is not comparable once beta
             # changes (same y_hat, different weighted total) -- only the master (with its
             # accumulated cuts) and shared_pool carry forward into the next stage.
@@ -712,7 +744,7 @@ function _run_aggregate_od_route_nearest_open_benders_y(
                 "generated_column_pool_size" => length(shared_pool),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
                 "cut_derivation" => string(solver.cut_derivation),
-            ), solver)
+            ), solver; phase1_guided=!isnothing(direct_enumeration_pool))
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersY did not find a feasible incumbent"))

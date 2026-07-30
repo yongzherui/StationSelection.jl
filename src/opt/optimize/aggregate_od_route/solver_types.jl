@@ -7,6 +7,8 @@ export AbstractBendersCutMode
 export SingleCut
 export MultiCut
 export BendersSolver
+export BranchAndBendersSolver
+export BranchBendersCut
 export HeuristicEnumerationSolver
 
 abstract type AbstractBendersDecomposition end
@@ -184,6 +186,80 @@ Motivation: when walking cost dominates the objective, low-`β` stages converge 
 iterations and the cuts they find remain useful once `β` is ramped up, so this can reach the same
 `β_T` result with less total work than solving at `β_T` directly. Defaults to `nothing`
 (single implicit stage at `model.route_regularization_weight`, i.e. today's behavior).
+
+# `lifted_routing_lower_bound`
+
+Only supported for `decomposition isa BendersYZ` with `cut_mode isa MultiCut` (checked here). When
+`true`, a multicommodity arc-flow relaxation of the routing subproblem is built once in the
+master (reusing the same `zp`/`zd` nearest-open endpoint selectors the master already carries --
+see `benders/lifted_routing_lower_bound.jl` for the full derivation and validity argument), added
+directly as an objective term (`route_lb_expr[s]`) rather than a floor constraint on `theta`.
+`theta[s]` then represents the nonnegative residual. The routing subproblem and completion LP
+remain in full-recourse units; every full cut `alpha + b'z` is installed as
+`theta[s] >= alpha + b'z - route_lb_expr[s]`, subtracting the live expression rather than an
+incumbent snapshot. Thus `theta[s] + route_lb_expr[s]` globally bounds the full routing cut.
+Works identically for all three `cut_derivation` values. `route_lb_expr` itself can never
+cause an unsound result either way: it is a provably valid lower bound (it drops vehicle capacity,
+exact wait/detour timing, and route/vehicle identity -- all valid relaxation directions).
+Composes with `lifted_walking_objective` (both independently togglable) -- when both are `true`,
+`route_lb_expr` is computed in `subproblem_model`'s (unit-weighted) units and scaled by
+`current_beta` in the objective, matching how `theta` is already denominated and scaled under
+`lifted_walking_objective=true`. Defaults to `false`, reproducing prior behavior exactly.
+
+# `direct_enumeration_guide`
+
+Only supported for `decomposition isa Union{BendersY, BendersYZ}` with
+`lifted_walking_objective=true` (checked here). When `true`, `run_opt` performs two
+phases in one call instead of a single Benders solve:
+
+- **Phase 1**: the usual `lifted_walking_objective=true` master (`y`, `theta`, and the
+  exact nearest-open `x`/walking-cost structure) is additionally augmented, once, with
+  the *complete* enumerated route universe (`enumerate_aggregate_od_route_columns`, the
+  same exhaustive DFS `DirectSolver` uses) as a second, exact routing-cost term
+  (`theta_direct` binaries plus route-covering constraints against the master's own
+  `x`) added to the objective alongside `theta`. This makes the master's own `y_hat`
+  choices exact-cost-guided rather than only cut-bounded, so the standard outer Benders
+  loop run against this augmented master should need fewer iterations to converge, and
+  the cuts it derives along the way are recorded (harvested) rather than only being
+  used to prove convergence.
+- **Phase 2**: a fresh master, structurally identical to today's plain
+  `lifted_walking_objective=true` master (no `theta_direct`, no enumerated pool), is
+  built and seeded with every cut harvested in phase 1 before its own outer loop runs.
+  This master is cheap to re-solve (no enumerated-route binaries), and because the
+  seeded cuts already characterize the optimum found in phase 1, it should converge in
+  very few (ideally 0-1) additional iterations.
+
+`run_opt`'s returned `OptResult` is phase 2's (the certified, non-heuristic-guided
+result); phase 1's objective/iteration/cut-count are recorded under `phase1_*` keys in
+its metadata purely as diagnostics -- `phase1_objective` is a heuristic-guide artifact
+(theta and the exact `theta_direct` term are both costed simultaneously in phase 1, so
+it double-counts routing cost) and is never the certified answer. A mismatch between
+phase 1's and phase 2's final objective triggers a `@warn`, not a fatal error, mirroring
+`outer_gap_warning_tol`'s cross-check pattern elsewhere in this solver.
+
+`direct_enumeration_max_routes`/`direct_enumeration_time_limit_sec` bound the phase-1
+enumeration (`enumerate_aggregate_od_route_columns`'s own `max_routes`/`time_limit_sec`);
+unlike `DirectSolver`'s enumeration (implicitly scoped by whichever single `y_hat` it is
+solving for), this enumerates over the *entire* station set regardless of `l`, so these
+limits typically need to be set tighter than `DirectSolver`'s defaults for the same
+instance. Defaults to `false` (today's single-phase behavior).
+
+`direct_enumeration_max_stops` decouples the enumerated pool's own `max_stops` cap from
+`model.max_stops`: the underlying model's `max_stops` still governs label-setting/CG
+pricing and the Benders subproblem (in both phases, and for any non-guided solve of the
+same model) unchanged, but the *enumeration* that builds phase 1's `theta_direct` pool
+uses `direct_enumeration_max_stops` instead when set, letting a much cheaper (fewer
+stops, far fewer routes) pool guide the master without also restricting what the real
+subproblem/pricing is allowed to search over. Defaults to `nothing` (use `model.max_stops`
+for enumeration too, i.e. today's behavior of a single shared cap).
+
+`direct_enumeration_relax_integrality`, when `true`, declares phase 1's `theta_direct`
+route-selection variables as continuous (`0<=theta_direct<=1`) instead of binary. Phase
+1's own result is never the certified answer (only phase 2's, built without
+`theta_direct` at all) -- `theta_direct`'s only job is to keep the master's `y_hat`
+choices exact-cost-guided, so an LP-relaxed route selection is a legitimate, much cheaper
+substitute whenever the underlying route-covering LP/IP gap is small. Defaults to `false`
+(today's binary behavior).
 """
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
@@ -201,6 +277,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
     outer_gap_warning_tol::Float64
     lifted_walking_objective::Bool
     route_regularization_weight_schedule::Union{Nothing, Vector{Float64}}
+    lifted_routing_lower_bound::Bool
+    direct_enumeration_guide::Bool
+    direct_enumeration_max_routes::Int
+    direct_enumeration_time_limit_sec::Float64
+    direct_enumeration_max_stops::Union{Nothing, Int}
+    direct_enumeration_relax_integrality::Bool
 
     function BendersSolver(;
         config::SolverConfig=SolverConfig(),
@@ -223,6 +305,12 @@ struct BendersSolver <: AbstractStationSelectionSolver
         outer_gap_warning_tol::Number=0.03,
         lifted_walking_objective::Bool=false,
         route_regularization_weight_schedule::Union{AbstractVector{<:Number}, Nothing}=nothing,
+        lifted_routing_lower_bound::Bool=false,
+        direct_enumeration_guide::Bool=false,
+        direct_enumeration_max_routes::Int=10_000,
+        direct_enumeration_time_limit_sec::Number=30.0,
+        direct_enumeration_max_stops::Union{Int, Nothing}=nothing,
+        direct_enumeration_relax_integrality::Bool=false,
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -235,6 +323,34 @@ struct BendersSolver <: AbstractStationSelectionSolver
         lifted_walking_objective && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
             "lifted_walking_objective is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
             "got $(typeof(decomposition))"
+        ))
+        direct_enumeration_guide && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
+            "direct_enumeration_guide is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
+            "got $(typeof(decomposition))"
+        ))
+        lifted_routing_lower_bound && !(decomposition isa BendersYZ) && throw(ArgumentError(
+            "lifted_routing_lower_bound is only supported for decomposition isa BendersYZ; " *
+            "got $(typeof(decomposition)) -- BendersY's master has no zp/zd endpoint selectors " *
+            "for the arc-flow relaxation to reuse (z stays in the subproblem there)"
+        ))
+        lifted_routing_lower_bound && !(cut_mode isa MultiCut) && throw(ArgumentError(
+            "lifted_routing_lower_bound is only supported for cut_mode isa MultiCut -- theta is " *
+            "indexed one-per-scenario there, matching the arc-flow relaxation computed one-per-scenario; " *
+            "got $(typeof(cut_mode))"
+        ))
+        direct_enumeration_guide && !lifted_walking_objective && throw(ArgumentError(
+            "direct_enumeration_guide requires lifted_walking_objective=true -- the exact enumerated " *
+            "routing-cost term only makes sense against the same unit-weighted, x-linked master " *
+            "structure lifted_walking_objective builds"
+        ))
+        direct_enumeration_max_routes > 0 ||
+            throw(ArgumentError("direct_enumeration_max_routes must be positive"))
+        direct_enumeration_time_limit_sec > 0 ||
+            throw(ArgumentError("direct_enumeration_time_limit_sec must be positive"))
+        isnothing(direct_enumeration_max_stops) || direct_enumeration_max_stops > 0 ||
+            throw(ArgumentError("direct_enumeration_max_stops must be positive"))
+        direct_enumeration_relax_integrality && !direct_enumeration_guide && throw(ArgumentError(
+            "direct_enumeration_relax_integrality requires direct_enumeration_guide=true"
         ))
         resolved_schedule = isnothing(route_regularization_weight_schedule) ?
             nothing : Float64.(route_regularization_weight_schedule)
@@ -286,6 +402,124 @@ struct BendersSolver <: AbstractStationSelectionSolver
             resolved_outer_gap_warning_tol,
             lifted_walking_objective,
             resolved_schedule,
+            lifted_routing_lower_bound,
+            direct_enumeration_guide,
+            direct_enumeration_max_routes,
+            Float64(direct_enumeration_time_limit_sec),
+            direct_enumeration_max_stops,
+            direct_enumeration_relax_integrality,
+        )
+    end
+end
+
+"""A globally valid full-recourse cut used by `BranchAndBendersSolver`.
+
+`beta` is keyed by station index for `BendersY`, and by
+`(endpoint_chain_key, rank)` for `BendersYZ`.
+"""
+struct BranchBendersCut
+    decomposition::Symbol
+    block_id::Int
+    alpha::Float64
+    beta::Dict{Any, Float64}
+    recourse_value::Float64
+end
+
+function BranchBendersCut(
+    decomposition::Symbol,
+    block_id::Int,
+    alpha::Real,
+    beta::AbstractDict,
+    recourse_value::Real,
+)
+    decomposition in (:y, :yz) || throw(ArgumentError("cut decomposition must be :y or :yz"))
+    block_id >= 0 || throw(ArgumentError("cut block_id must be non-negative"))
+    return BranchBendersCut(
+        decomposition, block_id, Float64(alpha),
+        Dict{Any, Float64}(key => Float64(value) for (key, value) in beta),
+        Float64(recourse_value),
+    )
+end
+
+"""Single-tree branch-and-Benders solver strengthened by the MCF routing bound."""
+struct BranchAndBendersSolver <: AbstractStationSelectionSolver
+    config::SolverConfig
+    decomposition::Union{BendersY, BendersYZ}
+    cut_derivation::Symbol
+    inner_solver::ColumnGenerationSolver
+    initial_cuts::Vector{BranchBendersCut}
+    initial_benders_cut_rounds::Int
+    integrality_tolerance::Float64
+    lazy_cut_tolerance::Float64
+    cut_tightness_tolerance::Float64
+    dual_feasibility_tolerance::Float64
+    pricing_tolerance::Float64
+    max_reprice_rounds::Int
+    mcf_lower_bound_mode::Symbol
+    mcf_scenario_id::Union{Nothing, Int}
+    projected_mcf_user_cuts::Bool
+    projected_mcf_max_separations::Int
+    projected_mcf_tolerance::Float64
+    log_dir::Union{Nothing, String}
+
+    function BranchAndBendersSolver(;
+        config::SolverConfig=SolverConfig(),
+        decomposition::Union{BendersY, BendersYZ}=BendersYZ(),
+        cut_derivation::Symbol=:standard,
+        inner_solver::Union{Nothing, ColumnGenerationSolver}=nothing,
+        initial_cuts::Vector{BranchBendersCut}=BranchBendersCut[],
+        initial_benders_cut_rounds::Int=0,
+        integrality_tolerance::Number=1e-6,
+        lazy_cut_tolerance::Number=1e-6,
+        cut_tightness_tolerance::Number=1e-5,
+        dual_feasibility_tolerance::Number=1e-7,
+        pricing_tolerance::Number=1e-7,
+        max_reprice_rounds::Int=10_000,
+        mcf_lower_bound_mode::Symbol=:all_scenarios,
+        mcf_scenario_id::Union{Nothing, Int}=nothing,
+        projected_mcf_user_cuts::Bool=false,
+        projected_mcf_max_separations::Int=8,
+        projected_mcf_tolerance::Number=1e-6,
+        log_dir::Union{Nothing, AbstractString}=nothing,
+    )
+        initial_benders_cut_rounds >= 0 || throw(ArgumentError("initial_benders_cut_rounds must be non-negative"))
+        max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
+        cut_derivation in (:standard, :restricted_mw_fixed_pi) || throw(ArgumentError(
+            "BranchAndBendersSolver cut_derivation must be :standard or :restricted_mw_fixed_pi"
+        ))
+        decomposition isa BendersY && cut_derivation != :standard && throw(ArgumentError(
+            "BranchAndBendersSolver restricted MW integration currently supports BendersYZ only"
+        ))
+        mcf_lower_bound_mode in (:all_scenarios, :single_scenario, :common_od_scaled) ||
+            throw(ArgumentError(
+                "mcf_lower_bound_mode must be :all_scenarios, :single_scenario, or :common_od_scaled",
+            ))
+        !isnothing(mcf_scenario_id) && mcf_scenario_id <= 0 &&
+            throw(ArgumentError("mcf_scenario_id must be positive"))
+        projected_mcf_max_separations >= 0 || throw(ArgumentError(
+            "projected_mcf_max_separations must be non-negative",
+        ))
+        projected_mcf_tolerance >= 0 || throw(ArgumentError(
+            "projected_mcf_tolerance must be non-negative",
+        ))
+        tolerances = (
+            integrality_tolerance, lazy_cut_tolerance, cut_tightness_tolerance,
+            dual_feasibility_tolerance, pricing_tolerance,
+        )
+        all(t -> t >= 0, tolerances) || throw(ArgumentError("branch-and-Benders tolerances must be non-negative"))
+        resolved_inner = isnothing(inner_solver) ? ColumnGenerationSolver(
+            config=config,
+            reduced_cost_tol=pricing_tolerance,
+        ) : inner_solver
+        return new(
+            config, decomposition, cut_derivation, resolved_inner, copy(initial_cuts), initial_benders_cut_rounds,
+            Float64(integrality_tolerance), Float64(lazy_cut_tolerance),
+            Float64(cut_tightness_tolerance), Float64(dual_feasibility_tolerance),
+            Float64(pricing_tolerance), max_reprice_rounds,
+            mcf_lower_bound_mode, mcf_scenario_id,
+            projected_mcf_user_cuts, projected_mcf_max_separations,
+            Float64(projected_mcf_tolerance),
+            isnothing(log_dir) ? nothing : String(log_dir),
         )
     end
 end

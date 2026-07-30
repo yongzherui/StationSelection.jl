@@ -151,7 +151,7 @@ function _build_yzh_route_subproblem_lp(
         fix_cons[key] = @constraint(m, h[key] == get(h_hat, key, 0.0))
     end
 
-    @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
+    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
     cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
     for p in group_physical_pairs
         for pair in feasible_pairs_by_p[p]
@@ -523,6 +523,8 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     total_reprice_columns_found = 0
     total_reprice_rounds = 0
     benders_rows = NamedTuple[]
+    previous_y_hat_signature = nothing
+    y_hat_repeat_streak = 0
 
     # DIAGNOSTIC (temporary, opt-in via YZH_DIAG_DUMP_PATH): dumps everything needed to
     # reconstruct any iteration's route-covering LP and IP outside this run -- h_hat, the
@@ -545,6 +547,18 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
         assignments = _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat)
+
+        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
+        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
+        if y_hat_changed && !isnothing(previous_y_hat_signature)
+            println(
+                "  [BendersYZH iteration $iteration] master lower-bound y changed (lower_bound=",
+                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+            )
+            flush(stdout)
+        end
+        previous_y_hat_signature = y_hat_signature
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
@@ -668,6 +682,9 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
             # max_reprice_rounds without exhaustion) while a true LP/IP gap is actually small.
             iteration_lp_value=iteration_lp_value,
             iteration_ip_value=isnothing(final_result.objective_value) ? NaN : final_result.objective_value,
+            y_hat_signature=y_hat_signature,
+            y_hat_changed=y_hat_changed,
+            y_hat_repeat_streak=y_hat_repeat_streak,
         ))
         _flush_benders_iteration_log!(
             solver, benders_rows; extra_headers=[:cut_derivation, :zero_completion_fallback_count, :iteration_lp_value, :iteration_ip_value],

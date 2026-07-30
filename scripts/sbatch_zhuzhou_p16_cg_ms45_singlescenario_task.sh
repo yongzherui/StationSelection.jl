@@ -1,0 +1,103 @@
+#!/bin/bash
+#SBATCH --job-name=zz_p16_cg_ss
+#SBATCH --partition=mit_preemptable
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=06:00:00
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
+
+set -euo pipefail
+
+# CG-heuristic-vs-Direct comparison at n_stations>=20, single-scenario zhuzhou
+# p16 route100x -- SLURM array task runner, one (n_stations, seed, method)
+# triple per task (cg_ms4/cg_ms5 only -- see
+# zhuzhou_p16_cg_ms45_singlescenario.jl for why Direct isn't re-run here).
+# 6h budget (vs 12h for the Direct/BendersYZ batches) since plain CG is
+# expected to be much faster if it's to be useful as a heuristic at all; if a
+# cell times out at 6h that itself is a meaningful negative result.
+#
+# Usage:
+#   sbatch --array=1-N --output=... --error=... \
+#          scripts/sbatch_zhuzhou_p16_cg_ms45_singlescenario_task.sh <jobs_file> <base_outdir>
+
+JOBS_FILE="${1:-}"
+BASE_OUTDIR="${2:-}"
+TASK="${SLURM_ARRAY_TASK_ID:-}"
+PROJECT_ROOT="$SLURM_SUBMIT_DIR"
+
+if [ -z "$JOBS_FILE" ] || [ -z "$BASE_OUTDIR" ]; then
+    echo "ERROR: Usage: sbatch_zhuzhou_p16_cg_ms45_singlescenario_task.sh <jobs_file> <base_outdir>"
+    exit 1
+fi
+if [ -z "$TASK" ]; then
+    echo "ERROR: SLURM_ARRAY_TASK_ID is not set; submit this script with --array."
+    exit 1
+fi
+
+# Task IDs are absolute 1-indexed data rows in JOBS_FILE (header is row 0).
+JOB_LINE=$(sed -n "$((TASK + 1))p" "$JOBS_FILE")
+if [ -z "$JOB_LINE" ]; then
+    echo "ERROR: No job found for task $TASK in $JOBS_FILE"
+    exit 1
+fi
+
+N_STATIONS=$(echo "$JOB_LINE" | cut -f1)
+SEED=$(echo      "$JOB_LINE" | cut -f2)
+METHOD=$(echo    "$JOB_LINE" | cut -f3)
+
+echo "=========================================="
+echo "zhuzhou p16 CG-vs-Direct (single-scenario) - array task"
+echo "Array job:  ${SLURM_ARRAY_JOB_ID}  task: ${TASK}"
+echo "n_stations: ${N_STATIONS}   seed: ${SEED}   method: ${METHOD}"
+echo "Node:       ${SLURM_NODELIST}"
+echo "Started:    $(date)"
+echo "=========================================="
+echo ""
+
+echo "===== Loading modules ====="
+JULIA_MODULE="${CS_JULIA_MODULE:-julia/1.12.6}"
+GUROBI_MODULE="${CS_GUROBI_MODULE:-}"
+module load "$JULIA_MODULE"
+if [ -n "$GUROBI_MODULE" ]; then
+    module load "$GUROBI_MODULE"
+fi
+julia --version
+echo ""
+
+echo "===== Setting up Julia depot ====="
+JULIA_VERSION=$(julia --startup-file=no -e 'print(VERSION)')
+COPY_DEPOT="${CS_COPY_DEPOT:-1}"
+if [ "$COPY_DEPOT" = "0" ]; then
+    export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-$HOME/.julia}"
+    echo "Using existing depot: $JULIA_DEPOT_PATH"
+else
+    if [ -n "${SLURM_TMPDIR:-}" ]; then
+        export JULIA_DEPOT_PATH="$SLURM_TMPDIR/julia_depot_v${JULIA_VERSION}"
+    else
+        export JULIA_DEPOT_PATH="/tmp/$USER/julia_depot_v${JULIA_VERSION}_${SLURM_ARRAY_JOB_ID}_${TASK}"
+    fi
+    mkdir -p "$JULIA_DEPOT_PATH"
+    rsync -a --exclude='compiled/' --exclude='logs/' ~/.julia/ "$JULIA_DEPOT_PATH/"
+    echo "Depot ready: $JULIA_DEPOT_PATH"
+fi
+echo ""
+
+cd "$PROJECT_ROOT"
+
+echo "===== Running ====="
+set +e
+stdbuf -o0 -e0 julia --startup-file=no \
+      --project="$PROJECT_ROOT" \
+      "$PROJECT_ROOT/scripts/zhuzhou_p16_cg_ms45_singlescenario_task.jl" \
+      "$BASE_OUTDIR" "$N_STATIONS" "$SEED" "$METHOD"
+EXIT_CODE=$?
+set -e
+
+echo ""
+echo "=========================================="
+echo "Finished: $(date)  exit=$EXIT_CODE"
+echo "=========================================="
+exit $EXIT_CODE

@@ -11,6 +11,7 @@ function set_aggregate_od_route_objective!(
     route_regularization_weight::Float64=1.0,
     walk_cost_weight::Float64=1.0,
     repositioning_time::Float64=20.0,
+    extra_walking_cost_expr::Union{Nothing, AffExpr}=nothing,
 )
     obj = AffExpr(0.0)
     x = m[:x]
@@ -24,6 +25,10 @@ function set_aggregate_od_route_objective!(
             end
         end
     end
+    # NearestOpenAggregateODAssignmentPolicy(:direct_ly): walking cost has no x to attach to,
+    # so add_gamma_chain_nearest_open_coverage! hands back its own (γ-difference-based)
+    # walking-cost expression here instead -- same weight, different carrier variable.
+    isnothing(extra_walking_cost_expr) || add_to_expression!(obj, walk_cost_weight, extra_walking_cost_expr)
 
     theta = m[:theta_compat]
     column_by_id = Dict(column.id => column for column in mapping.columns)

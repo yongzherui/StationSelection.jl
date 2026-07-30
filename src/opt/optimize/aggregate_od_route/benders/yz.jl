@@ -73,7 +73,7 @@ function _build_yz_route_subproblem_lp(
         )
     end
 
-    @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
+    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
     cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
     for request in requests
         s, _o, _d = request
@@ -269,7 +269,10 @@ BendersYZ's result needs to be provably optimal, exactly as with `BendersY`.
 function _run_aggregate_od_route_nearest_open_benders_yz(
     data::StationSelectionData,
     model::AggregateODRouteModel,
-    solver::BendersSolver,
+    solver::BendersSolver;
+    direct_enumeration_pool::Union{Nothing, Vector{AggregateODRouteColumn}}=nothing,
+    seed_cuts::Vector{<:NamedTuple}=NamedTuple[],
+    harvested_cuts::Union{Nothing, Vector{<:NamedTuple}}=nothing,
 )
     _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style) ||
         throw(ArgumentError(
@@ -325,15 +328,33 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     @variable(master, theta[cut_ids] >= 0.0)
     @constraint(master, sum(y) == model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
+    direct_cost_expr = AffExpr(0.0)
     if solver.lifted_walking_objective
-        walking_cost_expr = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
-        @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+        walking_cost_expr, x_by_pair_full = _add_nearest_open_master_walking_cost!(master, data, model, y, requests, feasible_pairs)
+        isempty(seed_cuts) || _seed_yz_cuts!(master, theta, seed_cuts)
+        if !isnothing(direct_enumeration_pool)
+            direct_cost_expr = _add_direct_enumeration_guide!(
+                master, data, model, requests, feasible_pairs, x_by_pair_full, direct_enumeration_pool;
+                relax_integrality=solver.direct_enumeration_relax_integrality,
+            )
+        end
+        # route_lb_exprs (below) reuses the zp/zd chains _add_nearest_open_master_walking_cost!
+        # just built, so it must be constructed after this call, not before.
+        route_lb_exprs = solver.lifted_routing_lower_bound ?
+            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+            nothing
+        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cut_id] for cut_id in cut_ids; init=AffExpr(0.0))
+        @objective(master, Min, current_beta * (sum(theta[cut_id] for cut_id in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr)
     else
         _add_nearest_open_master_z!(
             master, data, y, requests, feasible_pairs, model.max_walking_distance, model.allow_walk_only,
             model.assignment_policy.feasibility_cut_style,
         )
-        @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids))
+        route_lb_exprs = solver.lifted_routing_lower_bound ?
+            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+            nothing
+        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cut_id] for cut_id in cut_ids; init=AffExpr(0.0))
+        @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids) + route_lb_term)
     end
 
     best_result = nothing
@@ -356,6 +377,8 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
     shared_pool = isnothing(model.initial_columns) ?
         AggregateODRouteColumn[] :
         copy(model.initial_columns)
+    previous_y_hat_signature = nothing
+    y_hat_repeat_streak = 0
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -368,6 +391,23 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
+        # theta is eta when lifted_routing_lower_bound is enabled.  Its cuts subtract the live
+        # route_lb_expr rather than this incumbent value; route_lb_hat is used only to test the
+        # current residual violation.
+        route_lb_hat = isnothing(route_lb_exprs) ?
+            nothing : Dict(cut_id => value(route_lb_exprs[cut_id]) for cut_id in cut_ids)
+
+        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
+        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
+        if y_hat_changed && !isnothing(previous_y_hat_signature)
+            println(
+                "  [BendersYZ iteration $iteration] master lower-bound y changed (lower_bound=",
+                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+            )
+            flush(stdout)
+        end
+        previous_y_hat_signature = y_hat_signature
 
         assignments, infeasible = _fixed_assignments_from_y(
             data, requests, feasible_pairs, y_hat;
@@ -480,10 +520,12 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             qbar_for_cut = nothing
             certification_already_failed = false
             assignments_for_group = Dict{NTuple{3, Int}, Tuple{Int, Int}}()
+            _debug_qbar_raw = nothing
             if solver.cut_derivation != :standard
                 assignments_for_group = Dict(request => assignments[request] for request in group_requests)
                 try
                     certified_for_cut, qbar_for_cut = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments_for_group)
+                    _debug_qbar_raw = qbar_for_cut
                     v_hat = min(v_hat, qbar_for_cut)
                 catch err
                     throw(ErrorException(
@@ -494,13 +536,25 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 end
             end
 
+            if get(ENV, "CS_DEBUG_LIFTED_LB", "0") == "1"
+                println(
+                    "    [debug] iter=$iteration cut_id=$cut_id theta_hat=$(round(theta_hat[cut_id], digits=3)) ",
+                    "v_hat(full)=$(round(v_hat, digits=3)) qbar_raw=$(isnothing(_debug_qbar_raw) ? "n/a" : round(_debug_qbar_raw, digits=3)) ",
+                    "route_lb_hat=$(isnothing(route_lb_hat) ? "n/a" : round(route_lb_hat[cut_id], digits=3)) ",
+                    "will_add_cut=$(theta_hat[cut_id] + (isnothing(route_lb_hat) ? 0.0 : route_lb_hat[cut_id]) < v_hat - solver.optimality_tol)",
+                )
+                flush(stdout)
+            end
+
             subproblem_lp_seconds += time() - lp_start
             iteration_lp_value += v_hat
-            if theta_hat[cut_id] < v_hat - solver.optimality_tol
+            current_full_lb = theta_hat[cut_id] + (isnothing(route_lb_hat) ? 0.0 : route_lb_hat[cut_id])
+            if current_full_lb < v_hat - solver.optimality_tol
                 cut_diag = _add_aggregate_od_route_benders_yz_optimality_cut!(
                     master, theta, cut_id, data, subproblem_model, solver,
                     group_requests, feasible_pairs, z_hat, assignments_for_group, _open_station_values(y_hat),
                     z_core, optimizer_env, v_hat, rho;
+                    route_lb_expr=isnothing(route_lb_exprs) ? nothing : route_lb_exprs[cut_id],
                     certified=certified_for_cut, Q_bar=qbar_for_cut,
                     certification_already_failed=certification_already_failed,
                 )
@@ -509,6 +563,10 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 cut_diag.fallback && (mw_fallback_count += 1)
                 mw_completion_seconds += cut_diag.completion_runtime_sec
                 isnan(cut_diag.phi_core) || (mw_last_phi_core = cut_diag.phi_core)
+                isnothing(harvested_cuts) || push!(
+                    harvested_cuts,
+                    (cut_id=cut_id, cut_constant=cut_diag.cut_constant, coeffs=cut_diag.coeffs),
+                )
             end
         end
         push!(benders_rows, (
@@ -533,6 +591,9 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
             mw_completion_seconds=mw_completion_seconds,
             mw_phi_core=mw_last_phi_core,
             route_regularization_weight=current_beta,
+            y_hat_signature=y_hat_signature,
+            y_hat_changed=y_hat_changed,
+            y_hat_repeat_streak=y_hat_repeat_streak,
         ))
         _flush_benders_iteration_log!(
             solver, benders_rows;
@@ -544,7 +605,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         if cuts_added_this_iteration == 0 && stage_idx < length(beta_schedule)
             stage_idx += 1
             current_beta = beta_schedule[stage_idx]
-            @objective(master, Min, current_beta * sum(theta[cut_id] for cut_id in cut_ids) + walking_cost_expr)
+            @objective(master, Min, current_beta * (sum(theta[cut_id] for cut_id in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr)
             # An incumbent optimal for the previous stage's beta is not comparable once beta
             # changes (same y_hat, different weighted total) -- only the master (with its
             # accumulated cuts) and the CG-priming pool carry forward into the next stage.
@@ -583,7 +644,7 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(shared_pool),
                 "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
-            ), solver)
+            ), solver; phase1_guided=!isnothing(direct_enumeration_pool))
         end
     end
     isnothing(best_result) && throw(ArgumentError("BendersYZ did not find a feasible incumbent"))

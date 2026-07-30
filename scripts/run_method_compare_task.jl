@@ -163,7 +163,7 @@ function _write_benders_station_selection_csv!(result, station_ids::Vector{Int},
     CSV.write(joinpath(export_dir, "station_selection.csv"), DataFrame(rows))
 end
 
-function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple)
+function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple; use_station_simple::Bool=false)
     # allow_walk_only left at its default (false): the zero_completion /
     # restricted_mw_fixed_pi cut derivations only apply under allow_walk_only=false
     # (see BendersSolver docs) -- and every method in METHODS must solve the SAME
@@ -186,6 +186,7 @@ function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple)
         max_wait_time=cfg.max_wait_time,
         detour_factor=cfg.detour_factor,
         max_stops=max_stops,
+        use_station_simple=use_station_simple,
     )
 end
 
@@ -254,7 +255,7 @@ function main()
 
     data, max_walk = build_instance(FAMILY, N_STATIONS, N_PAIRS, SEED, DATA_DIR)
     L <= data.n_stations || error("l=$L exceeds n_stations=$(data.n_stations)")
-    model = build_model(L, max_stops, max_walk, CFG)
+    model = build_model(L, max_stops, max_walk, CFG; use_station_simple=method.use_station_simple)
 
     log_dir = joinpath(ITERS_DIR, "$(INST_NAME)__$(METHOD_LABEL)")
     mkpath(log_dir)
@@ -290,12 +291,14 @@ function main()
     n_iterations = ""
     final_lower_bound = ""
     final_outer_gap = ""
+    inner_cg_iterations = ""
     if method.kind == :benders
         last_row = _last_iteration_row(joinpath(log_dir, "aggregate_od_route_benders_iterations.csv"))
         if !isnothing(last_row)
             n_iterations = string(last_row.iteration)
             final_lower_bound = string(last_row.lower_bound)
             final_outer_gap = string(last_row.outer_gap)
+            inner_cg_iterations = string(last_row.inner_cg_iterations)
         end
     elseif method.kind == :cg
         last_row = _last_iteration_row(joinpath(log_dir, "aggregate_od_route_cg_iterations.csv"))
@@ -316,12 +319,14 @@ function main()
         reprice_subproblem = method.reprice,
         max_stops_mode     = string(method.max_stops_mode),
         max_stops          = max_stops,
+        use_station_simple = method.use_station_simple,
         status             = status,
         termination_status = isnothing(result) ? "" : string(result.termination_status),
         objective_value    = isnothing(result) || isnothing(result.objective_value) ? "" : string(result.objective_value),
         wall_time_sec      = wall_time,
         runtime_sec        = isnothing(result) ? "" : string(result.runtime_sec),
         n_iterations       = n_iterations,
+        inner_cg_iterations = inner_cg_iterations,
         final_lower_bound  = final_lower_bound,
         final_outer_gap    = final_outer_gap,
         n_stations_selected = length(selected_stations),

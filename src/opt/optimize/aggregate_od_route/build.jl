@@ -26,13 +26,29 @@ function _build_aggregate_od_route_core!(
     m[:aggregate_od_route_detour_factor] = base_model.detour_factor
     m[:aggregate_od_route_max_stops] = base_model.max_stops
     m[:aggregate_od_route_max_visits_per_node] = base_model.max_visits_per_node
+    m[:aggregate_od_route_use_station_simple] = base_model.use_station_simple
     m[:aggregate_od_route_max_new_columns] = base_model.max_new_columns
     m[:aggregate_od_route_n_candidates] = base_model.n_candidates
     m[:aggregate_od_route_pricing_time_limit_sec] = base_model.pricing_time_limit_sec
     m[:aggregate_od_route_reduced_cost_tol] = base_model.reduced_cost_tol
 
+    use_direct_ly = base_model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+        base_model.assignment_policy.feasibility_cut_style == :direct_ly
+
+    if use_direct_ly
+        base_model.allow_walk_only && throw(ArgumentError(
+            "NearestOpenAggregateODAssignmentPolicy(:direct_ly) does not support allow_walk_only " *
+            "(no station-free walk-only sentinel wiring in the γ-chain coverage rows)"
+        ))
+    end
+
     variable_counts["station_selection"] = add_station_selection_variables!(m, data)
-    variable_counts["assignment"] = add_assignment_variables!(m, data, mapping)
+    variable_counts["assignment"] = if use_direct_ly
+        m[:x] = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
+        0
+    else
+        add_assignment_variables!(m, data, mapping)
+    end
     variable_counts["aggregate_od_route_theta"] = add_aggregate_od_route_theta_variables!(
         m,
         data,
@@ -44,6 +60,53 @@ function _build_aggregate_od_route_core!(
         _relax_aggregate_od_route_station_and_assignment!(m)
     end
 
+    constraint_counts["station_limit"] =
+        add_station_limit_constraint!(m, data, base_model.l; equality=true)
+
+    extra_walking_cost_expr = nothing
+    if use_direct_ly
+        # No x, no z: nearest-open assignment is folded into a real per-request γ-chain
+        # directly against (y, θ) -- see add_gamma_chain_nearest_open_coverage!.
+        constraint_counts["assignment"] = 0
+        constraint_counts["assignment_to_selected"] = 0
+        if model isa RouteCoveringProblem
+            constraint_counts["fixed_open_stations"] =
+                add_fixed_open_station_constraints!(m, data, model)
+        end
+        gamma_constraint_count, extra_walking_cost_expr =
+            add_gamma_chain_nearest_open_coverage!(m, data, mapping)
+        constraint_counts["aggregate_od_route_coverage"] = gamma_constraint_count
+    else
+        constraint_counts["assignment"] =
+            add_assignment_constraints!(m, data, mapping)
+        constraint_counts["assignment_to_selected"] =
+            add_assignment_to_selected_constraints!(m, data, mapping)
+        if model isa RouteCoveringProblem
+            constraint_counts["fixed_open_stations"] =
+                add_fixed_open_station_constraints!(m, data, model)
+        elseif base_model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
+            if _is_endpoint_nearest_style(base_model.assignment_policy.feasibility_cut_style)
+                # Endpoint styles build independent per-endpoint nearest-open selectors
+                # (no ranking over station pairs), so they can support direct walking
+                # unlike :pair_chain, which ranks station *pairs* jointly and has no
+                # walk-only wiring.
+                validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base_model.allow_walk_only)
+                constraint_counts["nearest_open_assignment"] =
+                    add_nearest_open_endpoint_constraints!(
+                        m, data, mapping;
+                        allow_walk_only=base_model.allow_walk_only,
+                        selector_style=base_model.assignment_policy.feasibility_cut_style,
+                    )
+            else
+                assert_no_walk_only_pairs(mapping, "NearestOpenAggregateODAssignmentPolicy(:pair_chain)")
+                constraint_counts["nearest_open_assignment"] =
+                    add_nearest_open_assignment_constraints!(m, data, mapping)
+            end
+        end
+        constraint_counts["aggregate_od_route_coverage"] =
+            add_aggregate_od_route_coverage_constraints!(m, data, mapping)
+    end
+
     set_aggregate_od_route_objective!(
         m,
         data,
@@ -51,38 +114,8 @@ function _build_aggregate_od_route_core!(
         route_regularization_weight=base_model.route_regularization_weight,
         walk_cost_weight=base_model.walk_cost_weight,
         repositioning_time=base_model.repositioning_time,
+        extra_walking_cost_expr=extra_walking_cost_expr,
     )
-
-    constraint_counts["station_limit"] =
-        add_station_limit_constraint!(m, data, base_model.l; equality=true)
-    constraint_counts["assignment"] =
-        add_assignment_constraints!(m, data, mapping)
-    constraint_counts["assignment_to_selected"] =
-        add_assignment_to_selected_constraints!(m, data, mapping)
-    if model isa RouteCoveringProblem
-        constraint_counts["fixed_open_stations"] =
-            add_fixed_open_station_constraints!(m, data, model)
-    elseif base_model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
-        if _is_endpoint_nearest_style(base_model.assignment_policy.feasibility_cut_style)
-            # Endpoint styles build independent per-endpoint nearest-open selectors
-            # (no ranking over station pairs), so they can support direct walking
-            # unlike :pair_chain, which ranks station *pairs* jointly and has no
-            # walk-only wiring.
-            validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base_model.allow_walk_only)
-            constraint_counts["nearest_open_assignment"] =
-                add_nearest_open_endpoint_constraints!(
-                    m, data, mapping;
-                    allow_walk_only=base_model.allow_walk_only,
-                    selector_style=base_model.assignment_policy.feasibility_cut_style,
-                )
-        else
-            assert_no_walk_only_pairs(mapping, "NearestOpenAggregateODAssignmentPolicy(:pair_chain)")
-            constraint_counts["nearest_open_assignment"] =
-                add_nearest_open_assignment_constraints!(m, data, mapping)
-        end
-    end
-    constraint_counts["aggregate_od_route_coverage"] =
-        add_aggregate_od_route_coverage_constraints!(m, data, mapping)
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())

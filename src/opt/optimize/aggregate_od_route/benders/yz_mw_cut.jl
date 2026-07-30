@@ -170,7 +170,7 @@ end
 # ---------------------------------------------------------------------------
 
 function _yz_phi_expr(
-    z_point::Dict{Any, Vector{Float64}},
+    z_point::AbstractDict,
     alpha::Dict{NTuple{3, Int}, VariableRef},
     rhoO::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef},
     rhoD::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef},
@@ -213,7 +213,7 @@ function _yz_completion_lp(
     requests::Vector{NTuple{3, Int}},
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
     z_hat::Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}},
-    z_core::Dict{Any, Vector{Float64}},
+    z_core::AbstractDict,
     pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},
     Q_bar::Float64,
     objective_mode::Symbol,
@@ -298,7 +298,7 @@ function _solve_yz_completion(
     requests::Vector{NTuple{3, Int}},
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
     z_hat::Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}},
-    z_core::Dict{Any, Vector{Float64}},
+    z_core::AbstractDict,
     pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},
     Q_bar::Float64,
     objective_mode::Symbol,
@@ -380,7 +380,7 @@ function _restricted_yz_optimality_cut(
     z_hat::Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}},
     assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
     open_stations::Vector{Int},
-    z_core::Dict{Any, Vector{Float64}},
+    z_core::AbstractDict,
     optimizer_env,
     objective_mode::Symbol;
     certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
@@ -453,19 +453,26 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     optimizer_env,
     v_hat::Float64,
     rho::AbstractDict;
+    route_lb_expr::Union{Nothing, AffExpr}=nothing,
     certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
     Q_bar::Union{Nothing, Float64}=nothing,
     certification_already_failed::Bool=false,
 )
     chain_cache = master[:nearest_endpoint_chain_cache]
+    # The subproblem and every cut below remain in full routing-recourse units.  When the
+    # multicommodity lower bound is enabled, theta is the residual eta, so subtract the *live*
+    # master expression from the full cut.  Never subtract value(route_lb_expr) from v_hat or
+    # Q_bar: that would freeze an incumbent-specific shift into a globally active cut.
+    residual_shift = isnothing(route_lb_expr) ? AffExpr(0.0) : route_lb_expr
     if solver.cut_derivation == :standard
         @constraint(master, theta[cut_id] >= v_hat + sum(
             rho[(key, i)] * (chain_cache[key][i] - z_hat[key][i]) for (key, i) in keys(rho)
-        ))
+        ) - residual_shift)
+        standard_cut_constant = v_hat - sum(rho[(key, i)] * z_hat[key][i] for (key, i) in keys(rho); init=0.0)
         return (
             mode=:standard, mw_status=:not_attempted, Q_bar=v_hat, phi_core=NaN,
             phi_core_baseline=NaN, completion_runtime_sec=0.0, n_routes=0,
-            n_cg_iterations=0, fallback=false,
+            n_cg_iterations=0, fallback=false, cut_constant=standard_cut_constant, coeffs=rho,
         )
     end
 
@@ -495,11 +502,12 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     beta = yz_result.beta
     @constraint(master, theta[cut_id] >= cut_constant + sum(
         beta[key] * chain_cache[key[1]][key[2]] for key in keys(beta)
-    ))
+    ) - residual_shift)
     return (
         mode=solver.cut_derivation, mw_status=:ok, Q_bar=yz_result.Q_bar, phi_core=yz_result.phi_core,
         phi_core_baseline=isnothing(yz_result.phi_core_baseline) ? NaN : yz_result.phi_core_baseline,
         completion_runtime_sec=yz_result.completion_runtime_sec, n_routes=yz_result.n_routes,
         n_cg_iterations=yz_result.n_cg_iterations, fallback=false,
+        cut_constant=cut_constant, coeffs=beta,
     )
 end

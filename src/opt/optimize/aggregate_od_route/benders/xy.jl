@@ -129,7 +129,7 @@ function _build_xy_route_subproblem_lp(
         fix_cons[key] = @constraint(m, x[key] == get(x_hat, key, 0.0))
     end
 
-    @variable(m, 0 <= lambda[1:length(columns), 1:n_scenarios(data)] <= 1)
+    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
     for request in requests
         s, _o, _d = request
         for pair in feasible_pairs[request]
@@ -235,6 +235,8 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
     optimality_cuts = 0
     inner_cg_iters = 0
     benders_rows = NamedTuple[]
+    previous_y_hat_signature = nothing
+    y_hat_repeat_streak = 0
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -251,6 +253,18 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
         assignments = _selected_assignments_from_x(requests, feasible_pairs, x_hat)
+
+        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
+        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
+        if y_hat_changed && !isnothing(previous_y_hat_signature)
+            println(
+                "  [BendersXY iteration $iteration] master lower-bound y changed (lower_bound=",
+                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+            )
+            flush(stdout)
+        end
+        previous_y_hat_signature = y_hat_signature
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
@@ -305,6 +319,9 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
             selected_assignment_count=length(assignments),
             generated_column_pool_size=length(cg_result.generated_columns),
             inner_cg_iterations=inner_cg_iters,
+            y_hat_signature=y_hat_signature,
+            y_hat_changed=y_hat_changed,
+            y_hat_repeat_streak=y_hat_repeat_streak,
         ))
         _flush_benders_iteration_log!(solver, benders_rows)
 
@@ -377,6 +394,8 @@ function _run_aggregate_od_route_free_benders_xy(
     optimality_cuts = 0
     inner_cg_iters = 0
     benders_rows = NamedTuple[]
+    previous_y_hat_signature = nothing
+    y_hat_repeat_streak = 0
 
     for iteration in 1:solver.max_iterations
         master_start = time()
@@ -390,6 +409,18 @@ function _run_aggregate_od_route_free_benders_xy(
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
         assignments = _selected_assignments_from_x(requests, feasible_pairs, x_hat)
+
+        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
+        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
+        if y_hat_changed && !isnothing(previous_y_hat_signature)
+            println(
+                "  [BendersXY iteration $iteration] master lower-bound y changed (lower_bound=",
+                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+            )
+            flush(stdout)
+        end
+        previous_y_hat_signature = y_hat_signature
 
         cg_start = time()
         cg_result = _solve_fixed_route_covering_by_cg(
@@ -445,6 +476,9 @@ function _run_aggregate_od_route_free_benders_xy(
             selected_assignment_count=length(assignments),
             generated_column_pool_size=length(cg_result.generated_columns),
             inner_cg_iterations=inner_cg_iters,
+            y_hat_signature=y_hat_signature,
+            y_hat_changed=y_hat_changed,
+            y_hat_repeat_streak=y_hat_repeat_streak,
         ))
         _flush_benders_iteration_log!(solver, benders_rows)
 

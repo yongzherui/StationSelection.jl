@@ -15,7 +15,12 @@ function add_aggregate_od_route_theta_variables!(
     for column in mapping.columns
         for s in 1:n_scenarios(data)
             if relax_integrality
-                theta[(column.id, s)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
+                # The upper bound is primal-redundant for this positive-cost set-covering LP:
+                # every coverage RHS is at most one, so reducing theta > 1 to one preserves
+                # feasibility and cannot increase cost.  Keeping the bound lets its bound dual
+                # absorb reduced cost, which makes coverage duals alone invalid for Benders/MW
+                # completion.  Use the equivalent standard nonnegative covering relaxation.
+                theta[(column.id, s)] = @variable(m, lower_bound = 0.0)
             else
                 theta[(column.id, s)] = @variable(m, binary = true)
             end

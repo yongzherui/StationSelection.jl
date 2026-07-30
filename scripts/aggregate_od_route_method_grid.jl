@@ -58,7 +58,13 @@ struct MethodSpec
     cut_derivation::Symbol        # :standard | :zero_completion | :restricted_mw_fixed_pi (benders only)
     reprice::Bool                 # benders only
     max_stops_mode::Symbol        # :ms4 | :ms3 | :uncapped
+    use_station_simple::Bool      # benders/cg inner pricer: elementary-route label search vs default
 end
+
+# Backward-compatible 6-arg constructor for every pre-existing MethodSpec(...) call site --
+# use_station_simple defaults to false (the revisit-tolerant station-age pricer, unchanged).
+MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode) =
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, false)
 
 function _benders_variants(label_prefix::String, decomposition; include_mw::Bool)
     # std_noreprice (cut_derivation=:standard, reprice=false) dropped: it only ever
@@ -100,6 +106,18 @@ const METHODS = MethodSpec[
     _benders_variants("bendersY",   StationSelection.BendersY();   include_mw=true)...,
     _benders_variants("bendersYZ",  StationSelection.BendersYZ();  include_mw=true)...,
     _benders_variants("bendersYZH", StationSelection.BendersYZH(); include_mw=false)...,
+    # Station-simple pricer twins of BendersYZ zerocomp -- same decomposition/cut derivation/
+    # max_stops_mode as their normal counterparts above, differing only in which inner-CG label
+    # search prices columns (elementary station-simple vs the default revisit-tolerant
+    # station-age search). Kept separate from `_benders_variants` since this axis is orthogonal
+    # to cut derivation and, for now, is only being compared for BendersYZ zerocomp.
+    MethodSpec("bendersYZ_zerocomp_ms4_ss",      :benders, StationSelection.BendersYZ(), :zero_completion, false, :ms4,      true),
+    MethodSpec("bendersYZ_zerocomp_uncapped_ss", :benders, StationSelection.BendersYZ(), :zero_completion, false, :uncapped, true),
+    # BendersYZ restricted_mw_fixed_pi (MW cut) at max_stops=5, normal + station-simple pricer --
+    # not in MAX_STOPS_MODES (:ms4/:uncapped only), so added directly rather than via
+    # `_benders_variants` to avoid adding an ms5 variant for every other cut derivation too.
+    MethodSpec("bendersYZ_mw_ms5",    :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, false),
+    MethodSpec("bendersYZ_mw_ms5_ss", :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, true),
 ]
 
 method_by_label(label::AbstractString) = only(filter(m -> m.label == label, METHODS))

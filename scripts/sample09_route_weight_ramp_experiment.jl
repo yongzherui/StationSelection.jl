@@ -24,6 +24,13 @@ Env overrides:
     RAMP_N_STATIONS    number of candidate stations from the sample_09 fixture (default 15)
     RAMP_SCHEDULE      ';'-separated β schedule (default "0.01;0.1;1.0;10.0")
     RAMP_DECOMPOSITION "bendersY" or "bendersYZ" (default "bendersY")
+    RAMP_CUT_DERIVATION cut_derivation passed to BendersSolver -- "restricted_mw_fixed_pi"
+                        (default, matches every prior use of this script), "standard", or
+                        "zero_completion". Added so this same harness can also produce an
+                        exact-cut ground-truth solve (:standard, still with reprice_subproblem=true)
+                        to check whether the MW-derivation's schedule-dependent final objective
+                        (see notes/... route weight ramp findings) is actually reaching the true
+                        optimum or just agreeing with itself across schedules.
 """
 
 using CSV, DataFrames, Gurobi, JuMP, Printf, StationSelection
@@ -38,6 +45,11 @@ const RAMP_SCHEDULE = parse.(Float64, split(get(ENV, "RAMP_SCHEDULE", "0.01;0.1;
 const RAMP_DECOMPOSITION = get(ENV, "RAMP_DECOMPOSITION", "bendersY")
 RAMP_DECOMPOSITION in ("bendersY", "bendersYZ") ||
     error("RAMP_DECOMPOSITION must be \"bendersY\" or \"bendersYZ\", got $(repr(RAMP_DECOMPOSITION))")
+const RAMP_CUT_DERIVATION = Symbol(get(ENV, "RAMP_CUT_DERIVATION", "restricted_mw_fixed_pi"))
+RAMP_CUT_DERIVATION in (:standard, :zero_completion, :restricted_mw_fixed_pi) || error(
+    "RAMP_CUT_DERIVATION must be \"standard\", \"zero_completion\", or \"restricted_mw_fixed_pi\", " *
+    "got $(repr(RAMP_CUT_DERIVATION))"
+)
 
 function run_variant(outdir::String, variant::String)
     variant in ("direct", "ramp") || error("variant must be \"direct\" or \"ramp\", got $(repr(variant))")
@@ -71,7 +83,7 @@ function run_variant(outdir::String, variant::String)
         max_iterations=max(CFG.benders_max_iters, 3000),
         max_reprice_rounds=CFG.max_reprice_rounds,
         reprice_subproblem=true,
-        cut_derivation=:restricted_mw_fixed_pi,
+        cut_derivation=RAMP_CUT_DERIVATION,
         lifted_walking_objective=true,
         route_regularization_weight_schedule=schedule,
         log_dir=iters_dir,
@@ -88,7 +100,8 @@ function run_variant(outdir::String, variant::String)
     flush(stdout)
 
     row = DataFrame([(
-        decomposition=RAMP_DECOMPOSITION, variant=variant, n_stations=RAMP_N_STATIONS, l=l,
+        decomposition=RAMP_DECOMPOSITION, variant=variant, cut_derivation=string(RAMP_CUT_DERIVATION),
+        n_stations=RAMP_N_STATIONS, l=l,
         objective_value=result.objective_value,
         iterations=result.metadata["benders_iterations"],
         optimality_cuts=result.metadata["optimality_cuts_added"],

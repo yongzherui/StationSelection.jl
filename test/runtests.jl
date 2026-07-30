@@ -61,15 +61,20 @@ const MOI = JuMP.MOI
     @testset "Model Integration" begin
         include("opt/test_integration.jl")
         include("opt/test_aggregate_od_route_pricing.jl")
+        include("opt/test_passenger_free_assignment_pricing.jl")
+        include("opt/test_passenger_dual_selection.jl")
         include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
         include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
+        include("opt/test_aggregate_od_route_direct_ly.jl")
         include("opt/test_aggregate_od_route_direct_walking.jl")
         include("opt/test_aggregate_od_route_restricted_mw_cut.jl")
         include("opt/test_aggregate_od_route_yz_restricted_mw_cut.jl")
         include("opt/test_aggregate_od_route_yzh_zero_completion.jl")
         include("opt/test_aggregate_od_route_same_station_dual_completion.jl")
         include("opt/test_aggregate_od_route_lifted_walking_objective.jl")
+        include("opt/test_aggregate_od_route_lifted_routing_lower_bound.jl")
         include("opt/test_aggregate_od_route_route_weight_schedule.jl")
+        include("opt/test_aggregate_od_route_direct_enumeration_guide.jl")
     end
 
 end
