@@ -117,6 +117,7 @@ function create_passenger_free_assignment_pricing_data(
     max_stops::Int=typemax(Int),
     max_visits_per_node::Int=typemax(Int),
     max_distinct_stations::Int=typemax(Int),
+    compensated_dominance::Bool=true,
 )::PassengerFreeAssignmentPricingData
     layer_weight, assignment_layer_mask, positive_candidates = _build_passenger_reward_layers(candidates)
     n_layers = length(layer_weight)
@@ -167,6 +168,7 @@ function create_passenger_free_assignment_pricing_data(
         max_distinct_stations,
         bounded_distinct_stations,
         station_bit,
+        compensated_dominance,
         n_layers,
         layer_weight,
         assignment_layer_mask,

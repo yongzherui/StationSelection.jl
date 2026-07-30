@@ -78,9 +78,16 @@ under converged CG duals where most `rho_pjk` are near zero and `beta * travel` 
 comparable to the entire remaining reward -- a regime this benchmark could not
 reproduce. Do not assume it helps without measuring on the target duals.
 """
+# `label`/`label_bs` are intentionally untyped: this bound is shared by the
+# revisit-tolerant pricer (`PassengerFreeAssignmentPricingLabel` /
+# `PassengerFreeAssignmentLabelBitsets`) and the elementary station-simple pricer
+# (`station_simple.jl`), whose label/bitset types differ but expose the same
+# `current`/`time`/`activated_reward_layers` and `age_idx`/`age_val` fields the
+# bound reads. Julia still specializes per concrete call site, so there is no
+# dispatch or performance cost to dropping the annotations.
 function _passenger_free_assignment_remaining_reward_bound(
-    label::PassengerFreeAssignmentPricingLabel,
-    label_bs::PassengerFreeAssignmentLabelBitsets,
+    label,
+    label_bs,
     pricing_data::PassengerFreeAssignmentPricingData,
     index::PassengerFreeAssignmentSearchIndex,
     workspace::PassengerFreeAssignmentBoundWorkspace,
@@ -199,7 +206,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
             bucket, live_labels, label, label_id, label_bs,
             pricing_data.layer_weight, pricing_data.bounded_max_stops,
-            pricing_data.bounded_distinct_stations, dominated_scratch,
+            pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
+            dominated_scratch,
         )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
@@ -278,7 +286,8 @@ function _enumerate_passenger_free_assignment_pricing_labels(
                 inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
                     bucket, live_labels, child, child_id, child_bs,
                     pricing_data.layer_weight, pricing_data.bounded_max_stops,
-            pricing_data.bounded_distinct_stations, dominated_scratch,
+            pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
+            dominated_scratch,
                 )
                 profile && (t_dominance += time_ns() - t0)
                 labels_removed_by_dominance += removed

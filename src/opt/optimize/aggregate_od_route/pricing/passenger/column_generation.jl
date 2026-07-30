@@ -126,6 +126,8 @@ function _price_one_passenger_scenario(
     time_limit::Float64,
     reduced_cost_tol::Float64,
     station_budget_cap::Bool=false,
+    compensated_dominance::Bool=true,
+    use_station_simple::Bool=false,
 )
     md = master.master_data
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
@@ -149,17 +151,30 @@ function _price_one_passenger_scenario(
         # notes/2026-07-30_passenger_pricing_label_search_optimizations.md before
         # enabling this expecting a better bound.
         max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
+        compensated_dominance=compensated_dominance,
     )
     isempty(pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
 
-    columns_s, exhausted_s, stats_s = passenger_free_assignment_pricing_by_label_setting(
-        pricing_data, existing;
-        next_column_id=base_column_id,
-        reduced_cost_tol=reduced_cost_tol,
-        max_new_columns=max_new_columns,
-        n_candidates=n_candidates,
-        time_limit=time_limit,
-    )
+    # Elementary vs revisit-tolerant pricer -- same pricing_data, same
+    # `(columns, exhausted, stats)` contract. `max_visits_per_node` is meaningless
+    # to the elementary search and simply not forwarded.
+    columns_s, exhausted_s, stats_s = use_station_simple ?
+        passenger_free_assignment_pricing_by_station_simple_label_setting(
+            pricing_data, existing;
+            next_column_id=base_column_id,
+            reduced_cost_tol=reduced_cost_tol,
+            max_new_columns=max_new_columns,
+            n_candidates=n_candidates,
+            time_limit=time_limit,
+        ) :
+        passenger_free_assignment_pricing_by_label_setting(
+            pricing_data, existing;
+            next_column_id=base_column_id,
+            reduced_cost_tol=reduced_cost_tol,
+            max_new_columns=max_new_columns,
+            n_candidates=n_candidates,
+            time_limit=time_limit,
+        )
     return columns_s, exhausted_s, stats_s.labels_generated
 end
 
@@ -191,6 +206,8 @@ function _price_passenger_scenarios(
     verify_reduced_costs::Bool,
     parallel_scenarios::Bool=true,
     station_budget_cap::Bool=false,
+    compensated_dominance::Bool=true,
+    use_station_simple::Bool=false,
 )
     md = master.master_data
     scenarios = sort!(collect(keys(md.passengers_by_scenario)))
@@ -228,6 +245,8 @@ function _price_passenger_scenarios(
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
                 station_budget_cap=station_budget_cap,
+                compensated_dominance=compensated_dominance,
+                use_station_simple=use_station_simple,
             )
         end
     else
@@ -238,6 +257,8 @@ function _price_passenger_scenarios(
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
                 station_budget_cap=station_budget_cap,
+                compensated_dominance=compensated_dominance,
+                use_station_simple=use_station_simple,
             )
         end
     end
@@ -314,6 +335,17 @@ function run_passenger_free_assignment_column_generation(
     # but measured inert on bound quality here and slower to price; see
     # notes/2026-07-30_passenger_pricing_label_search_optimizations.md.
     station_budget_cap::Bool=false,
+    # Dominance rule for the label search. `true` is the compensated rule
+    # `rc_a + w(A_a \ A_b) <= rc_b`; `false` is the plain `A_a subseteq A_b`.
+    # Compensated prices 2.5-3.9x faster but yields ~50% fewer distinct columns
+    # per search, so which wins for CG is an end-to-end question.
+    compensated_dominance::Bool=true,
+    # Price with the elementary (station-simple) label search, which forbids station
+    # revisits. Faster (smaller dominance buckets, fewer extensions) but restricts the
+    # column universe, so it can weaken `lp_bound` or miss improving columns where the
+    # optimum wants a revisiting route -- opt-in and validate against the default
+    # pricer. See pricing/passenger/station_simple.jl.
+    use_station_simple::Bool=false,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -426,6 +458,8 @@ function run_passenger_free_assignment_column_generation(
                 verify_reduced_costs=verify_reduced_costs,
                 parallel_scenarios=parallel_scenarios,
                 station_budget_cap=station_budget_cap,
+                compensated_dominance=compensated_dominance,
+                use_station_simple=use_station_simple,
             )
             pricing_seconds = time() - t_price
             total_pricing_seconds += pricing_seconds
@@ -501,6 +535,8 @@ function run_passenger_free_assignment_column_generation(
             verify_reduced_costs=verify_reduced_costs,
             parallel_scenarios=parallel_scenarios,
             station_budget_cap=station_budget_cap,
+            compensated_dominance=compensated_dominance,
+            use_station_simple=use_station_simple,
         )
         round_cert_seconds = time() - t_cert
         certification_seconds += round_cert_seconds

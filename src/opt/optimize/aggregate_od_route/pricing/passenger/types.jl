@@ -69,6 +69,12 @@ struct PassengerFreeAssignmentPricingData
     max_distinct_stations::Int
     bounded_distinct_stations::Bool
     station_bit::Dict{Int, UInt64}
+    # Whether dominance uses the compensated reward test `rc_a + w(A_a \ A_b) <= rc_b`
+    # or the older plain `A_a subseteq A_b`. A toggle only because the compensated
+    # rule trades away column diversity per search for speed -- measured 2.5-3.9x
+    # faster but ~50% fewer distinct columns harvested -- and which side wins for
+    # column generation is an end-to-end question, not a pricing-speed one.
+    compensated_dominance::Bool
     n_layers::Int
     layer_weight::Vector{Float64}
     assignment_layer_mask::Dict{Tuple{Int, Int, Int}, RewardLayerBitset}

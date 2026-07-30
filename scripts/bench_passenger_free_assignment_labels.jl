@@ -50,6 +50,7 @@ const N_CANDIDATES = 1_000_000_000
 # more distinct stations than it has stops.
 _l_for(n::Int) = max(2, ceil(Int, n / 2))
 const MAX_DISTINCT = parse(Int, get(ENV, "PFA_MAX_DISTINCT", "0"))
+const COMPENSATED = get(ENV, "PFA_COMPENSATED_DOMINANCE", "1") in ("1", "true", "yes")
 
 function build_scenario_candidates(data::StationSelectionData, n_stations::Int, s::Int)
     candidates = PassengerAssignmentCandidate[]
@@ -107,31 +108,60 @@ function run_case(n_stations::Int, raw_max_stops::Int)
             max_stops=max_stops,
             max_visits_per_node=MAX_VISITS_PER_NODE,
             max_distinct_stations=max_distinct,
+            compensated_dominance=COMPENSATED,
         )
 
-        t0 = time()
-        columns, exhausted, stats = passenger_free_assignment_pricing_by_label_setting(
+        # Both pricers price over the SAME `pricing_data`. `best_rc` is expected to
+        # AGREE whenever the case's optimum route is elementary and to DIVERGE (with
+        # station-simple no better, i.e. >= the revisit-tolerant `best_rc`) where the
+        # optimum wants a revisit -- that divergence is the column-universe
+        # restriction, not a bug. See notes/2026-07-30_passenger_station_simple_pricing.md.
+        run_pricer(name, priced) = begin
+            t0 = time()
+            columns, exhausted, stats = priced()
+            wall = time() - t0
+            # Columns are returned sorted by reduced cost, so [1] is still the best.
+            # `max_new_columns` is set to `n_candidates` so `columns` also reports how
+            # many DISTINCT columns one search yields -- the quantity an earlier version
+            # of this benchmark was blind to, having harvested only one.
+            best_rc = isempty(columns) ? NaN : columns[1].metadata["reduced_cost"]
+            best_route = isempty(columns) ? Int[] : columns[1].route
+            @printf(
+                "RESULT\tpricer=%s\tn=%d\tms=%s\tl=%s\ts=%d\texhausted=%s\twall=%.3f\tlabels=%d\trejected=%d\tremoved=%d\tstale=%d\tmax_live=%d\tcolumns=%d\tbest_rc=%.6f\troute=%s\n",
+                name, n_stations, ms_label,
+                max_distinct == typemax(Int) ? "none" : string(max_distinct), s, exhausted, wall,
+                stats.labels_generated, stats.labels_rejected_by_dominance,
+                stats.labels_removed_by_dominance, stats.stale_pops,
+                stats.max_live_labels, length(columns), best_rc, string(best_route),
+            )
+            @printf(
+                "PROFILE\tpricer=%s\tn=%d\tms=%s\ts=%d\tdominance=%.3f\tqueue=%.3f\tcandidates=%.3f\textension=%.3f\n",
+                name, n_stations, ms_label, s,
+                stats.t_dominance_sec, stats.t_queue_sec,
+                stats.t_candidates_sec, stats.t_extension_sec,
+            )
+            flush(stdout)
+            return (wall=wall, best_rc=best_rc, max_live=stats.max_live_labels, t_dominance=stats.t_dominance_sec)
+        end
+
+        rev = run_pricer("revisit", () -> passenger_free_assignment_pricing_by_label_setting(
             pricing_data, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES,
+            next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
             time_limit=TIME_LIMIT_SEC, profile=true,
-        )
-        wall = time() - t0
-        best_rc = isempty(columns) ? NaN : columns[1].metadata["reduced_cost"]
-        best_route = isempty(columns) ? Int[] : columns[1].route
+        ))
+        ss = run_pricer("station_simple", () -> passenger_free_assignment_pricing_by_station_simple_label_setting(
+            pricing_data, PassengerFreeAssignmentRouteColumn[];
+            next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
+            time_limit=TIME_LIMIT_SEC, profile=true,
+        ))
 
+        speedup = ss.wall > 0 ? rev.wall / ss.wall : NaN
+        live_ratio = ss.max_live > 0 ? rev.max_live / ss.max_live : NaN
+        rc_gap = (isnan(rev.best_rc) || isnan(ss.best_rc)) ? NaN :
+            (abs(rev.best_rc) < 1e-9 ? ss.best_rc - rev.best_rc : (ss.best_rc - rev.best_rc) / abs(rev.best_rc))
         @printf(
-            "RESULT\tn=%d\tms=%s\tl=%s\ts=%d\texhausted=%s\twall=%.3f\tlabels=%d\trejected=%d\tremoved=%d\tstale=%d\tmax_live=%d\tbest_rc=%.6f\troute=%s\n",
-            n_stations, ms_label,
-            max_distinct == typemax(Int) ? "none" : string(max_distinct), s, exhausted, wall,
-            stats.labels_generated, stats.labels_rejected_by_dominance,
-            stats.labels_removed_by_dominance, stats.stale_pops,
-            stats.max_live_labels, best_rc, string(best_route),
-        )
-        @printf(
-            "PROFILE\tn=%d\tms=%s\ts=%d\tdominance=%.3f\tqueue=%.3f\tcandidates=%.3f\textension=%.3f\n",
-            n_stations, ms_label, s,
-            stats.t_dominance_sec, stats.t_queue_sec,
-            stats.t_candidates_sec, stats.t_extension_sec,
+            "COMPARE\tn=%d\tms=%s\ts=%d\tspeedup=%.2f\tlive_ratio=%.2f\trev_best_rc=%.6f\tss_best_rc=%.6f\trc_gap=%.4f\n",
+            n_stations, ms_label, s, speedup, live_ratio, rev.best_rc, ss.best_rc, rc_gap,
         )
         flush(stdout)
     end
@@ -155,6 +185,10 @@ function warmup()
         repositioning_time=0.0, max_stops=3, max_visits_per_node=2,
     )
     passenger_free_assignment_pricing_by_label_setting(
+        pd, PassengerFreeAssignmentRouteColumn[];
+        next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
+    )
+    passenger_free_assignment_pricing_by_station_simple_label_setting(
         pd, PassengerFreeAssignmentRouteColumn[];
         next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
     )

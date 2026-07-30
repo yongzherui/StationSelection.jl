@@ -24,15 +24,59 @@ const DEFAULT_STUDY = normpath(joinpath(
     @__DIR__, "..", "experiments", "2026-07-30_pfa_scaling_grid",
 ))
 
+"""
+Load every cell's summary.
+
+Reads the per-case `results/*.csv`, which `run_one` writes as soon as a case
+returns, rather than `combined_results.csv`, which is only written after *all*
+cases in that job finish. If SLURM kills a job at its wall limit the combined
+file never appears, so preferring it would silently drop the very cells that ran
+longest -- exactly the ones a scaling study cares about. `combined_results.csv`
+is used only as a fallback for cells that have one but no `results/` directory.
+"""
 function load_grid(study::AbstractString)
     rows = DataFrame[]
     for entry in sort(readdir(study))
-        f = joinpath(study, entry, "combined_results.csv")
-        isfile(f) || continue
-        push!(rows, CSV.read(f, DataFrame))
+        cell = joinpath(study, entry)
+        isdir(cell) || continue
+        rdir = joinpath(cell, "results")
+        loaded = false
+        if isdir(rdir)
+            for f in sort(readdir(rdir))
+                endswith(f, ".csv") || continue
+                push!(rows, CSV.read(joinpath(rdir, f), DataFrame))
+                loaded = true
+            end
+        end
+        if !loaded
+            f = joinpath(cell, "combined_results.csv")
+            isfile(f) && push!(rows, CSV.read(f, DataFrame))
+        end
     end
-    isempty(rows) && error("no combined_results.csv found under $study")
+    isempty(rows) && error("no per-case results found under $study")
     return reduce(vcat, rows; cols=:union)
+end
+
+"""
+Last recorded iteration of a cell, from its `iters/*_iterations.csv`.
+
+This is the progress trace for a cell that never certified: it shows where the
+LP bound had got to, how big the pool was, and whether pricing was still finding
+improving columns when the clock ran out. A cell killed outright by SLURM still
+leaves this file for every iteration it completed.
+"""
+function last_iteration(study::AbstractString, n_stations, n_pairs)
+    for entry in sort(readdir(study))
+        idir = joinpath(study, entry, "iters")
+        isdir(idir) || continue
+        for f in sort(readdir(idir))
+            occursin("_n$(n_stations)_p$(n_pairs)_", f) || continue
+            df = CSV.read(joinpath(idir, f), DataFrame)
+            nrow(df) == 0 && continue
+            return df[end, :], nrow(df)
+        end
+    end
+    return nothing, 0
 end
 
 _num(x) = ismissing(x) || x === nothing ? missing :
@@ -126,15 +170,27 @@ function main()
     fit_axis(df, :n_stations, :n_pairs, :wall_time_sec)
     fit_axis(df, :n_pairs, :n_stations, :wall_time_sec)
 
-    println("\n## non-proven cells")
+    println("\n## cells that did not certify -- progress at cutoff")
     bad = df[string.(df.cg_stop_reason) .!= "optimality_proven", :]
     if nrow(bad) == 0
         println("  none -- every cell certified optimality")
     else
+        println("  lp_bound is NOT a certified bound for these: pricing had not")
+        println("  proven that no improving column remains. best_rc is the most")
+        println("  negative reduced cost still on the table at the cutoff -- the")
+        println("  further from 0, the further from convergence.")
+        @printf("  %4s %4s %-24s %10s %12s %8s %8s %12s\n",
+                "n", "p", "stop", "wall_s", "lp_bound", "iters", "pool", "best_rc")
         for r in eachrow(bad)
-            @printf("  n=%-3d p=%-3d status=%s stop=%s wall=%.0fs\n",
-                    r.n_stations, r.n_pairs, r.status, r.cg_stop_reason,
-                    something(_num(r.wall_time_sec), NaN))
+            last, n_iter = last_iteration(study, r.n_stations, r.n_pairs)
+            lp = something(_num(r.lp_bound), NaN)
+            pool = isnothing(last) ? missing : _num(last.pool_size)
+            brc = isnothing(last) ? missing : _num(last.best_reduced_cost)
+            @printf("  %4d %4d %-24s %10.0f %12.2f %8d %8s %12s\n",
+                    r.n_stations, r.n_pairs, r.cg_stop_reason,
+                    something(_num(r.wall_time_sec), NaN), lp, n_iter,
+                    ismissing(pool) ? "-" : @sprintf("%.0f", pool),
+                    ismissing(brc) ? "-" : @sprintf("%.1f", brc))
         end
     end
 

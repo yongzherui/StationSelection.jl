@@ -149,8 +149,12 @@ function _passenger_free_assignment_station_budget_allows(
     return count_ones(label.visited_mask) < pricing_data.max_distinct_stations
 end
 
+# `label` is untyped so both the revisit-tolerant and the elementary
+# (`station_simple.jl`) pricers can share this: it reads only `station_age`,
+# `current`, and `activated_reward_layers`, which both label types expose. Julia
+# specializes per concrete call site, so there is no dispatch or speed cost.
 function _has_useful_live_passenger_free_assignment_origin(
-    label::PassengerFreeAssignmentPricingLabel,
+    label,
     pricing_data::PassengerFreeAssignmentPricingData,
 )::Bool
     for (station, age) in label.station_age
@@ -347,10 +351,14 @@ function _passenger_free_assignment_compensation(
     b_layers::RewardLayerBitset,
     layer_weight::Vector{Float64},
     budget::Float64,
+    compensated::Bool=true,
 )::Float64
     # Word-wise and much cheaper than the element loop; also the single most
     # common case (it is exactly the old, uncompensated dominance rule).
     issubset(a_layers, b_layers) && return 0.0
+    # With compensation off this IS the old rule: a non-subset never dominates,
+    # which `Inf` expresses without duplicating the surrounding predicate.
+    compensated || return Inf
     total = 0.0
     @inbounds for layer in a_layers
         layer in b_layers && continue
@@ -406,6 +414,7 @@ function _dominates_passenger_free_assignment_label(
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
     bounded_distinct_stations::Bool=false,
+    compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
@@ -418,6 +427,7 @@ function _dominates_passenger_free_assignment_label(
     budget >= 0.0 || return false
     _passenger_free_assignment_compensation(
         a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
+        compensated_dominance,
     ) <= budget || return false
     all_stations = union(keys(a.station_age), keys(b.station_age), (a.current, b.current))
     for station in all_stations
@@ -434,6 +444,7 @@ function _dominates_passenger_free_assignment_label(
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
     bounded_distinct_stations::Bool=false,
+    compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
@@ -449,6 +460,7 @@ function _dominates_passenger_free_assignment_label(
     budget >= 0.0 || return false
     _passenger_free_assignment_compensation(
         abs.activated_bits, bbs.activated_bits, layer_weight, budget,
+        compensated_dominance,
     ) <= budget || return false
     # `dom(age_b) subseteq dom(age_a)` and `age_a(j) <= age_b(j)` for all j in
     # dom(age_b) -- exactly equivalent to the dense "all stations, missing = Inf"
@@ -493,6 +505,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
     bounded_distinct_stations::Bool,
+    compensated_dominance::Bool,
     dominated::Vector{Int},
 )
     inserted = true
@@ -504,7 +517,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
         existing_label = entry.label
 
         if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops, bounded_distinct_stations)
+            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops, bounded_distinct_stations, compensated_dominance)
                 inserted = false
                 break
             end
@@ -512,7 +525,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops, bounded_distinct_stations)
+        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops, bounded_distinct_stations, compensated_dominance)
             push!(dominated, i)
         end
     end
