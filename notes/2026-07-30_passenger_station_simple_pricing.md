@@ -17,11 +17,14 @@ revisits is expected to be faster on two levers, both aimed at that scan:
 
 1. **Fewer extensions** — candidate generation drops already-visited nodes, so the
    branching factor shrinks as a route grows.
-2. **Tiny dominance buckets** — buckets are keyed on the exact `(current, visited)`
-   pair rather than on `current` alone. Two elementary labels with different
-   visited sets have different forbidden futures and can never dominate each
-   other, so they never share a bucket, and the visited comparison drops out of
-   the per-pair dominance predicate entirely.
+2. **Stronger, subset-visited dominance** — buckets are keyed on `current` alone,
+   and dominance adds the elementary resource `U_a ⊆ U_b`: a label that has visited
+   a subset of another's stations has fewer forbidden futures, so it dominates
+   whenever otherwise no worse. This prunes the "wandered" labels the
+   revisit-tolerant pricer (which ignores `visited` when uncapped) would carry.
+   (An earlier iteration keyed on the exact `(current, visited)` pair — tiny
+   buckets, but labels with differing visited sets never compared, which measured
+   letting the live population balloon 3-6x. See the measured section.)
 
 ## What elementarity does and does not simplify
 
@@ -42,24 +45,26 @@ label therefore keeps `activated_reward_layers` and the live-clock Dict, and add
 an authoritative `visited::Set{Int}` (no 64-station `UInt64` ceiling, unlike the
 revisit-tolerant `visited_mask` budget bitset it replaces).
 
-## Dominance soundness (exact-visited signature)
+## Dominance soundness (subset-visited)
 
-Buckets are keyed on `(current, visited)`, so any two labels compared for
-dominance already share both. With identical visited sets the two labels have
-exactly the same set of reachable futures, so `a` dominates `b` iff:
+Buckets are keyed on `current`. `a` dominates `b` iff:
 
+- `U_a ⊆ U_b` (visited-subset). For an elementary route `visited` is the set of
+  forbidden future stations, so a subset means every station `b` may still visit,
+  `a` may visit too — every completion feasible for `b` is feasible from `a`.
 - `time_a <= time_b`;
 - the **compensated** reward-layer budget `rc_a + w(A_a \ A_b) <= rc_b` (the same
   test the revisit-tolerant pricer uses — see `_passenger_free_assignment_compensation`
-  and the dominance docstring in `labels.jl`; a plain `A_a ⊆ A_b` subset test is
-  the special case `w(A_a \ A_b) = 0` and is unsound in general);
-- `age_a(j) <= age_b(j)` for every live origin `j` (sparse merge walk).
+  and the dominance docstring in `labels.jl`; a plain `A_a ⊆ A_b` subset test on
+  *layers* is the special case `w(A_a \ A_b) = 0` and is unsound in general);
+- `age_a(j) <= age_b(j)` for every live origin `j`, i.e. `a` holds every live clock
+  `b` does at no larger age (sparse merge walk; an extra clock in `a` is fine).
 
-Two resources present in the revisit-tolerant dominance are **dropped** here as
-redundant, not weakened: `route_length` (equal within a bucket, since
-`route_length == |visited|`) and the visited-subset resource (equality is
-stronger than subset). This is a strict special case of the revisit-tolerant
-compensated dominance, so it never claims an unsound domination.
+`route_length` needs no separate condition: `U_a ⊆ U_b` implies
+`route_length_a <= route_length_b`, so the `max_stops` resource is subsumed. Every
+condition is necessary, so this never claims an unsound domination; and it is
+strictly stronger than the exact-`(current, visited)` rule (which is the special
+case `U_a = U_b`), so it prunes at least as many labels.
 
 ## Correctness caveat — this restricts the column universe
 
@@ -103,8 +108,68 @@ positive when station-simple is restricted). Expected signature: `speedup > 1` a
 `live_ratio > 1` where the case is nontrivial, with `rc_gap` either ~0 (exact) or
 positive (restriction visible).
 
-<!-- MEASURED: fill in from a bench run once the cluster grid frees up:
-     scripts/bench_passenger_free_assignment_labels.jl --cases 15:5,15:6,20:5 -->
+### MEASURED (A) — exact-visited dominance, SUPERSEDED (2026-07-30)
+
+This is the first-cut dominance (bucket on `(current, visited)`), kept here as the
+motivation for switching to subset-visited. Zhuzhou grid, n ∈ {10,15,20}, ms=5,
+p=16, 3 scenarios. Both pricers run to genuine exhaustion on identical `pricing_data`
+(`scripts/bench_passenger_free_assignment_labels.jl --cases 10:5,15:5,20:5`, one
+SLURM array task per n). `speedup = rev_wall / ss_wall`,
+`live_ratio = rev_maxlive / ss_maxlive`, `rc_gap` = relative worsening of the best
+reduced cost (0 = exact match, positive = station-simple is restricted).
+
+| n  | s | speedup | live_ratio | rc_gap  | rev max_live | ss max_live |
+|----|---|---------|------------|---------|--------------|-------------|
+| 10 | 1 | 9.11\*  | 0.31       | 0.0442  | 2,090        | 6,807       |
+| 10 | 2 | 0.58    | 0.30       | 0.0201  | 1,129        | 3,756       |
+| 10 | 3 | 0.50    | 0.33       | 0.0000  | 1,989        | 6,025       |
+| 15 | 1 | 1.26    | 0.20       | 0.0210  | 13,269       | 66,429      |
+| 15 | 2 | 0.59    | 0.20       | 0.0169  | 11,715       | 59,596      |
+| 15 | 3 | 0.95    | 0.26       | 0.0834  | 19,095       | 73,079      |
+| 20 | 1 | 1.69    | 0.17       | 0.0009  | 52,461       | 301,059     |
+| 20 | 2 | 1.51    | 0.18       | 0.0000  | 41,761       | 237,402     |
+| 20 | 3 | 2.84    | 0.23       | 0.0000  | 76,683       | 337,846     |
+
+\* n=10 walls are sub-second, so that ratio is timing noise, not signal.
+
+**Three findings, none matching the optimistic premise:**
+
+1. **The exact-visited signature inflates the label population 3–6×** (`live_ratio`
+   0.17–0.33, i.e. station-simple's `max_live` is 3–6× the revisit-tolerant
+   pricer's). Keying buckets on `(current, visited)` destroys the cross-domination
+   the revisit-tolerant pricer gets from keying on `current` alone and ignoring
+   `visited` when uncapped — labels with different visited sets never compare, so
+   far fewer are pruned. This is the opposite of the "tiny buckets shrink the live
+   set" hypothesis in the header.
+
+2. **Speed is inconsistent and only reliably positive at n=20** (1.5–2.8×). At
+   n≤15 it is a wash-to-slower (0.5–1.3×). The n=20 win comes purely from cheaper
+   per-insertion scans (buckets are tiny even though there are 3–6× more of them);
+   it grows with n, so the tiny-bucket lever may eventually dominate, but not in the
+   measured range.
+
+3. **It is NOT exact on this family** — `rc_gap` is nonzero in 5 of 9 cases, up to
+   **8.3%** (n=15/s3). The Zhuzhou optimum frequently wants a revisiting route, so
+   elementary pricing genuinely misses the best column. This is the
+   column-universe restriction, exactly as warned above, and it is why the feature
+   is off by default.
+
+**Why this motivated the switch.** The label-count blow-up is entirely a dominance
+artifact: bucketing on exact `(current, visited)` prevents a lean route from
+dominating a wandered one. The subset-visited rule (now the implementation) keys on
+`current` and adds `U_a ⊆ U_b`, restoring that cross-domination. The `rc_gap`
+column is a property of the *route universe*, not the dominance rule, so it is
+unchanged by the switch — the Zhuzhou optimum still frequently wants a revisit, and
+the feature stays off by default for that reason.
+
+### MEASURED (B) — subset-visited dominance (the shipped rule)
+
+Same grid, re-run after switching the dominance rule. `live_ratio` should climb
+toward / above 1 (label count no longer inflated) and `speedup` improve, while
+`rc_gap` stays as in (A) (same elementary universe).
+
+<!-- MEASURED: fill from the subset-visited re-run:
+     sbatch --array=0-2 tmp_ss_bench/sbatch_ss_grid_array.sh -->
 ```
-(pending bench run)
+(subset-visited bench re-run pending)
 ```

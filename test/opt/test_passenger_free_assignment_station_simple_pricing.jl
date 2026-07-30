@@ -215,7 +215,7 @@
         @test ss_best > rev_best + 1e-6
     end
 
-    @testset "dominance: exact visited signature with compensated layers" begin
+    @testset "dominance: subset-visited rule with compensated layers" begin
         travel = line_travel_cost(3)
         candidates = [
             PassengerAssignmentCandidate(1, 1, 2, 100.0, 4.0),
@@ -233,15 +233,33 @@
                 current, collect(visited), Set(visited), time, station_age, layers, time, rc, length(visited),
             )
         bs(label) = StationSelection._make_passenger_free_assignment_station_simple_bitsets(label, node_index, n_nodes)
+        dominates(x, y) = StationSelection._dominates_passenger_free_assignment_station_simple_label(
+            x, y, bs(x), bs(y), pd.layer_weight,
+        )
 
+        # Equal visited, strictly no worse on time/rc/age -> dominates.
         a = mklabel(2, [1, 2], 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
         b = mklabel(2, [1, 2], 2.0, Dict(1 => 2.0), RewardLayerBitset(), 0.0)
-        @test StationSelection._dominates_passenger_free_assignment_station_simple_label(a, b, bs(a), bs(b), pd.layer_weight)
-        @test !StationSelection._dominates_passenger_free_assignment_station_simple_label(b, a, bs(b), bs(a), pd.layer_weight)
+        @test dominates(a, b)
+        @test !dominates(b, a)
 
-        # Different visited sets never dominate, even when otherwise no worse.
-        c = mklabel(2, [2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -1.0)
-        @test !StationSelection._dominates_passenger_free_assignment_station_simple_label(c, a, bs(c), bs(a), pd.layer_weight)
-        @test !StationSelection._dominates_passenger_free_assignment_station_simple_label(a, c, bs(a), bs(c), pd.layer_weight)
+        # Subset visited: a lean route dominates a wandered one that is otherwise
+        # no worse -- the cross-domination the exact-visited rule could not express.
+        lean = mklabel(2, [2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -1.0)
+        wandered = mklabel(2, [1, 2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -1.0)
+        @test dominates(lean, wandered)     # {2} ⊆ {1,2}
+        @test !dominates(wandered, lean)    # {1,2} ⊄ {2}
+
+        # A superset-visited label cannot dominate even with a better reduced cost:
+        # it has forbidden itself a station the lean label can still use.
+        cheap_wandered = mklabel(2, [1, 2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -5.0)
+        @test !dominates(cheap_wandered, lean)
+
+        # Live-clock (age) resource: the dominator must hold every live clock the
+        # dominated one has. An extra clock is fine; a missing one breaks dominance.
+        has_clock = mklabel(2, [2], 1.0, Dict(1 => 1.0), RewardLayerBitset(), -1.0)
+        no_clock = mklabel(2, [2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -1.0)
+        @test dominates(has_clock, no_clock)
+        @test !dominates(no_clock, has_clock)
     end
 end

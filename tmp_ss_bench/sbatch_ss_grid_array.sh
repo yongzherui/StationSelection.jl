@@ -14,6 +14,7 @@ set -uo pipefail
 NVALS=(10 15 20)
 TASK="${SLURM_ARRAY_TASK_ID:?submit with --array=0-2}"
 N="${NVALS[$TASK]}"
+MAX_STOPS="${PFA_GRID_MAX_STOPS:-5}"
 
 PROJECT_ROOT="/home/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl"
 
@@ -36,9 +37,10 @@ rsync -a --exclude='compiled/' --exclude='logs/' ~/.julia/ "$JULIA_DEPOT_PATH/"
 
 cd "$PROJECT_ROOT"
 # p=16, 3 scenarios come from the benchmark's own N_PAIRS/N_SCENARIOS defaults.
-# max_stops=5 exhausts within the limit for n<=20; 900s per search leaves margin.
+# `MAX_STOPS=0` is the benchmark's uncapped sentinel. A 900s per-search limit
+# prevents an uncapped case from consuming the whole allocation.
 export PFA_TIME_LIMIT=900
-echo "===== station-simple grid: n=${N}, ms=5, p=16, 3 scenarios ====="
+echo "===== station-simple grid: n=${N}, ms=${MAX_STOPS}, p=16, 3 scenarios ====="
 julia --startup-file=no --project="$PROJECT_ROOT" \
     "$PROJECT_ROOT/scripts/bench_passenger_free_assignment_labels.jl" \
-    --cases "${N}:5"
+    --cases "${N}:${MAX_STOPS}"

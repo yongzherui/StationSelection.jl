@@ -21,20 +21,24 @@ station is visited exactly once, so a clock only ages and is never reopened.
 
 # Why this is faster
 
-Two levers, both aimed at the dominance scan that is ~85-90% of wall time in the
-revisit-tolerant pricer:
+Two levers:
 
 1. **Fewer extensions.** Candidate generation drops any already-visited node, so
    the branching factor shrinks as a route grows.
 
-2. **Tiny dominance buckets.** Buckets are keyed on the EXACT `(current, visited)`
-   pair rather than on `current` alone. Two elementary labels with different
-   visited sets have different forbidden futures and can never dominate each
-   other, so they never share a bucket -- and because `visited` is identical
-   within a bucket, the visited comparison drops out of the dominance predicate
-   entirely, leaving only the same compensated reward-layer test
-   (`_passenger_free_assignment_compensation`) and live-age merge the
-   revisit-tolerant pricer already uses.
+2. **Stronger dominance from a subset-visited rule.** Buckets are keyed on
+   `current` alone, and dominance adds the elementary resource `U_a ⊆ U_b`: a
+   label that has visited a subset of another's stations has fewer forbidden
+   futures, so it dominates whenever it is otherwise no worse. This is strictly
+   stronger than the revisit-tolerant pricer, which ignores `visited` entirely
+   when uncapped, and prunes the "wandered" labels an elementary search would
+   otherwise carry.
+
+   An earlier version keyed buckets on the exact `(current, visited)` pair, which
+   makes each bucket tiny but lets labels with differing visited sets never
+   compare -- measured letting the live population balloon 3-6x. The subset rule
+   above recovers that cross-domination; see
+   `notes/2026-07-30_passenger_station_simple_pricing.md`.
 
 # Correctness caveat
 
@@ -79,8 +83,8 @@ struct PassengerFreeAssignmentStationSimpleLabel
 end
 
 """
-Hot-path mirror of a station-simple label. `visited_bits` supplies the exact
-dominance signature; `activated_bits`/`age_idx`/`age_val` mirror
+Hot-path mirror of a station-simple label. `visited_bits` supplies the compact
+visited-subset resource used by dominance; `activated_bits`/`age_idx`/`age_val` mirror
 `PassengerFreeAssignmentLabelBitsets` so the shared reward bound and the
 compensated-layer/age dominance tests apply unchanged. `age_idx` is sorted
 ascending, `age_val` parallel to it.
@@ -116,12 +120,16 @@ function _make_passenger_free_assignment_station_simple_bitsets(
     )
 end
 
-# Exact `(current, visited)` signature: buckets never mix distinct visited sets,
-# which is what lets the dominance predicate below skip a visited comparison.
+# Bucket on `current` alone: labels at the same station compare regardless of
+# their visited sets, so the subset-visited dominance in
+# `_dominates_passenger_free_assignment_station_simple_label` can actually fire
+# across differing routes (that cross-domination is the whole point of the subset
+# rule over exact `(current, visited)` bucketing). `bs` is unused but kept in the
+# signature so the call site matches the exact-visited variant's shape.
 _passenger_free_assignment_station_simple_signature(
     label::PassengerFreeAssignmentStationSimpleLabel,
-    bs::PassengerFreeAssignmentStationSimpleBitsets,
-) = (label.current, bs.visited_bits)
+    ::PassengerFreeAssignmentStationSimpleBitsets,
+) = label.current
 
 _passenger_free_assignment_station_simple_entry_order_key(entry) =
     (entry.label.reduced_cost, entry.label.time, entry.label.route_length, entry.id)
@@ -139,17 +147,25 @@ const PassengerFreeAssignmentStationSimpleDominanceBucket =
     _dominates_passenger_free_assignment_station_simple_label(a, b, abs, bbs, layer_weight)
 
 `a` dominates `b`: every completion of `b` has a counterpart from `a` at least as
-good. Callers only ever compare labels drawn from the same `(current, visited)`
-bucket, so `current` and `visited` are already equal -- both are re-checked here
-only as cheap guards. With identical visited sets the two labels share exactly the
-same set of reachable futures, so the remaining conditions are precisely the
-revisit-tolerant pricer's, minus the `route_length` resource (equal here, since
-`route_length == length(visited)`) and the visited-subset resource:
+good. Callers only ever compare labels drawn from the same `current` bucket, so
+`a.current == b.current` is re-checked only as a cheap guard.
+
+The visited resource is a **subset** test, `U_a ⊆ U_b`, not equality. For an
+elementary route `visited` is the set of forbidden future stations, so if `a` has
+visited a subset of what `b` has, every station `b` may still visit `a` may visit
+too -- hence every completion feasible for `b` is feasible from `a`. This is
+strictly stronger than the exact-`(current, visited)` bucketing it replaced: a
+"lean" label (visited a subset) can now kill a "wandered" one that forbade itself
+extra stations for no gain, which the exact rule structurally could not, and which
+was measured letting the live-label population balloon 3-6x (see the note). Because
+`U_a ⊆ U_b` implies `route_length_a <= route_length_b`, the `max_stops` resource is
+subsumed and needs no separate check. The remaining conditions are the
+revisit-tolerant pricer's:
 
   - `time_a <= time_b`;
   - the compensated reward-layer budget `rc_a + w(A_a ∖ A_b) <= rc_b` (see
     `_passenger_free_assignment_compensation` and the dominance docstring in
-    `labels.jl` for why this, not `issubset`, is the sound test);
+    `labels.jl` for why this, not `issubset` on layers, is the sound test);
   - every live station age in `a` is no larger than `b`'s (sparse merge walk).
 """
 function _dominates_passenger_free_assignment_station_simple_label(
@@ -160,7 +176,7 @@ function _dominates_passenger_free_assignment_station_simple_label(
     layer_weight::Vector{Float64},
 )::Bool
     a.current == b.current || return false
-    abs.visited_bits == bbs.visited_bits || return false
+    issubset(abs.visited_bits, bbs.visited_bits) || return false
     a.time <= b.time + 1e-9 || return false
     budget = b.reduced_cost - a.reduced_cost + 1e-9
     budget >= 0.0 || return false
@@ -365,7 +381,7 @@ function _enumerate_passenger_free_assignment_station_simple_pricing_labels(
 )
     frontier = PriorityQueue{Int, Float64}()
     live_labels = Dict{Int, PassengerFreeAssignmentStationSimpleLabel}()
-    dominance_buckets = Dict{Tuple{Int, BitSet}, PassengerFreeAssignmentStationSimpleDominanceBucket}()
+    dominance_buckets = Dict{Int, PassengerFreeAssignmentStationSimpleDominanceBucket}()
     best_by_signature = Dict{Any, PassengerFreeAssignmentStationSimpleLabel}()
 
     n_nodes = length(pricing_data.nodes)
