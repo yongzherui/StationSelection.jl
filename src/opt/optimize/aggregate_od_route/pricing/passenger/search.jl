@@ -159,45 +159,12 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     reduced_cost_tol::Float64,
     max_visits_per_node::Int,
     use_reduced_cost_pruning::Bool=true,
-    dominance_index::Symbol=:vector,
     profile::Bool=false,
     stop_if=label -> false,
 )
-    # Bucket structure: `:vector` (default) is the original sorted-Vector linear scan;
-    # `:treap` is the augmented BST with sublinear (rc, time) pruning
-    # (dominance_treap.jl). Both are exact -- only speed differs. Dispatching to a
-    # type-parametric impl keeps each path fully specialized (the `:vector` path is
-    # byte-for-byte the original).
-    common = (; time_limit, reduced_cost_tol, max_visits_per_node,
-              use_reduced_cost_pruning, profile, stop_if)
-    if dominance_index === :treap
-        return _enumerate_passenger_free_assignment_pricing_labels_impl(
-            pricing_data, PassengerFreeAssignmentDominanceTreap,
-            _create_passenger_free_assignment_dominance_treap,
-            _add_passenger_free_assignment_label_to_treap!; common...)
-    elseif dominance_index === :vector
-        return _enumerate_passenger_free_assignment_pricing_labels_impl(
-            pricing_data, PassengerFreeAssignmentDominanceBucket,
-            _create_passenger_free_assignment_dominance_bucket,
-            _add_passenger_free_assignment_label_to_bucket!; common...)
-    else
-        throw(ArgumentError("dominance_index must be :vector or :treap, got $(dominance_index)"))
-    end
-end
-
-function _enumerate_passenger_free_assignment_pricing_labels_impl(
-    pricing_data::PassengerFreeAssignmentPricingData,
-    ::Type{B}, make_bucket::MF, add_to_bucket!::AF;
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    max_visits_per_node::Int,
-    use_reduced_cost_pruning::Bool=true,
-    profile::Bool=false,
-    stop_if=label -> false,
-) where {B, MF, AF}
     frontier = PriorityQueue{Int, Float64}()
     live_labels = Dict{Int, PassengerFreeAssignmentPricingLabel}()
-    dominance_buckets = Dict{Int, B}()
+    dominance_buckets = Dict{Int, PassengerFreeAssignmentDominanceBucket}()
     best_by_signature = Dict{Any, PassengerFreeAssignmentPricingLabel}()
 
     n_nodes = length(pricing_data.nodes)
@@ -234,9 +201,9 @@ function _enumerate_passenger_free_assignment_pricing_labels_impl(
         labels_generated += 1
         live_labels[label_id] = label
         label_bs = _make_passenger_free_assignment_label_bitsets(label, search_index.node_index, n_nodes)
-        bucket = get!(make_bucket, dominance_buckets, _passenger_free_assignment_dominance_signature(label))
+        bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
-        inserted, removed = add_to_bucket!(
+        inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
             bucket, live_labels, label, label_id, label_bs,
             pricing_data.layer_weight, pricing_data.bounded_max_stops,
             pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
@@ -314,9 +281,9 @@ function _enumerate_passenger_free_assignment_pricing_labels_impl(
                 labels_generated += 1
                 live_labels[child_id] = child
                 child_bs = _make_passenger_free_assignment_label_bitsets(child, search_index.node_index, n_nodes)
-                bucket = get!(make_bucket, dominance_buckets, _passenger_free_assignment_dominance_signature(child))
+                bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
                 t0 = profile ? time_ns() : UInt64(0)
-                inserted, removed = add_to_bucket!(
+                inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
                     bucket, live_labels, child, child_id, child_bs,
                     pricing_data.layer_weight, pricing_data.bounded_max_stops,
             pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
@@ -459,7 +426,6 @@ function passenger_free_assignment_pricing_by_label_setting(
     n_candidates::Int=max_new_columns,
     time_limit::Float64=30.0,
     max_visits_per_node::Int=pricing_data.max_visits_per_node,
-    dominance_index::Symbol=:vector,
     profile::Bool=false,
 )
     max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
@@ -496,7 +462,6 @@ function passenger_free_assignment_pricing_by_label_setting(
         time_limit=time_limit,
         reduced_cost_tol=reduced_cost_tol,
         max_visits_per_node=max_visits_per_node,
-        dominance_index=dominance_index,
         profile=profile,
         stop_if=label -> try_accept_route!(label.route, label.reduced_cost),
     )

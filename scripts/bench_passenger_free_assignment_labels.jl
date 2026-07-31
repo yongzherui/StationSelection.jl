@@ -149,55 +149,19 @@ function run_case(n_stations::Int, raw_max_stops::Int)
             next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
             time_limit=TIME_LIMIT_SEC, profile=true,
         ))
-        # Same revisit-tolerant pricer, augmented-treap bucket instead of the linear
-        # sorted-Vector scan. `best_rc` MUST match `rev` (exact drop-in); the win is
-        # in `t_dominance`/wall, expected to grow with n (bigger per-current buckets).
-        rev_treap = run_pricer("revisit_treap", () -> passenger_free_assignment_pricing_by_label_setting(
+        ss = run_pricer("station_simple", () -> passenger_free_assignment_pricing_by_station_simple_label_setting(
             pricing_data, PassengerFreeAssignmentRouteColumn[];
             next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
-            time_limit=TIME_LIMIT_SEC, dominance_index=:treap, profile=true,
-        ))
-        # Both station-simple dominance modes price the SAME elementary universe, so
-        # `best_rc` must match between them; they differ only in bucket granularity
-        # (exact = fine buckets/more labels, subset = coarse buckets/fewer labels).
-        ss_subset = run_pricer("ss_subset", () -> passenger_free_assignment_pricing_by_station_simple_label_setting(
-            pricing_data, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
-            time_limit=TIME_LIMIT_SEC, dominance_mode=:subset, profile=true,
-        ))
-        ss_exact = run_pricer("ss_exact", () -> passenger_free_assignment_pricing_by_station_simple_label_setting(
-            pricing_data, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=N_CANDIDATES, n_candidates=N_CANDIDATES,
-            time_limit=TIME_LIMIT_SEC, dominance_mode=:exact, profile=true,
+            time_limit=TIME_LIMIT_SEC, profile=true,
         ))
 
-        rc_gap(r) = (isnan(rev.best_rc) || isnan(r.best_rc)) ? NaN :
-            (abs(rev.best_rc) < 1e-9 ? r.best_rc - rev.best_rc : (r.best_rc - rev.best_rc) / abs(rev.best_rc))
-        for (mode, r) in (("subset", ss_subset), ("exact", ss_exact))
-            @printf(
-                "COMPARE\tmode=%s\tn=%d\tms=%s\ts=%d\tspeedup=%.2f\tlive_ratio=%.2f\trev_best_rc=%.6f\tss_best_rc=%.6f\trc_gap=%.4f\n",
-                mode, n_stations, ms_label, s,
-                r.wall > 0 ? rev.wall / r.wall : NaN,
-                r.max_live > 0 ? rev.max_live / r.max_live : NaN,
-                rev.best_rc, r.best_rc, rc_gap(r),
-            )
-        end
-        # Direct exact-vs-subset wall ratio (>1 means exact is faster).
+        speedup = ss.wall > 0 ? rev.wall / ss.wall : NaN
+        live_ratio = ss.max_live > 0 ? rev.max_live / ss.max_live : NaN
+        rc_gap = (isnan(rev.best_rc) || isnan(ss.best_rc)) ? NaN :
+            (abs(rev.best_rc) < 1e-9 ? ss.best_rc - rev.best_rc : (ss.best_rc - rev.best_rc) / abs(rev.best_rc))
         @printf(
-            "COMPARE_SS\tn=%d\tms=%s\ts=%d\texact_over_subset_speedup=%.2f\tsubset_live_over_exact=%.2f\n",
-            n_stations, ms_label, s,
-            ss_exact.wall > 0 ? ss_subset.wall / ss_exact.wall : NaN,
-            ss_subset.max_live > 0 ? ss_exact.max_live / ss_subset.max_live : NaN,
-        )
-        # Treap-vs-Vector dominance index on the revisit-tolerant pricer. `rc_match`
-        # must be true (exact); `dom_speedup`/`wall_speedup` > 1 means the treap wins.
-        @printf(
-            "COMPARE_IDX\tn=%d\tms=%s\ts=%d\twall_speedup=%.2f\tdom_speedup=%.2f\tvec_dom=%.3f\ttreap_dom=%.3f\trc_match=%s\n",
-            n_stations, ms_label, s,
-            rev_treap.wall > 0 ? rev.wall / rev_treap.wall : NaN,
-            rev_treap.t_dominance > 0 ? rev.t_dominance / rev_treap.t_dominance : NaN,
-            rev.t_dominance, rev_treap.t_dominance,
-            isapprox(rev.best_rc, rev_treap.best_rc; atol=1e-6),
+            "COMPARE\tn=%d\tms=%s\ts=%d\tspeedup=%.2f\tlive_ratio=%.2f\trev_best_rc=%.6f\tss_best_rc=%.6f\trc_gap=%.4f\n",
+            n_stations, ms_label, s, speedup, live_ratio, rev.best_rc, ss.best_rc, rc_gap,
         )
         flush(stdout)
     end
@@ -220,20 +184,14 @@ function warmup()
         route_regularization_weight=1.0, max_wait_time=200.0,
         repositioning_time=0.0, max_stops=3, max_visits_per_node=2,
     )
-    for idx in (:vector, :treap)
-        passenger_free_assignment_pricing_by_label_setting(
-            pd, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
-            dominance_index=idx,
-        )
-    end
-    for mode in (:subset, :exact)
-        passenger_free_assignment_pricing_by_station_simple_label_setting(
-            pd, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
-            dominance_mode=mode,
-        )
-    end
+    passenger_free_assignment_pricing_by_label_setting(
+        pd, PassengerFreeAssignmentRouteColumn[];
+        next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
+    )
+    passenger_free_assignment_pricing_by_station_simple_label_setting(
+        pd, PassengerFreeAssignmentRouteColumn[];
+        next_column_id=1, max_new_columns=1, n_candidates=N_CANDIDATES, time_limit=10.0,
+    )
     return nothing
 end
 

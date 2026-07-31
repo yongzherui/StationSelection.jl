@@ -553,40 +553,4 @@
             @test column.metadata["reduced_cost"] < -1e-6
         end
     end
-
-    @testset "treap and vector dominance indices agree" begin
-        # The augmented-treap bucket (dominance_index=:treap) is an exact drop-in for
-        # the sorted-Vector scan: same route universe, same dominance predicate, only
-        # the bucket data structure differs. So the best reduced cost and the set of
-        # priced column signatures must be identical -- a revisit-needing instance is
-        # used so the search actually exercises deep buckets.
-        nodes = [1, 2, 3, 4]
-        travel = line_travel_cost(4)
-        candidates = [
-            PassengerAssignmentCandidate(1, 2, 4, 100.0, 11.0),
-            PassengerAssignmentCandidate(2, 3, 1, 100.0, 9.0),
-            PassengerAssignmentCandidate(3, 2, 1, 100.0, 6.0),
-            PassengerAssignmentCandidate(1, 1, 3, 100.0, 8.0),
-        ]
-        pricing_data = create_passenger_free_assignment_pricing_data(
-            1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=20.0, max_stops=4, max_visits_per_node=2,
-        )
-        runidx(idx) = passenger_free_assignment_pricing_by_label_setting(
-            pricing_data, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=10^6, n_candidates=10^6, time_limit=30.0,
-            dominance_index=idx,
-        )
-        vcols, vexh, _ = runidx(:vector)
-        tcols, texh, _ = runidx(:treap)
-        @test vexh && texh
-        @test !isempty(vcols) && !isempty(tcols)
-        @test isapprox(
-            minimum(c.metadata["reduced_cost"] for c in vcols),
-            minimum(c.metadata["reduced_cost"] for c in tcols); atol=1e-6,
-        )
-        sig(cols) = Set(Tuple(sort(c.assignments)) for c in cols)
-        @test sig(vcols) == sig(tcols)
-        @test_throws ArgumentError runidx(:nonsense)
-    end
 end

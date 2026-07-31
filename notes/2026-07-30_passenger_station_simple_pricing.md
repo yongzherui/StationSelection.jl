@@ -201,6 +201,40 @@ revisit 19.2/12.1/41.7s, **ss_exact 10.4/7.6/11.9s**, ss_subset 69.0/27.8/140.0s
 is now genuinely faster than the revisit-tolerant pricer at n=20 — but remains a
 heuristic on instance families whose optimum wants a revisit, so it is opt-in.
 
+## Failed acceleration: augmented treap dominance index (2026-07-31)
+
+We prototyped an `rc`-keyed randomized treap augmented with the minimum and maximum
+time in each subtree. The intent was to replace the revisit-tolerant pricer's linear
+dominance-bucket scan with output-sensitive queries over the necessary scalar
+conditions `rc_a <= rc_b` and `time_a <= time_b`.
+
+The standalone data-structure experiment was encouraging. It passed 4,000 randomized
+insert/delete/query comparisons against brute force. Its dominator query was 3.1-4.5x
+faster than a vector at bucket sizes 1k-20k and 15.2x faster at 100k. Treap insertion
+also overtook sorted-vector insertion around bucket size 5k and scaled much better.
+
+The result did **not** carry into the real pricer:
+
+| case | vector wall | treap wall | vector dominance | treap dominance |
+|------|-------------|------------|------------------|-----------------|
+| n=20, s=1 | 20.0s | 21.2s | 15.8s | 18.9s |
+| n=20, s=2 | 11.7s | 13.2s | 10.0s | 11.4s |
+| n=20, s=3 | 34.4s | 43.0s | 31.2s | 39.7s |
+| n=25, s=1 | 313.6s | 437.3s | 301.5s | 426.5s |
+
+Both indices returned the same best reduced costs, so the experiment supported
+correctness, but the treap was 6-39% slower. The `(rc, time)` filter was not selective
+enough: many scalar survivors still required the full reward-layer/age/resource
+predicate, while recursive pointer traversal, allocation, rotations, and deletion
+cost more than scanning a contiguous Julia vector. The n=30 vector run itself reached
+the 900s limit before a paired treap result was available; the decisive n=25 loss gives
+no reason to expect a useful later crossover from the same structure.
+
+**Decision:** remove the treap implementation, API toggle, tests, and benchmark path.
+Keep the vector dominance bucket. Any future index should first measure scalar-survivor
+counts and add a more selective, cache-friendly discriminator (for example a compact
+Pareto skyline or flat bins incorporating reward/age state) before integration.
+
 ## End-to-end CG: objective gap and the two-phase warm start (2026-07-31)
 
 `scripts/diag_passenger_station_simple_vs_revisit_objective.jl` runs the FULL
