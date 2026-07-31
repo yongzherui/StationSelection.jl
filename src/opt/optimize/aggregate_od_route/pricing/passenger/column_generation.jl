@@ -351,6 +351,16 @@ function run_passenger_free_assignment_column_generation(
     # optimum wants a revisiting route -- opt-in and validate against the default
     # pricer. See pricing/passenger/station_simple.jl.
     use_station_simple::Bool=false,
+    # Two-phase warm start: price with the fast elementary (station-simple) search
+    # until it PROVES no improving elementary column remains (an exhausted, empty
+    # certification pass), THEN switch to the exact revisit-tolerant pricer to close
+    # the remaining gap and certify. The elementary phase populates the pool cheaply;
+    # the exact phase then only has to find the (typically few) revisiting columns the
+    # true optimum needs. Overrides `use_station_simple` (which fixes the pricer for
+    # the whole run). The final `lp_bound` is still a genuine certificate -- the
+    # switch happens precisely because the elementary pool could not be improved, and
+    # the exact phase runs to its own exhaustion. See the phase-switch below.
+    station_simple_warm_start::Bool=false,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -404,6 +414,14 @@ function run_passenger_free_assignment_column_generation(
     total_pricing_seconds = 0.0
     total_lp_seconds = 0.0
     total_labels = 0
+
+    # Which pricer the current phase uses. Under `station_simple_warm_start` this
+    # starts elementary and flips to revisit-tolerant once the elementary universe is
+    # exhausted (see the certification branch); otherwise it is fixed at
+    # `use_station_simple` for the whole run. `warm_start_pending` guards the one-time
+    # switch.
+    pricing_station_simple = station_simple_warm_start ? true : use_station_simple
+    warm_start_pending = station_simple_warm_start
 
     # ── seed: every two-stop route ────────────────────────────────────────────
     # Without this the pool starts empty, so the first several iterations price
@@ -486,7 +504,7 @@ function run_passenger_free_assignment_column_generation(
                 parallel_scenarios=parallel_scenarios,
                 station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
-                use_station_simple=use_station_simple,
+                use_station_simple=pricing_station_simple,
             )
             pricing_seconds = time() - t_price
             total_pricing_seconds += pricing_seconds
@@ -503,6 +521,7 @@ function run_passenger_free_assignment_column_generation(
                 minimum(Float64(get(c.metadata, "reduced_cost", Inf)) for c in new_columns)
             push!(iteration_rows, (
                 round=n_rounds, iteration=n_iters, phase="early_return",
+                pricer=pricing_station_simple ? "station_simple" : "revisit",
                 lp_bound=lp_bound, lp_seconds=lp_seconds,
                 pricing_seconds=pricing_seconds, labels_generated=labels,
                 columns_priced=length(new_columns), columns_added=added,
@@ -563,7 +582,7 @@ function run_passenger_free_assignment_column_generation(
             parallel_scenarios=parallel_scenarios,
             station_budget_cap=station_budget_cap,
             compensated_dominance=compensated_dominance,
-            use_station_simple=use_station_simple,
+            use_station_simple=pricing_station_simple,
         )
         round_cert_seconds = time() - t_cert
         certification_seconds += round_cert_seconds
@@ -577,6 +596,7 @@ function run_passenger_free_assignment_column_generation(
         end
         push!(iteration_rows, (
             round=n_rounds, iteration=n_iters, phase="certification",
+            pricer=pricing_station_simple ? "station_simple" : "revisit",
             lp_bound=lp_bound, lp_seconds=0.0,
             pricing_seconds=round_cert_seconds, labels_generated=cert_labels,
             columns_priced=length(cert_columns), columns_added=cert_added,
@@ -591,6 +611,33 @@ function run_passenger_free_assignment_column_generation(
             "$(round(round_cert_seconds; digits=2))s",
         )
         flush(stdout)
+
+        if warm_start_pending && (
+                (isempty(cert_columns) && cert_exhausted) ||
+                (!isempty(cert_columns) && cert_added == 0))
+            # Elementary pricing can no longer improve the pool -- it either proved the
+            # elementary universe exhausted (empty + exhausted) or now only re-finds
+            # already-pooled columns. Switch to the exact revisit-tolerant pricer for
+            # the rest of the run instead of stopping over the restricted elementary
+            # pool. The LP is unchanged (nothing new was added), so the next round
+            # re-prices the same duals with the exact pricer, which is what can still
+            # find the revisiting columns the true optimum needs.
+            warm_start_pending = false
+            pricing_station_simple = false
+            verbose && println(
+                "  [r$(n_rounds)] station-simple warm start exhausted the elementary " *
+                "universe; switching to the revisit-tolerant pricer",
+            )
+            if n_iters >= max_cg_iters
+                cg_stop_reason = :max_cg_iters
+                break
+            end
+            if time() - t_start > total_time_limit_sec
+                cg_stop_reason = :total_time_limit
+                break
+            end
+            continue
+        end
 
         if isempty(cert_columns)
             # Exhaustive pricing found nothing. Only `exhausted` distinguishes a

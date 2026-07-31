@@ -132,6 +132,36 @@
         @test get(off.final_result.metadata, "seed_two_stop_columns", -1) == 0
     end
 
+    @testset "station-simple warm start reaches the same certified optimum" begin
+        # Warm start prices elementary routes first, then switches to the exact
+        # revisit-tolerant pricer once the elementary universe is exhausted. It must
+        # certify the SAME LP optimum and MIP objective as a pure revisit-tolerant
+        # run: the elementary phase only pre-populates columns, and the exact phase
+        # still runs to its own exhaustion before optimality is claimed.
+        data, model = tiny_instance()
+        common = (
+            optimizer_env=SEED_ENV, max_cg_iters=500, n_candidates=10,
+            max_new_columns=10, pricing_time_limit_sec=30.0,
+            certification_time_limit_sec=60.0, ip_time_limit_sec=60.0,
+            verbose=false,
+        )
+        plain = run_passenger_free_assignment_column_generation(model, data; common...)
+        warm = run_passenger_free_assignment_column_generation(
+            model, data; station_simple_warm_start=true, common...,
+        )
+
+        @test plain.cg_stop_reason == :optimality_proven
+        @test warm.cg_stop_reason == :optimality_proven
+        @test warm.lp_bound ≈ plain.lp_bound rtol = 1e-6
+        @test warm.mip_objective ≈ plain.mip_objective rtol = 1e-6
+
+        # The run must actually go through BOTH pricer phases: elementary first, then
+        # the revisit-tolerant pricer after the warm-start switch.
+        phases = Set(r.pricer for r in warm.iteration_rows)
+        @test "station_simple" in phases
+        @test "revisit" in phases
+    end
+
     @testset "seeded start never pays the unserved penalty" begin
         # The point of seeding: v[p] is inert from iteration 1, so the opening LP
         # is a real service cost rather than a big-M artefact.

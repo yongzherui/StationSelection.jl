@@ -162,14 +162,84 @@ column is a property of the *route universe*, not the dominance rule, so it is
 unchanged by the switch — the Zhuzhou optimum still frequently wants a revisit, and
 the feature stays off by default for that reason.
 
-### MEASURED (B) — subset-visited dominance (the shipped rule)
+### MEASURED (B) — 3-way, BitSet-`visited` label, exact vs subset (2026-07-31)
 
-Same grid, re-run after switching the dominance rule. `live_ratio` should climb
-toward / above 1 (label count no longer inflated) and `speedup` improve, while
-`rc_gap` stays as in (A) (same elementary universe).
+`visited` was moved from `Set{Int}` to `BitSet` and the hot-path mirror was slimmed
+to ages-only (dominance now reads `visited`/`activated_reward_layers` straight off
+the label). A `dominance_mode` toggle was added so one grid measures both rules on
+the identical optimized label. `speedup` and `live_ratio` are vs the revisit-tolerant
+pricer (higher = better).
 
-<!-- MEASURED: fill from the subset-visited re-run:
-     sbatch --array=0-2 tmp_ss_bench/sbatch_ss_grid_array.sh -->
-```
-(subset-visited bench re-run pending)
-```
+| n  | s | speedup :exact | speedup :subset | exact_over_subset | subset_live/exact |
+|----|---|----------------|-----------------|-------------------|-------------------|
+| 15 | 1 | **1.61**       | 1.14            | 1.40              | 2.44              |
+| 15 | 2 | 0.64           | 0.45            | 1.42              | 2.33              |
+| 15 | 3 | **1.24**       | 0.65            | 1.91              | 2.30              |
+| 20 | 1 | **1.84**       | 0.28            | 6.64              | 2.10              |
+| 20 | 2 | **1.60**       | 0.44            | 3.67              | 2.50              |
+| 20 | 3 | **3.51**       | 0.30            | 11.78             | 2.09              |
+
+(n=10 omitted — sub-second, pure timing noise.) Absolute n=20 walls (s1/s2/s3):
+revisit 19.2/12.1/41.7s, **ss_exact 10.4/7.6/11.9s**, ss_subset 69.0/27.8/140.0s.
+
+**The subset detour is refuted; `:exact` is the default.**
+
+1. **`:exact` (fine `(current, visited)` buckets) wins outright** — fastest of all
+   three, beating the revisit-tolerant pricer 1.6-3.5x at n=20.
+2. **`:subset` keeps ~2x fewer labels yet runs 1.4-11.8x slower than `:exact`.** Its
+   coarse `current`-only buckets grow huge and the O(bucket) per-insertion scan
+   (~85-90% of wall time) dominates; halving the labels does not pay for it. This is
+   the decisive lesson: **bucket granularity, not domination power, sets wall time.**
+3. **BitSet-`visited` + slim label helped `:exact` further** — its n=20 speedup rose
+   from 1.69/1.51/2.84 (MEASURED A, `Set`-based) to 1.84/1.60/3.51 here, a further
+   ~8-25%, from removing the per-label `visited_bits` rebuild and `activated` copy.
+4. **`rc_gap` is unchanged** (identical between modes and vs A — same elementary
+   universe), so the Zhuzhou restriction (up to 8.3%) stands and the feature stays
+   off by default in CG.
+
+**Takeaway.** Ship `:exact`. The elementary pricer, with fine BitSet-keyed buckets,
+is now genuinely faster than the revisit-tolerant pricer at n=20 — but remains a
+heuristic on instance families whose optimum wants a revisit, so it is opt-in.
+
+## End-to-end CG: objective gap and the two-phase warm start (2026-07-31)
+
+`scripts/diag_passenger_station_simple_vs_revisit_objective.jl` runs the FULL
+passenger CG three ways on the same model+data (p=16, 3 scenarios, ms=5, seed 42):
+`station_simple` (`use_station_simple=true`), `revisit` (exact), and `warm_start`
+(the new `station_simple_warm_start=true` — elementary pricing until the elementary
+universe is exhausted, then switch to the exact pricer and certify).
+
+**How far station-simple alone takes us (objective gap = ss − revisit, minimisation):**
+
+| n  | ss LP / MIP        | revisit LP / MIP   | LP gap  | MIP gap | ss wall | rev wall |
+|----|--------------------|--------------------|---------|---------|---------|----------|
+| 10 | 7434.91 / 7434.91  | 7434.91 / 7434.91  | 0.000%  | 0.000%  | 6.6s    | 1.8s     |
+| 15 | 6254.00 / 6258.29  | 6247.27 / 6258.29  | 0.108%  | 0.000%  | 20.5s   | 23.4s    |
+| 20 | 5545.00 / 5550.70  | 5521.84 / 5527.54  | 0.419%  | 0.419%  | 100.7s  | 515.4s   |
+
+Elementary columns alone reach the exact MIP at n=10/15 and within **0.42%** at
+n=20 — and at n=20 the elementary CG certifies in **99s vs 515s** for the full
+revisit CG (5.2x), because the exhaustive certification pass over the full revisit
+universe is what makes the exact CG expensive. (At n=10 station-simple is slower —
+the revisit CG is already 1.8s, so the elementary phase is pure overhead.)
+
+**Two-phase warm start — same certified optimum, faster at scale:**
+
+| n  | warm_start wall | rev wall | ws_speedup | ws_matches_rev |
+|----|-----------------|----------|------------|----------------|
+| 10 | 2.4s            | 1.8s     | 0.76x      | true           |
+| 15 | 31.3s           | 23.4s    | 0.75x      | true           |
+| 20 | **197.9s**      | 515.4s   | **2.60x**  | true           |
+
+Warm start certifies the IDENTICAL LP and MIP as pure revisit at every n
+(`ws_matches_rev=true`; the correctness test in
+`test/opt/test_passenger_free_assignment_seeding.jl` asserts this and that both
+pricer phases run). At n=20 it is **2.6x faster**: Phase A reaches 0.42%-of-optimal
+in ~100s, then Phase B closes the gap and certifies in ~98s — vs 515s from scratch,
+because the warm elementary pool leaves the exact phase little to find. At small n
+it is a mild loss (~0.75x): the elementary phase is overhead the cheap exact CG
+does not need.
+
+**Takeaway.** `station_simple_warm_start=true` is the way to use the elementary
+pricer inside CG: it keeps the exact optimum and pays off (2.6x at n=20) precisely
+where the exact CG is expensive. Default off; worth enabling as instances grow.
