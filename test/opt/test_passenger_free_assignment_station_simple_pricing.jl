@@ -230,11 +230,11 @@
 
         mklabel(current, visited, time, station_age, layers, rc) =
             StationSelection.PassengerFreeAssignmentStationSimpleLabel(
-                current, collect(visited), Set(visited), time, station_age, layers, time, rc, length(visited),
+                current, collect(visited), BitSet(visited), time, station_age, layers, time, rc, length(visited),
             )
-        bs(label) = StationSelection._make_passenger_free_assignment_station_simple_bitsets(label, node_index, n_nodes)
+        ages(label) = StationSelection._make_passenger_free_assignment_station_simple_ages(label, node_index)
         dominates(x, y) = StationSelection._dominates_passenger_free_assignment_station_simple_label(
-            x, y, bs(x), bs(y), pd.layer_weight,
+            x, y, ages(x), ages(y), pd.layer_weight,
         )
 
         # Equal visited, strictly no worse on time/rc/age -> dominates.
@@ -261,5 +261,37 @@
         no_clock = mklabel(2, [2], 1.0, Dict{Int, Float64}(), RewardLayerBitset(), -1.0)
         @test dominates(has_clock, no_clock)
         @test !dominates(no_clock, has_clock)
+    end
+
+    @testset "dominance_mode :exact and :subset agree on the priced optimum" begin
+        # Exact-visited buckets more finely and subset-visited prunes more, but both
+        # are sound over the same elementary route universe, so the best reduced cost
+        # and the set of column signatures must be identical.
+        nodes = [1, 2, 3, 4]
+        travel = line_travel_cost(4)
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 3, 100.0, 8.0),
+            PassengerAssignmentCandidate(2, 2, 4, 100.0, 6.0),
+            PassengerAssignmentCandidate(3, 1, 4, 100.0, 7.0),
+            PassengerAssignmentCandidate(4, 2, 1, 100.0, 5.0),
+        ]
+        pd = create_passenger_free_assignment_pricing_data(
+            1, nodes, travel, candidates;
+            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
+        )
+        run(mode) = passenger_free_assignment_pricing_by_station_simple_label_setting(
+            pd, PassengerFreeAssignmentRouteColumn[];
+            next_column_id=1, max_new_columns=10^6, n_candidates=10^6, time_limit=30.0,
+            dominance_mode=mode,
+        )
+        subset_cols, sub_exh, _ = run(:subset)
+        exact_cols, exa_exh, _ = run(:exact)
+        @test sub_exh && exa_exh
+        @test isapprox(
+            minimum(c.metadata["reduced_cost"] for c in subset_cols),
+            minimum(c.metadata["reduced_cost"] for c in exact_cols); atol=1e-6,
+        )
+        sig(cols) = Set(Tuple(sort(c.assignments)) for c in cols)
+        @test sig(subset_cols) == sig(exact_cols)
     end
 end

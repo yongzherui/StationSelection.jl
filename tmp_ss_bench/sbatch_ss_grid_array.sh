@@ -11,8 +11,8 @@ set -uo pipefail
 
 # One array task per station count so the breakpoints run concurrently on
 # separate nodes. Submit with:  sbatch --array=0-2 sbatch_ss_grid_array.sh
-NVALS=(10 15 20)
-TASK="${SLURM_ARRAY_TASK_ID:?submit with --array=0-2}"
+read -ra NVALS <<< "${PFA_GRID_NVALS:-10 15 20}"
+TASK="${SLURM_ARRAY_TASK_ID:?submit with --array=0-<#n minus 1>}"
 N="${NVALS[$TASK]}"
 MAX_STOPS="${PFA_GRID_MAX_STOPS:-5}"
 
