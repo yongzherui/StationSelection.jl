@@ -82,6 +82,10 @@ const STATION_BUDGET_CAP = get(ENV, "PFA_STATION_BUDGET_CAP", "0") in ("1", "tru
 # `A_a subseteq A_b` rule. Faster pricing but fewer columns per search, so this
 # exists to settle the tradeoff end to end rather than on pricing speed alone.
 const COMPENSATED_DOMINANCE = get(ENV, "PFA_COMPENSATED_DOMINANCE", "1") in ("1", "true", "yes")
+# Seed the pool with every two-stop route before the first LP. On by default (the
+# library default too); set 0 to reproduce the empty-pool runs, whose opening
+# iterations price against `unserved_penalty` duals rather than real costs.
+const SEED_TWO_STOP = get(ENV, "PFA_SEED_TWO_STOP", "1") in ("1", "true", "yes")
 # Selector objective weights. Defaults follow the original design (stabilization
 # dominant). Measured result: stabilization makes the duals DENSER, raising the
 # positive-rho count and hence pricing cost -- so inverting these is the direct
@@ -144,6 +148,7 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
             parallel_scenarios=PARALLEL_SCENARIOS,
             station_budget_cap=STATION_BUDGET_CAP,
             compensated_dominance=COMPENSATED_DOMINANCE,
+            seed_two_stop_routes=SEED_TWO_STOP,
             dual_selector=PassengerDualSelectorConfig(
                 use_pricing_aware_dual_selection=USE_DUAL_SELECTOR,
                 dual_selector_stabilization_weight=SEL_STAB_W,
@@ -215,6 +220,9 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
         # Dual-selector accounting. The selector is only worth it if the pricing
         # effort it saves exceeds `selector_seconds` (its own auxiliary LP solves).
         compensated_dominance = COMPENSATED_DOMINANCE,
+        seed_two_stop = SEED_TWO_STOP,
+        n_seed_columns = isnothing(result) ? missing :
+            get(result.final_result.metadata, "seed_two_stop_columns", missing),
         use_dual_selector = USE_DUAL_SELECTOR,
         parallel_scenarios = PARALLEL_SCENARIOS,
         n_threads = Threads.nthreads(),

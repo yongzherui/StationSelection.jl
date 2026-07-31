@@ -323,6 +323,11 @@ function run_passenger_free_assignment_column_generation(
     # limit). Guards scaling runs against a case that keeps finding columns for
     # thousands of iterations and starves every later case of wall clock.
     total_time_limit_sec::Float64=Inf,
+    # Seed the pool with every two-stop route `[j, k]` before the first LP. On by
+    # default: it costs one enumerable pass, and starting from an empty pool
+    # makes the opening iterations price against `unserved_penalty` duals instead
+    # of real service costs. Set false to reproduce the pre-seeding behaviour.
+    seed_two_stop_routes::Bool=true,
     # Pricing-aware dual selection (dual_selection.jl). Disabled by default; when
     # disabled, not one line of the selector runs and this loop behaves exactly as
     # it did before that feature existed.
@@ -399,6 +404,28 @@ function run_passenger_free_assignment_column_generation(
     total_pricing_seconds = 0.0
     total_lp_seconds = 0.0
     total_labels = 0
+
+    # ── seed: every two-stop route ────────────────────────────────────────────
+    # Without this the pool starts empty, so the first several iterations price
+    # against big-M duals and are spent finding *any* covering set rather than a
+    # cheap one. These columns are the ones `unserved_penalty` was standing in
+    # for, they are enumerable, and they make `v[p]` inert unless the instance is
+    # genuinely uncoverable. See the seeding function's docstring.
+    n_seed_columns = 0
+    if seed_two_stop_routes
+        seeds = passenger_free_assignment_two_stop_seed_columns(
+            master_data; next_column_id=next_column_id,
+        )
+        for column in seeds
+            _theta, action = add_passenger_free_assignment_column!(master, column)
+            action == :added && (n_seed_columns += 1)
+        end
+        next_column_id += length(seeds)
+        verbose && println(
+            "  seeded $(n_seed_columns) two-stop columns " *
+            "(of $(length(seeds)) distinct (scenario, j, k) routes)",
+        )
+    end
 
     while true
         n_rounds += 1
@@ -690,6 +717,7 @@ function run_passenger_free_assignment_column_generation(
             "cg_iterations" => n_iters,
             "cg_rounds" => n_rounds,
             "generated_columns" => length(master.theta),
+            "seed_two_stop_columns" => n_seed_columns,
             "passengers" => length(master_data.passengers),
             "master_rows" => length(master.coverage) + length(master.pickup_link) + length(master.dropoff_link),
             "open_stations" => open_stations,

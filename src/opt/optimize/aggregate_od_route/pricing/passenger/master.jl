@@ -64,6 +64,7 @@ export PassengerFreeAssignmentPassenger
 export PassengerFreeAssignmentMasterData
 export PassengerFreeAssignmentMaster
 export build_passenger_free_assignment_master
+export passenger_free_assignment_two_stop_seed_columns
 export extract_passenger_free_assignment_duals
 export passenger_free_assignment_pricing_candidates
 
@@ -387,6 +388,74 @@ function passenger_free_assignment_column_cost(
     end
     return master_data.route_regularization_weight * (column.tau + master_data.repositioning_time) +
         master_data.walk_cost_weight * walk
+end
+
+"""
+    passenger_free_assignment_two_stop_seed_columns(master_data; next_column_id=1)
+
+Every two-stop route `[j, k]` that any passenger can use, one column per
+`(scenario, j, k)`.
+
+# Why this exists
+
+The `v[p]` slack makes the RMP feasible from an *empty* pool, but an empty pool
+is not a requirement -- it was just the starting point. Starting empty means the
+first several CG iterations are not improving the routing cost at all, they are
+hunting for enough columns to cover every passenger, and until they succeed the
+LP objective is dominated by `unserved_penalty * sum_p v[p]`. Measured on the
+2026-07-30 scaling grid: the iteration-1 LP is 39x-131x the final value, and
+*all* of that is big-M draining out. The genuine CG improvement, measured from
+the first iterate that covers everyone, is only 1.8%-50%.
+
+Two-stop routes remove that phase entirely, because they are exactly the
+columns the big-M was standing in for. `_default_unserved_penalty` already says
+so in its own derivation: "serving ONE passenger never requires more than a
+direct two-stop route `[j, k]`". Seed them and every feasible assignment is in
+the pool from iteration 1, so `v` is never priced in unless the instance is
+*genuinely* uncoverable by any `l`-subset (which `x_same` also exists to
+mitigate) -- and the duals the pricer sees are real service costs rather than
+big-M, from the very first search.
+
+# Coverage claim
+
+`ride_limit[(p,j,k)] = detour_factor * travel(j,k)`, and replaying `[j, k]`
+gives the pickup at `j` an age of exactly `travel(j,k)` on arrival at `k`. So
+with `detour_factor >= 1` *every* `(p,j,k)` in `feasible_assignments` is
+certified by its own two-stop route. The age test is still applied explicitly
+below rather than assumed, so a `detour_factor < 1` configuration silently
+drops the uncertifiable assignments instead of building an invalid column.
+
+One column per `(s, j, k)` rather than per `(p, j, k)`: a two-stop route carries
+*every* passenger of that scenario whose `(j,k)` it certifies, and that is the
+same column, so the seed count is bounded by `n_scenarios * n * (n-1)` and in
+practice by the number of distinct feasible pairs.
+"""
+function passenger_free_assignment_two_stop_seed_columns(
+    master_data::PassengerFreeAssignmentMasterData;
+    next_column_id::Int=1,
+)::Vector{PassengerFreeAssignmentRouteColumn}
+    by_route = Dict{Tuple{Int, Int, Int}, Vector{Tuple{Int, Int, Int}}}()
+    for p in master_data.passengers
+        for (j, k) in master_data.feasible_assignments[p.id]
+            j == k && continue
+            tau = get(master_data.travel_cost, (j, k), Inf)
+            isfinite(tau) || continue
+            # Replay of `[j, k]`: the pickup at `j` is `tau` old on arrival at `k`.
+            tau <= master_data.ride_limit[(p.id, j, k)] + 1e-9 || continue
+            push!(get!(by_route, (p.scenario, j, k), Tuple{Int, Int, Int}[]), (p.id, j, k))
+        end
+    end
+
+    columns = PassengerFreeAssignmentRouteColumn[]
+    id = next_column_id
+    for (s, j, k) in sort!(collect(keys(by_route)))
+        push!(columns, PassengerFreeAssignmentRouteColumn(
+            id, [j, k], sort!(by_route[(s, j, k)]), master_data.travel_cost[(j, k)];
+            metadata=Dict{String, Any}("scenario" => s, "seed" => "two_stop"),
+        ))
+        id += 1
+    end
+    return columns
 end
 
 """

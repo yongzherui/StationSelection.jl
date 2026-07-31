@@ -63,6 +63,7 @@ const MOI = JuMP.MOI
         include("opt/test_aggregate_od_route_pricing.jl")
         include("opt/test_passenger_free_assignment_pricing.jl")
         include("opt/test_passenger_free_assignment_station_simple_pricing.jl")
+        include("opt/test_passenger_free_assignment_seeding.jl")
         include("opt/test_passenger_dual_selection.jl")
         include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
         include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
