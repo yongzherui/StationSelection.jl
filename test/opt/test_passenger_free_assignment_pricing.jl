@@ -14,6 +14,53 @@
         return only(filter(l -> l.current == current, labels))
     end
 
+    @testset "closed-station reduced-cost slack certifies pricing eliminations" begin
+        candidates = [
+            PassengerAssignmentCandidate(1, 2, 1, 10.0, 2.0),
+            PassengerAssignmentCandidate(1, 2, 3, 10.0, 1.0),  # same origin side: max stays 2
+            PassengerAssignmentCandidate(1, 1, 2, 10.0, 1.0),
+            PassengerAssignmentCandidate(2, 2, 3, 10.0, 1.5),
+            PassengerAssignmentCandidate(3, 3, 2, 10.0, -9.0),
+        ]
+        y_value = [1.0, 0.0, 0.0]
+        y_lower_rc = [0.0, 5.0, 1.0]
+
+        eliminated, required =
+            passenger_free_assignment_station_reduced_cost_eliminations(
+                candidates, y_value, y_lower_rc; slack_tol=1e-7,
+            )
+
+        @test 2 in eliminated
+        @test !(1 in eliminated)  # open stations are never certified by lower-bound slack
+        @test !(3 in eliminated)
+        @test required[2] ≈ 4.5   # p1: 2 + 1, p2: 1.5
+        @test required[3] ≈ 2.5
+    end
+
+    @testset "joint reduced-cost slack filter suppresses individual opportunities" begin
+        using Gurobi
+        env = Gurobi.Env()
+        candidates = [
+            PassengerAssignmentCandidate(1, 2, 3, 10.0, 3.0),
+            PassengerAssignmentCandidate(1, 2, 4, 10.0, 8.0),
+            PassengerAssignmentCandidate(1, 5, 3, 10.0, 8.0),
+        ]
+        y_value = [1.0, 0.0, 0.0, 1.0, 1.0]
+        y_lower_rc = [0.0, 2.0, 1.0, 0.0, 0.0]
+
+        joint = StationSelection._station_reduced_cost_joint_lp_filter(
+            candidates, y_value, y_lower_rc, env;
+            closed_tol=1e-7, reward_tol=1e-7, slack_tol=1e-7,
+        )
+
+        @test (1, 2, 3) in joint.excluded_opportunities
+        @test !((1, 2, 4) in joint.excluded_opportunities)
+        @test !((1, 5, 3) in joint.excluded_opportunities)
+        @test joint.adjusted_rewards[(1, 2, 3)] <= 1e-7
+        @test all(joint.adjusted_rewards[(c.passenger, c.origin, c.destination)] <=
+                  c.reward + 1e-8 for c in candidates)
+    end
+
     @testset "reward coarsening rounds upward and preserves exact default" begin
         candidates = [
             PassengerAssignmentCandidate(1, 1, 2, 100.0, 2.0),

@@ -64,336 +64,11 @@ struct PassengerFreeAssignmentCGResult
     total_labels_generated::Int
     iteration_rows::Vector{NamedTuple}
     total_seconds::Float64
-    # Empty unless pricing-aware dual selection was enabled.
-    selector_logs::Vector{PassengerDualSelectionRoundLog}
-    # Total time in the selector LPs, and how many iterations actually used its
-    # duals (vs falling back to the RMP's own). The certificate is always
-    # `cg_stop_reason == :optimality_proven`; the selector never certifies.
-    total_selector_seconds::Float64
-    selector_iterations_used::Int
-    # Mean count of attractive (p,j,k) per iteration under the duals ACTUALLY used
-    # for pricing, and under the raw RMP duals. Divergence between them is the
-    # direct measure of whether dual selection helps or hurts the label search.
+    # Mean count of attractive `(p,j,k)` opportunities under the raw RMP duals.
     mean_positive_rho_used::Float64
     mean_raw_positive_rho::Float64
-end
-
-
-"""
-Number of `(p,j,k)` with `rho > tol` under the given duals -- i.e. how many
-opportunities the pricer will have to carry. Pricing cost scales with this, so it
-is logged for BOTH the raw RMP duals and (when enabled) the selected duals, to
-test whether dual selection is making pricing easier or harder.
-"""
-function _count_positive_rho(
-    md::PassengerFreeAssignmentMasterData,
-    alpha::Dict{Int, Float64},
-    gamma_o::Dict{Tuple{Int, Int}, Float64},
-    gamma_d::Dict{Tuple{Int, Int}, Float64};
-    tol::Float64=1e-9,
-)::Int
-    n = 0
-    for p in md.passengers
-        a = get(alpha, p.id, 0.0)
-        a > tol || continue
-        for (j, k) in md.feasible_assignments[p.id]
-            rho = a - get(gamma_o, (p.id, j), 0.0) - get(gamma_d, (p.id, k), 0.0) -
-                md.walk_cost_weight * md.assignment_walk_cost[(p.id, j, k)]
-            rho > tol && (n += 1)
-        end
-    end
-    return n
-end
-
-"""
-Price one scenario. Pure with respect to shared state: it only *reads* `master`
-and the dual dicts, and allocates everything else itself, which is what makes the
-per-scenario calls safe to run concurrently.
-
-Note that pricing touches no Gurobi at all -- it is pure Julia label-setting --
-so there is no solver thread-safety question here.
-"""
-function _price_one_passenger_scenario(
-    master::PassengerFreeAssignmentMaster,
-    alpha::Dict{Int, Float64},
-    gamma_o::Dict{Tuple{Int, Int}, Float64},
-    gamma_d::Dict{Tuple{Int, Int}, Float64},
-    s::Int,
-    base_column_id::Int,
-    existing::Vector{PassengerFreeAssignmentRouteColumn};
-    n_candidates::Int,
-    max_new_columns::Int,
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    station_budget_cap::Bool=false,
-    compensated_dominance::Bool=true,
-    use_station_simple::Bool=false,
-    reward_coarsening_levels::Int=0,
-)
-    md = master.master_data
-    candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
-    isempty(candidates) && return PassengerFreeAssignmentRouteColumn[], true, 0
-
-    exact_pricing_data = create_passenger_free_assignment_pricing_data(
-        s, md.nodes, md.travel_cost, candidates;
-        route_regularization_weight=md.route_regularization_weight,
-        max_wait_time=md.max_wait_time,
-        repositioning_time=md.repositioning_time,
-        max_stops=md.max_stops,
-        max_visits_per_node=md.max_visits_per_node,
-        # Restrict pricing to columns an integer solution could actually use: with
-        # `theta_r >= 1` forcing `y_j = 1` at every assignment-carrying station,
-        # `|A_r| <= sum(y) = l`. This leaves the IP optimum untouched while making
-        # `lp_bound` tighter -- it directly excludes the broad multi-station "hub"
-        # columns that earn dual credit in the LP but are unusable in the IP.
-        # MEASURED and left OFF: the LP bound came out identical to ten decimal
-        # places at n=10 and n=15 (the LP optimum never wanted a wider column),
-        # while pricing ran 5-37% slower and generated MORE columns. See
-        # notes/2026-07-30_passenger_pricing_label_search_optimizations.md before
-        # enabling this expecting a better bound.
-        max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
-        compensated_dominance=compensated_dominance,
-    )
-    isempty(exact_pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
-
-    pricing_data = if reward_coarsening_levels > 0
-        relaxed_candidates = coarsen_passenger_assignment_rewards(
-            candidates, reward_coarsening_levels,
-        )
-        create_passenger_free_assignment_pricing_data(
-            s, md.nodes, md.travel_cost, relaxed_candidates;
-            route_regularization_weight=md.route_regularization_weight,
-            max_wait_time=md.max_wait_time,
-            repositioning_time=md.repositioning_time,
-            max_stops=md.max_stops,
-            max_visits_per_node=md.max_visits_per_node,
-            max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
-            compensated_dominance=compensated_dominance,
-        )
-    else
-        exact_pricing_data
-    end
-
-    # Pool novelty must be judged on EXACT assignment signatures. Under reward
-    # coarsening the driver's own novelty check would compare a *relaxed*
-    # signature against the pool's exact ones, and those genuinely differ: when
-    # coarsening collapses two of a passenger's reward levels, replay's argmax
-    # tie-break can pick a different `(j, k)` than exact replay would. A spurious
-    # match would then silently discard a route that is a new column exactly, and
-    # would also stop "no columns returned" from meaning "nothing improving
-    # exists". So the relaxed search runs against an empty pool and novelty is
-    # re-applied below, on exact signatures.
-    search_pool = reward_coarsening_levels > 0 ?
-        PassengerFreeAssignmentRouteColumn[] : existing
-
-    # Elementary vs revisit-tolerant pricer -- same pricing_data, same
-    # `(columns, exhausted, stats)` contract. `max_visits_per_node` is meaningless
-    # to the elementary search and simply not forwarded.
-    columns_s, exhausted_s, stats_s = use_station_simple ?
-        passenger_free_assignment_pricing_by_station_simple_label_setting(
-            pricing_data, search_pool;
-            next_column_id=base_column_id,
-            reduced_cost_tol=reduced_cost_tol,
-            max_new_columns=max_new_columns,
-            n_candidates=n_candidates,
-            time_limit=time_limit,
-        ) :
-        passenger_free_assignment_pricing_by_label_setting(
-            pricing_data, search_pool;
-            next_column_id=base_column_id,
-            reduced_cost_tol=reduced_cost_tol,
-            max_new_columns=max_new_columns,
-            n_candidates=n_candidates,
-            time_limit=time_limit,
-        )
-    reward_coarsening_levels == 0 &&
-        return columns_s, exhausted_s, stats_s.labels_generated
-
-    # Relaxed rewards are used only to choose routes. Replay against the exact
-    # rewards before accepting a column, and re-apply pool novelty because the
-    # relaxed assignment signature may differ from the exact one.
-    best_pool_tau = Dict{Any, Float64}()
-    for column in existing
-        signature = _passenger_free_assignment_column_signature(column)
-        best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
-    end
-    exact_by_signature = Dict{Any, NamedTuple}()
-    for column in columns_s
-        relaxed_rc = Float64(get(column.metadata, "reduced_cost", Inf))
-        assignments, tau, exact_rc = _passenger_free_assignment_column_from_route(
-            collect(Int, column.route), exact_pricing_data,
-        )
-        relaxed_rc <= exact_rc + 1e-6 || error(
-            "reward-coarsened pricing violated relaxed_rc <= exact_rc on route " *
-            "$(column.route): $(relaxed_rc) > $(exact_rc)",
-        )
-        isempty(assignments) && continue
-        exact_rc < -reduced_cost_tol || continue
-        signature = _passenger_free_assignment_column_signature(assignments)
-        tau < get(best_pool_tau, signature, Inf) - 1e-9 || continue
-        current = get(exact_by_signature, signature, nothing)
-        if isnothing(current) || exact_rc < current.reduced_cost - 1e-9 ||
-                (abs(exact_rc - current.reduced_cost) <= 1e-9 && tau < current.tau - 1e-9)
-            exact_by_signature[signature] = (
-                route=collect(Int, column.route), assignments=assignments,
-                tau=tau, reduced_cost=exact_rc,
-            )
-        end
-    end
-    scored = sort!(collect(values(exact_by_signature));
-                   by=entry -> (entry.reduced_cost, entry.tau, string(entry.route)))
-    scored = scored[1:min(length(scored), max_new_columns)]
-    exact_columns = PassengerFreeAssignmentRouteColumn[]
-    for (offset, entry) in enumerate(scored)
-        push!(exact_columns, PassengerFreeAssignmentRouteColumn(
-            base_column_id + offset - 1, entry.route, entry.assignments, entry.tau;
-            metadata=Dict{String, Any}(
-                "scenario" => s,
-                "route" => Tuple(entry.route),
-                "reduced_cost" => entry.reduced_cost,
-                "harvester" => "reward_coarsened",
-                "reward_coarsening_levels" => reward_coarsening_levels,
-            ),
-        ))
-    end
-    # `exhausted` must keep meaning "no improving column exists", because that is
-    # what the caller turns into `:optimality_proven`. Under coarsening it only
-    # survives when the RELAXED search itself came back empty: then no route has
-    # `relaxed_rc < -tol`, and since `relaxed_rc <= exact_rc` route by route, none
-    # has `exact_rc < -tol` either -- a valid certificate.
-    #
-    # When the relaxed search DID return routes that all then failed exact
-    # replay, nothing is proven: the returned set is dominance-pruned under
-    # relaxed rewards, so a route with `exact_rc < -tol` can be dominated by one
-    # with better relaxed and worse exact reduced cost, and never surface. That is
-    # the normal case at convergence (measured: 16/16 certifiable scenarios at
-    # n=20 returned a non-empty exhausted relaxed set), so reporting `exhausted`
-    # here would be a certificate resting on a dominance-pruned sample.
-    #
-    # `run_passenger_free_assignment_column_generation` happens to be insulated
-    # today because it pins the certification pass to level 0, but the pricer
-    # contract is public and must stand on its own.
-    certified = exhausted_s && isempty(columns_s)
-    return exact_columns, certified, stats_s.labels_generated
-end
-
-"""
-    _price_passenger_scenarios(...; parallel_scenarios)
-
-The pricing subproblem separates exactly by scenario: a column belongs to one
-scenario, and its reduced cost
-`Phi_r = sum(alpha_p - u_pj - v_pk - W) - beta*c_r` touches only that scenario's
-duals (the `y`-side duals `eta`/`s_j` live in the `y` column's dual row, not
-`theta`'s). All cross-scenario coupling -- `theta <= y_j`, `sum y = L` -- is in the
-master. So the per-scenario searches can run concurrently with no interaction.
-
-Determinism is preserved regardless of thread count: results are written into
-preallocated per-scenario slots, concatenated in sorted scenario order, and only
-THEN assigned sequential column ids. Ids therefore do not depend on completion
-order, which they would if each thread drew from a shared counter.
-"""
-function _price_passenger_scenarios(
-    master::PassengerFreeAssignmentMaster,
-    alpha::Dict{Int, Float64},
-    gamma_o::Dict{Tuple{Int, Int}, Float64},
-    gamma_d::Dict{Tuple{Int, Int}, Float64},
-    next_column_id::Int;
-    n_candidates::Int,
-    max_new_columns::Int,
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    verify_reduced_costs::Bool,
-    parallel_scenarios::Bool=true,
-    station_budget_cap::Bool=false,
-    compensated_dominance::Bool=true,
-    use_station_simple::Bool=false,
-    reward_coarsening_levels::Int=0,
-)
-    md = master.master_data
-    scenarios = sort!(collect(keys(md.passengers_by_scenario)))
-    n_s = length(scenarios)
-
-    # Group the pool by scenario ONCE. Each scenario previously rebuilt its own
-    # `existing` list by scanning every column, i.e. O(S * pool) per iteration; at
-    # 15 scenarios with a 10.7k pool that is ~160k filter operations per iteration
-    # and it grows with the pool. Grouping first makes it O(pool).
-    #
-    # Behaviour is deliberately identical, including the `"scenario"` default of 0:
-    # a column lacking that metadata key lands in bucket 0 and matches no real
-    # scenario, exactly as the old filter did. (That is a latent inefficiency --
-    # such a column is invisible to the pool-novelty check and may be regenerated
-    # -- but changing it here would confound the performance measurement.)
-    #
-    # Built before the parallel region and only read inside it, so it is safe to
-    # share across threads.
-    empty_pool = PassengerFreeAssignmentRouteColumn[]
-    existing_by_scenario = Dict{Int, Vector{PassengerFreeAssignmentRouteColumn}}()
-    for c in values(master.columns)
-        push!(get!(() -> PassengerFreeAssignmentRouteColumn[],
-                   existing_by_scenario, Int(get(c.metadata, "scenario", 0))), c)
-    end
-    cols_by_s = Vector{Vector{PassengerFreeAssignmentRouteColumn}}(undef, n_s)
-    exh_by_s = Vector{Bool}(undef, n_s)
-    lab_by_s = Vector{Int}(undef, n_s)
-
-    use_threads = parallel_scenarios && n_s > 1 && Threads.nthreads() > 1
-    if use_threads
-        Threads.@threads for i in 1:n_s
-            cols_by_s[i], exh_by_s[i], lab_by_s[i] = _price_one_passenger_scenario(
-                master, alpha, gamma_o, gamma_d, scenarios[i], next_column_id,
-                get(existing_by_scenario, scenarios[i], empty_pool);
-                n_candidates=n_candidates, max_new_columns=max_new_columns,
-                time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
-                station_budget_cap=station_budget_cap,
-                compensated_dominance=compensated_dominance,
-                use_station_simple=use_station_simple,
-                reward_coarsening_levels=reward_coarsening_levels,
-            )
-        end
-    else
-        for i in 1:n_s
-            cols_by_s[i], exh_by_s[i], lab_by_s[i] = _price_one_passenger_scenario(
-                master, alpha, gamma_o, gamma_d, scenarios[i], next_column_id,
-                get(existing_by_scenario, scenarios[i], empty_pool);
-                n_candidates=n_candidates, max_new_columns=max_new_columns,
-                time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
-                station_budget_cap=station_budget_cap,
-                compensated_dominance=compensated_dominance,
-                use_station_simple=use_station_simple,
-                reward_coarsening_levels=reward_coarsening_levels,
-            )
-        end
-    end
-
-    all_columns = PassengerFreeAssignmentRouteColumn[]
-    exhausted = all(exh_by_s)
-    labels_generated = sum(lab_by_s; init=0)
-    column_id = next_column_id
-
-    for i in 1:n_s
-        # Every scenario priced from the SAME `next_column_id`, so ids collide until
-        # renumbered here in sorted-scenario order.
-        for c in cols_by_s[i]
-            renumbered = PassengerFreeAssignmentRouteColumn(
-                column_id, c.route, c.assignments, c.tau; metadata=c.metadata,
-            )
-            column_id += 1
-            # Verification runs OUTSIDE the parallel region so a mismatch raises a
-            # clean, deterministic error rather than a TaskFailedException whose
-            # reported column depends on which thread happened to fail first.
-            if verify_reduced_costs
-                ok, pricer_rc, master_rc =
-                    _verify_passenger_master_reduced_cost(renumbered, md, alpha, gamma_o, gamma_d)
-                ok || error(
-                    "passenger pricing reduced cost $(pricer_rc) disagrees with the master's " *
-                    "dual-implied $(master_rc) for column route $(renumbered.route) -- the pricer " *
-                    "and master formulations have drifted apart",
-                )
-            end
-            push!(all_columns, renumbered)
-        end
-    end
-    return all_columns, exhausted, labels_generated
+    mean_positive_rho_stations_used::Float64
+    mean_raw_positive_rho_stations::Float64
 end
 
 """
@@ -430,10 +105,6 @@ function run_passenger_free_assignment_column_generation(
     # makes the opening iterations price against `unserved_penalty` duals instead
     # of real service costs. Set false to reproduce the pre-seeding behaviour.
     seed_two_stop_routes::Bool=true,
-    # Pricing-aware dual selection (dual_selection.jl). Disabled by default; when
-    # disabled, not one line of the selector runs and this loop behaves exactly as
-    # it did before that feature existed.
-    dual_selector::PassengerDualSelectorConfig=PassengerDualSelectorConfig(),
     # Run the per-scenario label searches concurrently. Exact and deterministic
     # (see `_price_passenger_scenarios`); a no-op with one thread or one scenario.
     parallel_scenarios::Bool=true,
@@ -467,6 +138,11 @@ function run_passenger_free_assignment_column_generation(
     # measured best quality/speed compromise. Every candidate route is replayed
     # with exact rewards, and exhaustive certification always uses level 0.
     reward_coarsening_levels::Int=0,
+    # Iteration-only exact station restriction: at each RMP optimum, closed
+    # stations whose lower-bound reduced-cost slack can absorb every positive
+    # incident assignment reward are omitted from the current pricing graph.
+    use_station_reduced_cost_filter::Bool=false,
+    station_reduced_cost_filter_mode::Symbol=:none,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -488,6 +164,11 @@ function run_passenger_free_assignment_column_generation(
             "reward-coarsened and station-simple harvesting are alternative modes; " *
             "enable only one per run",
         ))
+    station_reduced_cost_filter_mode = _normal_station_reduced_cost_filter_mode(
+        use_station_reduced_cost_filter && station_reduced_cost_filter_mode == :none ?
+            :closed_form : station_reduced_cost_filter_mode,
+    )
+    station_reduced_cost_filter_active = station_reduced_cost_filter_mode != :none
 
     t_start = time()
     isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
@@ -496,6 +177,7 @@ function run_passenger_free_assignment_column_generation(
     master_data = create_passenger_free_assignment_master_data(
         model, data, mapping; unserved_penalty=unserved_penalty,
     )
+    pricing_scenarios = sort!(collect(keys(master_data.passengers_by_scenario)))
     master = build_passenger_free_assignment_master(master_data, optimizer_env; relax_integrality=true)
     m = master.model
     silent && set_silent(m)
@@ -506,14 +188,10 @@ function run_passenger_free_assignment_column_generation(
         "$(length(master.dropoff_link)) dropoff linking rows, l=$(master_data.l)",
     )
 
-    selector = dual_selector.use_pricing_aware_dual_selection ?
-        build_dual_selector(master_data, dual_selector, optimizer_env) : nothing
-    selector_reference_rewards = Dict{Tuple{Int, Int, Int}, Float64}()
-    selector_logs = PassengerDualSelectionRoundLog[]
-    total_selector_seconds = 0.0
-    selector_used_count = 0
     pos_rho_used_sum = 0
     pos_rho_raw_sum = 0
+    pos_rho_stations_used_sum = 0
+    pos_rho_stations_raw_sum = 0
     pos_rho_samples = 0
 
     iteration_rows = NamedTuple[]
@@ -581,29 +259,23 @@ function run_passenger_free_assignment_column_generation(
             lp_bound = objective_value(m)
             alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
 
-            raw_pos_rho = _count_positive_rho(master_data, alpha, gamma_o, gamma_d)
+            raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
+            used_stats = raw_stats
 
-            # Single-pass dual selection: swap in a pricing-friendlier point on the
-            # SAME optimal dual face, then price exactly as ordinary CG would. The
-            # selector performs no pricing and certifies nothing; substituting an
-            # RMP-optimal dual cannot invalidate the certificate.
-            if !isnothing(selector)
-                original_D = sum(values(alpha); init=0.0)
-                sel_alpha, sel_u, sel_v, sel_rewards, sel_ok, sel_log =
-                    select_pricing_duals!(
-                        selector, master, lp_bound, original_D, selector_reference_rewards,
-                    )
-                push!(selector_logs, sel_log)
-                total_selector_seconds += sel_log.selector_seconds
-                if sel_ok
-                    alpha, gamma_o, gamma_d = sel_alpha, sel_u, sel_v
-                    selector_reference_rewards = sel_rewards
-                    selector_used_count += 1
-                end
+            station_filter_stats = station_reduced_cost_filter_active ?
+                _station_reduced_cost_filter_stats(
+                    master, alpha, gamma_o, gamma_d, pricing_scenarios, reduced_cost_tol,
+                    optimizer_env, station_reduced_cost_filter_mode) : nothing
+            if !isnothing(station_filter_stats)
+                used_stats = (
+                    n_positive_rho=station_filter_stats.filtered_positive_rho,
+                    j_positive_rho=station_filter_stats.filtered_positive_rho_stations,
+                )
             end
-
-            pos_rho_raw_sum += raw_pos_rho
-            pos_rho_used_sum += _count_positive_rho(master_data, alpha, gamma_o, gamma_d)
+            pos_rho_raw_sum += raw_stats.n_positive_rho
+            pos_rho_used_sum += used_stats.n_positive_rho
+            pos_rho_stations_raw_sum += raw_stats.j_positive_rho
+            pos_rho_stations_used_sum += used_stats.j_positive_rho
             pos_rho_samples += 1
 
             t_price = time()
@@ -619,6 +291,13 @@ function run_passenger_free_assignment_column_generation(
                 compensated_dominance=compensated_dominance,
                 use_station_simple=pricing_station_simple,
                 reward_coarsening_levels=reward_coarsening_levels,
+                use_station_reduced_cost_filter=station_reduced_cost_filter_active,
+                station_reduced_cost_filter_mode=station_reduced_cost_filter_mode,
+                station_filter_excluded_stations=isnothing(station_filter_stats) ?
+                    nothing : station_filter_stats.excluded_stations,
+                station_filter_excluded_opportunities=isnothing(station_filter_stats) ?
+                    nothing : station_filter_stats.excluded_opportunities,
+                optimizer_env=optimizer_env,
             )
             pricing_seconds = time() - t_price
             total_pricing_seconds += pricing_seconds
@@ -641,6 +320,38 @@ function run_passenger_free_assignment_column_generation(
                 pricing_seconds=pricing_seconds, labels_generated=labels,
                 columns_priced=length(new_columns), columns_added=added,
                 best_reduced_cost=best_rc, pricing_exhausted=exhausted,
+                raw_positive_rho=raw_stats.n_positive_rho,
+                used_positive_rho=used_stats.n_positive_rho,
+                raw_positive_rho_stations=raw_stats.j_positive_rho,
+                used_positive_rho_stations=used_stats.j_positive_rho,
+                station_filter_raw_positive_rho=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.raw_positive_rho,
+                station_filter_positive_rho=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.filtered_positive_rho,
+                station_filter_positive_rho_reduction=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.positive_rho_reduction,
+                station_filter_raw_positive_rho_stations=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.raw_positive_rho_stations,
+                station_filter_positive_rho_stations=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.filtered_positive_rho_stations,
+                station_filter_positive_rho_station_reduction=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.positive_rho_station_reduction,
+                station_filter_closed_stations=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.n_closed_stations,
+                station_filter_closed_stations_with_positive_need=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.n_closed_stations_with_positive_need,
+                station_filter_excluded_stations=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.n_excluded_stations,
+                station_filter_excluded_opportunities=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.n_excluded_opportunities,
+                station_filter_joint_lp_objective=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.joint_lp_objective,
+                station_filter_min_slack_need_ratio=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.min_slack_need_ratio,
+                station_filter_mean_slack_need_ratio=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.mean_slack_need_ratio,
+                station_filter_max_slack_need_ratio=isnothing(station_filter_stats) ?
+                    missing : station_filter_stats.max_slack_need_ratio,
                 pool_size=length(master.theta),
             ))
             verbose && @printf(
@@ -684,6 +395,11 @@ function run_passenger_free_assignment_column_generation(
         end
         lp_bound = objective_value(m)
         alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
+        cert_raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
+        cert_station_filter_stats = station_reduced_cost_filter_active ?
+            _station_reduced_cost_filter_stats(
+                master, alpha, gamma_o, gamma_d, pricing_scenarios, reduced_cost_tol,
+                optimizer_env, station_reduced_cost_filter_mode) : nothing
         cert_budget = isfinite(total_time_limit_sec) ?
             min(certification_time_limit_sec, max(1.0, total_time_limit_sec - (time() - t_start))) :
             certification_time_limit_sec
@@ -699,6 +415,13 @@ function run_passenger_free_assignment_column_generation(
             compensated_dominance=compensated_dominance,
             use_station_simple=pricing_station_simple,
             reward_coarsening_levels=0,
+            use_station_reduced_cost_filter=station_reduced_cost_filter_active,
+            station_reduced_cost_filter_mode=station_reduced_cost_filter_mode,
+            station_filter_excluded_stations=isnothing(cert_station_filter_stats) ?
+                nothing : cert_station_filter_stats.excluded_stations,
+            station_filter_excluded_opportunities=isnothing(cert_station_filter_stats) ?
+                nothing : cert_station_filter_stats.excluded_opportunities,
+            optimizer_env=optimizer_env,
         )
         round_cert_seconds = time() - t_cert
         certification_seconds += round_cert_seconds
@@ -719,6 +442,40 @@ function run_passenger_free_assignment_column_generation(
             best_reduced_cost=isempty(cert_columns) ? nothing :
                 minimum(Float64(get(c.metadata, "reduced_cost", Inf)) for c in cert_columns),
             pricing_exhausted=cert_exhausted,
+            raw_positive_rho=cert_raw_stats.n_positive_rho,
+            used_positive_rho=isnothing(cert_station_filter_stats) ?
+                cert_raw_stats.n_positive_rho : cert_station_filter_stats.filtered_positive_rho,
+            raw_positive_rho_stations=cert_raw_stats.j_positive_rho,
+            used_positive_rho_stations=isnothing(cert_station_filter_stats) ?
+                cert_raw_stats.j_positive_rho : cert_station_filter_stats.filtered_positive_rho_stations,
+            station_filter_raw_positive_rho=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.raw_positive_rho,
+            station_filter_positive_rho=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.filtered_positive_rho,
+            station_filter_positive_rho_reduction=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.positive_rho_reduction,
+            station_filter_raw_positive_rho_stations=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.raw_positive_rho_stations,
+            station_filter_positive_rho_stations=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.filtered_positive_rho_stations,
+            station_filter_positive_rho_station_reduction=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.positive_rho_station_reduction,
+            station_filter_closed_stations=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.n_closed_stations,
+            station_filter_closed_stations_with_positive_need=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.n_closed_stations_with_positive_need,
+            station_filter_excluded_stations=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.n_excluded_stations,
+            station_filter_excluded_opportunities=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.n_excluded_opportunities,
+            station_filter_joint_lp_objective=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.joint_lp_objective,
+            station_filter_min_slack_need_ratio=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.min_slack_need_ratio,
+            station_filter_mean_slack_need_ratio=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.mean_slack_need_ratio,
+            station_filter_max_slack_need_ratio=isnothing(cert_station_filter_stats) ?
+                missing : cert_station_filter_stats.max_slack_need_ratio,
             pool_size=length(master.theta),
         ))
         verbose && println(
@@ -894,11 +651,12 @@ function run_passenger_free_assignment_column_generation(
             "station_simple_warm_start" => station_simple_warm_start,
             "iteration_rows" => copy(iteration_rows),
             "column_rows" => column_rows,
-            "selector_logs" => copy(selector_logs),
-            "selector_seconds" => total_selector_seconds,
-            "selector_iterations_used" => selector_used_count,
             "mean_positive_rho_used" => (pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples),
             "mean_raw_positive_rho" => (pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples),
+            "mean_positive_rho_stations_used" =>
+                (pos_rho_samples == 0 ? 0.0 : pos_rho_stations_used_sum / pos_rho_samples),
+            "mean_raw_positive_rho_stations" =>
+                (pos_rho_samples == 0 ? 0.0 : pos_rho_stations_raw_sum / pos_rho_samples),
             "iteration_log_path" => isnothing(iteration_log_path) ? nothing : String(iteration_log_path),
             "column_log_path" => isnothing(column_log_path) ? nothing : String(column_log_path),
         ),
@@ -913,9 +671,10 @@ function run_passenger_free_assignment_column_generation(
         certification_seconds, cert_exhausted,
         total_pricing_seconds, total_lp_seconds, total_labels,
         iteration_rows, total_seconds,
-        selector_logs, total_selector_seconds, selector_used_count,
         pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples,
         pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples,
+        pos_rho_samples == 0 ? 0.0 : pos_rho_stations_used_sum / pos_rho_samples,
+        pos_rho_samples == 0 ? 0.0 : pos_rho_stations_raw_sum / pos_rho_samples,
     )
 end
 

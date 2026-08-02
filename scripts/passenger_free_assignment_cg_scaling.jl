@@ -31,6 +31,7 @@ Env overrides:
     PFA_CERT_TIME       default 900 (exhaustive certification budget, seconds)
     PFA_IP_TIME         default 600
     PFA_MAX_CG_ITERS    default 2000
+    PFA_STATION_RC_FILTER default 0 (`0`, `1`/`closed_form`, or `joint_lp`)
 """
 
 using CSV, DataFrames, Gurobi, JuMP, Printf, StationSelection
@@ -66,10 +67,6 @@ const MAX_WALK = 600.0
 # NOT match the convention; set PFA_ROUTE_WEIGHT=1.0 to reproduce those.
 const ROUTE_WEIGHT = parse(Float64, get(ENV, "PFA_ROUTE_WEIGHT", "10.0"))
 const WALK_WEIGHT = parse(Float64, get(ENV, "PFA_WALK_WEIGHT", "0.1"))
-# Pricing-aware dual selection (dual_selection.jl). Off by default, matching the
-# library default -- every scaling number reported before this was added used
-# ordinary CG with the solver's raw RMP duals.
-const USE_DUAL_SELECTOR = get(ENV, "PFA_DUAL_SELECTOR", "0") in ("1", "true", "yes")
 # Concurrent per-scenario pricing. Exact and deterministic either way; set to 0 to
 # force the sequential path for an A/B timing comparison.
 const PARALLEL_SCENARIOS = get(ENV, "PFA_PARALLEL_SCENARIOS", "1") in ("1", "true", "yes")
@@ -78,6 +75,20 @@ const PARALLEL_SCENARIOS = get(ENV, "PFA_PARALLEL_SCENARIOS", "1") in ("1", "tru
 # while being unusable in any integer solution -- so the metric to watch here is
 # `lp_mip_gap_pct`, not wall time.
 const STATION_BUDGET_CAP = get(ENV, "PFA_STATION_BUDGET_CAP", "0") in ("1", "true", "yes")
+function _station_rc_filter_mode()
+    raw = lowercase(strip(get(ENV, "PFA_STATION_RC_FILTER", "0")))
+    raw in ("0", "false", "no", "none") && return :none
+    raw in ("1", "true", "yes", "closed_form") && return :closed_form
+    raw == "joint_lp" && return :joint_lp
+    error("PFA_STATION_RC_FILTER must be 0, 1, closed_form, or joint_lp")
+end
+
+# Closed-station reduced-cost slack filter for the pricing graph. Exact and
+# iteration-only; `joint_lp` can suppress individual opportunities jointly across
+# endpoints, while `closed_form` only deletes whole stations by the independent
+# one-station test.
+const STATION_RC_FILTER_MODE = _station_rc_filter_mode()
+const STATION_RC_FILTER = STATION_RC_FILTER_MODE != :none
 # Compensated layer dominance. On by default; set 0 to fall back to the plain
 # `A_a subseteq A_b` rule. Faster pricing but fewer columns per search, so this
 # exists to settle the tradeoff end to end rather than on pricing speed alone.
@@ -86,18 +97,6 @@ const COMPENSATED_DOMINANCE = get(ENV, "PFA_COMPENSATED_DOMINANCE", "1") in ("1"
 # library default too); set 0 to reproduce the empty-pool runs, whose opening
 # iterations price against `unserved_penalty` duals rather than real costs.
 const SEED_TWO_STOP = get(ENV, "PFA_SEED_TWO_STOP", "1") in ("1", "true", "yes")
-# Selector objective weights. Defaults follow the original design (stabilization
-# dominant). Measured result: stabilization makes the duals DENSER, raising the
-# positive-rho count and hence pricing cost -- so inverting these is the direct
-# test of "sparser duals price faster".
-const SEL_STAB_W = parse(Float64, get(ENV, "PFA_SELECTOR_STAB_WEIGHT", "1.0"))
-const SEL_POSREW_W = parse(Float64, get(ENV, "PFA_SELECTOR_POSREWARD_WEIGHT", "1e-4"))
-# :l1_stabilized (LP) or :l0_count (MIP minimizing the NUMBER of attractive
-# assignments -- the quantity that actually drives pricing cost).
-const SEL_OBJ = Symbol(get(ENV, "PFA_SELECTOR_OBJECTIVE", "l1_stabilized"))
-const SEL_MIP_TIME = parse(Float64, get(ENV, "PFA_SELECTOR_MIP_TIME", "10.0"))
-const SEL_MIP_GAP = parse(Float64, get(ENV, "PFA_SELECTOR_MIP_GAP", "0.05"))
-
 # One Gurobi.Env reused for every solve in this process -- constructing several
 # has previously caused a silent multi-minute stall on this cluster.
 const GRB_ENV = Gurobi.Env()
@@ -121,7 +120,8 @@ end
 function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::String)
     # scenario count is part of the identity: passengers = n_pairs * n_scenarios, so a
     # 1-scenario and 3-scenario run of the same (n, p) are different problems.
-    case = "pfa_n$(n_stations)_p$(N_PAIRS)_sc$(N_SCENARIOS)_s$(seed)_ms$(MAX_STOPS == typemax(Int) ? "inf" : string(MAX_STOPS))"
+    suffix = STATION_RC_FILTER_MODE == :none ? "nofilter" : string(STATION_RC_FILTER_MODE)
+    case = "pfa_n$(n_stations)_p$(N_PAIRS)_sc$(N_SCENARIOS)_s$(seed)_ms$(MAX_STOPS == typemax(Int) ? "inf" : string(MAX_STOPS))_$(suffix)"
     @printf("=== %s ===\n", case)
     flush(stdout)
 
@@ -147,16 +147,10 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
             total_time_limit_sec=CASE_TIME,
             parallel_scenarios=PARALLEL_SCENARIOS,
             station_budget_cap=STATION_BUDGET_CAP,
+            use_station_reduced_cost_filter=STATION_RC_FILTER,
+            station_reduced_cost_filter_mode=STATION_RC_FILTER_MODE,
             compensated_dominance=COMPENSATED_DOMINANCE,
             seed_two_stop_routes=SEED_TWO_STOP,
-            dual_selector=PassengerDualSelectorConfig(
-                use_pricing_aware_dual_selection=USE_DUAL_SELECTOR,
-                dual_selector_stabilization_weight=SEL_STAB_W,
-                dual_selector_positive_reward_weight=SEL_POSREW_W,
-                dual_selector_objective=SEL_OBJ,
-                dual_selector_mip_time_limit_sec=SEL_MIP_TIME,
-                dual_selector_mip_gap=SEL_MIP_GAP,
-            ),
             verify_reduced_costs=true,
             verbose=true,
         )
@@ -184,6 +178,20 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
             @warn "failed to write per-iteration CSV for $case" exception=(err, catch_backtrace())
         end
     end
+
+    station_filter_rows = isnothing(result) ? NamedTuple[] :
+        [r for r in result.iteration_rows if !ismissing(r.station_filter_positive_rho_reduction)]
+    mean_station_filter_opp_reduction = isempty(station_filter_rows) ? missing :
+        sum(r.station_filter_positive_rho_reduction for r in station_filter_rows) / length(station_filter_rows)
+    mean_station_filter_station_reduction = isempty(station_filter_rows) ? missing :
+        sum(r.station_filter_positive_rho_station_reduction for r in station_filter_rows) / length(station_filter_rows)
+    mean_station_filter_excluded_stations = isempty(station_filter_rows) ? missing :
+        sum(r.station_filter_excluded_stations for r in station_filter_rows) / length(station_filter_rows)
+    mean_station_filter_excluded_opportunities = isempty(station_filter_rows) ? missing :
+        sum(r.station_filter_excluded_opportunities for r in station_filter_rows) / length(station_filter_rows)
+    mean_station_filter_slack_need_ratio = isempty(station_filter_rows) ? missing :
+        sum(skipmissing((r.station_filter_mean_slack_need_ratio for r in station_filter_rows))) /
+        max(1, count(r -> !ismissing(r.station_filter_mean_slack_need_ratio), station_filter_rows))
 
     summary = (
         case = case,
@@ -217,26 +225,25 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
         certification_exhausted = isnothing(result) ? missing : result.certification_exhausted,
         total_labels_generated = isnothing(result) ? missing : result.total_labels_generated,
         n_unserved = isnothing(result) ? missing : length(result.unserved_passengers),
-        # Dual-selector accounting. The selector is only worth it if the pricing
-        # effort it saves exceeds `selector_seconds` (its own auxiliary LP solves).
         compensated_dominance = COMPENSATED_DOMINANCE,
         seed_two_stop = SEED_TWO_STOP,
         n_seed_columns = isnothing(result) ? missing :
             get(result.final_result.metadata, "seed_two_stop_columns", missing),
-        use_dual_selector = USE_DUAL_SELECTOR,
+        station_rc_filter = STATION_RC_FILTER,
+        station_rc_filter_mode = string(STATION_RC_FILTER_MODE),
         parallel_scenarios = PARALLEL_SCENARIOS,
         n_threads = Threads.nthreads(),
-        selector_seconds = isnothing(result) ? missing : result.total_selector_seconds,
-        selector_iterations_used = isnothing(result) ? missing : result.selector_iterations_used,
-        selector_fallbacks = isnothing(result) ? missing :
-            count(l -> !l.used_selected_duals, result.selector_logs),
-        # mean count of attractive (p,j,k) under the SELECTED duals -- the quantity the
-        # positive-reward term is meant to shrink, and what drives pricing cost.
-        selector_objective = string(SEL_OBJ),
-        selector_stab_weight = SEL_STAB_W,
-        selector_posreward_weight = SEL_POSREW_W,
         mean_positive_rho_used = isnothing(result) ? missing : result.mean_positive_rho_used,
         mean_raw_positive_rho = isnothing(result) ? missing : result.mean_raw_positive_rho,
+        mean_positive_rho_stations_used = isnothing(result) ? missing :
+            result.mean_positive_rho_stations_used,
+        mean_raw_positive_rho_stations = isnothing(result) ? missing :
+            result.mean_raw_positive_rho_stations,
+        mean_station_filter_positive_rho_reduction = mean_station_filter_opp_reduction,
+        mean_station_filter_positive_rho_station_reduction = mean_station_filter_station_reduction,
+        mean_station_filter_excluded_stations = mean_station_filter_excluded_stations,
+        mean_station_filter_excluded_opportunities = mean_station_filter_excluded_opportunities,
+        mean_station_filter_slack_need_ratio = mean_station_filter_slack_need_ratio,
         open_stations = isnothing(result) ? "" : string(result.open_stations),
         wall_time_sec = wall,
     )
