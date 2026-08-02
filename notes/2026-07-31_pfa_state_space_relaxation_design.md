@@ -436,3 +436,76 @@ Unchanged from the reward-axis section: **`L=2` reward-ladder coarsening is the
 one relaxation that pays** (2.3x at n=20, columns ~1% off optimal), as a
 replacement for the early-return pricing phase. Neither axis certifies. Do not
 quantize travel times.
+
+---
+
+# Correctness audit of the shipped `reward_coarsening_levels` path (2026-07-31)
+
+Two soundness defects found in `_price_one_passenger_scenario`, both fixed, both
+now covered by `test/opt/test_passenger_reward_coarsening_pricer.jl`.
+
+## 1. `exhausted` was propagated from the relaxed search unconditionally
+
+The pricer contract is that `exhausted == true` with zero columns means "no
+improving column exists" -- that is what the caller turns into
+`:optimality_proven`. Under coarsening the old code returned the *relaxed*
+search's flag straight through.
+
+That is sound only when the relaxed search itself returned nothing: then no route
+has `relaxed_rc < -tol`, and since `relaxed_rc <= exact_rc` route by route, none
+has `exact_rc < -tol` either. But when the relaxed search returns routes that all
+then fail exact replay, nothing is proven -- the returned set is dominance-pruned
+under *relaxed* rewards, so a route with `exact_rc < -tol` can be dominated by one
+with better relaxed and worse exact reduced cost and never surface.
+
+**Reach, from the census CSVs (L=2):** the old code would have reported
+`exhausted = true` alongside zero exact columns on **12.5% (n=10), 22.9% (n=15),
+24.2% (n=20)** of priced scenarios. Every relaxed search in those runs was
+exhausted, so the flag was load-bearing on roughly one call in four.
+
+**It was not producing wrong LP bounds**, because
+`run_passenger_free_assignment_column_generation` pins the certification pass to
+`reward_coarsening_levels=0` (level 0 = exact), and `:optimality_proven` is set
+only from that pass. The defect was in the public pricer contract, which anyone
+calling `_price_one_passenger_scenario` or `_price_passenger_scenarios` directly
+would have hit.
+
+Fix: `certified = exhausted_s && isempty(columns_s)`.
+
+Consequence worth stating plainly: **a run with coarsening enabled everywhere can
+never certify.** That matches the measurement (0/5, 0/10, 0/16) and is why the
+level-0 certification pass is the right design, not an accident.
+
+## 2. Pool novelty was judged on relaxed assignment signatures
+
+The relaxed search was handed the real column pool, and its internal
+`try_accept_route!` rejects a route whose assignment signature is already pooled
+at no worse `tau`. That check is sound for the exact pricer (a pooled column with
+the same signature and smaller `tau` has smaller reduced cost, and is already in
+the master at `rc >= 0`), but under coarsening the signature is computed from
+*relaxed* replay -- and those genuinely differ, because collapsing two of a
+passenger's reward levels changes replay's argmax tie-break to a different
+`(j, k)`.
+
+A spurious match therefore discarded routes that were new columns exactly, and it
+also weakened "no columns returned", which fix 1 now relies on.
+
+Fix: run the relaxed search against an empty pool and apply novelty afterwards on
+exact signatures, which the surrounding code already did.
+
+## Also verified
+
+  - Coarsening changes only what an assignment is *worth*, never which `(p,j,k)`
+    are certifiable: it maps `reward > tol` to a retained value `>= reward > tol`
+    and copies `reward <= tol` untouched, so the opportunity set is identical.
+    This is what makes "relaxed found nothing" bound the exact problem, and it is
+    now asserted directly.
+  - Every emitted column carries the *exact* reduced cost in metadata and
+    satisfies `exact_rc < -tol`.
+  - `reward_coarsening_levels = 0` is byte-identical to the untouched pricer.
+  - `test/Project.toml` was missing `Combinatorics`, so
+    `test_passenger_station_subset_pricing.jl` errored under `Pkg.test()`
+    (declared in the top-level `Project.toml`, but the test environment is
+    separate). Added.
+
+Full suite after the fixes: **2499 passed, 0 failed, 0 errored.**

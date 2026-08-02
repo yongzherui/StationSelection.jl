@@ -34,3 +34,10 @@ JuliaLocalPreferences.toml
 *.pdf
 *.json
 experiments/
+
+# Slurm scheduler output and temporary benchmark logs
+slurm-*.out
+slurm-*.err
+slurm_logs/
+tmp_ss_bench/*.out
+tmp_ss_bench/*.err

@@ -128,12 +128,13 @@ function _price_one_passenger_scenario(
     station_budget_cap::Bool=false,
     compensated_dominance::Bool=true,
     use_station_simple::Bool=false,
+    reward_coarsening_levels::Int=0,
 )
     md = master.master_data
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
     isempty(candidates) && return PassengerFreeAssignmentRouteColumn[], true, 0
 
-    pricing_data = create_passenger_free_assignment_pricing_data(
+    exact_pricing_data = create_passenger_free_assignment_pricing_data(
         s, md.nodes, md.travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
         max_wait_time=md.max_wait_time,
@@ -153,14 +154,44 @@ function _price_one_passenger_scenario(
         max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
         compensated_dominance=compensated_dominance,
     )
-    isempty(pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
+    isempty(exact_pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
+
+    pricing_data = if reward_coarsening_levels > 0
+        relaxed_candidates = coarsen_passenger_assignment_rewards(
+            candidates, reward_coarsening_levels,
+        )
+        create_passenger_free_assignment_pricing_data(
+            s, md.nodes, md.travel_cost, relaxed_candidates;
+            route_regularization_weight=md.route_regularization_weight,
+            max_wait_time=md.max_wait_time,
+            repositioning_time=md.repositioning_time,
+            max_stops=md.max_stops,
+            max_visits_per_node=md.max_visits_per_node,
+            max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
+            compensated_dominance=compensated_dominance,
+        )
+    else
+        exact_pricing_data
+    end
+
+    # Pool novelty must be judged on EXACT assignment signatures. Under reward
+    # coarsening the driver's own novelty check would compare a *relaxed*
+    # signature against the pool's exact ones, and those genuinely differ: when
+    # coarsening collapses two of a passenger's reward levels, replay's argmax
+    # tie-break can pick a different `(j, k)` than exact replay would. A spurious
+    # match would then silently discard a route that is a new column exactly, and
+    # would also stop "no columns returned" from meaning "nothing improving
+    # exists". So the relaxed search runs against an empty pool and novelty is
+    # re-applied below, on exact signatures.
+    search_pool = reward_coarsening_levels > 0 ?
+        PassengerFreeAssignmentRouteColumn[] : existing
 
     # Elementary vs revisit-tolerant pricer -- same pricing_data, same
     # `(columns, exhausted, stats)` contract. `max_visits_per_node` is meaningless
     # to the elementary search and simply not forwarded.
     columns_s, exhausted_s, stats_s = use_station_simple ?
         passenger_free_assignment_pricing_by_station_simple_label_setting(
-            pricing_data, existing;
+            pricing_data, search_pool;
             next_column_id=base_column_id,
             reduced_cost_tol=reduced_cost_tol,
             max_new_columns=max_new_columns,
@@ -168,14 +199,82 @@ function _price_one_passenger_scenario(
             time_limit=time_limit,
         ) :
         passenger_free_assignment_pricing_by_label_setting(
-            pricing_data, existing;
+            pricing_data, search_pool;
             next_column_id=base_column_id,
             reduced_cost_tol=reduced_cost_tol,
             max_new_columns=max_new_columns,
             n_candidates=n_candidates,
             time_limit=time_limit,
         )
-    return columns_s, exhausted_s, stats_s.labels_generated
+    reward_coarsening_levels == 0 &&
+        return columns_s, exhausted_s, stats_s.labels_generated
+
+    # Relaxed rewards are used only to choose routes. Replay against the exact
+    # rewards before accepting a column, and re-apply pool novelty because the
+    # relaxed assignment signature may differ from the exact one.
+    best_pool_tau = Dict{Any, Float64}()
+    for column in existing
+        signature = _passenger_free_assignment_column_signature(column)
+        best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
+    end
+    exact_by_signature = Dict{Any, NamedTuple}()
+    for column in columns_s
+        relaxed_rc = Float64(get(column.metadata, "reduced_cost", Inf))
+        assignments, tau, exact_rc = _passenger_free_assignment_column_from_route(
+            collect(Int, column.route), exact_pricing_data,
+        )
+        relaxed_rc <= exact_rc + 1e-6 || error(
+            "reward-coarsened pricing violated relaxed_rc <= exact_rc on route " *
+            "$(column.route): $(relaxed_rc) > $(exact_rc)",
+        )
+        isempty(assignments) && continue
+        exact_rc < -reduced_cost_tol || continue
+        signature = _passenger_free_assignment_column_signature(assignments)
+        tau < get(best_pool_tau, signature, Inf) - 1e-9 || continue
+        current = get(exact_by_signature, signature, nothing)
+        if isnothing(current) || exact_rc < current.reduced_cost - 1e-9 ||
+                (abs(exact_rc - current.reduced_cost) <= 1e-9 && tau < current.tau - 1e-9)
+            exact_by_signature[signature] = (
+                route=collect(Int, column.route), assignments=assignments,
+                tau=tau, reduced_cost=exact_rc,
+            )
+        end
+    end
+    scored = sort!(collect(values(exact_by_signature));
+                   by=entry -> (entry.reduced_cost, entry.tau, string(entry.route)))
+    scored = scored[1:min(length(scored), max_new_columns)]
+    exact_columns = PassengerFreeAssignmentRouteColumn[]
+    for (offset, entry) in enumerate(scored)
+        push!(exact_columns, PassengerFreeAssignmentRouteColumn(
+            base_column_id + offset - 1, entry.route, entry.assignments, entry.tau;
+            metadata=Dict{String, Any}(
+                "scenario" => s,
+                "route" => Tuple(entry.route),
+                "reduced_cost" => entry.reduced_cost,
+                "harvester" => "reward_coarsened",
+                "reward_coarsening_levels" => reward_coarsening_levels,
+            ),
+        ))
+    end
+    # `exhausted` must keep meaning "no improving column exists", because that is
+    # what the caller turns into `:optimality_proven`. Under coarsening it only
+    # survives when the RELAXED search itself came back empty: then no route has
+    # `relaxed_rc < -tol`, and since `relaxed_rc <= exact_rc` route by route, none
+    # has `exact_rc < -tol` either -- a valid certificate.
+    #
+    # When the relaxed search DID return routes that all then failed exact
+    # replay, nothing is proven: the returned set is dominance-pruned under
+    # relaxed rewards, so a route with `exact_rc < -tol` can be dominated by one
+    # with better relaxed and worse exact reduced cost, and never surface. That is
+    # the normal case at convergence (measured: 16/16 certifiable scenarios at
+    # n=20 returned a non-empty exhausted relaxed set), so reporting `exhausted`
+    # here would be a certificate resting on a dominance-pruned sample.
+    #
+    # `run_passenger_free_assignment_column_generation` happens to be insulated
+    # today because it pins the certification pass to level 0, but the pricer
+    # contract is public and must stand on its own.
+    certified = exhausted_s && isempty(columns_s)
+    return exact_columns, certified, stats_s.labels_generated
 end
 
 """
@@ -208,6 +307,7 @@ function _price_passenger_scenarios(
     station_budget_cap::Bool=false,
     compensated_dominance::Bool=true,
     use_station_simple::Bool=false,
+    reward_coarsening_levels::Int=0,
 )
     md = master.master_data
     scenarios = sort!(collect(keys(md.passengers_by_scenario)))
@@ -247,6 +347,7 @@ function _price_passenger_scenarios(
                 station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
                 use_station_simple=use_station_simple,
+                reward_coarsening_levels=reward_coarsening_levels,
             )
         end
     else
@@ -259,6 +360,7 @@ function _price_passenger_scenarios(
                 station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
                 use_station_simple=use_station_simple,
+                reward_coarsening_levels=reward_coarsening_levels,
             )
         end
     end
@@ -360,7 +462,11 @@ function run_passenger_free_assignment_column_generation(
     # the whole run). The final `lp_bound` is still a genuine certificate -- the
     # switch happens precisely because the elementary pool could not be improved, and
     # the exact phase runs to its own exhaustion. See the phase-switch below.
-    station_simple_warm_start::Bool=false,
+    station_simple_warm_start::Bool=true,
+    # Opt-in reward-state relaxation for the early-return harvester. `2` is the
+    # measured best quality/speed compromise. Every candidate route is replayed
+    # with exact rewards, and exhaustive certification always uses level 0.
+    reward_coarsening_levels::Int=0,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -375,6 +481,13 @@ function run_passenger_free_assignment_column_generation(
     pricing_time_limit_sec > 0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
     certification_time_limit_sec > 0 ||
         throw(ArgumentError("certification_time_limit_sec must be positive"))
+    reward_coarsening_levels >= 0 ||
+        throw(ArgumentError("reward_coarsening_levels must be nonnegative"))
+    reward_coarsening_levels > 0 && (use_station_simple || station_simple_warm_start) &&
+        throw(ArgumentError(
+            "reward-coarsened and station-simple harvesting are alternative modes; " *
+            "enable only one per run",
+        ))
 
     t_start = time()
     isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
@@ -505,6 +618,7 @@ function run_passenger_free_assignment_column_generation(
                 station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
                 use_station_simple=pricing_station_simple,
+                reward_coarsening_levels=reward_coarsening_levels,
             )
             pricing_seconds = time() - t_price
             total_pricing_seconds += pricing_seconds
@@ -521,7 +635,8 @@ function run_passenger_free_assignment_column_generation(
                 minimum(Float64(get(c.metadata, "reduced_cost", Inf)) for c in new_columns)
             push!(iteration_rows, (
                 round=n_rounds, iteration=n_iters, phase="early_return",
-                pricer=pricing_station_simple ? "station_simple" : "revisit",
+                pricer=pricing_station_simple ? "station_simple" :
+                    reward_coarsening_levels > 0 ? "reward_coarsened_L$(reward_coarsening_levels)" : "revisit",
                 lp_bound=lp_bound, lp_seconds=lp_seconds,
                 pricing_seconds=pricing_seconds, labels_generated=labels,
                 columns_priced=length(new_columns), columns_added=added,
@@ -583,6 +698,7 @@ function run_passenger_free_assignment_column_generation(
             station_budget_cap=station_budget_cap,
             compensated_dominance=compensated_dominance,
             use_station_simple=pricing_station_simple,
+            reward_coarsening_levels=0,
         )
         round_cert_seconds = time() - t_cert
         certification_seconds += round_cert_seconds
@@ -774,6 +890,8 @@ function run_passenger_free_assignment_column_generation(
             "pricing_seconds" => total_pricing_seconds,
             "lp_seconds" => total_lp_seconds,
             "labels_generated" => total_labels,
+            "reward_coarsening_levels" => reward_coarsening_levels,
+            "station_simple_warm_start" => station_simple_warm_start,
             "iteration_rows" => copy(iteration_rows),
             "column_rows" => column_rows,
             "selector_logs" => copy(selector_logs),

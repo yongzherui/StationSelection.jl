@@ -65,7 +65,7 @@ function build_model_for(n_stations::Int)
     )
 end
 
-function attempt(label, model, data, use_station_simple; warm_start=false)
+function attempt(label, model, data, use_station_simple; warm_start=false, reward_levels=0)
     t0 = time()
     res = nothing
     err = ""
@@ -81,6 +81,7 @@ function attempt(label, model, data, use_station_simple; warm_start=false)
             total_time_limit_sec=CASE_TIME,
             use_station_simple=use_station_simple,
             station_simple_warm_start=warm_start,
+            reward_coarsening_levels=reward_levels,
             verify_reduced_costs=true,
             verbose=false,
         )
@@ -115,13 +116,18 @@ function run_case(n_stations::Int, results_dir::String)
     )
 
     ss, ss_err, ss_wall = attempt("station_simple", build_model_for(n_stations), data, true)
+    coarse, coarse_err, coarse_wall = attempt(
+        "reward_L2", build_model_for(n_stations), data, false; reward_levels=2,
+    )
     rev, rev_err, rev_wall = attempt("revisit", build_model_for(n_stations), data, false)
     ws, ws_err, ws_wall = attempt("warm_start", build_model_for(n_stations), data, false; warm_start=true)
 
     ss_lp = isnothing(ss) ? missing : ss.lp_bound
+    coarse_lp = isnothing(coarse) ? missing : coarse.lp_bound
     rev_lp = isnothing(rev) ? missing : rev.lp_bound
     ws_lp = isnothing(ws) ? missing : ws.lp_bound
     ss_mip = isnothing(ss) || isnothing(ss.mip_objective) ? missing : ss.mip_objective
+    coarse_mip = isnothing(coarse) || isnothing(coarse.mip_objective) ? missing : coarse.mip_objective
     rev_mip = isnothing(rev) || isnothing(rev.mip_objective) ? missing : rev.mip_objective
     ws_mip = isnothing(ws) || isnothing(ws.mip_objective) ? missing : ws.mip_objective
     both_lp_certified = !isnothing(ss) && !isnothing(rev) &&
@@ -130,6 +136,11 @@ function run_case(n_stations::Int, results_dir::String)
     ws_matches_rev = !isnothing(ws) && !isnothing(rev) && ws.lp_bound_certified &&
         rev.lp_bound_certified && isapprox(ws_lp, rev_lp; atol=1e-4)
     ws_speedup = (rev_wall > 0 && ws_wall > 0) ? rev_wall / ws_wall : missing
+    coarse_matches_rev = !isnothing(coarse) && !isnothing(rev) && coarse.lp_bound_certified &&
+        rev.lp_bound_certified && isapprox(coarse_lp, rev_lp; atol=1e-4)
+    coarse_harvest_speedup = !isnothing(coarse) && !isnothing(rev) &&
+        coarse.total_pricing_seconds > 0 ?
+        rev.total_pricing_seconds / coarse.total_pricing_seconds : missing
 
     lp_gap = _gap(ss_lp, rev_lp)
     lp_gap_pct = _gap_pct(ss_lp, rev_lp)
@@ -149,6 +160,12 @@ function run_case(n_stations::Int, results_dir::String)
         string(ws_matches_rev),
         ws_lp isa Real ? @sprintf("%.4f", ws_lp) : "-",
         rev_lp isa Real ? @sprintf("%.4f", rev_lp) : "-")
+    @printf("  REWARDL2\tn=%d\tcoarse_wall=%.1f\trev_wall=%.1f\tpricing_speedup=%s\tmatches_rev=%s\tcoarse_lp=%s\trev_lp=%s\n",
+        n_stations, coarse_wall, rev_wall,
+        coarse_harvest_speedup isa Real ? @sprintf("%.2f", coarse_harvest_speedup) : "-",
+        string(coarse_matches_rev),
+        coarse_lp isa Real ? @sprintf("%.4f", coarse_lp) : "-",
+        rev_lp isa Real ? @sprintf("%.4f", rev_lp) : "-")
     flush(stdout)
 
     summary = (
@@ -159,6 +176,12 @@ function run_case(n_stations::Int, results_dir::String)
         ss_lp=ss_lp, ss_mip=ss_mip,
         ss_columns=isnothing(ss) ? missing : ss.n_columns,
         ss_wall=ss_wall, ss_error=ss_err,
+        coarse_status=isnothing(coarse) ? "error" : string(coarse.cg_stop_reason),
+        coarse_certified=isnothing(coarse) ? missing : coarse.lp_bound_certified,
+        coarse_lp=coarse_lp, coarse_mip=coarse_mip,
+        coarse_columns=isnothing(coarse) ? missing : coarse.n_columns,
+        coarse_pricing_sec=isnothing(coarse) ? missing : coarse.total_pricing_seconds,
+        coarse_wall=coarse_wall, coarse_error=coarse_err,
         rev_status=isnothing(rev) ? "error" : string(rev.cg_stop_reason),
         rev_certified=isnothing(rev) ? missing : rev.lp_bound_certified,
         rev_lp=rev_lp, rev_mip=rev_mip,
@@ -174,6 +197,8 @@ function run_case(n_stations::Int, results_dir::String)
         mip_gap=mip_gap, mip_gap_pct=mip_gap_pct,
         both_lp_certified=both_lp_certified,
         ws_matches_rev=ws_matches_rev, ws_speedup=ws_speedup,
+        coarse_matches_rev=coarse_matches_rev,
+        coarse_harvest_speedup=coarse_harvest_speedup,
     )
     try
         CSV.write(joinpath(results_dir, "pfass_n$(n_stations)_p$(N_PAIRS)_s$(SEED).csv"), DataFrame([summary]))

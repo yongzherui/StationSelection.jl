@@ -19,6 +19,74 @@ contract this preprocessing feeds.
 """
 
 export create_passenger_free_assignment_pricing_data
+export coarsen_passenger_assignment_rewards
+
+"""
+    coarsen_passenger_assignment_rewards(candidates, levels; tol=1e-9)
+
+Round each positive assignment reward *up* to one of at most `levels` retained
+values for that passenger. The maximum value is always retained. Since the
+transformed reward is never smaller than the exact reward, pricing with the
+transformed candidates is a relaxation (`relaxed_rc <= exact_rc` route by
+route). Returned routes must still be replayed against exact pricing data before
+they are admitted to the master.
+
+The retained values are selected at evenly-spaced targets over the passenger's
+observed reward range. `levels == 0` returns a copy without coarsening.
+"""
+function coarsen_passenger_assignment_rewards(
+    candidates::AbstractVector{PassengerAssignmentCandidate},
+    levels::Int;
+    tol::Float64=1e-9,
+)::Vector{PassengerAssignmentCandidate}
+    levels >= 0 || throw(ArgumentError("reward coarsening levels must be nonnegative"))
+    levels == 0 && return collect(PassengerAssignmentCandidate, candidates)
+
+    values_by_passenger = Dict{Int, Vector{Float64}}()
+    for candidate in candidates
+        candidate.reward > tol || continue
+        push!(get!(() -> Float64[], values_by_passenger, candidate.passenger), candidate.reward)
+    end
+    retained_by_passenger = Dict{Int, Vector{Float64}}()
+    for (passenger, raw_values) in values_by_passenger
+        values = Float64[]
+        for value in sort(raw_values)
+            (!isempty(values) && value - values[end] <= tol) || push!(values, value)
+        end
+        if length(values) <= levels
+            retained_by_passenger[passenger] = values
+            continue
+        end
+        retained = Float64[]
+        lo, hi = first(values), last(values)
+        for level in 1:levels
+            target = lo + (hi - lo) * level / levels
+            index = findfirst(value -> value >= target - tol, values)
+            isnothing(index) && continue
+            value = values[index]
+            (isempty(retained) || value > retained[end] + tol) && push!(retained, value)
+        end
+        (isempty(retained) || retained[end] < hi - tol) && push!(retained, hi)
+        retained_by_passenger[passenger] = retained
+    end
+
+    transformed = PassengerAssignmentCandidate[]
+    sizehint!(transformed, length(candidates))
+    for candidate in candidates
+        if candidate.reward <= tol
+            push!(transformed, candidate)
+            continue
+        end
+        retained = retained_by_passenger[candidate.passenger]
+        index = findfirst(value -> value >= candidate.reward - tol, retained)
+        rounded = isnothing(index) ? last(retained) : retained[index]
+        push!(transformed, PassengerAssignmentCandidate(
+            candidate.passenger, candidate.origin, candidate.destination,
+            candidate.ride_limit, rounded,
+        ))
+    end
+    return transformed
+end
 
 function _passenger_free_assignment_travel(
     pricing_data::PassengerFreeAssignmentPricingData, u::Int, v::Int,

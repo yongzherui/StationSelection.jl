@@ -14,6 +14,203 @@
         return only(filter(l -> l.current == current, labels))
     end
 
+    @testset "reward coarsening rounds upward and preserves exact default" begin
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 2, 100.0, 2.0),
+            PassengerAssignmentCandidate(1, 1, 3, 100.0, 4.0),
+            PassengerAssignmentCandidate(1, 1, 4, 100.0, 7.0),
+            PassengerAssignmentCandidate(1, 2, 4, 100.0, 10.0),
+            PassengerAssignmentCandidate(2, 1, 2, 100.0, 3.0),
+            PassengerAssignmentCandidate(2, 1, 3, 100.0, -1.0),
+        ]
+        unchanged = coarsen_passenger_assignment_rewards(candidates, 0)
+        @test [c.reward for c in unchanged] == [c.reward for c in candidates]
+
+        coarse = coarsen_passenger_assignment_rewards(candidates, 2)
+        @test all(coarse[i].reward >= candidates[i].reward - 1e-9 for i in eachindex(candidates))
+        @test [c.reward for c in coarse[1:4]] == [7.0, 7.0, 7.0, 10.0]
+        @test coarse[5].reward == 3.0
+        @test coarse[6].reward == -1.0
+        @test_throws ArgumentError coarsen_passenger_assignment_rewards(candidates, -1)
+
+        travel = line_travel_cost(4)
+        exact = create_passenger_free_assignment_pricing_data(
+            1, [1, 2, 3, 4], travel, candidates;
+            route_regularization_weight=1.0, max_wait_time=10.0,
+        )
+        relaxed = create_passenger_free_assignment_pricing_data(
+            1, [1, 2, 3, 4], travel, coarse;
+            route_regularization_weight=1.0, max_wait_time=10.0,
+        )
+        for route in ([1, 2], [1, 3], [1, 4], [1, 2, 4])
+            _ra, _rt, relaxed_rc = StationSelection._passenger_free_assignment_column_from_route(route, relaxed)
+            _ea, _et, exact_rc = StationSelection._passenger_free_assignment_column_from_route(route, exact)
+            @test relaxed_rc <= exact_rc + 1e-9
+        end
+    end
+
+    @testset "passenger-Lagrangian bound keeps one route and relaxes uniqueness" begin
+        travel = line_travel_cost(4)
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 2, 10.0, 4.0),
+            PassengerAssignmentCandidate(1, 1, 3, 10.0, 8.0),
+            PassengerAssignmentCandidate(2, 2, 4, 10.0, 7.0),
+        ]
+        exact = create_passenger_free_assignment_pricing_data(
+            1, [1, 2, 3, 4], travel, candidates;
+            route_regularization_weight=1.0, max_wait_time=10.0,
+            max_stops=4, max_visits_per_node=2,
+        )
+        bound, certified, stats = passenger_free_assignment_lagrangian_bound(
+            exact, candidates; max_iterations=3, time_limit=20.0,
+        )
+        @test certified
+        @test stats.max_passenger_multiplicity == 2
+        @test stats.repeated_passenger_count > 0
+        @test bound <= stats.best_exact_replay_rc + 1e-9
+        @test !stats.proves_no_improving_column
+        @test_throws ArgumentError passenger_free_assignment_lagrangian_bound(
+            exact, candidates; max_iterations=0,
+        )
+    end
+
+    @testset "passenger-Lagrangian randomized lower-bound validity" begin
+        rng = MersenneTwister(731)
+        travel = line_travel_cost(5)
+        for trial in 1:12
+            candidates = PassengerAssignmentCandidate[]
+            for passenger in 1:3, origin in 1:4, destination in (origin + 1):5
+                rand(rng) < 0.45 || continue
+                push!(candidates, PassengerAssignmentCandidate(
+                    passenger, origin, destination, 10.0,
+                    1.0 + 9.0 * rand(rng),
+                ))
+            end
+            isempty(candidates) && continue
+            exact = create_passenger_free_assignment_pricing_data(
+                trial, collect(1:5), travel, candidates;
+                route_regularization_weight=1.0, max_wait_time=10.0,
+                max_stops=5, max_visits_per_node=2,
+            )
+            exact_columns, exact_exhausted, _stats =
+                passenger_free_assignment_pricing_by_label_setting(
+                    exact, PassengerFreeAssignmentRouteColumn[];
+                    next_column_id=1, reduced_cost_tol=1e-9,
+                    max_new_columns=typemax(Int) ÷ 2,
+                    n_candidates=typemax(Int) ÷ 2,
+                    time_limit=20.0,
+                )
+            @test exact_exhausted
+            exact_optimum = isempty(exact_columns) ? 0.0 :
+                minimum(Float64(c.metadata["reduced_cost"]) for c in exact_columns)
+            bound, certified, _lag_stats = passenger_free_assignment_lagrangian_bound(
+                exact, candidates; max_iterations=3, time_limit=20.0,
+            )
+            @test certified
+            @test bound <= exact_optimum + 1e-6
+        end
+    end
+
+    @testset "passenger-DSSR promotes duplicated passengers and becomes exact" begin
+        travel = line_travel_cost(4)
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 2, 10.0, 4.0),
+            PassengerAssignmentCandidate(1, 1, 3, 10.0, 8.0),
+            PassengerAssignmentCandidate(2, 2, 4, 10.0, 7.0),
+        ]
+        exact = create_passenger_free_assignment_pricing_data(
+            1, [1, 2, 3, 4], travel, candidates;
+            route_regularization_weight=1.0, max_wait_time=10.0,
+            max_stops=4, max_visits_per_node=2,
+        )
+        bound, certified, stats = passenger_free_assignment_passenger_dssr_bound(
+            exact, candidates; max_rounds=5, time_limit=20.0,
+        )
+        @test certified
+        @test stats.exact
+        @test stats.rounds == 2
+        @test stats.promoted_by_round[1] == [1]
+        @test issorted(stats.bound_trajectory)
+        @test bound ≈ -12.0
+        @test bound ≈ stats.best_exact_replay_rc
+        @test_throws ArgumentError passenger_free_assignment_passenger_dssr_bound(
+            exact, candidates; max_rounds=0,
+        )
+    end
+
+    @testset "passenger-DSSR randomized bound validity and monotonicity" begin
+        rng = MersenneTwister(913)
+        travel = line_travel_cost(5)
+        for trial in 1:10
+            candidates = PassengerAssignmentCandidate[]
+            for passenger in 1:3, origin in 1:4, destination in (origin + 1):5
+                rand(rng) < 0.5 || continue
+                push!(candidates, PassengerAssignmentCandidate(
+                    passenger, origin, destination, 10.0,
+                    1.0 + 9.0 * rand(rng),
+                ))
+            end
+            isempty(candidates) && continue
+            exact = create_passenger_free_assignment_pricing_data(
+                trial, collect(1:5), travel, candidates;
+                route_regularization_weight=1.0, max_wait_time=10.0,
+                max_stops=5, max_visits_per_node=2,
+            )
+            exact_columns, exact_exhausted, _stats =
+                passenger_free_assignment_pricing_by_label_setting(
+                    exact, PassengerFreeAssignmentRouteColumn[];
+                    next_column_id=1, reduced_cost_tol=1e-9,
+                    max_new_columns=typemax(Int) ÷ 2,
+                    n_candidates=typemax(Int) ÷ 2,
+                    time_limit=20.0,
+                )
+            @test exact_exhausted
+            exact_optimum = isempty(exact_columns) ? 0.0 : minimum(
+                Float64(column.metadata["reduced_cost"]) for column in exact_columns
+            )
+            bound, certified, dssr_stats = passenger_free_assignment_passenger_dssr_bound(
+                exact, candidates; max_rounds=10, time_limit=20.0,
+            )
+            @test certified
+            @test bound <= exact_optimum + 1e-6
+            @test all(diff(dssr_stats.bound_trajectory) .>= -1e-6)
+            dssr_stats.exact && @test bound ≈ exact_optimum atol = 1e-6
+        end
+    end
+
+    @testset "post-W destination-only completion" begin
+        travel = line_travel_cost(3)
+        candidates = [
+            PassengerAssignmentCandidate(1, 1, 2, 10.0, 10.0),
+            PassengerAssignmentCandidate(2, 1, 3, 10.0, 8.0),
+        ]
+        pricing_data = create_passenger_free_assignment_pricing_data(
+            1, [1, 2, 3], travel, candidates;
+            route_regularization_weight=1.0, max_wait_time=5.0,
+            max_stops=5, max_visits_per_node=3,
+        )
+        post_w = PassengerFreeAssignmentPricingLabel(
+            1, [1], 5.0, Dict(1 => 0.0), RewardLayerBitset(),
+            0.0, 0.0, 1, pricing_data.station_bit[1],
+        )
+        best, exhausted, stats = passenger_free_assignment_post_w_completion(
+            post_w, pricing_data; time_limit=10.0,
+        )
+        @test exhausted
+        @test best.reduced_cost ≈ -16.0
+        @test best.route == [1, 2, 3]
+        @test stats.suffix_stops == 2
+        @test length(unique(best.route[2:end])) == length(best.route[2:end])
+
+        pre_w = PassengerFreeAssignmentPricingLabel(
+            1, [1], 4.0, Dict(1 => 0.0), RewardLayerBitset(),
+            0.0, 0.0, 1, pricing_data.station_bit[1],
+        )
+        @test_throws ArgumentError passenger_free_assignment_post_w_completion(
+            pre_w, pricing_data,
+        )
+    end
+
     @testset "single passenger: improving destination upgrades reward, doesn't double count" begin
         travel = line_travel_cost(3)
         candidates = [

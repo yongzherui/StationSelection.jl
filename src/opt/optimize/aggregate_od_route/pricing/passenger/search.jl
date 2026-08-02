@@ -159,8 +159,15 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     reduced_cost_tol::Float64,
     max_visits_per_node::Int,
     use_reduced_cost_pruning::Bool=true,
+    use_post_w_completion_bound::Bool=false,
     profile::Bool=false,
     stop_if=label -> false,
+    # Diagnostic hook: called once per label that survives dominance and enters the
+    # frontier. `nothing` (the default) costs one branch per insertion and nothing
+    # else -- production pricing never sets it. Used by
+    # `scripts/diag_passenger_split_census.jl` to census the live-label population
+    # (live-clock support, pickup-phase membership) without duplicating this loop.
+    label_observer=nothing,
 )
     frontier = PriorityQueue{Int, Float64}()
     live_labels = Dict{Int, PassengerFreeAssignmentPricingLabel}()
@@ -186,14 +193,29 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     t_candidates = UInt64(0)
     t_extension = UInt64(0)
     t_dominance = UInt64(0)
+    post_w_bound_calls = 0
+    post_w_bound_states = 0
+    t_post_w_bound = 0.0
 
     remaining_reward_bound(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
         _passenger_free_assignment_remaining_reward_bound(
             label, label_bs, pricing_data, search_index, bound_workspace,
         )
 
-    label_priority(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
-        label.reduced_cost - remaining_reward_bound(label, label_bs)
+    function label_priority(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets)
+        if use_post_w_completion_bound && label.time + 1e-9 >= pricing_data.max_wait_time
+            t0 = time()
+            completion, completion_exhausted, completion_stats =
+                passenger_free_assignment_post_w_completion(
+                    label, pricing_data; time_limit=max(1e-3, time_limit - (time() - t_start)),
+                )
+            t_post_w_bound += time() - t0
+            post_w_bound_calls += 1
+            post_w_bound_states += completion_stats.states
+            completion_exhausted && return completion.reduced_cost
+        end
+        return label.reduced_cost - remaining_reward_bound(label, label_bs)
+    end
 
     for label in initial_passenger_free_assignment_pricing_labels(pricing_data)
         label_id = next_label_id
@@ -217,6 +239,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
             profile && (t_queue += time_ns() - t0)
             max_frontier_size = max(max_frontier_size, length(frontier))
             max_live_labels = max(max_live_labels, length(live_labels))
+            isnothing(label_observer) || label_observer(label)
         else
             delete!(live_labels, label_id)
             labels_rejected_by_dominance += 1
@@ -297,6 +320,7 @@ function _enumerate_passenger_free_assignment_pricing_labels(
                     profile && (t_queue += time_ns() - t0)
                     max_frontier_size = max(max_frontier_size, length(frontier))
                     max_live_labels = max(max_live_labels, length(live_labels))
+                    isnothing(label_observer) || label_observer(child)
                 else
                     delete!(live_labels, child_id)
                     labels_rejected_by_dominance += 1
@@ -316,6 +340,9 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         t_candidates_sec=t_candidates * 1e-9,
         t_extension_sec=t_extension * 1e-9,
         t_dominance_sec=t_dominance * 1e-9,
+        post_w_bound_calls=post_w_bound_calls,
+        post_w_bound_states=post_w_bound_states,
+        t_post_w_bound_sec=t_post_w_bound,
     )
     return collect(values(best_by_signature)), exhausted, stats
 end
@@ -427,6 +454,7 @@ function passenger_free_assignment_pricing_by_label_setting(
     time_limit::Float64=30.0,
     max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
+    use_post_w_completion_bound::Bool=false,
 )
     max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
     n_candidates >= max_new_columns || throw(ArgumentError("n_candidates must be >= max_new_columns"))
@@ -463,6 +491,7 @@ function passenger_free_assignment_pricing_by_label_setting(
         reduced_cost_tol=reduced_cost_tol,
         max_visits_per_node=max_visits_per_node,
         profile=profile,
+        use_post_w_completion_bound=use_post_w_completion_bound,
         stop_if=label -> try_accept_route!(label.route, label.reduced_cost),
     )
 
