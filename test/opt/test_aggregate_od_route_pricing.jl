@@ -283,9 +283,9 @@
         node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
         bs = StationSelection._make_aggregate_od_route_label_bitsets(label, pair_index, 2, node_index, 4)
         @test 1 in bs.served_bits
-        @test bs.station_age[node_index[1]] == 1.0
-        @test bs.station_age[node_index[2]] == 0.0
-        @test isinf(bs.station_age[node_index[3]])
+        @test bs.age_idx == Int32[node_index[1], node_index[2]]
+        @test bs.age_val == [1.0, 0.0]
+        @test bs.age_mask == 0x03
     end
 
     @testset "label-setting candidate generation enforces max visits per node" begin

@@ -18,9 +18,10 @@ function _enumerate_aggregate_od_route_pricing_labels(
     stop_if=label -> false,
 )
     frontier = PriorityQueue{Int, Float64}()
-    live_labels = Dict{Int, AggregateODRoutePricingLabel}()
-    dominance_buckets = Dict{Int, SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId}}()
-    best_by_signature = Dict{Any, AggregateODRoutePricingLabel}()
+    live_labels = Union{Nothing, AggregateODRoutePricingLabel}[]
+    n_live_labels = 0
+    dominance_buckets = Dict{Int, AggregateODRouteDominanceBucket}()
+    best_by_signature = Dict{Tuple{Vararg{Tuple{Int, Int}}}, AggregateODRoutePricingLabel}()
 
     n_pairs = length(pricing_data.active_pairs)
     pair_index = Dict(pair => i for (i, pair) in enumerate(pricing_data.active_pairs))
@@ -35,7 +36,7 @@ function _enumerate_aggregate_od_route_pricing_labels(
         haskey(pricing_data.travel_cost, (u, v)) &&
             (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
     end
-    label_bitsets = Dict{Int, AggregateODRouteLabelBitsets}()
+    rules = AggregateODRouteDominanceRules{pricing_data.bounded_max_stops}()
 
     exhausted = true
     t_start = time()
@@ -61,7 +62,9 @@ function _enumerate_aggregate_od_route_pricing_labels(
         @inbounds for i in 1:n_pairs
             positive_pair_rewards[i] > 0 || continue
             i in label_bs.served_bits && continue
-            origin_age = label_bs.station_age[pair_origin_idx[i]]
+            pos = searchsortedfirst(label_bs.age_idx, Int32(pair_origin_idx[i]))
+            origin_age = pos <= length(label_bs.age_idx) && label_bs.age_idx[pos] == pair_origin_idx[i] ?
+                label_bs.age_val[pos] : Inf
             can_claim_current = isfinite(origin_age) &&
                 origin_age + travel_matrix[current_idx, pair_dest_idx[i]] <= pair_ride_limit[i] + 1e-9
             can_refresh = !past_pickup_cutoff &&
@@ -79,24 +82,26 @@ function _enumerate_aggregate_od_route_pricing_labels(
         label_id = next_label_id
         next_label_id += 1
         labels_generated += 1
-        live_labels[label_id] = label
+        push!(live_labels, label)
+        n_live_labels += 1
         label_bs = _make_aggregate_od_route_label_bitsets(label, pair_index, n_pairs, node_index, n_nodes)
         bucket = get!(() -> _create_aggregate_od_route_dominance_bucket(), dominance_buckets, _aggregate_od_route_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
         inserted, removed = _add_aggregate_od_route_label_to_bucket!(
-            bucket, live_labels, label_bitsets, label, label_id, label_bs,
-            pricing_data.bounded_max_stops,
+            bucket, live_labels, label, label_id, label_bs, rules,
         )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
+        n_live_labels -= removed
         if inserted
             t0 = profile ? time_ns() : UInt64(0)
             enqueue!(frontier, label_id => label_priority(label, label_bs))
             profile && (t_queue += time_ns() - t0)
             max_frontier_size = max(max_frontier_size, length(frontier))
-            max_live_labels = max(max_live_labels, length(live_labels))
+            max_live_labels = max(max_live_labels, n_live_labels)
         else
-            delete!(live_labels, label_id)
+            live_labels[label_id] = nothing
+            n_live_labels -= 1
             labels_rejected_by_dominance += 1
         end
     end
@@ -108,14 +113,14 @@ function _enumerate_aggregate_od_route_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        label_id = dequeue!(frontier)
+        label_id, popped_priority = dequeue_pair!(frontier)
         profile && (t_queue += time_ns() - t0)
-        if !haskey(live_labels, label_id)
+        maybe_label = live_labels[label_id]
+        if isnothing(maybe_label)
             stale_pops += 1
             continue
         end
-        label = live_labels[label_id]
-        label_bs = label_bitsets[label_id]
+        label = maybe_label::AggregateODRoutePricingLabel
 
         if !isempty(label.served_pairs)
             signature = _aggregate_od_route_column_signature(label.served_pairs)
@@ -131,7 +136,7 @@ function _enumerate_aggregate_od_route_pricing_labels(
 
         label.route_length >= pricing_data.max_stops && continue
         if use_reduced_cost_pruning
-            label_priority(label, label_bs) >= -reduced_cost_tol && continue
+            popped_priority >= -reduced_cost_tol && continue
         end
 
         t0 = profile ? time_ns() : UInt64(0)
@@ -145,34 +150,34 @@ function _enumerate_aggregate_od_route_pricing_labels(
 
         for next_node in next_nodes
             t0 = profile ? time_ns() : UInt64(0)
-            children = extend_aggregate_od_route_pricing_label(label, next_node, pricing_data, duals)
+            child = _extend_aggregate_od_route_pricing_label(label, next_node, pricing_data, duals)
             profile && (t_extension += time_ns() - t0)
 
-            for child in children
                 child_id = next_label_id
                 next_label_id += 1
                 labels_generated += 1
-                live_labels[child_id] = child
+                push!(live_labels, child)
+                n_live_labels += 1
                 child_bs = _make_aggregate_od_route_label_bitsets(child, pair_index, n_pairs, node_index, n_nodes)
                 bucket = get!(() -> _create_aggregate_od_route_dominance_bucket(), dominance_buckets, _aggregate_od_route_dominance_signature(child))
                 t0 = profile ? time_ns() : UInt64(0)
                 inserted, removed = _add_aggregate_od_route_label_to_bucket!(
-                    bucket, live_labels, label_bitsets, child, child_id, child_bs,
-                    pricing_data.bounded_max_stops,
+                    bucket, live_labels, child, child_id, child_bs, rules,
                 )
                 profile && (t_dominance += time_ns() - t0)
                 labels_removed_by_dominance += removed
+                n_live_labels -= removed
                 if inserted
                     t0 = profile ? time_ns() : UInt64(0)
                     enqueue!(frontier, child_id => label_priority(child, child_bs))
                     profile && (t_queue += time_ns() - t0)
                     max_frontier_size = max(max_frontier_size, length(frontier))
-                    max_live_labels = max(max_live_labels, length(live_labels))
+                    max_live_labels = max(max_live_labels, n_live_labels)
                 else
-                    delete!(live_labels, child_id)
+                    live_labels[child_id] = nothing
+                    n_live_labels -= 1
                     labels_rejected_by_dominance += 1
                 end
-            end
         end
     end
 
@@ -257,7 +262,7 @@ function aggregate_od_route_pricing_by_label_setting(
     end
 
     scored = collect(values(scored_by_signature))
-    sort!(scored, by=entry -> (entry[1], entry[2].tau, string(entry[2].route)))
+    scored = scored[sortperm([(entry[1], entry[2].tau, string(entry[2].route)) for entry in scored])]
     scored = scored[1:min(length(scored), n_candidates)]
     scored = scored[1:min(length(scored), max_new_columns)]
 

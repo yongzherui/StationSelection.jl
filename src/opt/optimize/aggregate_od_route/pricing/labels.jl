@@ -125,6 +125,17 @@ function extend_aggregate_od_route_pricing_label(
     pricing_data::AggregateODRoutePricingData,
     duals::AggregateODRoutePricingDuals,
 )::Vector{AggregateODRoutePricingLabel}
+    return AggregateODRoutePricingLabel[
+        _extend_aggregate_od_route_pricing_label(label, next_node, pricing_data, duals),
+    ]
+end
+
+function _extend_aggregate_od_route_pricing_label(
+    label::AggregateODRoutePricingLabel,
+    next_node::Int,
+    pricing_data::AggregateODRoutePricingData,
+    duals::AggregateODRoutePricingDuals,
+)::AggregateODRoutePricingLabel
     travel_time = _aggregate_od_route_travel(pricing_data, label.current, next_node)
     arrival_time = label.time + travel_time
     new_tau = label.tau + travel_time
@@ -151,7 +162,7 @@ function extend_aggregate_od_route_pricing_label(
         next_node,
     )
 
-    child = AggregateODRoutePricingLabel(
+    return AggregateODRoutePricingLabel(
         next_node,
         new_route,
         arrival_time,
@@ -162,7 +173,6 @@ function extend_aggregate_od_route_pricing_label(
         label.route_length + 1,
     )
 
-    return AggregateODRoutePricingLabel[child]
 end
 
 _aggregate_od_route_dominance_signature(label::AggregateODRoutePricingLabel) = label.current
@@ -179,7 +189,7 @@ function _aggregate_od_route_label_order_key(
     )
 end
 
-_create_aggregate_od_route_dominance_bucket() = SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId}()
+_create_aggregate_od_route_dominance_bucket() = AggregateODRouteDominanceBucket()
 
 function _make_aggregate_od_route_label_bitsets(
     label::AggregateODRoutePricingLabel,
@@ -193,13 +203,37 @@ function _make_aggregate_od_route_label_bitsets(
         push!(served_bits, pair_index[pair])
     end
 
-    station_age = fill(Inf, n_nodes)
+    n_live = length(label.station_age)
+    age_idx = Vector{Int32}(undef, n_live)
+    age_val = Vector{Float64}(undef, n_live)
+    age_mask = UInt64(0)
+    i = 0
     for (station, age) in label.station_age
-        station_age[node_index[station]] = age
+        idx = Int32(node_index[station])
+        age_mask |= UInt64(1) << ((idx - 1) & 63)
+        j = i
+        while j >= 1 && age_idx[j] > idx
+            age_idx[j + 1] = age_idx[j]
+            age_val[j + 1] = age_val[j]
+            j -= 1
+        end
+        age_idx[j + 1] = idx
+        age_val[j + 1] = age
+        i += 1
     end
 
-    return AggregateODRouteLabelBitsets(served_bits, station_age)
+    return AggregateODRouteLabelBitsets(served_bits, age_idx, age_val, age_mask)
 end
+
+AggregateODRouteDominanceFilters(label::AggregateODRoutePricingLabel, bs::AggregateODRouteLabelBitsets) =
+    AggregateODRouteDominanceFilters(label.reduced_cost, label.time, bs.age_mask,
+        Int32(label.route_length), Int32(length(bs.age_idx)))
+
+AggregateODRouteBucketEntry(id, label, bs) = AggregateODRouteBucketEntry(
+    AggregateODRouteDominanceFilters(label, bs), id, label, bs)
+
+_aggregate_od_route_entry_order_key(entry::AggregateODRouteBucketEntry) =
+    (entry.filters.reduced_cost, entry.filters.time, entry.filters.route_length, entry.id)
 
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
@@ -230,31 +264,60 @@ function _dominates_aggregate_od_route_label(
     a.time <= b.time + 1e-9 || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
     issubset(abs.served_bits, bbs.served_bits) || return false
-    @inbounds for i in eachindex(abs.station_age)
-        abs.station_age[i] <= bbs.station_age[i] + 1e-9 || return false
+    length(abs.age_idx) >= length(bbs.age_idx) || return false
+    bbs.age_mask & ~abs.age_mask == 0 || return false
+    ia = 1
+    @inbounds for ib in eachindex(bbs.age_idx)
+        idx = bbs.age_idx[ib]
+        while ia <= length(abs.age_idx) && abs.age_idx[ia] < idx
+            ia += 1
+        end
+        ia <= length(abs.age_idx) && abs.age_idx[ia] == idx || return false
+        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return false
+    end
+    return true
+end
+
+@inline function _dominates_aggregate_od_route_in_bucket(
+    af::AggregateODRouteDominanceFilters, abs::AggregateODRouteLabelBitsets,
+    bf::AggregateODRouteDominanceFilters, bbs::AggregateODRouteLabelBitsets,
+    ::AggregateODRouteDominanceRules{BoundedStops},
+)::Bool where {BoundedStops}
+    af.time <= bf.time + 1e-9 || return false
+    af.n_live_ages >= bf.n_live_ages || return false
+    bf.age_mask & ~af.age_mask == 0 || return false
+    BoundedStops && af.route_length > bf.route_length && return false
+    af.reduced_cost <= bf.reduced_cost + 1e-9 || return false
+    issubset(abs.served_bits, bbs.served_bits) || return false
+    ia = 1
+    na = Int(af.n_live_ages)
+    @inbounds for ib in Base.OneTo(Int(bf.n_live_ages))
+        idx = bbs.age_idx[ib]
+        while ia <= na && abs.age_idx[ia] < idx
+            ia += 1
+        end
+        ia <= na && abs.age_idx[ia] == idx || return false
+        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return false
     end
     return true
 end
 
 function _add_aggregate_od_route_label_to_bucket!(
-    bucket::SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId},
-    live_labels::Dict{Int, AggregateODRoutePricingLabel},
-    label_bitsets::Dict{Int, AggregateODRouteLabelBitsets},
+    bucket::AggregateODRouteDominanceBucket,
+    live_labels::Vector{Union{Nothing, AggregateODRoutePricingLabel}},
     label::AggregateODRoutePricingLabel,
     label_id::Int,
     label_bs::AggregateODRouteLabelBitsets,
-    bounded_max_stops::Bool,
+    rules::AggregateODRouteDominanceRules,
 )
     inserted = true
-    dominated_ids = Int[]
+    dominated = Int[]
     switched = false
 
-    for (_existing_key, existing_id) in pairs(bucket)
-        existing_label = live_labels[existing_id]
-        existing_bs = label_bitsets[existing_id]
-
-        if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_aggregate_od_route_label(existing_label, label, existing_bs, label_bs, bounded_max_stops)
+    new_filters = AggregateODRouteDominanceFilters(label, label_bs)
+    for (i, entry) in pairs(bucket)
+        if !switched && label.reduced_cost > entry.filters.reduced_cost + 1e-9
+            if _dominates_aggregate_od_route_in_bucket(entry.filters, entry.bitsets, new_filters, label_bs, rules)
                 inserted = false
                 break
             end
@@ -262,21 +325,20 @@ function _add_aggregate_od_route_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_aggregate_od_route_label(label, existing_label, label_bs, existing_bs, bounded_max_stops)
-            push!(dominated_ids, existing_id)
+        if _dominates_aggregate_od_route_in_bucket(new_filters, label_bs, entry.filters, entry.bitsets, rules)
+            push!(dominated, i)
         end
     end
 
     if inserted
-        for id in dominated_ids
-            delete!(bucket, _aggregate_od_route_label_order_key(live_labels[id], id))
-            delete!(live_labels, id)
-            delete!(label_bitsets, id)
+        for i in dominated
+            live_labels[bucket[i].id] = nothing
         end
-        bucket[_aggregate_od_route_label_order_key(label, label_id)] = label_id
-        label_bitsets[label_id] = label_bs
+        deleteat!(bucket, dominated)
+        entry = AggregateODRouteBucketEntry(label_id, label, label_bs)
+        insert!(bucket, searchsortedfirst(bucket, entry; by=_aggregate_od_route_entry_order_key), entry)
     end
-    return inserted, length(dominated_ids)
+    return inserted, length(dominated)
 end
 
 function _aggregate_od_route_label_priority(

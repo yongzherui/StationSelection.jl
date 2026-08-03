@@ -49,5 +49,26 @@ const AggregateODRouteLabelOrderKey = Tuple{Float64, Float64, Int, Int}
 
 struct AggregateODRouteLabelBitsets
     served_bits::BitSet
-    station_age::Vector{Float64}
+    age_idx::Vector{Int32}
+    age_val::Vector{Float64}
+    age_mask::UInt64
 end
+
+struct AggregateODRouteDominanceFilters
+    reduced_cost::Float64
+    time::Float64
+    age_mask::UInt64
+    route_length::Int32
+    n_live_ages::Int32
+end
+
+struct AggregateODRouteBucketEntry
+    filters::AggregateODRouteDominanceFilters
+    id::AggregateODRouteLabelId
+    label::AggregateODRoutePricingLabel
+    bitsets::AggregateODRouteLabelBitsets
+end
+
+const AggregateODRouteDominanceBucket = Vector{AggregateODRouteBucketEntry}
+
+struct AggregateODRouteDominanceRules{BoundedStops} end
