@@ -203,24 +203,7 @@ function _make_aggregate_od_route_label_bitsets(
         push!(served_bits, pair_index[pair])
     end
 
-    n_live = length(label.station_age)
-    age_idx = Vector{Int32}(undef, n_live)
-    age_val = Vector{Float64}(undef, n_live)
-    age_mask = UInt64(0)
-    i = 0
-    for (station, age) in label.station_age
-        idx = Int32(node_index[station])
-        age_mask |= UInt64(1) << ((idx - 1) & 63)
-        j = i
-        while j >= 1 && age_idx[j] > idx
-            age_idx[j + 1] = age_idx[j]
-            age_val[j + 1] = age_val[j]
-            j -= 1
-        end
-        age_idx[j + 1] = idx
-        age_val[j + 1] = age
-        i += 1
-    end
+    age_idx, age_val, age_mask = _make_sparse_station_ages(label.station_age, node_index)
 
     return AggregateODRouteLabelBitsets(served_bits, age_idx, age_val, age_mask)
 end
@@ -264,18 +247,10 @@ function _dominates_aggregate_od_route_label(
     a.time <= b.time + 1e-9 || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
     issubset(abs.served_bits, bbs.served_bits) || return false
-    length(abs.age_idx) >= length(bbs.age_idx) || return false
-    bbs.age_mask & ~abs.age_mask == 0 || return false
-    ia = 1
-    @inbounds for ib in eachindex(bbs.age_idx)
-        idx = bbs.age_idx[ib]
-        while ia <= length(abs.age_idx) && abs.age_idx[ia] < idx
-            ia += 1
-        end
-        ia <= length(abs.age_idx) && abs.age_idx[ia] == idx || return false
-        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return false
-    end
-    return true
+    return _sparse_station_ages_dominate(
+        abs.age_idx, abs.age_val, abs.age_mask,
+        bbs.age_idx, bbs.age_val, bbs.age_mask,
+    )
 end
 
 @inline function _dominates_aggregate_od_route_in_bucket(

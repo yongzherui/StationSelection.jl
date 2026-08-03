@@ -262,7 +262,8 @@ function aggregate_od_route_pricing_by_label_setting(
     end
 
     scored = collect(values(scored_by_signature))
-    scored = scored[sortperm([(entry[1], entry[2].tau, string(entry[2].route)) for entry in scored])]
+    scored = _sort_pricing_results_by_route(scored,
+        entry -> (entry[1], entry[2].tau, string(entry[2].route)))
     scored = scored[1:min(length(scored), n_candidates)]
     scored = scored[1:min(length(scored), max_new_columns)]
 

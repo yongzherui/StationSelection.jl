@@ -379,26 +379,7 @@ function _make_passenger_free_assignment_label_bitsets(
     node_index::Dict{Int, Int},
     n_nodes::Int,
 )::PassengerFreeAssignmentLabelBitsets
-    n_live = length(label.station_age)
-    age_idx = Vector{Int32}(undef, n_live)
-    age_val = Vector{Float64}(undef, n_live)
-    age_mask = UInt64(0)
-    i = 0
-    @inbounds for (station, age) in label.station_age
-        # Insertion sort on the way in: slide the entries already placed right
-        # until this station's index lands in ascending order.
-        idx = Int32(node_index[station])
-        age_mask |= UInt64(1) << ((idx - 1) & 63)
-        j = i
-        while j >= 1 && age_idx[j] > idx
-            age_idx[j + 1] = age_idx[j]
-            age_val[j + 1] = age_val[j]
-            j -= 1
-        end
-        age_idx[j + 1] = idx
-        age_val[j + 1] = age
-        i += 1
-    end
+    age_idx, age_val, age_mask = _make_sparse_station_ages(label.station_age, node_index)
     return PassengerFreeAssignmentLabelBitsets(
         label.activated_reward_layers, age_idx, age_val, age_mask,
     )
@@ -668,12 +649,11 @@ compensation's early bail is defined against a non-negative budget.
     # `dom(age_b) subseteq dom(age_a)` is required below, so `a` cannot have fewer
     # live clocks than `b`. Both counts ride inline in the filters, ahead of
     # everything that has to look at set contents.
-    na = Int(af.n_live_ages)
-    nb = Int(bf.n_live_ages)
-    na >= nb || return _reject(2)
-
-    # `dom(age_b) subseteq dom(age_a)`, as one instruction on inline scalars.
-    bf.age_mask & ~af.age_mask == 0 || return _reject(9)
+    age_rejection = _sparse_station_age_support_rejection(
+        abs.age_idx, af.age_mask, bbs.age_idx, bf.age_mask,
+    )
+    age_rejection == 1 && return _reject(2)
+    age_rejection == 2 && return _reject(9)
 
     if BoundedStops
         af.route_length <= bf.route_length || return _reject(3)
@@ -692,15 +672,9 @@ compensation's early bail is defined against a non-negative budget.
     # rule (a live age absent from `a` compares as Inf and always fails; one
     # absent from `b` compares as <= Inf and always passes), but costs O(#live)
     # instead of O(n_nodes). Both arrays are sorted, so one merge walk suffices.
-    ia = 1
-    @inbounds for ib in Base.OneTo(nb)
-        j = bbs.age_idx[ib]
-        while ia <= na && abs.age_idx[ia] < j
-            ia += 1
-        end
-        (ia <= na && abs.age_idx[ia] == j) || return _reject(6)
-        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return _reject(6)
-    end
+    _sparse_station_age_values_dominate(
+        abs.age_idx, abs.age_val, bbs.age_idx, bbs.age_val,
+    ) || return _reject(6)
 
     # See the 6-argument method for why the reward test is a compensated
     # reduced-cost budget rather than `issubset`. There is no `length` prefilter

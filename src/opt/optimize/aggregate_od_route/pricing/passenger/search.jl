@@ -539,8 +539,8 @@ function passenger_free_assignment_pricing_by_label_setting(
     # machinery, `_typeinfo_implicit`, showing up in the flame graph). Each key is
     # now built exactly once; the ordering is unchanged.
     scored = collect(values(scored_by_signature))
-    sort_keys = [(entry.reduced_cost, entry.tau, string(entry.route)) for entry in scored]
-    scored = scored[sortperm(sort_keys)]
+    scored = _sort_pricing_results_by_route(scored,
+        entry -> (entry.reduced_cost, entry.tau, string(entry.route)))
     scored = scored[1:min(length(scored), n_candidates)]
     scored = scored[1:min(length(scored), max_new_columns)]
 
