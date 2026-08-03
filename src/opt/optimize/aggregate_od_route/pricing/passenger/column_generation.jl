@@ -82,6 +82,32 @@ accumulated pool.
 always runs unbounded. `certification_time_limit_sec` bounds that pass -- if it
 times out, optimality is *not* claimed.
 """
+
+# Per-iteration y-support churn diagnostics. `yv` is the current RMP LP solution of
+# the build vars (`value.(master.y)`, length n); `prev` is the previous iteration's
+# (or `nothing` at the first). `l` is the build budget (`sum_j y[j] = l`). Returns a
+# NamedTuple describing the support and how much it moved since `prev`. The "top-l"
+# set is the l stations with the largest y value -- since the LP is tight this is
+# almost always the {y_j ~ 1} set, but it is robust to fractional splits.
+function _y_support_metrics(yv::Vector{Float64}, prev::Union{Vector{Float64}, Nothing}, l::Int)
+    n = length(yv)
+    n_ge_half = count(>(0.5), yv)
+    n_fractional = count(v -> 1e-6 < v < 1 - 1e-6, yv)
+    topl = Set(partialsortperm(yv, 1:min(l, n); rev=true))
+    if prev === nothing
+        return (support_ge_half=n_ge_half, n_fractional=n_fractional,
+            l1_move=missing, topl_entered=missing, topl_jaccard=missing,
+            topl=topl)
+    end
+    l1_move = sum(abs.(yv .- prev))
+    prev_topl = Set(partialsortperm(prev, 1:min(l, n); rev=true))
+    entered = length(setdiff(topl, prev_topl))
+    uni = length(union(topl, prev_topl))
+    jac = uni == 0 ? 1.0 : length(intersect(topl, prev_topl)) / uni
+    return (support_ge_half=n_ge_half, n_fractional=n_fractional,
+        l1_move=l1_move, topl_entered=entered, topl_jaccard=jac, topl=topl)
+end
+
 function run_passenger_free_assignment_column_generation(
     model::AggregateODRouteModel,
     data::StationSelectionData;
@@ -195,6 +221,8 @@ function run_passenger_free_assignment_column_generation(
     pos_rho_samples = 0
 
     iteration_rows = NamedTuple[]
+    y_support_rows = NamedTuple[]   # per-iteration y-support churn diagnostics
+    prev_yv = nothing               # previous iteration's value.(master.y)
     lp_bound = NaN
     cg_stop_reason = :max_cg_iters
     n_iters = 0
@@ -257,6 +285,17 @@ function run_passenger_free_assignment_column_generation(
                 break
             end
             lp_bound = objective_value(m)
+            let yv = value.(master.y), l = round(Int, sum(value.(master.y)))
+                ym = _y_support_metrics(yv, prev_yv, l)
+                push!(y_support_rows, (
+                    round=n_rounds, iteration=n_iters, phase="early_return",
+                    lp_bound=lp_bound, l=l,
+                    support_ge_half=ym.support_ge_half, n_fractional=ym.n_fractional,
+                    l1_move=ym.l1_move, topl_entered=ym.topl_entered,
+                    topl_jaccard=ym.topl_jaccard,
+                ))
+                prev_yv = yv
+            end
             alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
 
             raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
@@ -394,6 +433,17 @@ function run_passenger_free_assignment_column_generation(
             break
         end
         lp_bound = objective_value(m)
+        let yv = value.(master.y), l = round(Int, sum(value.(master.y)))
+            ym = _y_support_metrics(yv, prev_yv, l)
+            push!(y_support_rows, (
+                round=n_rounds, iteration=n_iters, phase="certification",
+                lp_bound=lp_bound, l=l,
+                support_ge_half=ym.support_ge_half, n_fractional=ym.n_fractional,
+                l1_move=ym.l1_move, topl_entered=ym.topl_entered,
+                topl_jaccard=ym.topl_jaccard,
+            ))
+            prev_yv = yv
+        end
         alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
         cert_raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
         cert_station_filter_stats = station_reduced_cost_filter_active ?
@@ -650,6 +700,7 @@ function run_passenger_free_assignment_column_generation(
             "reward_coarsening_levels" => reward_coarsening_levels,
             "station_simple_warm_start" => station_simple_warm_start,
             "iteration_rows" => copy(iteration_rows),
+            "y_support_rows" => copy(y_support_rows),
             "column_rows" => column_rows,
             "mean_positive_rho_used" => (pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples),
             "mean_raw_positive_rho" => (pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples),

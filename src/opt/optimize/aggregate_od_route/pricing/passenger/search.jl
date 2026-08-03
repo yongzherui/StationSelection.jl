@@ -161,6 +161,11 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     use_reduced_cost_pruning::Bool=true,
     use_post_w_completion_bound::Bool=false,
     profile::Bool=false,
+    # Count which dominance condition rejected each tested pair, into
+    # `PFA_DOMINANCE_REJECTIONS`. Off in production: it selects an instrumented
+    # specialization of the dominance predicate, so the counters cost nothing at
+    # all when this is `false`. See `scripts/audit_pfa_dominance_conditions.jl`.
+    dominance_census::Bool=false,
     stop_if=label -> false,
     # Diagnostic hook: called once per label that survives dominance and enters the
     # frontier. `nothing` (the default) costs one branch per insertion and nothing
@@ -170,9 +175,17 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     label_observer=nothing,
 )
     frontier = PriorityQueue{Int, Float64}()
-    live_labels = Dict{Int, PassengerFreeAssignmentPricingLabel}()
+    # Label ids are handed out sequentially from 1, so this is a plain array
+    # indexed by id, with `nothing` marking a label that dominance has evicted --
+    # no hashing, and (unlike an always-append `Vector{Label}`) evicted labels
+    # still become garbage promptly, which matters at millions of labels each
+    # holding a route vector and a station-age `Dict`.
+    live_labels = Union{Nothing, PassengerFreeAssignmentPricingLabel}[]
+    n_live_labels = 0
     dominance_buckets = Dict{Int, PassengerFreeAssignmentDominanceBucket}()
-    best_by_signature = Dict{Any, PassengerFreeAssignmentPricingLabel}()
+    # Concretely typed: the signature is the label's reward-layer set, and an
+    # `Any`-keyed `Dict` boxed it and dispatched dynamically on every pop.
+    best_by_signature = Dict{RewardLayerBitset, PassengerFreeAssignmentPricingLabel}()
 
     n_nodes = length(pricing_data.nodes)
     search_index = _build_passenger_free_assignment_search_index(pricing_data)
@@ -180,6 +193,14 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     # Reused across every bucket insertion: indices of the entries the incoming
     # label dominates, in ascending order.
     dominated_scratch = Int[]
+    # Built once per search: the dominance switches live in the type, so the scan
+    # compiles down to only the conditions this configuration actually uses.
+    dominance_rules = _passenger_free_assignment_dominance_rules(
+        pricing_data.bounded_max_stops,
+        pricing_data.bounded_distinct_stations,
+        pricing_data.compensated_dominance,
+        dominance_census,
+    )
     exhausted = true
     t_start = time()
     next_label_id = 1
@@ -221,27 +242,28 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         label_id = next_label_id
         next_label_id += 1
         labels_generated += 1
-        live_labels[label_id] = label
+        push!(live_labels, label)
+        n_live_labels += 1
         label_bs = _make_passenger_free_assignment_label_bitsets(label, search_index.node_index, n_nodes)
         bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(label))
         t0 = profile ? time_ns() : UInt64(0)
         inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
             bucket, live_labels, label, label_id, label_bs,
-            pricing_data.layer_weight, pricing_data.bounded_max_stops,
-            pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
-            dominated_scratch,
+            pricing_data.layer_weight, dominance_rules, dominated_scratch,
         )
         profile && (t_dominance += time_ns() - t0)
         labels_removed_by_dominance += removed
+        n_live_labels -= removed
         if inserted
             t0 = profile ? time_ns() : UInt64(0)
             enqueue!(frontier, label_id => label_priority(label, label_bs))
             profile && (t_queue += time_ns() - t0)
             max_frontier_size = max(max_frontier_size, length(frontier))
-            max_live_labels = max(max_live_labels, length(live_labels))
+            max_live_labels = max(max_live_labels, n_live_labels)
             isnothing(label_observer) || label_observer(label)
         else
-            delete!(live_labels, label_id)
+            live_labels[label_id] = nothing
+            n_live_labels -= 1
             labels_rejected_by_dominance += 1
         end
     end
@@ -262,11 +284,12 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         # so halving it buys nothing. Kept only because it is strictly less work.
         label_id, popped_priority = dequeue_pair!(frontier)
         profile && (t_queue += time_ns() - t0)
-        if !haskey(live_labels, label_id)
+        maybe_label = live_labels[label_id]
+        if isnothing(maybe_label)
             stale_pops += 1
             continue
         end
-        label = live_labels[label_id]
+        label = maybe_label::PassengerFreeAssignmentPricingLabel
 
         if !isempty(label.activated_reward_layers)
             signature = _passenger_free_assignment_layer_signature(label)
@@ -295,36 +318,37 @@ function _enumerate_passenger_free_assignment_pricing_labels(
 
         for next_node in next_nodes
             t0 = profile ? time_ns() : UInt64(0)
-            children = extend_passenger_free_assignment_pricing_label(label, next_node, pricing_data)
+            # One child per stop, returned directly: see
+            # `_extend_passenger_free_assignment_pricing_label`.
+            child = _extend_passenger_free_assignment_pricing_label(label, next_node, pricing_data)
             profile && (t_extension += time_ns() - t0)
 
-            for child in children
-                child_id = next_label_id
-                next_label_id += 1
-                labels_generated += 1
-                live_labels[child_id] = child
-                child_bs = _make_passenger_free_assignment_label_bitsets(child, search_index.node_index, n_nodes)
-                bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
+            child_id = next_label_id
+            next_label_id += 1
+            labels_generated += 1
+            push!(live_labels, child)
+            n_live_labels += 1
+            child_bs = _make_passenger_free_assignment_label_bitsets(child, search_index.node_index, n_nodes)
+            bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
+            t0 = profile ? time_ns() : UInt64(0)
+            inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
+                bucket, live_labels, child, child_id, child_bs,
+                pricing_data.layer_weight, dominance_rules, dominated_scratch,
+            )
+            profile && (t_dominance += time_ns() - t0)
+            labels_removed_by_dominance += removed
+            n_live_labels -= removed
+            if inserted
                 t0 = profile ? time_ns() : UInt64(0)
-                inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
-                    bucket, live_labels, child, child_id, child_bs,
-                    pricing_data.layer_weight, pricing_data.bounded_max_stops,
-            pricing_data.bounded_distinct_stations, pricing_data.compensated_dominance,
-            dominated_scratch,
-                )
-                profile && (t_dominance += time_ns() - t0)
-                labels_removed_by_dominance += removed
-                if inserted
-                    t0 = profile ? time_ns() : UInt64(0)
-                    enqueue!(frontier, child_id => label_priority(child, child_bs))
-                    profile && (t_queue += time_ns() - t0)
-                    max_frontier_size = max(max_frontier_size, length(frontier))
-                    max_live_labels = max(max_live_labels, length(live_labels))
-                    isnothing(label_observer) || label_observer(child)
-                else
-                    delete!(live_labels, child_id)
-                    labels_rejected_by_dominance += 1
-                end
+                enqueue!(frontier, child_id => label_priority(child, child_bs))
+                profile && (t_queue += time_ns() - t0)
+                max_frontier_size = max(max_frontier_size, length(frontier))
+                max_live_labels = max(max_live_labels, n_live_labels)
+                isnothing(label_observer) || label_observer(child)
+            else
+                live_labels[child_id] = nothing
+                n_live_labels -= 1
+                labels_rejected_by_dominance += 1
             end
         end
     end
@@ -359,6 +383,14 @@ candidate routes ever need this, not every intermediate label.
 
 Ties on reward are broken lexicographically by `(origin, destination)` for
 determinism.
+
+Clocks are held as **absolute pickup times**, not ages. Ageing every live clock by
+the same `travel_time` at each stop used to be written as a comprehension, which
+built a brand-new `Dict` per stop of every route replayed -- and replay runs once
+per improving route, which in a harvesting configuration is once per accepted
+column. Storing `pickup_time[j]` and deriving `age = elapsed_time - pickup_time[j]`
+at the point of use is the same arithmetic with no rebuild: a station never seen
+reads back as `-Inf`, so its age is `Inf`, exactly as the missing-key default was.
 """
 function _replay_passenger_free_assignment_route(
     route::Vector{Int},
@@ -367,19 +399,18 @@ function _replay_passenger_free_assignment_route(
     best = Dict{Int, Tuple{Int, Int, Float64}}()
     isempty(route) && return best
 
-    station_age = Dict{Int, Float64}()
+    pickup_time = Dict{Int, Float64}()
     current = route[1]
     elapsed_time = 0.0
-    station_age[current] = 0.0  # t = 0 is always within the (non-negative) pickup window
+    pickup_time[current] = 0.0  # t = 0 is always within the (non-negative) pickup window
 
     for idx in 2:length(route)
         next_node = route[idx]
         travel_time = _passenger_free_assignment_travel(pricing_data, current, next_node)
         elapsed_time += travel_time
-        station_age = Dict(station => age + travel_time for (station, age) in station_age)
 
         for opp in get(pricing_data.assignments_by_destination, next_node, PassengerAssignmentOpportunity[])
-            origin_age = get(station_age, opp.origin, Inf)
+            origin_age = elapsed_time - get(pickup_time, opp.origin, -Inf)
             origin_age <= opp.ride_limit + 1e-9 || continue
             current_best = get(best, opp.passenger, nothing)
             if isnothing(current_best) || opp.reward > current_best[3] + 1e-9 ||
@@ -389,7 +420,7 @@ function _replay_passenger_free_assignment_route(
         end
 
         if elapsed_time <= pricing_data.max_wait_time + 1e-9
-            station_age[next_node] = 0.0
+            pickup_time[next_node] = elapsed_time  # a fresh clock, i.e. age 0 from here
         end
         current = next_node
     end
@@ -455,6 +486,7 @@ function passenger_free_assignment_pricing_by_label_setting(
     max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
     use_post_w_completion_bound::Bool=false,
+    dominance_census::Bool=false,
 )
     max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
     n_candidates >= max_new_columns || throw(ArgumentError("n_candidates must be >= max_new_columns"))
@@ -492,6 +524,7 @@ function passenger_free_assignment_pricing_by_label_setting(
         max_visits_per_node=max_visits_per_node,
         profile=profile,
         use_post_w_completion_bound=use_post_w_completion_bound,
+        dominance_census=dominance_census,
         stop_if=label -> try_accept_route!(label.route, label.reduced_cost),
     )
 
@@ -499,8 +532,15 @@ function passenger_free_assignment_pricing_by_label_setting(
         try_accept_route!(label.route, label.reduced_cost)
     end
 
+    # Decorate-sort-undecorate. `sort!(...; by=f)` calls `f` inside the comparison,
+    # so building the route's string form there cost one `string(::Vector{Int})`
+    # per *comparison* rather than per column -- roughly 17x more at 10^5 harvested
+    # columns, and measured at ~15% of this pricer's working time (array-show
+    # machinery, `_typeinfo_implicit`, showing up in the flame graph). Each key is
+    # now built exactly once; the ordering is unchanged.
     scored = collect(values(scored_by_signature))
-    sort!(scored, by=entry -> (entry.reduced_cost, entry.tau, string(entry.route)))
+    sort_keys = [(entry.reduced_cost, entry.tau, string(entry.route)) for entry in scored]
+    scored = scored[sortperm(sort_keys)]
     scored = scored[1:min(length(scored), n_candidates)]
     scored = scored[1:min(length(scored), max_new_columns)]
 

@@ -1,0 +1,259 @@
+Set parameter LicenseID to value 134731
+Set parameter GURO_PAR_SPECIAL
+Set parameter TokenServer to value "engaging-license-001"
+=== n=25 scen=1 seed=42 l=13 uncapped ===
+Precompiling packages...
+   1382.8 ms  ✓ TranscodingStreams
+   1621.1 ms  ✓ SuiteSparse_jll
+   1656.7 ms  ✓ CompilerSupportLibraries_jll
+   1649.3 ms  ✓ Unicode
+   1973.2 ms  ✓ UUIDs
+   2110.7 ms  ✓ Logging
+   2172.4 ms  ✓ OpenLibm_jll
+   2063.0 ms  ✓ DocStringExtensions
+   2316.7 ms  ✓ Zlib_jll
+   2175.4 ms  ✓ StaticArraysCore
+   2299.9 ms  ✓ Base64
+   3065.2 ms  ✓ Serialization
+   1900.9 ms  ✓ Printf
+   1280.3 ms  ✓ CodecZlib
+   1415.8 ms  ✓ DiffResults
+   4003.6 ms  ✓ OrderedCollections
+   4543.6 ms  ✓ IrrationalConstants
+    742.4 ms  ✓ LogExpFunctions
+   3724.0 ms  ✓ NaNMath
+   7551.4 ms  ✓ MacroTools
+    610.5 ms  ✓ CommonSubexpressions
+   5039.8 ms  ✓ Dates
+    600.5 ms  ✓ TOML
+   6220.9 ms  ✓ SparseArrays
+    759.4 ms  ✓ Statistics
+   1275.5 ms  ✓ Preferences
+   2044.2 ms  ✓ StructUtils
+    507.6 ms  ✓ StructUtils → StructUtilsStaticArraysCoreExt
+    722.1 ms  ✓ PrecompileTools
+    899.3 ms  ✓ JLLWrappers
+   2341.5 ms  ✓ Compat
+    976.5 ms  ✓ Bzip2_jll
+   1038.8 ms  ✓ Gurobi_jll
+   1019.9 ms  ✓ Compat → CompatLinearAlgebraExt
+   1380.3 ms  ✓ OpenSpecFun_jll
+    742.4 ms  ✓ CodecBzip2
+   3866.7 ms  ✓ SpecialFunctions
+    850.9 ms  ✓ DiffRules
+  19135.5 ms  ✓ Profile
+   7160.0 ms  ✓ ForwardDiff
+  14890.3 ms  ✓ Parsers
+  25147.2 ms  ✓ Markdown
+   1777.2 ms  ✓ InteractiveUtils
+   4130.9 ms  ✓ JSON
+   1385.6 ms  ✓ BenchmarkTools
+   4368.1 ms  ✓ Test
+   4150.0 ms  ✓ MutableArithmetics
+  33806.7 ms  ✓ MathOptInterface
+Info Given Gurobi was explicitly requested, output will be shown live [0K
+[0KSet parameter LicenseID to value 134731
+[0KSet parameter GURO_PAR_SPECIAL
+[0KSet parameter TokenServer to value "engaging-license-001"
+   7181.3 ms  ✓ Gurobi
+  49 dependencies successfully precompiled in 79 seconds
+  1 dependency had output during precompilation:
+┌ Gurobi
+│  [Output was shown above]
+└  
+Precompiling packages...
+  16170.5 ms  ✓ JuMP
+  1 dependency successfully precompiled in 16 seconds. 47 already precompiled.
+Precompiling packages...
+   1288.7 ms  ✓ LaTeXStrings
+   2074.8 ms  ✓ TensorCore
+   2006.7 ms  ✓ Future
+   2045.9 ms  ✓ StatsAPI
+   1798.3 ms  ✓ MozillaCACerts_jll
+   2221.6 ms  ✓ Contour
+   2344.0 ms  ✓ WorkerUtilities
+   2415.1 ms  ✓ IteratorInterfaceExtensions
+   2142.2 ms  ✓ nghttp2_jll
+   2694.7 ms  ✓ NetworkOptions
+   1167.0 ms  ✓ TextWrap
+   2914.2 ms  ✓ Measures
+   3221.8 ms  ✓ p7zip_jll
+   1764.1 ms  ✓ Reexport
+   2191.0 ms  ✓ DataValueInterfaces
+   2343.7 ms  ✓ StableRNGs
+   2198.0 ms  ✓ SimpleBufferStream
+   5013.7 ms  ✓ Combinatorics
+   2581.9 ms  ✓ URIs
+   2077.8 ms  ✓ PtrArrays
+   3290.5 ms  ✓ Requires
+   2142.7 ms  ✓ PCRE2_jll
+   5597.5 ms  ✓ Format
+   1960.4 ms  ✓ InvertedIndices
+   3858.9 ms  ✓ InlineStrings
+   3346.6 ms  ✓ Mmap
+   2501.0 ms  ✓ DataAPI
+   6637.2 ms  ✓ Grisu
+   2702.2 ms  ✓ Inflate
+   6788.3 ms  ✓ ArgTools
+              ✗ MbedTLS_jll
+   2599.8 ms  ✓ BitFlags
+   1897.6 ms  ✓ Scratch
+   2293.7 ms  ✓ LoggingExtras
+   3910.0 ms  ✓ ConcurrentUtilities
+   2095.1 ms  ✓ Showoff
+   2235.9 ms  ✓ LLVMOpenMP_jll
+   2297.1 ms  ✓ Xorg_libpciaccess_jll
+   3527.9 ms  ✓ SimpleTraits
+   3498.4 ms  ✓ ExceptionUnwrapping
+   8333.2 ms  ✓ Distances
+   3085.9 ms  ✓ EpollShim_jll
+   3835.6 ms  ✓ Libmount_jll
+   5781.8 ms  ✓ DataStructures
+   4211.8 ms  ✓ OpenSSL_jll
+   2173.9 ms  ✓ libpng_jll
+   3293.8 ms  ✓ Xorg_libICE_jll
+   6074.3 ms  ✓ SentinelArrays
+   3578.7 ms  ✓ Xorg_libXau_jll
+   2740.6 ms  ✓ LAME_jll
+   2268.1 ms  ✓ Ogg_jll
+   3378.9 ms  ✓ libfdk_aac_jll
+   3715.0 ms  ✓ LERC_jll
+   2813.2 ms  ✓ mtdev_jll
+   3183.1 ms  ✓ XZ_jll
+   3538.2 ms  ✓ fzf_jll
+   2838.2 ms  ✓ Xorg_libXdmcp_jll
+   2784.3 ms  ✓ x265_jll
+   2846.6 ms  ✓ libaom_jll
+   3683.6 ms  ✓ x264_jll
+   4635.3 ms  ✓ JpegTurbo_jll
+  10670.1 ms  ✓ Crayons
+   3558.1 ms  ✓ Expat_jll
+   3838.0 ms  ✓ Zstd_jll
+   2698.2 ms  ✓ Libiconv_jll
+   3412.2 ms  ✓ LZO_jll
+   3369.4 ms  ✓ Opus_jll
+   2942.7 ms  ✓ Xorg_xtrans_jll
+   3035.0 ms  ✓ Libffi_jll
+   3297.2 ms  ✓ libevdev_jll
+   3466.7 ms  ✓ Libuuid_jll
+   3739.1 ms  ✓ eudev_jll
+   3769.9 ms  ✓ FriBidi_jll
+   1790.3 ms  ✓ DelimitedFiles
+   2452.9 ms  ✓ InlineStrings → ParsersExt
+   3234.9 ms  ✓ FreeType2_jll
+   3544.9 ms  ✓ AliasTables
+  14188.7 ms  ✓ FixedPointNumbers
+   3683.4 ms  ✓ ArgParse
+   3963.9 ms  ✓ GettextRuntime_jll
+   3390.7 ms  ✓ PooledArrays
+   6045.8 ms  ✓ RecipesBase
+   2425.2 ms  ✓ LibSSH2_jll
+   4142.5 ms  ✓ Graphite2_jll
+   3373.2 ms  ✓ Tar
+   6261.5 ms  ✓ FilePathsBase
+   3127.6 ms  ✓ RelocatableFolders
+   3386.2 ms  ✓ Pixman_jll
+   8147.0 ms  ✓ StringManipulation
+   2557.7 ms  ✓ SortingAlgorithms
+   3787.2 ms  ✓ libdrm_jll
+   7543.3 ms  ✓ Unzip
+   3566.7 ms  ✓ Distances → DistancesSparseArraysExt
+              ✗ MbedTLS
+   2802.0 ms  ✓ Xorg_libSM_jll
+   6973.1 ms  ✓ Missings
+   3604.5 ms  ✓ libvorbis_jll
+   2478.6 ms  ✓ TableTraits
+   2898.4 ms  ✓ Wayland_jll
+   2207.5 ms  ✓ LibGit2_jll
+   3406.4 ms  ✓ Libtiff_jll
+   4421.8 ms  ✓ Dbus_jll
+   2415.3 ms  ✓ LibCURL_jll
+   4148.2 ms  ✓ WeakRefStrings
+   4261.3 ms  ✓ libinput_jll
+   3665.0 ms  ✓ Glib_jll
+   7228.4 ms  ✓ OpenSSL
+   4833.5 ms  ✓ Fontconfig_jll
+   6600.2 ms  ✓ Ghostscript_jll
+   6925.4 ms  ✓ Xorg_libxcb_jll
+   3148.5 ms  ✓ FilePathsBase → FilePathsBaseMmapExt
+   2168.1 ms  ✓ LibCURL
+   4086.4 ms  ✓ FilePathsBase → FilePathsBaseTestExt
+   1620.0 ms  ✓ Xorg_xcb_util_jll
+   3643.6 ms  ✓ Xorg_libX11_jll
+   7525.8 ms  ✓ Tables
+   3753.9 ms  ✓ Xorg_xcb_util_renderutil_jll
+   3818.0 ms  ✓ Xorg_xcb_util_image_jll
+   3886.1 ms  ✓ Xorg_xcb_util_keysyms_jll
+   3850.3 ms  ✓ Xorg_xcb_util_wm_jll
+   2472.7 ms  ✓ Xorg_libXext_jll
+  11131.5 ms  ✓ ColorTypes
+   3031.7 ms  ✓ Xorg_libXfixes_jll
+   1848.7 ms  ✓ StructUtils → StructUtilsTablesExt
+   3885.3 ms  ✓ Xorg_libXrender_jll
+   2979.3 ms  ✓ Xorg_xcb_util_cursor_jll
+   3393.0 ms  ✓ Xorg_libxkbfile_jll
+              ✗ HTTP
+   3861.2 ms  ✓ Xorg_libXinerama_jll
+  11625.1 ms  ✓ LibGit2
+   9200.5 ms  ✓ Downloads
+   3171.7 ms  ✓ libva_jll
+   4592.1 ms  ✓ Libglvnd_jll
+  13679.5 ms  ✓ StatsBase
+   1754.9 ms  ✓ Xorg_libXcursor_jll
+   4476.3 ms  ✓ Xorg_libXi_jll
+   3576.8 ms  ✓ Xorg_libXrandr_jll
+   2110.0 ms  ✓ Xorg_xkbcomp_jll
+   3597.4 ms  ✓ Cairo_jll
+   1896.4 ms  ✓ Xorg_xkeyboard_config_jll
+  28450.8 ms  ✓ StaticArrays
+   2002.3 ms  ✓ HarfBuzz_jll
+   9361.3 ms  ✓ ColorVectorSpace
+   1947.4 ms  ✓ xkbcommon_jll
+  16612.3 ms  ✓ Latexify
+   2224.9 ms  ✓ StaticArrays → StaticArraysStatisticsExt
+   2625.4 ms  ✓ ForwardDiff → ForwardDiffStaticArraysExt
+   2725.0 ms  ✓ Pango_jll
+   2843.0 ms  ✓ libass_jll
+   2054.4 ms  ✓ ColorVectorSpace → SpecialFunctionsExt
+   2419.3 ms  ✓ Vulkan_Loader_jll
+   2556.6 ms  ✓ Latexify → SparseArraysExt
+   2794.2 ms  ✓ libdecor_jll
+   5694.7 ms  ✓ ArnoldiMethod
+  13464.8 ms  ✓ Colors
+   3168.8 ms  ✓ FFMPEG_jll
+    582.7 ms  ✓ FFMPEG
+   2103.1 ms  ✓ GLFW_jll
+   3704.8 ms  ✓ Qt6Base_jll
+   1585.6 ms  ✓ Qt6Svg_jll
+   1905.9 ms  ✓ Qt6ShaderTools_jll
+   2417.4 ms  ✓ GR_jll
+   7440.7 ms  ✓ Graphs
+   7214.9 ms  ✓ ColorSchemes
+   3836.8 ms  ✓ Qt6Declarative_jll
+   1704.4 ms  ✓ Qt6Wayland_jll
+   5112.1 ms  ✓ SimpleWeightedGraphs
+  30206.1 ms  ✓ CSV
+   7497.7 ms  ✓ GR
+  18488.7 ms  ✓ PlotUtils
+  75498.8 ms  ✓ REPL
+   1113.6 ms  ✓ JLFzf
+   8479.7 ms  ✓ PlotThemes
+   2168.0 ms  ✓ UnicodeFun
+   9832.9 ms  ✓ RecipesPipeline
+  20296.1 ms  ✓ PrettyTables
+  52272.7 ms  ✓ DataFrames
+  73025.1 ms  ✓ Pkg
+   1233.9 ms  ✓ Latexify → DataFramesExt
+  40806.0 ms  ✓ Plots
+   8014.1 ms  ✓ StationSelection
+  178 dependencies successfully precompiled in 204 seconds. 50 already precompiled.
+stop=optimality_proven certified=true mip=12355.48
+
+selected routes (theta>0.5):
+  id      scen  stops  tau      route
+  758     1     7      1126.5   18-17-9-11-24-19-3
+
+route-length histogram (stops => count):
+   7 stops: # (1)
+
+selected: 1 routes, max 7 stops, 1 routes with >4 stops (100%)

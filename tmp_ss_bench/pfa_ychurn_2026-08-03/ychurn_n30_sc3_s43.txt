@@ -1,0 +1,291 @@
+Set parameter LicenseID to value 134731
+Set parameter GURO_PAR_SPECIAL
+Set parameter TokenServer to value "engaging-license-001"
+=== n=30 scen=3 seed=43 l=15 uncapped ===
+Precompiling packages...
+   1155.6 ms  ✓ WorkerUtilities
+   1154.0 ms  ✓ UUIDs
+   1152.5 ms  ✓ Unicode
+   1534.4 ms  ✓ Future
+   1613.7 ms  ✓ IteratorInterfaceExtensions
+   1695.9 ms  ✓ Zlib_jll
+   1885.0 ms  ✓ DataValueInterfaces
+   1732.2 ms  ✓ DataAPI
+   1875.2 ms  ✓ InlineStrings
+    797.5 ms  ✓ Printf
+   1903.4 ms  ✓ Mmap
+   2087.4 ms  ✓ TranscodingStreams
+   1018.0 ms  ✓ TableTraits
+    732.3 ms  ✓ CodecZlib
+   1037.6 ms  ✓ PooledArrays
+   3472.7 ms  ✓ OrderedCollections
+   3167.2 ms  ✓ Dates
+   2442.1 ms  ✓ Tables
+    842.5 ms  ✓ TOML
+   1146.8 ms  ✓ Preferences
+   2051.9 ms  ✓ SentinelArrays
+    423.7 ms  ✓ PrecompileTools
+   1628.8 ms  ✓ Compat
+    539.4 ms  ✓ Compat → CompatLinearAlgebraExt
+   1353.5 ms  ✓ FilePathsBase
+    644.7 ms  ✓ FilePathsBase → FilePathsBaseMmapExt
+  10693.1 ms  ✓ Parsers
+    426.2 ms  ✓ InlineStrings → ParsersExt
+    772.0 ms  ✓ WeakRefStrings
+  13645.1 ms  ✓ CSV
+  30 dependencies successfully precompiled in 33 seconds
+Precompiling packages...
+   1207.8 ms  ✓ Reexport
+   1297.6 ms  ✓ Base64
+   2239.0 ms  ✓ LaTeXStrings
+   1609.9 ms  ✓ InvertedIndices
+   1908.6 ms  ✓ SuiteSparse_jll
+   1978.0 ms  ✓ Serialization
+   2374.9 ms  ✓ DataStructures
+   3309.0 ms  ✓ Crayons
+    921.8 ms  ✓ SortingAlgorithms
+   3953.0 ms  ✓ StringManipulation
+   4719.3 ms  ✓ Missings
+   6771.8 ms  ✓ SparseArrays
+    698.7 ms  ✓ Statistics
+  19386.1 ms  ✓ Markdown
+   2050.7 ms  ✓ InteractiveUtils
+  37770.6 ms  ✓ REPL
+  19584.4 ms  ✓ PrettyTables
+  33142.9 ms  ✓ DataFrames
+  18 dependencies successfully precompiled in 114 seconds. 19 already precompiled.
+Precompiling packages...
+   1128.8 ms  ✓ Logging
+   1389.2 ms  ✓ CompilerSupportLibraries_jll
+   1500.8 ms  ✓ OpenLibm_jll
+   1424.9 ms  ✓ StaticArraysCore
+   1608.4 ms  ✓ DocStringExtensions
+   1907.9 ms  ✓ JLLWrappers
+   1537.6 ms  ✓ DiffResults
+   3671.5 ms  ✓ StructUtils
+    556.6 ms  ✓ StructUtils → StructUtilsStaticArraysCoreExt
+   3466.3 ms  ✓ NaNMath
+   2906.2 ms  ✓ Bzip2_jll
+   2912.5 ms  ✓ Gurobi_jll
+   2915.4 ms  ✓ OpenSpecFun_jll
+   1217.6 ms  ✓ CodecBzip2
+   6767.2 ms  ✓ MacroTools
+   6748.9 ms  ✓ IrrationalConstants
+   1048.1 ms  ✓ CommonSubexpressions
+   1315.0 ms  ✓ LogExpFunctions
+   6740.5 ms  ✓ JSON
+  10380.1 ms  ✓ Test
+  11445.2 ms  ✓ Profile
+   4565.2 ms  ✓ SpecialFunctions
+   1955.9 ms  ✓ BenchmarkTools
+    926.7 ms  ✓ DiffRules
+   7127.0 ms  ✓ MutableArithmetics
+   5868.7 ms  ✓ ForwardDiff
+  36385.1 ms  ✓ MathOptInterface
+Info Given Gurobi was explicitly requested, output will be shown live [0K
+[0KSet parameter LicenseID to value 134731
+[0KSet parameter GURO_PAR_SPECIAL
+[0KSet parameter TokenServer to value "engaging-license-001"
+   7441.7 ms  ✓ Gurobi
+  28 dependencies successfully precompiled in 63 seconds. 21 already precompiled.
+  1 dependency had output during precompilation:
+┌ Gurobi
+│  [Output was shown above]
+└  
+Precompiling packages...
+   1069.0 ms  ✓ FilePathsBase → FilePathsBaseTestExt
+  1 dependency successfully precompiled in 1 seconds. 14 already precompiled.
+Precompiling packages...
+    359.5 ms  ✓ StructUtils → StructUtilsTablesExt
+  1 dependency successfully precompiled in 0 seconds. 11 already precompiled.
+Precompiling packages...
+  16212.1 ms  ✓ JuMP
+  1 dependency successfully precompiled in 16 seconds. 47 already precompiled.
+Precompiling packages...
+   1679.0 ms  ✓ MozillaCACerts_jll
+   1572.1 ms  ✓ nghttp2_jll
+   1986.8 ms  ✓ NetworkOptions
+   2109.4 ms  ✓ Contour
+   2588.1 ms  ✓ StatsAPI
+   2541.3 ms  ✓ Measures
+   2399.3 ms  ✓ p7zip_jll
+   2309.0 ms  ✓ StableRNGs
+   2747.7 ms  ✓ TensorCore
+   2368.6 ms  ✓ TextWrap
+   3328.8 ms  ✓ Requires
+   3833.9 ms  ✓ Combinatorics
+   2215.8 ms  ✓ SimpleBufferStream
+   2463.2 ms  ✓ PtrArrays
+   2003.8 ms  ✓ PCRE2_jll
+   2009.0 ms  ✓ BitFlags
+   2222.8 ms  ✓ Inflate
+   3233.3 ms  ✓ URIs
+   2493.3 ms  ✓ DelimitedFiles
+   2385.3 ms  ✓ Scratch
+              ✗ MbedTLS_jll
+   2523.1 ms  ✓ LoggingExtras
+   3627.1 ms  ✓ ConcurrentUtilities
+   6490.7 ms  ✓ Format
+   2848.9 ms  ✓ SimpleTraits
+    992.7 ms  ✓ Xorg_libICE_jll
+   1755.1 ms  ✓ Xorg_libXau_jll
+   3564.2 ms  ✓ AliasTables
+   8151.4 ms  ✓ ArgTools
+   3563.0 ms  ✓ EpollShim_jll
+   2151.7 ms  ✓ libpng_jll
+   4119.7 ms  ✓ OpenSSL_jll
+   8479.8 ms  ✓ Unzip
+   3995.2 ms  ✓ Graphite2_jll
+   8706.7 ms  ✓ Grisu
+   2431.0 ms  ✓ libfdk_aac_jll
+   4405.8 ms  ✓ LLVMOpenMP_jll
+   4771.7 ms  ✓ Libmount_jll
+   4030.7 ms  ✓ Xorg_libpciaccess_jll
+   1549.1 ms  ✓ Ogg_jll
+   3553.8 ms  ✓ LAME_jll
+   2000.7 ms  ✓ mtdev_jll
+   2924.4 ms  ✓ LERC_jll
+   2709.4 ms  ✓ XZ_jll
+   1700.3 ms  ✓ Expat_jll
+   1787.4 ms  ✓ Xorg_xtrans_jll
+   3674.2 ms  ✓ x265_jll
+   3690.8 ms  ✓ Xorg_libXdmcp_jll
+   4563.4 ms  ✓ fzf_jll
+   3683.2 ms  ✓ x264_jll
+   3173.3 ms  ✓ Zstd_jll
+   2517.2 ms  ✓ Libiconv_jll
+   8979.2 ms  ✓ UnicodeFun
+   5303.5 ms  ✓ JpegTurbo_jll
+   3642.7 ms  ✓ LZO_jll
+   3347.0 ms  ✓ Opus_jll
+   2271.3 ms  ✓ Libffi_jll
+   2135.2 ms  ✓ eudev_jll
+   4190.1 ms  ✓ libaom_jll
+   3340.4 ms  ✓ libevdev_jll
+   2920.3 ms  ✓ FriBidi_jll
+   3013.4 ms  ✓ Libuuid_jll
+   3218.5 ms  ✓ JLFzf
+   2698.9 ms  ✓ RelocatableFolders
+   2942.2 ms  ✓ ExceptionUnwrapping
+   3345.1 ms  ✓ FreeType2_jll
+   3629.7 ms  ✓ Libtiff_jll
+   3587.9 ms  ✓ Xorg_libSM_jll
+   2036.6 ms  ✓ Showoff
+   2212.8 ms  ✓ libdrm_jll
+   4442.2 ms  ✓ Wayland_jll
+  14596.7 ms  ✓ FixedPointNumbers
+   5943.4 ms  ✓ RecipesBase
+   5596.3 ms  ✓ ArgParse
+              ✗ MbedTLS
+   4280.4 ms  ✓ Pixman_jll
+   1736.1 ms  ✓ LibSSH2_jll
+   4169.3 ms  ✓ Dbus_jll
+   4611.1 ms  ✓ libvorbis_jll
+   2847.3 ms  ✓ Tar
+   3041.8 ms  ✓ libinput_jll
+   4111.0 ms  ✓ GettextRuntime_jll
+   2037.7 ms  ✓ LibGit2_jll
+   4454.6 ms  ✓ Ghostscript_jll
+   2088.5 ms  ✓ LibCURL_jll
+   8211.9 ms  ✓ OpenSSL
+   4316.7 ms  ✓ Fontconfig_jll
+   5880.3 ms  ✓ Distances
+   6778.2 ms  ✓ Xorg_libxcb_jll
+   3254.0 ms  ✓ Glib_jll
+   3003.2 ms  ✓ LibCURL
+   2068.4 ms  ✓ Distances → DistancesSparseArraysExt
+   2458.5 ms  ✓ Xorg_xcb_util_jll
+   2703.7 ms  ✓ Xorg_libX11_jll
+  12525.0 ms  ✓ StatsBase
+   7201.6 ms  ✓ ColorTypes
+   2258.1 ms  ✓ Xorg_xcb_util_image_jll
+   2718.8 ms  ✓ Xorg_xcb_util_keysyms_jll
+   2567.2 ms  ✓ Xorg_libxkbfile_jll
+   3299.6 ms  ✓ Xorg_xcb_util_renderutil_jll
+   3439.4 ms  ✓ Xorg_libXrender_jll
+   3655.4 ms  ✓ Xorg_xcb_util_wm_jll
+   3558.1 ms  ✓ Xorg_libXext_jll
+              ✗ HTTP
+   3906.0 ms  ✓ Xorg_libXfixes_jll
+   8312.0 ms  ✓ LibGit2
+   2079.9 ms  ✓ Xorg_libXinerama_jll
+   1950.1 ms  ✓ libva_jll
+   3671.6 ms  ✓ Xorg_xkbcomp_jll
+   3659.6 ms  ✓ Xorg_xcb_util_cursor_jll
+   6666.0 ms  ✓ ColorVectorSpace
+   3315.7 ms  ✓ Xorg_libXrandr_jll
+   2980.0 ms  ✓ Xorg_libXcursor_jll
+   3587.4 ms  ✓ Cairo_jll
+   3667.7 ms  ✓ Libglvnd_jll
+   3731.5 ms  ✓ Xorg_libXi_jll
+   1968.8 ms  ✓ Xorg_xkeyboard_config_jll
+   1819.8 ms  ✓ ColorVectorSpace → SpecialFunctionsExt
+   1293.0 ms  ✓ xkbcommon_jll
+  14019.0 ms  ✓ Latexify
+  11003.7 ms  ✓ Downloads
+   2766.8 ms  ✓ HarfBuzz_jll
+   1009.9 ms  ✓ libass_jll
+   1867.9 ms  ✓ Vulkan_Loader_jll
+   2655.9 ms  ✓ Pango_jll
+   3077.5 ms  ✓ Latexify → SparseArraysExt
+  26887.7 ms  ✓ StaticArrays
+  13691.4 ms  ✓ Colors
+   3018.0 ms  ✓ Qt6Base_jll
+   4889.8 ms  ✓ Latexify → DataFramesExt
+   4035.6 ms  ✓ FFMPEG_jll
+   2792.1 ms  ✓ libdecor_jll
+   2162.8 ms  ✓ StaticArrays → StaticArraysStatisticsExt
+   2248.0 ms  ✓ ForwardDiff → ForwardDiffStaticArraysExt
+   1336.2 ms  ✓ Qt6ShaderTools_jll
+   1648.4 ms  ✓ Qt6Svg_jll
+   1625.1 ms  ✓ FFMPEG
+   1751.0 ms  ✓ GLFW_jll
+   3829.0 ms  ✓ ArnoldiMethod
+   1251.4 ms  ✓ GR_jll
+   2807.0 ms  ✓ Qt6Declarative_jll
+    862.3 ms  ✓ Qt6Wayland_jll
+   5857.7 ms  ✓ ColorSchemes
+   6580.5 ms  ✓ Graphs
+   5750.0 ms  ✓ GR
+   3087.7 ms  ✓ SimpleWeightedGraphs
+  10860.7 ms  ✓ PlotUtils
+   3278.1 ms  ✓ PlotThemes
+   4387.6 ms  ✓ RecipesPipeline
+  69529.0 ms  ✓ Pkg
+  42801.0 ms  ✓ Plots
+   7741.0 ms  ✓ StationSelection
+  149 dependencies successfully precompiled in 156 seconds. 79 already precompiled.
+stop=optimality_proven certified=true mip=36727.88
+
+iter phase         lp_bound     l  supp>=.5  frac  l1_move  topl_in  topl_jac
+1    early_return     57338.4  15      15     0     -      -     -   
+2    early_return     53553.8  15      15     0    2.000    1   0.875
+3    early_return     51379.3  15      15     0    0.000    0   1.000
+4    early_return     48172.6  15      15     0    0.000    0   1.000
+5    early_return     45367.7  15      14     2    2.000    1   0.875
+6    early_return     44545.9  15      15     0    1.000    1   0.875
+7    early_return     42974.4  15      15     0    0.000    0   1.000
+8    early_return     41769.9  15      15     0    2.000    1   0.875
+9    early_return     41769.9  15      15     0    0.000    0   1.000
+10   early_return     40340.0  15      15     0    2.000    1   0.875
+11   early_return     38330.9  15      15     0    2.000    1   0.875
+12   early_return     38330.9  15      15     0    0.000    0   1.000
+13   early_return     36944.1  15      15     0    2.000    1   0.875
+14   early_return     36944.1  15      15     0    0.000    0   1.000
+15   early_return     36944.1  15      15     0    0.000    0   1.000
+16   early_return     36944.1  15      15     0    0.000    0   1.000
+17   early_return     36944.1  15      15     0    0.000    0   1.000
+18   early_return     36944.1  15      15     0    0.000    0   1.000
+19   early_return     36944.1  15      15     0    0.000    0   1.000
+20   early_return     36944.1  15      15     0    0.000    0   1.000
+21   early_return     36727.9  15      15     0    2.000    1   0.875
+22   early_return     36727.9  15      15     0    0.000    0   1.000
+22   certification    36727.9  15      15     0    0.000    0   1.000
+23   early_return     36727.9  15      15     0    0.000    0   1.000
+23   certification    36727.9  15      15     0    0.000    0   1.000
+
+recorded iters: 25   total l1 movement: 15.00   mean/iter: 0.625
+top-l set: 8 iters with any entry; churn STOPS after recorded-iter 21 of 25 (84% of the way in)
+final support>=.5 = 15 (budget l=15), final fractional = 0
+
+wrote /home/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/tmp_ss_bench/pfa_ychurn_2026-08-03/n30_sc3_s43_uncapped_ysupport.csv

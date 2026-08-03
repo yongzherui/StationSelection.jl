@@ -124,33 +124,99 @@ allocate and to scan on every dominance test, while the sparse form costs
 counts are far larger and dominance is the main thing keeping the search finite.
 
 `age_idx` is sorted ascending; `age_val` is parallel to it.
+
+`age_mask` is a one-bit-per-live-station summary of `age_idx`, and exists purely
+as a prefilter for the station-age merge walk, which profiling put at ~20% of the
+search once the reward-layer compensation had been moved behind it. Dominance
+requires `dom(age_b) ⊆ dom(age_a)`, so `age_mask_b & ~age_mask_a == 0` is
+necessary, and it is one instruction against a walk over two heap arrays.
+
+Station indices are folded modulo 64 (`(idx - 1) & 63`). Below 64 nodes that is
+exact; above it, two stations can share a bit, which can only make the filter
+*weaker* -- it may let a pair through that the walk then rejects, never the
+reverse -- so no correctness case depends on the node count.
 """
 struct PassengerFreeAssignmentLabelBitsets
     activated_bits::BitSet
     age_idx::Vector{Int32}
     age_val::Vector{Float64}
+    age_mask::UInt64
+end
+
+"""
+Every piece of label state the dominance test can check with a scalar comparison,
+in one `isbits` value so it can be *stored inline* in a bucket entry and passed by
+value. `Int32` for the two counts is what keeps this at 40 bytes, and the entry
+that embeds it inside one 64-byte cache line.
+"""
+struct PassengerFreeAssignmentDominanceFilters
+    reduced_cost::Float64
+    time::Float64
+    visited_mask::UInt64
+    age_mask::UInt64
+    route_length::Int32
+    n_live_ages::Int32
+end
+
+function PassengerFreeAssignmentDominanceFilters(
+    label::PassengerFreeAssignmentPricingLabel,
+    bitsets::PassengerFreeAssignmentLabelBitsets,
+)
+    return PassengerFreeAssignmentDominanceFilters(
+        label.reduced_cost, label.time, label.visited_mask, bitsets.age_mask,
+        Int32(label.route_length), Int32(length(bitsets.age_idx)),
+    )
 end
 
 """
 Everything the dominance scan needs about one live label, stored *in* the
 dominance bucket.
 
-The scan is the hot loop of the whole search -- measured at ~90% of wall time on
-n=15/max_stops=6 -- and it visits every entry of the bucket on every insertion.
-Keeping only a label id here and looking the label and its bitsets up in two side
-`Dict`s cost two hash probes per entry, which dominated the actual dominance
-predicate (mostly short-circuiting scalar comparisons). Inlining them makes the
-scan a straight walk over the sorted container.
+The scan is the hot loop of the whole search -- measured at ~90% of the
+revisit-tolerant pricer's wall time -- and it visits every entry of the bucket on
+every insertion. Keeping only a label id here and looking the label and its
+bitsets up in two side `Dict`s cost two hash probes per entry, which dominated the
+actual dominance predicate (mostly short-circuiting scalar comparisons). Inlining
+them makes the scan a straight walk over the sorted container.
 
 MEASURED: 1.1-1.15x, with labels and `max_live` bit-identical (it is a pure
 data-layout change). Less than the two-hash-probe estimate predicted, and that
 shortfall is what pointed at the container itself -- see
 `PassengerFreeAssignmentDominanceBucket` below.
+
+# Why the scalar fields are duplicated out of the label
+
+`label` and `bitsets` are both heap objects (they hold `Vector`s, a `Dict` and a
+`BitSet`), so an entry stores *pointers* to them, and every read of
+`entry.label.time` is a pointer chase into an unrelated cache line. But almost
+every entry the scan visits is rejected by a *scalar* comparison -- reduced cost,
+time, route length, the size and support of the live-clock set -- so the common
+case paid a cache miss to fetch one `Float64`.
+
+`PassengerFreeAssignmentDominanceFilters` gathers exactly those scalars and is
+stored **inline** here, so the whole first stage of the dominance test is a walk
+over contiguous memory; only entries that survive every scalar filter dereference
+`bitsets` (for the station-age values and the reward-layer compensation), and
+`label` is never touched on the scan path at all. The entry grows from 24 to 64
+bytes -- one cache line, and cheaper than the two chases it removes.
 """
 struct PassengerFreeAssignmentBucketEntry
+    # Inline: every scanned entry reads these.
+    filters::PassengerFreeAssignmentDominanceFilters
+    # Pointers: only entries that survive every scalar filter follow them.
     id::PassengerFreeAssignmentLabelId
     label::PassengerFreeAssignmentPricingLabel
     bitsets::PassengerFreeAssignmentLabelBitsets
+end
+
+function PassengerFreeAssignmentBucketEntry(
+    id::PassengerFreeAssignmentLabelId,
+    label::PassengerFreeAssignmentPricingLabel,
+    bitsets::PassengerFreeAssignmentLabelBitsets,
+)
+    return PassengerFreeAssignmentBucketEntry(
+        PassengerFreeAssignmentDominanceFilters(label, bitsets), id, label, bitsets,
+    )
 end
 
 """
@@ -175,7 +241,39 @@ MEASURED: 1.3-1.5x, again with labels and `max_live` bit-identical. See
 const PassengerFreeAssignmentDominanceBucket = Vector{PassengerFreeAssignmentBucketEntry}
 
 _passenger_free_assignment_entry_order_key(entry::PassengerFreeAssignmentBucketEntry) =
-    (entry.label.reduced_cost, entry.label.time, entry.label.route_length, entry.id)
+    (entry.filters.reduced_cost, entry.filters.time, entry.filters.route_length, entry.id)
+
+"""
+    PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented}
+
+The four dominance switches, carried in the *type* rather than as `Bool`
+arguments.
+
+They are constants for a whole pricing call, but as ordinary arguments they cost
+a branch per scanned bucket entry, and in the default configuration two of them
+(`BoundedStops`, `BoundedStations`) are `false`, so the branch is paid only to
+skip the code it guards. Encoding them as type parameters lets the compiler
+delete the disabled conditions outright and specialize the reward-layer
+compensation on `Compensated`.
+
+The cost is one dynamic dispatch where the rules object reaches
+`_add_passenger_free_assignment_label_to_bucket!` -- once per *label insertion*,
+against a bucket scan that is hundreds to thousands of entries long, so it is not
+measurable. Do not push the object any deeper (e.g. per scanned entry) expecting
+the same to hold.
+"""
+struct PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented} end
+
+function _passenger_free_assignment_dominance_rules(
+    bounded_max_stops::Bool,
+    bounded_distinct_stations::Bool,
+    compensated_dominance::Bool,
+    instrumented::Bool=false,
+)
+    return PassengerFreeAssignmentDominanceRules{
+        bounded_max_stops, bounded_distinct_stations, compensated_dominance, instrumented,
+    }()
+end
 
 """
     PassengerFreeAssignmentRouteColumn(id, route, assignments, tau; metadata)

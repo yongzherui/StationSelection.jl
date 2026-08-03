@@ -56,6 +56,30 @@ Scoreboard of what was tried, each measured on its own
 | station-budget cap at `l` (this file) | **off by default** -- slower, and the LP bound did not move |
 | compatibility-component decomposition | not built: the reward graph is one component holding 100% of opportunities |
 
+| **mechanical pass, 2026-08-03** (below) | **6-17x on the dominance scan, 1.7-9.2x wall** |
+
+The 2026-08-03 pass changed no pruning rule at all -- every case in the benchmark
+came back bit-identical on `best_rc`, `labels`, `max_live`, `columns` and the
+winning route. What it changed was the cost of the scan:
+
+  - conditions reordered cheapest-and-likeliest-first, with a `UInt64` live-clock
+    support mask added in front of the station-age merge walk
+    (`_dominates_passenger_free_assignment_in_bucket`);
+  - the reward-layer compensation fused into one word-wise pass instead of
+    `issubset` followed by an element walk (`_passenger_free_assignment_compensation`);
+  - the scalar dominance state inlined into the bucket entry so a rejected entry
+    is never dereferenced (`PassengerFreeAssignmentDominanceFilters` in `types.jl`);
+  - the dominance switches moved into the type, so disabled conditions compile
+    away (`PassengerFreeAssignmentDominanceRules`);
+  - `sortperm` and a defensive `BitSet` copy dropped from the per-label mirror
+    (`_make_passenger_free_assignment_label_bitsets`).
+
+Measured census over 456M tested pairs
+(`scripts/audit_pfa_dominance_conditions.jl`): 48% of pairs are rejected on
+`time`, a further 39-44% on the support mask, 7-9% on the support size. Under 2%
+ever reach the station-age walk and under 0.5% the reward compensation -- which is
+why the order of these conditions is worth this much.
+
 Any exact change must leave the benchmark's `best_rc` bit-identical; the
 station-budget cap is the one deliberate exception, since it restricts the column
 set on purpose.
@@ -231,11 +255,29 @@ function _passenger_free_assignment_candidate_next_nodes(
     return sort!(collect(candidate_nodes))
 end
 
+"""
+Extension always produces exactly one child (an unlimited-capacity route has
+nothing to branch on at a stop), so the search calls
+`_extend_passenger_free_assignment_pricing_label` and gets the label back
+directly. This method wraps it in the one-element `Vector` the public API has
+always returned; that wrapper allocation is per *extension*, so it is worth not
+paying on the search's hot path.
+"""
 function extend_passenger_free_assignment_pricing_label(
     label::PassengerFreeAssignmentPricingLabel,
     next_node::Int,
     pricing_data::PassengerFreeAssignmentPricingData,
 )::Vector{PassengerFreeAssignmentPricingLabel}
+    return PassengerFreeAssignmentPricingLabel[
+        _extend_passenger_free_assignment_pricing_label(label, next_node, pricing_data),
+    ]
+end
+
+function _extend_passenger_free_assignment_pricing_label(
+    label::PassengerFreeAssignmentPricingLabel,
+    next_node::Int,
+    pricing_data::PassengerFreeAssignmentPricingData,
+)::PassengerFreeAssignmentPricingLabel
     travel_time = _passenger_free_assignment_travel(pricing_data, label.current, next_node)
     arrival_time = label.time + travel_time
     new_tau = label.tau + travel_time
@@ -272,7 +314,7 @@ function extend_passenger_free_assignment_pricing_label(
             (aged_station[next_node] = aged)
     end
 
-    child = PassengerFreeAssignmentPricingLabel(
+    return PassengerFreeAssignmentPricingLabel(
         next_node,
         new_route,
         arrival_time,
@@ -283,8 +325,6 @@ function extend_passenger_free_assignment_pricing_label(
         label.route_length + 1,
         label.visited_mask | get(pricing_data.station_bit, next_node, UInt64(0)),
     )
-
-    return PassengerFreeAssignmentPricingLabel[child]
 end
 
 _passenger_free_assignment_dominance_signature(label::PassengerFreeAssignmentPricingLabel) = label.current
@@ -314,6 +354,26 @@ end
 
 _create_passenger_free_assignment_dominance_bucket() = PassengerFreeAssignmentDominanceBucket()
 
+"""
+Build the hot-path mirror of `label`'s pruning state.
+
+Called once per generated label, so its allocation count is multiplied by the
+whole label population. Two things it deliberately does *not* do:
+
+  - **no `sortperm`.** The old form allocated a permutation vector and two gathered
+    copies (`age_idx[perm]`, `age_val[perm]`) on top of the two it had already
+    filled -- five allocations to sort what is almost always one to four live
+    clocks. Insertion sort over the two parallel arrays does it in place; at this
+    length it also beats a comparison sort outright, quite apart from the
+    allocations.
+  - **no `copy` of the reward-layer set.** Labels are immutable and nothing in the
+    search ever mutates `activated_reward_layers` -- `_certify_..._layers_at_node`
+    builds a label's set with the non-mutating `union`/`setdiff`, and the reward
+    bound only ever reads it as a `union!` *source* into its own workspace. The
+    mirror can therefore alias it. (If a future change makes any label's layer set
+    mutable in place, this alias is the thing that breaks: the bucket would then
+    be dominance-testing against a set that has since changed underneath it.)
+"""
 function _make_passenger_free_assignment_label_bitsets(
     label::PassengerFreeAssignmentPricingLabel,
     node_index::Dict{Int, Int},
@@ -322,15 +382,25 @@ function _make_passenger_free_assignment_label_bitsets(
     n_live = length(label.station_age)
     age_idx = Vector{Int32}(undef, n_live)
     age_val = Vector{Float64}(undef, n_live)
-    i = 1
-    for (station, age) in label.station_age
-        age_idx[i] = Int32(node_index[station])
-        age_val[i] = age
+    age_mask = UInt64(0)
+    i = 0
+    @inbounds for (station, age) in label.station_age
+        # Insertion sort on the way in: slide the entries already placed right
+        # until this station's index lands in ascending order.
+        idx = Int32(node_index[station])
+        age_mask |= UInt64(1) << ((idx - 1) & 63)
+        j = i
+        while j >= 1 && age_idx[j] > idx
+            age_idx[j + 1] = age_idx[j]
+            age_val[j + 1] = age_val[j]
+            j -= 1
+        end
+        age_idx[j + 1] = idx
+        age_val[j + 1] = age
         i += 1
     end
-    perm = sortperm(age_idx)
     return PassengerFreeAssignmentLabelBitsets(
-        copy(label.activated_reward_layers), age_idx[perm], age_val[perm],
+        label.activated_reward_layers, age_idx, age_val, age_mask,
     )
 end
 
@@ -345,6 +415,22 @@ Bails out as soon as the running total exceeds `budget`, because the only use is
 the test `compensation <= budget`. In practice `budget` is a small reduced-cost
 difference while individual layer weights are large, so the common failing case
 exits after one layer.
+
+# One pass, not two
+
+The previous version ran `issubset(a, b)` first (word-wise, allocation-free) and,
+when that failed, restarted with an element-wise walk that re-tested `layer in b`
+one integer at a time -- so the interesting case, where `a` does hold layers `b`
+lacks, traversed the bit data twice and paid a per-element `in` probe on the
+second pass.
+
+Here both are the same walk. `w = a.bits[i] & ~b.bits[j]` is the set difference
+restricted to one 64-bit chunk: all-zero chunks (the subset case, still the most
+common outcome) are skipped at exactly the cost `issubset` used to pay, and a
+non-zero chunk is drained bit by bit with `trailing_zeros`/`w &= w - 1` right
+where it was found, with no second lookup. Chunk `i` of a `BitSet` holds the
+integers `((i - 1 + offset) << 6) .+ (0:63)`, which is what turns a set bit back
+into its layer id.
 """
 function _passenger_free_assignment_compensation(
     a_layers::RewardLayerBitset,
@@ -353,17 +439,43 @@ function _passenger_free_assignment_compensation(
     budget::Float64,
     compensated::Bool=true,
 )::Float64
-    # Word-wise and much cheaper than the element loop; also the single most
-    # common case (it is exactly the old, uncompensated dominance rule).
-    issubset(a_layers, b_layers) && return 0.0
-    # With compensation off this IS the old rule: a non-subset never dominates,
-    # which `Inf` expresses without duplicating the surrounding predicate.
-    compensated || return Inf
+    # Static dispatch on a loop-invariant flag: the specialized method below drops
+    # the branch entirely rather than re-testing it per chunk.
+    return compensated ?
+        _passenger_free_assignment_compensation(a_layers, b_layers, layer_weight, budget, Val(true)) :
+        _passenger_free_assignment_compensation(a_layers, b_layers, layer_weight, budget, Val(false))
+end
+
+function _passenger_free_assignment_compensation(
+    a_layers::RewardLayerBitset,
+    b_layers::RewardLayerBitset,
+    layer_weight::Vector{Float64},
+    budget::Float64,
+    ::Val{Compensated},
+)::Float64 where {Compensated}
+    a_bits = a_layers.bits
+    b_bits = b_layers.bits
+    # Chunk `i` of `a` lines up with chunk `i - shift` of `b`.
+    shift = b_layers.offset - a_layers.offset
+    n_b = length(b_bits)
     total = 0.0
-    @inbounds for layer in a_layers
-        layer in b_layers && continue
-        total += layer_weight[layer]
-        total > budget && return total
+    @inbounds for i in eachindex(a_bits)
+        w = a_bits[i]
+        w == 0 && continue
+        j = i - shift
+        if 1 <= j <= n_b
+            w &= ~b_bits[j]
+            w == 0 && continue
+        end
+        # With compensation off this IS the old rule: a non-subset never dominates,
+        # which `Inf` expresses without duplicating the surrounding predicate.
+        Compensated || return Inf
+        base = (a_layers.offset + i - 1) << 6
+        while w != 0
+            total += layer_weight[base + trailing_zeros(w)]
+            total > budget && return total
+            w &= w - one(UInt64)  # clear the lowest set bit
+        end
     end
     return total
 end
@@ -447,38 +559,170 @@ function _dominates_passenger_free_assignment_label(
     compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
-    (!bounded_max_stops || a.route_length <= b.route_length) || return false
-    # See the 4-argument method: `U_a subseteq U_b`, one instruction, and only
+    return _dominates_passenger_free_assignment_in_bucket(
+        PassengerFreeAssignmentDominanceFilters(a, abs), abs,
+        PassengerFreeAssignmentDominanceFilters(b, bbs), bbs,
+        layer_weight,
+        _passenger_free_assignment_dominance_rules(
+            bounded_max_stops, bounded_distinct_stations, compensated_dominance,
+        ),
+    )
+end
+
+"""
+Rejection census for `_dominates_passenger_free_assignment_in_bucket`, one counter
+per condition plus one for "dominates".
+
+Only written when the dominance rules carry `Instrumented = true`, which the
+production search never sets; with `Instrumented = false` the increments are
+constant-folded away, so an uninstrumented scan pays nothing for their existence.
+Ordering the conditions cheapest-and-likeliest-to-reject first is only meaningful
+against measured rejection rates, and this is where those come from -- see
+`scripts/audit_pfa_dominance_conditions.jl`.
+"""
+const PFA_DOMINANCE_CONDITIONS = (
+    :time, :live_clock_support, :route_length, :visited_mask,
+    :reduced_cost, :station_age, :compensation, :dominates, :age_mask,
+)
+const PFA_DOMINANCE_REJECTIONS = zeros(Int, length(PFA_DOMINANCE_CONDITIONS))
+
+"""
+    _dominates_passenger_free_assignment_in_bucket(a..., b..., layer_weight, rules)
+
+The dominance predicate as the bucket scan calls it: `a` dominates `b`, so `b` can
+be discarded. Scalar state is passed by value (the caller reads it straight out of
+`PassengerFreeAssignmentBucketEntry`, avoiding a chase into the label) and only the
+two `Bitsets` mirrors are passed by reference.
+
+The **signature check is absent on purpose**: buckets are keyed by exactly that
+signature (`label.current`), so every pair the scan ever tests already agrees on
+it, and testing it per entry was a guaranteed-true comparison in the hottest loop
+of the search. The 6-argument method above keeps it, for callers that are not the
+bucket.
+
+# Condition order
+
+Conditions are ordered by (cost to evaluate) against (how often they reject),
+cheapest-and-likeliest first, so that the expensive tail runs on as few pairs as
+possible:
+
+ 1. `time` -- one compare, and a strong discriminator: the bucket is sorted by
+    reduced cost, which correlates only weakly with elapsed time.
+ 2. **live-clock support size** -- `|dom(age_a)| >= |dom(age_b)|` is necessary for
+    the station-age condition (`dom(age_b) ⊆ dom(age_a)`), and it is two array
+    lengths. It used to sit *after* the reward compensation, i.e. the cheapest
+    remaining filter ran last.
+ 3. **live-clock support mask** -- `dom(age_b) ⊆ dom(age_a)` itself, as one
+    `UInt64` test, standing in front of the walk that would otherwise establish
+    it element by element out of two heap arrays (see
+    `PassengerFreeAssignmentLabelBitsets.age_mask`).
+ 4. `route_length`, 5. `visited_mask` -- compiled out entirely unless the
+    corresponding cap is on.
+ 6. `reduced_cost` -- guaranteed non-negative when called from the bucket scan
+    (the walk splits on exactly this), kept because the compensation's early bail
+    is defined in terms of a non-negative budget.
+ 7. **station ages** -- an `O(#live)` merge walk over two sorted `Int32`/`Float64`
+    arrays, no allocation, no hashing. Everything above it is scalar and reads
+    only fields the bucket entry carries inline, so a rejected pair never touches
+    the arrays.
+ 8. **reward-layer compensation** -- the only test that touches the layer bitsets,
+    now last. It was previously ahead of the station-age walk, so every pair that
+    the ages were going to reject paid a bitset traversal first.
+
+Swapping 7 and 8, and putting 3 in front of 7, are the reorderings with real
+leverage; the rest is a few instructions. Every condition is exact, so no
+ordering here can change *which* pairs dominate -- only how much work is done to
+find out.
+
+MEASURED (`scripts/audit_pfa_dominance_conditions.jl`, share of all tested pairs
+each condition is the *first* to reject; n=15/ms=6/s=3 and n=20/ms=5/s=3):
+
+| condition | rejects |
+| --- | --- |
+| 1 time | 49.4% / 47.9% |
+| 3 age mask | 39.5% / 43.6% |
+| 2 support size | 9.1% / 6.6% |
+| 4 route length | 0.7% / 0.6% |
+| 7 station ages | 1.1% / 0.7% |
+| 8 compensation | 0.2% / 0.5% |
+| dominates | 0.10% / 0.06% |
+
+So three scalar tests dispose of ~96% of pairs, and the two conditions that touch
+heap data run on under 2%. `visited_mask` and `reduced_cost` recorded **zero**
+rejections in 456M pairs -- the former because the station budget is off by
+default (and then compiled out), the latter because the bucket walk splits on
+exactly that comparison, so it is already guaranteed when this is reached. It is
+kept as a one-instruction guard for the non-bucket caller and because the
+compensation's early bail is defined against a non-negative budget.
+"""
+@inline function _dominates_passenger_free_assignment_in_bucket(
+    af::PassengerFreeAssignmentDominanceFilters, abs::PassengerFreeAssignmentLabelBitsets,
+    bf::PassengerFreeAssignmentDominanceFilters, bbs::PassengerFreeAssignmentLabelBitsets,
+    layer_weight::Vector{Float64},
+    ::PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented},
+)::Bool where {BoundedStops, BoundedStations, Compensated, Instrumented}
+    @inline _reject(i::Int) = (Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[i] += 1); false)
+
+    af.time <= bf.time + 1e-9 || return _reject(1)
+
+    # `dom(age_b) subseteq dom(age_a)` is required below, so `a` cannot have fewer
+    # live clocks than `b`. Both counts ride inline in the filters, ahead of
+    # everything that has to look at set contents.
+    na = Int(af.n_live_ages)
+    nb = Int(bf.n_live_ages)
+    na >= nb || return _reject(2)
+
+    # `dom(age_b) subseteq dom(age_a)`, as one instruction on inline scalars.
+    bf.age_mask & ~af.age_mask == 0 || return _reject(9)
+
+    if BoundedStops
+        af.route_length <= bf.route_length || return _reject(3)
+    end
+    # See the 6-argument method: `U_a subseteq U_b`, one instruction, and only
     # when the station budget is actually capped.
-    (!bounded_distinct_stations || a.visited_mask & ~b.visited_mask == 0) || return false
-    a.time <= b.time + 1e-9 || return false
-    # See the 4-argument method for why the reward test is a compensated
-    # reduced-cost budget rather than `issubset`. There is no `length` prefilter
-    # here any more: `a` holding *more* layers than `b` is now a legitimate
-    # domination whenever `a`'s reduced-cost advantage covers their weight.
-    budget = b.reduced_cost - a.reduced_cost + 1e-9
-    budget >= 0.0 || return false
-    _passenger_free_assignment_compensation(
-        abs.activated_bits, bbs.activated_bits, layer_weight, budget,
-        compensated_dominance,
-    ) <= budget || return false
+    if BoundedStations
+        af.visited_mask & ~bf.visited_mask == 0 || return _reject(4)
+    end
+
+    budget = bf.reduced_cost - af.reduced_cost + 1e-9
+    budget >= 0.0 || return _reject(5)
+
     # `dom(age_b) subseteq dom(age_a)` and `age_a(j) <= age_b(j)` for all j in
     # dom(age_b) -- exactly equivalent to the dense "all stations, missing = Inf"
     # rule (a live age absent from `a` compares as Inf and always fails; one
     # absent from `b` compares as <= Inf and always passes), but costs O(#live)
     # instead of O(n_nodes). Both arrays are sorted, so one merge walk suffices.
-    length(abs.age_idx) >= length(bbs.age_idx) || return false
     ia = 1
-    na = length(abs.age_idx)
-    @inbounds for ib in eachindex(bbs.age_idx)
+    @inbounds for ib in Base.OneTo(nb)
         j = bbs.age_idx[ib]
         while ia <= na && abs.age_idx[ia] < j
             ia += 1
         end
-        (ia <= na && abs.age_idx[ia] == j) || return false
-        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return false
+        (ia <= na && abs.age_idx[ia] == j) || return _reject(6)
+        abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return _reject(6)
     end
+
+    # See the 6-argument method for why the reward test is a compensated
+    # reduced-cost budget rather than `issubset`. There is no `length` prefilter
+    # here: `a` holding *more* layers than `b` is a legitimate domination whenever
+    # `a`'s reduced-cost advantage covers their weight.
+    _passenger_free_assignment_compensation(
+        abs.activated_bits, bbs.activated_bits, layer_weight, budget, Val(Compensated),
+    ) <= budget || return _reject(7)
+
+    Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[8] += 1)
     return true
+end
+
+"""
+Read out and reset the rejection census. Returns
+`condition => count` pairs in evaluation order.
+"""
+function passenger_free_assignment_dominance_rejections(; reset::Bool=true)
+    counts = [PFA_DOMINANCE_CONDITIONS[i] => PFA_DOMINANCE_REJECTIONS[i]
+              for i in eachindex(PFA_DOMINANCE_CONDITIONS)]
+    reset && fill!(PFA_DOMINANCE_REJECTIONS, 0)
+    return counts
 end
 
 """
@@ -495,29 +739,42 @@ incumbents.
 Dominated entries are collected as bucket *indices*, which the walk produces in
 ascending order, so eviction is a single `deleteat!` and nothing is mutated while
 the bucket is being scanned.
+
+Both directions are resolved in this **single walk**, never two: for entries below
+the new label's reduced cost only an incumbent can dominate (and the first one
+that does ends the walk), and for entries above it only the new label can
+dominate. Every scanned entry is therefore tested exactly once, in whichever
+direction is the only one that can possibly hold.
+
+The scalar state each test needs is read off the entry itself
+(`PassengerFreeAssignmentBucketEntry`), not off `entry.label`, so a rejected entry
+never dereferences the label it stands for.
 """
 function _add_passenger_free_assignment_label_to_bucket!(
     bucket::PassengerFreeAssignmentDominanceBucket,
-    live_labels::Dict{Int, PassengerFreeAssignmentPricingLabel},
+    live_labels::Vector{Union{Nothing, PassengerFreeAssignmentPricingLabel}},
     label::PassengerFreeAssignmentPricingLabel,
     label_id::Int,
     label_bs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
-    bounded_max_stops::Bool,
-    bounded_distinct_stations::Bool,
-    compensated_dominance::Bool,
+    rules::PassengerFreeAssignmentDominanceRules,
     dominated::Vector{Int},
 )
     inserted = true
     empty!(dominated)
     switched = false
 
+    # Hoisted out of the loop: the scan compares against these on every entry.
+    label_filters = PassengerFreeAssignmentDominanceFilters(label, label_bs)
+    label_rc = label_filters.reduced_cost
+
     @inbounds for i in eachindex(bucket)
         entry = bucket[i]
-        existing_label = entry.label
+        entry_filters = entry.filters
 
-        if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_label(existing_label, label, entry.bitsets, label_bs, layer_weight, bounded_max_stops, bounded_distinct_stations, compensated_dominance)
+        if !switched && label_rc > entry_filters.reduced_cost + 1e-9
+            if _dominates_passenger_free_assignment_in_bucket(
+                    entry_filters, entry.bitsets, label_filters, label_bs, layer_weight, rules)
                 inserted = false
                 break
             end
@@ -525,7 +782,8 @@ function _add_passenger_free_assignment_label_to_bucket!(
         end
 
         switched = true
-        if _dominates_passenger_free_assignment_label(label, existing_label, label_bs, entry.bitsets, layer_weight, bounded_max_stops, bounded_distinct_stations, compensated_dominance)
+        if _dominates_passenger_free_assignment_in_bucket(
+                label_filters, label_bs, entry_filters, entry.bitsets, layer_weight, rules)
             push!(dominated, i)
         end
     end
@@ -533,7 +791,7 @@ function _add_passenger_free_assignment_label_to_bucket!(
     n_dominated = length(dominated)
     if inserted
         @inbounds for i in dominated
-            delete!(live_labels, bucket[i].id)
+            live_labels[bucket[i].id] = nothing
         end
         deleteat!(bucket, dominated)
         new_entry = PassengerFreeAssignmentBucketEntry(label_id, label, label_bs)

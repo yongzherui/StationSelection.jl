@@ -101,7 +101,11 @@ const SEED_TWO_STOP = get(ENV, "PFA_SEED_TWO_STOP", "1") in ("1", "true", "yes")
 # has previously caused a silent multi-minute stall on this cluster.
 const GRB_ENV = Gurobi.Env()
 
-_l_for(n::Int) = max(2, ceil(Int, n / 2))
+# Build budget as a divisor of n: `l = ceil(n / PFA_L_DIV)`. Default 2 preserves
+# the historical `l = n/2` behaviour; set 4 or 3 to test whether a smaller build
+# budget opens a reduced-cost gap on closed stations (the station-filter lever).
+const L_DIV = parse(Float64, get(ENV, "PFA_L_DIV", "2"))
+_l_for(n::Int) = max(2, ceil(Int, n / L_DIV))
 
 function build_model_for(n_stations::Int)
     return AggregateODRouteModel(

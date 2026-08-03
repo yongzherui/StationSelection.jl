@@ -339,3 +339,146 @@ but the joint LP is promising enough to keep as an experimental option and test
 on larger server-scale runs. It still does little on `n=15` single-scenario
 instances, but it produces real opportunity and label reductions on the
 multi-scenario `n=10` cases while preserving the certified value.
+
+## 2026-08-02 scaling result: joint LP is inert at n=20/25/30
+
+Job 19523673 (`scripts/sbatch_pfa_station_filter_scaling.sh`): the earlier
+"promising, test at server scale" hope did **not** hold. Grid
+`{nofilter, joint_lp} x n in {20,25,30} x scen in {1,3} x seed in {42,43}`,
+p=16, ms4, warm start ON, all 24 cases `optimality_proven` in <16 min.
+
+Effectiveness: **exactly zero** at every case.
+
+| n | scen | mean opp reduction | mean excl opps | mean excl stations | label delta vs nofilter |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 1 | 0 | 0 | 0 | 0 |
+| 20 | 3 | 0 | 0 | 0 | 0 |
+| 25 | 1 | 0 | 0 | 0 | 0 |
+| 25 | 3 | 0 | 0 | 0 | 0 |
+| 30 | 1 | 0 | 0 | 0 | 0 |
+| 30 | 3 | 0 | 0 | 0 | 0 |
+
+Correctness reconfirmed at scale: `max |LP diff| = 0`, `max |MIP diff| = 0`
+across all 12 matched joint_lp/nofilter pairs; total label delta 0 everywhere.
+Pricing-time deltas are timing noise (labels bit-identical → identical search
+work); the filter's per-iteration LP is pure unmeasured overhead, net-negative.
+
+Warm-start integration is confirmed **active but empty**: the filter LP ran on
+335 `station_simple` iterations and 41 `revisit` iterations across the joint_lp
+runs, excluding nothing on either pricer. So the filter *is* wired into the
+elementary warm-start phase (as intended); it simply has nothing to cut.
+
+### Why zero: closed stations sit at the selection threshold with ~0 slack
+
+The mechanism is not "few stations are closed" -- it is that closed stations
+have **no reduced-cost slack**. Per-iteration diagnostics (joint_lp iters):
+
+| n | scen | mean closed | mean closed-with-need | mean slack/need | max slack/need |
+|---:|---:|---:|---:|---:|---:|
+| 20 | 1 | ~9.9 | ~9.2 | 0.0000 | 0.0000 |
+| 20 | 3 | ~9.6 | ~9.6 | 0.0000 | 0.0004 |
+| 25 | 1 | ~12.0 | ~11.6 | 0.0000 | 0.0000 |
+| 25 | 3 | ~11.5 | ~11.5 | 0.0000 | 0.0000 |
+| 30 | 1 | ~14.9 | ~14.7 | 0.0000 | 0.0000 |
+| 30 | 3 | ~15.0 | ~15.0 | 0.0000 | 0.0000 |
+
+There are `~n-l` closed stations and nearly all of them ARE endpoints of
+positive-reward opportunities (closed-with-need ≈ closed), so they are candidate
+eliminations. But `slack/need = rc(y_j)/required_j ≈ 0`: closed stations carry
+essentially zero LP reduced cost. Elimination needs `slack/need >= 1`; it never
+gets within four orders of magnitude.
+
+Root cause is the instance regime, not the filter. With `l = ceil(n/2)`, half
+the stations are open and the closed ones sit right at the p-median selection
+threshold `Gamma_j ≈ -mu`, so `rc(y_j) = -Gamma_j - mu ≈ 0`. `Gamma_j` is flat
+across the contested band -- exactly the "flat `Gamma_j`" failure mode this note
+flagged as an open question up top. The reduced-cost signal on `y` has no
+separation to exploit.
+
+### Consequence for the *permanent* fixing theorem
+
+This is also a caution for the global-gap version. Permanent fixing needs
+`rc(y_j) = -Gamma_j - mu > (z_UB - z_LP)`. If `rc(y_j) ≈ 0` for every closed
+station (as measured here), the permanent rule fixes nothing either, *regardless*
+of how tight the gap gets. Station fixing of any flavour can only bite when the
+LP separates "clearly-in" from "clearly-out" stations -- i.e. when `l << n` or
+the geometry makes many stations plainly useless -- not at the contested `l = n/2`
+balance point these instances use.
+
+### The lever to test next is `l/n`, not iteration-only-vs-permanent
+
+The productive follow-up is a sweep of the build budget `l` (e.g. `l = n/4`,
+`n/3`, `n/2`) at fixed `n`, measuring the closed-station `rc(y_j)` spread and the
+implied fixing count. The prediction: reductions appear only once `l` is small
+enough that a band of stations falls well below `-mu`. If even a modest `l/n`
+never opens a slack gap, station-level reduced-cost fixing is not a viable lever
+for this problem family and the effort should return to the label-search state
+space (`2026-07-31_pfa_state_space_relaxation_design.md`).
+
+## 2026-08-02 l/n sweep: the filter FIRES at small l but does NOT help
+
+Follow-up to the l=n/2 null result. Jobs 19525414 (joint_lp) + 19526161
+(nofilter A/B), same script with `PFA_L_DIV` added: `l = ceil(n / div)` for
+div in {4, 3} (l=n/2 already measured, all zero), n in {20,25,30}, scen in {1,3},
+seed in {42,43}, ms4, p=16, warm start ON. All cases `optimality_proven`,
+**0 unserved** at every l, so the small-l instances are still fully coverable.
+
+### The lever works: separation appears as l shrinks
+
+Max reduced-cost slack/need ratio ever observed (needs >= 1 to eliminate):
+
+| l/n | max slack/need | iters excluding a station | per-iter excluded opps (scen 3) |
+|---|---|---|---|
+| n/2 | 0.0000 | 0 | 0 |
+| n/3 | 0.92 | 8 | ~0.3-1.0 |
+| n/4 | 2.38 | 57 (up to 2 stations) | ~3-18 |
+
+So the note's hypothesis is confirmed: a smaller build budget pushes closed
+stations below the p-median threshold `-mu`, opening the `rc(y_j)` slack the
+filter needs. Firing concentrates in multi-scenario cases and at n/4.
+
+### But the payoff is a wash-to-negative (this kills the lever)
+
+Correctness holds when it fires: `max |LP diff| < 2e-12`, `max |MIP diff| < 8e-12`.
+The problem is cost. Aggregated joint_lp vs nofilter at matched l:
+
+| l | Σ labels Δ% | Σ pricing Δ% |
+|---:|---:|---:|
+| 5  (n/4, n=20) | **+29.9%** | +14.2% |
+| 7  (n/3 n=20 / n/4 n=25) | -4.5% | -2.4% |
+| 8  (n/4, n=30) | -0.1% | -13.4% |
+| 9  (n/3, n=25) | **+6.4%** | +12.2% |
+| 10 (n/3, n=30) | -0.0% | -6.0% |
+
+No consistent win, and several cases are markedly **worse**. The worst cases line
+up exactly with where the filter fires hardest -- e.g. l=5 n=20 scen3 seed43:
+labels **+59.6%**, pricing **+78%**, and **+23 CG iterations**; l=7 n=20 scen3
+seed43: labels +38%, +10 iterations.
+
+### Why firing hurts: it removes LP-dual-useful, integer-useless columns
+
+The `iΔ` column is the tell: in every case where labels ballooned, CG took MORE
+iterations. The filter's proof is that a closed station's slack can absorb the
+opportunity's reward, so no route through it can improve the LP **optimum**. That
+is not the same as "the column does not help LP **convergence**." Those
+dual-credit routes are exactly the broad hub columns CG leans on to settle the
+duals ([[project_lp_mip_gap_hub_routes]]: "CG picks broad hub routes for dual
+credit"). Suppressing them every iteration -- with a fresh, non-monotone excluded
+set each time -- perturbs the CG trajectory and can force more iterations, whose
+extra label work swamps the modest per-iteration graph shrink.
+
+### Verdict
+
+The iteration-only station reduced-cost filter (closed_form and joint_lp) is
+**not a viable speed lever** for this problem family:
+- l=n/2 (the operating regime): inert, `rc(y_j)~0`.
+- l<=n/3 (where it fires): certified-exact but net wash-to-negative, because the
+  non-monotone per-iteration exclusion destabilizes CG convergence.
+
+Remaining thread, not yet tested: the **permanent** global-gap fix is *monotone*
+(fix a station out once, never un-fix), so it would not oscillate the pricing
+graph across iterations and might avoid the trajectory inflation seen here. But it
+still needs the small-l regime to have any `rc(y_j)` slack at all, and the
+label-reduction ceiling even when firing looks modest. Given that, the higher-EV
+direction is back to the label-search state space
+(`2026-07-31_pfa_state_space_relaxation_design.md`), not further station fixing.

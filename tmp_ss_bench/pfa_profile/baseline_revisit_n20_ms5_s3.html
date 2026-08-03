@@ -1,0 +1,269 @@
+<title>PFA revisit pricer — n=20, max_stops=5, scenario 3 [baseline]</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --page: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --cat-1: #2a78d6;
+    --cat-2: #eb6834;
+    --cat-3: #1baf7a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --page: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --muted: #898781;
+      --grid: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --cat-1: #3987e5;
+      --cat-2: #d95926;
+      --cat-3: #199e70;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --cat-1: #3987e5;
+    --cat-2: #d95926;
+    --cat-3: #199e70;
+  }
+  body {
+    margin: 0;
+    padding: 24px 20px 64px;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 32px 0 10px; font-weight: 600; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; font-size: 13px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; min-width: 120px;
+  }
+  .tile .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tile .v { font-size: 20px; font-weight: 620; margin-top: 2px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .controls input {
+    background: var(--page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 6px 10px; font: inherit; font-size: 13px; min-width: 220px;
+  }
+  .controls button {
+    background: var(--page); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+  #flame { overflow-x: auto; }
+  #flameInner { position: relative; min-width: 100%; }
+  .frame {
+    position: absolute; height: 19px; overflow: hidden;
+    border-radius: 3px; cursor: pointer;
+    font-size: 11px; line-height: 19px; white-space: nowrap;
+    padding-left: 4px; box-sizing: border-box;
+    color: #fff;
+  }
+  .frame.dim { opacity: 0.25; }
+  #tip {
+    position: fixed; pointer-events: none; z-index: 20; display: none;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 10px; font-size: 12px; max-width: 460px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+  }
+  #tip .tn { font-weight: 600; word-break: break-all; }
+  #tip .tv { color: var(--text-secondary); margin-top: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.name { word-break: break-all; }
+  .bar { height: 8px; border-radius: 4px; background: var(--cat-1); display: block; }
+  .barcell { width: 130px; }
+  .crumb { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; min-height: 18px; word-break: break-all; }
+</style>
+
+<div class="wrap">
+<h1>PFA revisit pricer — n=20, max_stops=5, scenario 3 [baseline]</h1>
+<p class="sub">Sampling profile of one exhaustive pricing pass. Click any frame to zoom into it; the search box dims non-matching frames.</p>
+<div class="tiles">
+<div class="tile"><div class="k">Wall</div><div class="v">32.12 s</div></div>
+<div class="tile"><div class="k">Samples</div><div class="v">61558</div></div>
+<div class="tile"><div class="k">GC samples</div><div class="v">952 (1.5%)</div></div>
+<div class="tile"><div class="k">Labels</div><div class="v">274535</div></div>
+<div class="tile"><div class="k">Max live</div><div class="v">76683</div></div>
+<div class="tile"><div class="k">Columns</div><div class="v">31012</div></div>
+<div class="tile"><div class="k">Best rc</div><div class="v">-58077.184</div></div>
+</div>
+<h2>Flame graph</h2>
+<div class="card">
+  <div class="controls">
+    <input id="search" type="text" placeholder="Highlight frames matching…" />
+    <button id="reset">Reset zoom</button>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--cat-1)"></i>PFA pricer</span>
+      <span><i class="swatch" style="background:var(--cat-2)"></i>Julia Base / runtime</span>
+      <span><i class="swatch" style="background:var(--cat-3)"></i>GC</span>
+    </div>
+  </div>
+  <div class="crumb" id="crumb"></div>
+  <div id="flame"><div id="flameInner"></div></div>
+
+</div>
+<h2>Self time by source line</h2>
+<div class="card"><table>
+<thead><tr><th>Frame</th><th class="num">Samples</th><th class="num">Share</th><th></th></tr></thead><tbody>
+<tr><td class="name">poptask (task.jl:1216)</td><td class="num">30779</td><td class="num">50.00%</td><td class="barcell"><i class="bar" style="width:100%"></i></td></tr>
+<tr><td class="name">== (promotion.jl:637)</td><td class="num">6078</td><td class="num">9.87%</td><td class="barcell"><i class="bar" style="width:20%"></i></td></tr>
+<tr><td class="name">_all (anyall.jl:201)</td><td class="num">4813</td><td class="num">7.82%</td><td class="barcell"><i class="bar" style="width:16%"></i></td></tr>
+<tr><td class="name">length (essentials.jl:11)</td><td class="num">3620</td><td class="num">5.88%</td><td class="barcell"><i class="bar" style="width:12%"></i></td></tr>
+<tr><td class="name">&gt;&gt; (int.jl:533)</td><td class="num">2006</td><td class="num">3.26%</td><td class="barcell"><i class="bar" style="width:7%"></i></td></tr>
+<tr><td class="name">&lt; (int.jl:83)</td><td class="num">1674</td><td class="num">2.72%</td><td class="barcell"><i class="bar" style="width:5%"></i></td></tr>
+<tr><td class="name">getindex (essentials.jl:920)</td><td class="num">1303</td><td class="num">2.12%</td><td class="barcell"><i class="bar" style="width:4%"></i></td></tr>
+<tr><td class="name">&lt; (float.jl:623)</td><td class="num">1153</td><td class="num">1.87%</td><td class="barcell"><i class="bar" style="width:4%"></i></td></tr>
+<tr><td class="name">_passenger_free_assignment_compensation (labels.jl:366)</td><td class="num">965</td><td class="num">1.57%</td><td class="barcell"><i class="bar" style="width:3%"></i></td></tr>
+<tr><td class="name">GC</td><td class="num">952</td><td class="num">1.55%</td><td class="barcell"><i class="bar" style="width:3%"></i></td></tr>
+<tr><td class="name">_dominates_passenger_free_assignment_label (labels.jl:0)</td><td class="num">629</td><td class="num">1.02%</td><td class="barcell"><i class="bar" style="width:2%"></i></td></tr>
+<tr><td class="name">getproperty (Base_compiler.jl:54)</td><td class="num">603</td><td class="num">0.98%</td><td class="barcell"><i class="bar" style="width:2%"></i></td></tr>
+<tr><td class="name">+ (int.jl:87)</td><td class="num">558</td><td class="num">0.91%</td><td class="barcell"><i class="bar" style="width:2%"></i></td></tr>
+<tr><td class="name">_add_passenger_free_assignment_label_to_bucket! (labels.jl:520)</td><td class="num">518</td><td class="num">0.84%</td><td class="barcell"><i class="bar" style="width:2%"></i></td></tr>
+<tr><td class="name">&amp; (int.jl:353)</td><td class="num">406</td><td class="num">0.66%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">_passenger_free_assignment_compensation (labels.jl:0)</td><td class="num">389</td><td class="num">0.63%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">iterate (bitset.jl:334)</td><td class="num">333</td><td class="num">0.54%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">_bits_getindex (bitset.jl:65)</td><td class="num">328</td><td class="num">0.53%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">_dominates_passenger_free_assignment_label (labels.jl:479)</td><td class="num">312</td><td class="num">0.51%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">- (int.jl:86)</td><td class="num">304</td><td class="num">0.49%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">_typeinfo_implicit (arrayshow.jl:553)</td><td class="num">290</td><td class="num">0.47%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">+ (float.jl:495)</td><td class="num">215</td><td class="num">0.35%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">&lt;= (float.jl:624)</td><td class="num">195</td><td class="num">0.32%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">unsafe_copyto! (genericmemory.jl:129)</td><td class="num">167</td><td class="num">0.27%</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">trailing_zeros (int.jl:447)</td><td class="num">151</td><td class="num">0.25%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">_add_passenger_free_assignment_label_to_bucket! (labels.jl:519)</td><td class="num">138</td><td class="num">0.22%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">iterate (generator.jl:46)</td><td class="num">121</td><td class="num">0.20%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">_dominates_passenger_free_assignment_label (labels.jl:439)</td><td class="num">119</td><td class="num">0.19%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">_dominates_passenger_free_assignment_label (labels.jl:461)</td><td class="num">90</td><td class="num">0.15%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">iterate (range.jl:921)</td><td class="num">89</td><td class="num">0.14%</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+</tbody></table></div>
+<h2>Allocation sites</h2>
+<p class="sub">Sampled at rate 0.002; ranking is meaningful, absolute totals are scaled.</p>
+<div class="card"><table>
+<thead><tr><th>Site</th><th class="num">Allocations</th><th class="num">Bytes</th><th></th></tr></thead><tbody>
+<tr><td class="name">GenericMemory (boot.jl:588)</td><td class="num">11712</td><td class="num">1745996</td><td class="barcell"><i class="bar" style="width:100%"></i></td></tr>
+<tr><td class="name">unsafe_wrap (string.jl:120)</td><td class="num">15943</td><td class="num">382632</td><td class="barcell"><i class="bar" style="width:22%"></i></td></tr>
+<tr><td class="name">_string_n (string.jl:109)</td><td class="num">16023</td><td class="num">263743</td><td class="barcell"><i class="bar" style="width:15%"></i></td></tr>
+<tr><td class="name">Array (boot.jl:648)</td><td class="num">6570</td><td class="num">210240</td><td class="barcell"><i class="bar" style="width:12%"></i></td></tr>
+<tr><td class="name">_new_generic_iobuffer (iobuffer.jl:106)</td><td class="num">2435</td><td class="num">155840</td><td class="barcell"><i class="bar" style="width:9%"></i></td></tr>
+<tr><td class="name">Dict (dict.jl:80)</td><td class="num">1487</td><td class="num">118960</td><td class="barcell"><i class="bar" style="width:7%"></i></td></tr>
+<tr><td class="name">BitSet (bitset.jl:21)</td><td class="num">1529</td><td class="num">48928</td><td class="barcell"><i class="bar" style="width:3%"></i></td></tr>
+<tr><td class="name">_totuple (tuple.jl:491)</td><td class="num">1045</td><td class="num">42312</td><td class="barcell"><i class="bar" style="width:2%"></i></td></tr>
+<tr><td class="name">_typeinfo_implicit (arrayshow.jl:553)</td><td class="num">2410</td><td class="num">19280</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">setindex! (essentials.jl:929)</td><td class="num">71</td><td class="num">12224</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">#passenger_free_assignment_pricing_by_label_setting#741 (search.jl:510)</td><td class="num">373</td><td class="num">11664</td><td class="barcell"><i class="bar" style="width:1%"></i></td></tr>
+<tr><td class="name">try_accept_route! (search.jl:480)</td><td class="num">474</td><td class="num">7584</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">getproperty (Base_compiler.jl:54)</td><td class="num">476</td><td class="num">5888</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">_setindex! (genericmemory.jl:253)</td><td class="num">59</td><td class="num">2832</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">try_accept_route! (search.jl:483)</td><td class="num">56</td><td class="num">2688</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">#invokelatest_gr#232 (reflection.jl:1295)</td><td class="num">317</td><td class="num">2536</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">try_accept_route! (search.jl:478)</td><td class="num">136</td><td class="num">2176</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">rehash! (dict.jl:168)</td><td class="num">99</td><td class="num">1800</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+<tr><td class="name">ht_keyindex2_shorthash! (dict.jl:291)</td><td class="num">1</td><td class="num">176</td><td class="barcell"><i class="bar" style="width:0%"></i></td></tr>
+</tbody></table></div>
+</div><div id="tip"></div>
+<script>const DATA = {"v":61558,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":1,"c":[{"v":29338,"g":1,"c":[{"v":29338,"g":1,"c":[{"v":27797,"g":1,"c":[{"v":23994,"g":1,"c":[{"v":20364,"g":1,"c":[{"v":9092,"g":1,"c":[{"v":5470,"g":2,"c":[{"v":5336,"g":2,"c":[{"v":5336,"g":2,"c":[{"v":4779,"g":2,"c":[],"n":"_all (anyall.jl:201)"},{"v":453,"g":2,"c":[{"v":372,"g":2,"c":[{"v":286,"g":2,"c":[{"v":267,"g":2,"c":[],"n":"getindex (essentials.jl:920)"}],"n":"#issubset##3 (none:-1)"}],"n":"iterate (generator.jl:48)"}],"n":"_all (anyall.jl:196)"},{"v":90,"g":2,"c":[],"n":"_all (anyall.jl:203)"}],"n":"all (anyall.jl:188)"}],"n":"all (anyall.jl:80)"}],"n":"issubset (bitset.jl:415)"},{"v":3353,"g":2,"c":[{"v":3343,"g":2,"c":[],"n":"length (essentials.jl:11)"}],"n":"issubset (bitset.jl:410)"},{"v":156,"g":2,"c":[{"v":155,"g":2,"c":[],"n":"getproperty (Base_compiler.jl:54)"}],"n":"issubset (bitset.jl:411)"}],"n":"_passenger_free_assignment_compensation (labels.jl:358)"},{"v":4856,"g":1,"c":[{"v":3990,"g":2,"c":[{"v":3683,"g":2,"c":[{"v":3683,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"== (int.jl:524)"}],"n":"iterate (bitset.jl:334)"},{"v":551,"g":2,"c":[{"v":173,"g":2,"c":[],"n":"+ (int.jl:87)"},{"v":172,"g":2,"c":[{"v":172,"g":2,"c":[{"v":172,"g":2,"c":[],"n":"- (int.jl:86)"}],"n":"- (int.jl:1015)"}],"n":"_blsr (bitarray.jl:121)"},{"v":145,"g":2,"c":[],"n":"trailing_zeros (int.jl:447)"}],"n":"iterate (bitset.jl:339)"},{"v":206,"g":2,"c":[{"v":206,"g":2,"c":[],"n":"+ (int.jl:87)"}],"n":"iterate (bitset.jl:336)"},{"v":109,"g":2,"c":[{"v":93,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"iterate (bitset.jl:335)"}],"n":"_passenger_free_assignment_compensation (labels.jl:367)"},{"v":3999,"g":1,"c":[{"v":3963,"g":2,"c":[{"v":1949,"g":2,"c":[{"v":1919,"g":2,"c":[{"v":1919,"g":2,"c":[{"v":1919,"g":2,"c":[],"n":">> (int.jl:533)"}],"n":">> (int.jl:540)"}],"n":"_div64 (bitarray.jl:119)"}],"n":"_bits_getindex (bitset.jl:64)"},{"v":1699,"g":2,"c":[{"v":1699,"g":2,"c":[{"v":1699,"g":2,"c":[{"v":1699,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"== (int.jl:524)"}],"n":"!= (operators.jl:321)"}],"n":"_bits_getindex (bitset.jl:66)"},{"v":315,"g":2,"c":[],"n":"_bits_getindex (bitset.jl:65)"}],"n":"in (bitset.jl:330)"}],"n":"_passenger_free_assignment_compensation (labels.jl:364)"},{"v":1597,"g":1,"c":[{"v":666,"g":2,"c":[{"v":666,"g":2,"c":[],"n":"< (float.jl:623)"}],"n":"> (operators.jl:425)"}],"n":"_passenger_free_assignment_compensation (labels.jl:366)"},{"v":370,"g":1,"c":[],"n":"_passenger_free_assignment_compensation (labels.jl:0)"},{"v":107,"g":1,"c":[{"v":107,"g":2,"c":[],"n":"iterate (bitset.jl:334)"}],"n":"_passenger_free_assignment_compensation (labels.jl:363)"},{"v":87,"g":2,"c":[],"n":"<= (float.jl:624)"},{"v":80,"g":1,"c":[{"v":80,"g":2,"c":[],"n":"+ (float.jl:495)"}],"n":"_passenger_free_assignment_compensation (labels.jl:365)"},{"v":71,"g":1,"c":[],"n":"_passenger_free_assignment_compensation (labels.jl:349)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:461)"},{"v":1613,"g":1,"c":[{"v":1594,"g":2,"c":[],"n":"< (int.jl:83)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:475)"},{"v":387,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:479)"},{"v":358,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:0)"},{"v":298,"g":1,"c":[{"v":260,"g":2,"c":[],"n":"length (essentials.jl:11)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:470)"},{"v":89,"g":1,"c":[{"v":69,"g":2,"c":[],"n":"+ (float.jl:495)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:454)"},{"v":84,"g":1,"c":[{"v":62,"g":2,"c":[],"n":"- (float.jl:496)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:459)"},{"v":82,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:460)"},{"v":68,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:449)"},{"v":63,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:439)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:520)"},{"v":1948,"g":1,"c":[{"v":1317,"g":1,"c":[{"v":787,"g":1,"c":[{"v":402,"g":2,"c":[{"v":394,"g":2,"c":[{"v":394,"g":2,"c":[{"v":384,"g":2,"c":[{"v":381,"g":2,"c":[{"v":379,"g":2,"c":[{"v":351,"g":2,"c":[{"v":351,"g":2,"c":[],"n":"& (int.jl:353)"}],"n":"f (bitset.jl:414)"}],"n":"#issubset##3 (none:-1)"}],"n":"iterate (generator.jl:48)"}],"n":"_all (anyall.jl:196)"}],"n":"all (anyall.jl:188)"}],"n":"all (anyall.jl:80)"}],"n":"issubset (bitset.jl:415)"},{"v":351,"g":2,"c":[{"v":345,"g":2,"c":[],"n":"getproperty (Base_compiler.jl:54)"}],"n":"issubset (bitset.jl:411)"}],"n":"_passenger_free_assignment_compensation (labels.jl:358)"},{"v":207,"g":1,"c":[{"v":206,"g":2,"c":[{"v":107,"g":2,"c":[{"v":106,"g":2,"c":[{"v":106,"g":2,"c":[{"v":106,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"== (int.jl:524)"}],"n":"!= (operators.jl:321)"}],"n":"_bits_getindex (bitset.jl:66)"},{"v":89,"g":2,"c":[{"v":84,"g":2,"c":[{"v":84,"g":2,"c":[{"v":84,"g":2,"c":[],"n":">> (int.jl:533)"}],"n":">> (int.jl:540)"}],"n":"_div64 (bitarray.jl:119)"}],"n":"_bits_getindex (bitset.jl:64)"}],"n":"in (bitset.jl:330)"}],"n":"_passenger_free_assignment_compensation (labels.jl:364)"},{"v":203,"g":1,"c":[{"v":166,"g":2,"c":[{"v":146,"g":2,"c":[{"v":146,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"== (int.jl:524)"}],"n":"iterate (bitset.jl:334)"}],"n":"_passenger_free_assignment_compensation (labels.jl:367)"},{"v":76,"g":1,"c":[],"n":"_passenger_free_assignment_compensation (labels.jl:366)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:461)"},{"v":235,"g":1,"c":[],"n":"_dominates_passenger_free_assignment_label (labels.jl:0)"},{"v":76,"g":1,"c":[{"v":75,"g":2,"c":[],"n":"== (promotion.jl:637)"}],"n":"_dominates_passenger_free_assignment_label (labels.jl:449)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:528)"},{"v":855,"g":1,"c":[{"v":855,"g":2,"c":[],"n":"getindex (essentials.jl:920)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:516)"},{"v":582,"g":1,"c":[{"v":444,"g":2,"c":[{"v":444,"g":2,"c":[],"n":"< (float.jl:623)"}],"n":"> (operators.jl:425)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:519)"},{"v":174,"g":1,"c":[{"v":174,"g":2,"c":[{"v":174,"g":2,"c":[{"v":92,"g":2,"c":[{"v":92,"g":2,"c":[{"v":91,"g":2,"c":[],"n":"unsafe_copyto! (genericmemory.jl:129)"}],"n":"unsafe_copyto! (genericmemory.jl:143)"}],"n":"_growat! (array.jl:1191)"},{"v":77,"g":2,"c":[{"v":76,"g":2,"c":[],"n":"unsafe_copyto! (genericmemory.jl:129)"}],"n":"_growat! (array.jl:1184)"}],"n":"_insert! (array.jl:1786)"}],"n":"insert! (array.jl:1781)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:543)"},{"v":116,"g":1,"c":[{"v":92,"g":2,"c":[],"n":"iterate (range.jl:921)"}],"n":"_add_passenger_free_assignment_label_to_bucket! (labels.jl:531)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:309)"},{"v":548,"g":1,"c":[{"v":309,"g":1,"c":[{"v":134,"g":1,"c":[{"v":129,"g":1,"c":[{"v":119,"g":2,"c":[{"v":72,"g":2,"c":[{"v":68,"g":2,"c":[{"v":68,"g":2,"c":[{"v":68,"g":2,"c":[],"n":"hash (tuple.jl:580)"}],"n":"hash (hashing.jl:28)"}],"n":"hashindex (dict.jl:128)"}],"n":"ht_keyindex (dict.jl:242)"}],"n":"get (dict.jl:503)"}],"n":"_passenger_free_assignment_travel (data.jl:94)"}],"n":"_passenger_free_assignment_age_is_useful (data.jl:325)"},{"v":91,"g":2,"c":[{"v":89,"g":2,"c":[{"v":74,"g":2,"c":[{"v":74,"g":2,"c":[{"v":73,"g":3,"c":[],"n":"GC"}],"n":"GenericMemory (boot.jl:588)"}],"n":"rehash! (dict.jl:150)"}],"n":"ht_keyindex2_shorthash! (dict.jl:268)"}],"n":"setindex! (dict.jl:356)"}],"n":"extend_passenger_free_assignment_pricing_label (labels.jl:259)"},{"v":157,"g":1,"c":[],"n":"extend_passenger_free_assignment_pricing_label (labels.jl:244)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:298)"},{"v":286,"g":1,"c":[{"v":248,"g":1,"c":[{"v":248,"g":1,"c":[{"v":61,"g":1,"c":[],"n":"_passenger_free_assignment_remaining_reward_bound (search.jl:109)"}],"n":"remaining_reward_bound (search.jl:200)"}],"n":"label_priority (search.jl:217)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:319)"},{"v":277,"g":1,"c":[{"v":277,"g":1,"c":[{"v":113,"g":1,"c":[{"v":100,"g":3,"c":[],"n":"GC"}],"n":"try_accept_route! (search.jl:478)"},{"v":98,"g":1,"c":[{"v":98,"g":1,"c":[{"v":82,"g":1,"c":[],"n":"#_passenger_free_assignment_column_from_route#734 (search.jl:418)"}],"n":"_passenger_free_assignment_column_from_route (search.jl:413)"}],"n":"try_accept_route! (search.jl:472)"}],"n":"#745 (search.jl:495)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:276)"},{"v":102,"g":1,"c":[],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:306)"},{"v":84,"g":1,"c":[{"v":84,"g":1,"c":[],"n":"_passenger_free_assignment_candidate_next_nodes (labels.jl:184)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:289)"},{"v":83,"g":1,"c":[{"v":74,"g":2,"c":[{"v":63,"g":2,"c":[],"n":"popfirst! (priorityqueue.jl:324)"}],"n":"dequeue_pair! (deprecated.jl:215)"}],"n":"#_enumerate_passenger_free_assignment_pricing_labels#722 (search.jl:263)"}],"n":"_enumerate_passenger_free_assignment_pricing_labels (search.jl:156)"}],"n":"#passenger_free_assignment_pricing_by_label_setting#741 (search.jl:488)"},{"v":1072,"g":1,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":1072,"g":2,"c":[{"v":597,"g":2,"c":[{"v":597,"g":2,"c":[{"v":327,"g":2,"c":[{"v":327,"g":2,"c":[{"v":289,"g":2,"c":[{"v":289,"g":2,"c":[{"v":279,"g":2,"c":[{"v":279,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":1,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":2,"c":[{"v":276,"g":3,"c":[],"n":"GC"}],"n":"unsafe_wrap (string.jl:120)"}],"n":"StringMemory (iobuffer.jl:167)"}],"n":"dec (intfuncs.jl:918)"}],"n":"#string#403 (intfuncs.jl:1000)"}],"n":"string (intfuncs.jl:990)"}],"n":"show (show.jl:1285)"}],"n":"show_delim_array (show.jl:1422)"}],"n":"show_delim_array (show.jl:1411)"}],"n":"show_vector (arrayshow.jl:530)"}],"n":"show_vector (arrayshow.jl:515)"}],"n":"show (arrayshow.jl:486)"}],"n":"print (io.jl:35)"}],"n":"print_to_string (io.jl:151)"}],"n":"string (io.jl:193)"}],"n":"#747 (search.jl:503)"}],"n":"lt (ordering.jl:120)"}],"n":"partition! (sort.jl:1099)"}],"n":"#_sort!#19 (sort.jl:1137)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1154)"},{"v":165,"g":2,"c":[{"v":165,"g":2,"c":[{"v":64,"g":2,"c":[{"v":64,"g":2,"c":[],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"},{"v":215,"g":2,"c":[{"v":215,"g":2,"c":[{"v":90,"g":2,"c":[{"v":90,"g":2,"c":[],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1158)"}],"n":"_sort! (sort.jl:1123)"}],"n":"#_sort!#19 (sort.jl:1154)"},{"v":132,"g":2,"c":[{"v":83,"g":2,"c":[{"v":78,"g":2,"c":[{"v":78,"g":1,"c":[{"v":78,"g":2,"c":[{"v":74,"g":2,"c":[{"v":73,"g":2,"c":[{"v":73,"g":2,"c":[{"v":73,"g":2,"c":[],"n":"show_vector (arrayshow.jl:515)"}],"n":"show (arrayshow.jl:486)"}],"n":"print (io.jl:35)"}],"n":"print_to_string (io.jl:151)"}],"n":"string (io.jl:193)"}],"n":"#747 (search.jl:503)"}],"n":"lt (ordering.jl:120)"}],"n":"partition! (sort.jl:1106)"}],"n":"#_sort!#19 (sort.jl:1135)"},{"v":127,"g":2,"c":[{"v":69,"g":2,"c":[{"v":64,"g":2,"c":[{"v":64,"g":1,"c":[{"v":64,"g":2,"c":[{"v":63,"g":2,"c":[{"v":62,"g":2,"c":[{"v":62,"g":2,"c":[{"v":62,"g":2,"c":[],"n":"show_vector (arrayshow.jl:515)"}],"n":"show (arrayshow.jl:486)"}],"n":"print (io.jl:35)"}],"n":"print_to_string (io.jl:151)"}],"n":"string (io.jl:193)"}],"n":"#747 (search.jl:503)"}],"n":"lt (ordering.jl:120)"}],"n":"partition! (sort.jl:1106)"}],"n":"#_sort!#19 (sort.jl:1137)"}],"n":"_sort! (sort.jl:1123)"}],"n":"_sort! (sort.jl:1380)"}],"n":"_sort! (sort.jl:780)"}],"n":"_sort! (sort.jl:731)"}],"n":"_sort! (sort.jl:802)"}],"n":"_sort! (sort.jl:747)"}],"n":"_sort! (sort.jl:686)"}],"n":"_sort! (sort.jl:561)"}],"n":"_sort! (sort.jl:1594)"}],"n":"#sort!#23 (sort.jl:1740)"}],"n":"sort! (sort.jl:1733)"}],"n":"#passenger_free_assignment_pricing_by_label_setting#741 (search.jl:503)"},{"v":284,"g":1,"c":[{"v":247,"g":1,"c":[{"v":247,"g":1,"c":[{"v":235,"g":1,"c":[{"v":176,"g":1,"c":[{"v":175,"g":2,"c":[{"v":175,"g":2,"c":[{"v":175,"g":2,"c":[{"v":161,"g":2,"c":[{"v":161,"g":2,"c":[{"v":156,"g":3,"c":[],"n":"GC"}],"n":"Dict (dict.jl:80)"}],"n":"Dict (dict.jl:91)"}],"n":"dict_with_eltype (abstractdict.jl:640)"}],"n":"dict_with_eltype (abstractdict.jl:647)"}],"n":"Dict (dict.jl:117)"}],"n":"_replay_passenger_free_assignment_route (search.jl:379)"}],"n":"#_passenger_free_assignment_column_from_route#734 (search.jl:418)"}],"n":"_passenger_free_assignment_column_from_route (search.jl:413)"}],"n":"try_accept_route! (search.jl:472)"}],"n":"#passenger_free_assignment_pricing_by_label_setting#741 (search.jl:499)"},{"v":81,"g":1,"c":[],"n":"#passenger_free_assignment_pricing_by_label_setting#741 (search.jl:510)"}],"n":"passenger_free_assignment_pricing_by_label_setting (search.jl:447)"}],"n":"price_revisit (profile_pfa_flamegraph.jl:115)"}],"n":"macro expansion (Profile.jl:60)"}],"n":"#profile_case#55 (profile_pfa_flamegraph.jl:587)"}],"n":"profile_case (profile_pfa_flamegraph.jl:575)"}],"n":"main (profile_pfa_flamegraph.jl:685)"}],"n":"eval (boot.jl:489)"}],"n":"include_string (loading.jl:2874)"}],"n":"_include (loading.jl:2934)"}],"n":"include (Base.jl:306)"}],"n":"exec_options (client.jl:317)"}],"n":"_start (client.jl:550)"},{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[{"v":30779,"g":2,"c":[],"n":"poptask (task.jl:1216)"}],"n":"wait (task.jl:1228)"}],"n":"task_done_hook (task.jl:868)"}],"n":"all"};
+const PERIOD_MS = 1.0;</script>
+<script>
+(function () {
+  const CAT = ["", "--cat-1", "--cat-2", "--cat-3"];
+  const el = document.getElementById("flameInner");
+  const tip = document.getElementById("tip");
+  const crumb = document.getElementById("crumb");
+  const search = document.getElementById("search");
+  const ROW = 20;
+  let focus = DATA;
+  let query = "";
+
+  const pct = (v) => ((100 * v) / DATA.v).toFixed(2) + "%";
+  const ms = (v) => (v * PERIOD_MS).toFixed(0) + " ms";
+
+  function depth(node) {
+    let d = 1;
+    for (const c of node.c) d = Math.max(d, 1 + depth(c));
+    return d;
+  }
+
+  function render() {
+    el.innerHTML = "";
+    const h = depth(focus) * ROW;
+    el.style.height = h + "px";
+    const width = el.clientWidth || 900;
+    const q = query.toLowerCase();
+    const draw = (node, x0, w, row) => {
+      if (w < 0.4) return;
+      const d = document.createElement("div");
+      d.className = "frame" + (q && !node.n.toLowerCase().includes(q) ? " dim" : "");
+      d.style.left = x0 + "px";
+      // 2px surface gap so adjacent fills never fuse into one block.
+      d.style.width = Math.max(1, w - 2) + "px";
+      d.style.top = row * ROW + "px";
+      d.style.background = "var(" + (CAT[node.g] || "--cat-2") + ")";
+      if (w > 34) d.textContent = node.n.replace(/ \(.*/, "");
+      d.addEventListener("mousemove", (e) => {
+        tip.style.display = "block";
+        tip.innerHTML = '<div class="tn"></div><div class="tv"></div>';
+        tip.querySelector(".tn").textContent = node.n;
+        tip.querySelector(".tv").textContent =
+          node.v + " samples · " + pct(node.v) + " of total · ~" + ms(node.v);
+        const pad = 14;
+        let left = e.clientX + pad;
+        if (left + tip.offsetWidth > window.innerWidth - 8)
+          left = e.clientX - tip.offsetWidth - pad;
+        tip.style.left = left + "px";
+        tip.style.top = Math.min(e.clientY + pad, window.innerHeight - tip.offsetHeight - 8) + "px";
+      });
+      d.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+      d.addEventListener("click", () => { focus = node; crumb.textContent = node.n; render(); });
+      el.appendChild(d);
+      let cx = x0;
+      for (const c of node.c) {
+        const cw = (c.v / node.v) * w;
+        draw(c, cx, cw, row + 1);
+        cx += cw;
+      }
+    };
+    draw(focus, 0, width, 0);
+  }
+
+  document.getElementById("reset").addEventListener("click", () => {
+    focus = DATA; crumb.textContent = ""; render();
+  });
+  search.addEventListener("input", (e) => { query = e.target.value.trim(); render(); });
+  window.addEventListener("resize", render);
+  render();
+})();
+</script>
+
