@@ -170,3 +170,76 @@ julia --project=. scripts/analyze_theta_rho_heuristic_compare.jl \
 This writes case-level and variant-level CSVs including objective milestones,
 normalized gap AUC, certification improvement share, meaningful y shifts,
 theta/y movement, effective-support agreement, and LP/MIP deltas.
+
+## Rho-pair station clustering experiment
+
+An offline experiment evaluated whether the `l` pricing stations can be chosen
+directly from the positive passenger assignment rewards `rho[p,j,k]`.  It used
+72 exhaustive-pricing snapshots from the four `n=15` cases, with `l=8`.  Every
+method selected exactly eight stations; its restricted route pool was then
+compared with the unrestricted route pool from the same RMP dual solution.
+
+The useful score was not raw rho.  It discounted each assignment by a fraction
+of its direct pickup-to-dropoff travel cost,
+
+```text
+adjusted_reward[p,j,k] = rho[p,j,k] - lambda * beta * travel[j,k].
+```
+
+The station selector greedily maximizes the adjusted rewards whose two endpoint
+stations are both selected, followed by one-station swap improvement.  This is
+only an offline selector at present: it does not modify true reduced costs and
+has not yet been wired into the online column-generation loop.
+
+| selector | any improving route | unrestricted best route | mean normalized RC regret |
+|---|---:|---:|---:|
+| unrestricted exact pricing | 100.0% | 100.0% | 0.00% |
+| theta-load stations | 100.0% | 87.5% | 2.82% |
+| rho pair, `lambda=0.25` | 98.6% | 88.9% | 1.72% |
+| rho pair, `lambda=0.50` | 100.0% | 83.3% | 3.59% |
+| rho pair, `lambda=1.00` | 80.6% | 38.9% | 16.16% |
+| raw rho pair | 52.8% | 0.0% | 48.09% |
+| marginal station rho | 43.1% | 5.6% | 27.84% |
+
+The `lambda=0.25` selector captured the exact unrestricted best route in 64/72
+snapshots, one more than theta-load, and had zero median regret.  Its sole
+complete miss was `n15_sc3_s43_ms4`, solve sequence 20; theta-load captured the
+exact best route there.  The two selectors captured the exact best jointly in
+59 snapshots, only rho-travel in 5, only theta-load in 4, and neither in 4.
+This complementarity supports a rho-travel-first, theta-load-fallback design.
+
+Artifacts:
+
+- `scripts/analyze_rho_pair_station_selection.jl` reproduces the comparison;
+- `results/rho_pair_station_selection_2026-08-04/snapshot_results.csv` contains
+  all snapshot-level results;
+- `results/rho_pair_station_selection_2026-08-04/method_summary.csv` contains
+  the aggregate table.
+
+## Proposed joint-route-cost selector
+
+The direct `travel[j,k]` adjustment is still a crude proxy.  It charges each
+assignment independently, even though passengers on one route share travel,
+and it does not represent pickup/dropoff ordering, wait limits, ride limits, or
+route repositioning.  A more principled next heuristic is to score small
+assignment bundles using their minimum feasible joint routing cost:
+
+```text
+bundle_score(B) = sum(rho[a] for a in B) - beta * min_feasible_route_time(B).
+```
+
+For the first implementation, restrict `B` to one or two assignments, retain
+only the top few rho alternatives per passenger, and reuse the existing
+pairwise event-order enumeration in `pricing/passenger/station_subset.jl`.
+Greedily add the station with the greatest improvement in the best available
+bundle score, then perform a one-station swap search.  This incorporates shared
+travel and rejects jointly infeasible rewards while remaining much cheaper
+than unrestricted label setting.  If pairwise bundles are insufficient, the
+existing triple-assignment calculation provides the next controlled extension.
+
+This joint-cost selector is a documented proposal, not an implemented online
+heuristic.  It should first be evaluated on the same 72 saved snapshots against
+theta-load, `lambda=0.25`, and unrestricted pricing.  Required metrics are
+best-route capture, any-improving-route capture, normalized reduced-cost regret,
+selector runtime, and downstream label count.  Online integration should retain
+theta-load/adaptive-expansion recovery and unrestricted final certification.

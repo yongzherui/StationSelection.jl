@@ -159,7 +159,8 @@ function _record_priced_route!(
 end
 
 function _record_station_rho_scores!(
-    rows::Vector{NamedTuple}, md::PassengerFreeAssignmentMasterData,
+    rows::Vector{NamedTuple}, opportunity_rows::Vector{NamedTuple},
+    md::PassengerFreeAssignmentMasterData,
     alpha::Dict{Int, Float64}, gamma_o::Dict{Tuple{Int, Int}, Float64},
     gamma_d::Dict{Tuple{Int, Int}, Float64}, scenarios::Vector{Int};
     solve_sequence::Int, round::Int, iteration::Int, phase::String,
@@ -173,6 +174,12 @@ function _record_station_rho_scores!(
         for c in passenger_free_assignment_pricing_candidates(
             md, alpha, gamma_o, gamma_d, scenario,
         )
+            push!(opportunity_rows, (
+                solve_sequence=solve_sequence, round=round, iteration=iteration,
+                phase=phase, scenario=scenario, passenger=c.passenger,
+                pickup_index=c.origin, dropoff_index=c.destination,
+                rho=c.reward, direct_travel_time=md.travel_cost[(c.origin, c.destination)],
+            ))
             for j in unique((c.origin, c.destination))
                 count_incident[j] += 1
                 sum_incident[j] += c.reward
@@ -400,6 +407,7 @@ function run_passenger_free_assignment_column_generation(
     priced_route_rows = NamedTuple[] # every returned route, including duplicate/rejected routes
     route_rho_rows = NamedTuple[]    # one row per (route, certified passenger assignment)
     station_rho_score_rows = NamedTuple[] # candidate-subset scores from all positive rho opportunities
+    opportunity_rho_rows = NamedTuple[] # every positive (p,j,k) reward at every RMP solve
     theta_rows = NamedTuple[]          # every theta value at every RMP solve
     theta_summary_rows = NamedTuple[]  # active/fractional/near-one theta churn
     previous_theta = Dict{Int, Float64}()
@@ -505,7 +513,8 @@ function run_passenger_free_assignment_column_generation(
             )
             alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
             _record_station_rho_scores!(
-                station_rho_score_rows, master_data, alpha, gamma_o, gamma_d,
+                station_rho_score_rows, opportunity_rho_rows,
+                master_data, alpha, gamma_o, gamma_d,
                 pricing_scenarios; solve_sequence=solve_sequence, round=n_rounds,
                 iteration=n_iters, phase="early_return",
             )
@@ -713,7 +722,8 @@ function run_passenger_free_assignment_column_generation(
         )
         alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
         _record_station_rho_scores!(
-            station_rho_score_rows, master_data, alpha, gamma_o, gamma_d,
+            station_rho_score_rows, opportunity_rho_rows,
+            master_data, alpha, gamma_o, gamma_d,
             pricing_scenarios; solve_sequence=solve_sequence, round=n_rounds,
             iteration=n_iters, phase="certification",
         )
@@ -1002,6 +1012,7 @@ function run_passenger_free_assignment_column_generation(
             "priced_route_rows" => copy(priced_route_rows),
             "route_rho_rows" => copy(route_rho_rows),
             "station_rho_score_rows" => copy(station_rho_score_rows),
+            "opportunity_rho_rows" => copy(opportunity_rho_rows),
             "theta_rows" => copy(theta_rows),
             "theta_summary_rows" => copy(theta_summary_rows),
             "exhaustive_pricing_each_iteration" => exhaustive_pricing_each_iteration,

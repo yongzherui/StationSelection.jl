@@ -110,11 +110,16 @@ function main()
     priced_route_df = DataFrame(r.final_result.metadata["priced_route_rows"])
     route_rho_df = DataFrame(r.final_result.metadata["route_rho_rows"])
     station_rho_df = DataFrame(r.final_result.metadata["station_rho_score_rows"])
+    opportunity_rho_df = DataFrame(r.final_result.metadata["opportunity_rho_rows"])
     theta_df = DataFrame(r.final_result.metadata["theta_rows"])
     theta_summary_df = DataFrame(r.final_result.metadata["theta_summary_rows"])
     theta_rho_subset_df = DataFrame(r.final_result.metadata["theta_rho_subset_rows"])
     iteration_df = DataFrame(r.iteration_rows)
     station_rho_df[!, :station_id] = data.array_idx_to_station_id[station_rho_df.station_index]
+    opportunity_rho_df[!, :pickup_station_id] =
+        data.array_idx_to_station_id[opportunity_rho_df.pickup_index]
+    opportunity_rho_df[!, :dropoff_station_id] =
+        data.array_idx_to_station_id[opportunity_rho_df.dropoff_index]
     priced_route_df[!, :route_station_ids] = [join((data.array_idx_to_station_id[j]
         for j in parse.(Int, filter(x -> !isempty(x), split(String(route), '-')))), "-")
         for route in priced_route_df.route]
@@ -297,6 +302,7 @@ function main()
         _write_diag_csv(joinpath(OUTDIR, "$(case)_priced_routes.csv"), priced_route_df)
         _write_diag_csv(joinpath(OUTDIR, "$(case)_route_rhos.csv"), route_rho_df)
         _write_diag_csv(joinpath(OUTDIR, "$(case)_station_rho_scores.csv"), station_rho_df)
+        _write_diag_csv(joinpath(OUTDIR, "$(case)_opportunity_rhos.csv"), opportunity_rho_df)
         _write_diag_csv(joinpath(OUTDIR, "$(case)_route_rho_correlations.csv"), route_correlation_df)
         _write_diag_csv(joinpath(OUTDIR, "$(case)_subset_guides.csv"), subset_guide_df)
         _write_diag_csv(joinpath(OUTDIR, "$(case)_theta.csv"), theta_df)
