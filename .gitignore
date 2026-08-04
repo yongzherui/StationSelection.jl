@@ -41,3 +41,10 @@ slurm-*.err
 slurm_logs/
 tmp_ss_bench/*.out
 tmp_ss_bench/*.err
+
+# Raw outputs retained locally for the 2026-08-03 pricing experiment notes.
+# Curated summaries under results/ remain trackable.
+results/nearest_open_pricer_mechanics_ab/
+tmp_ss_bench/pfa_n15_rho_pair_exhaustive_*/
+tmp_ss_bench/pfa_n15_route_rho_*/
+tmp_ss_bench/pfa_n15_theta_rho_*/
