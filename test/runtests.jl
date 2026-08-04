@@ -52,6 +52,8 @@ const MOI = JuMP.MOI
         include("utils/test_case_generators/test_test5_triangle.jl")
         include("utils/test_case_generators/test_test6_bidirectional.jl")
         include("utils/test_export_variables.jl")
+        include("utils/test_solution_analysis.jl")
+        include("utils/test_objective_decomposition.jl")
     end
 
     @testset "Data Structures" begin

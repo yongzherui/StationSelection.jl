@@ -526,7 +526,7 @@ function _enumerate_passenger_free_assignment_station_simple_pricing_labels(
         n_live_labels -= removed
         if inserted
             t0 = profile ? time_ns() : UInt64(0)
-            enqueue!(frontier, label_id => label_priority(label, label_ages))
+            push!(frontier, label_id => label_priority(label, label_ages))
             profile && (t_queue += time_ns() - t0)
             max_frontier_size = max(max_frontier_size, length(frontier))
             max_live_labels = max(max_live_labels, n_live_labels)
@@ -549,7 +549,7 @@ function _enumerate_passenger_free_assignment_station_simple_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        label_id, popped_priority = dequeue_pair!(frontier)
+        label_id, popped_priority = popfirst!(frontier)
         profile && (t_queue += time_ns() - t0)
         maybe_label = live_labels[label_id]
         if isnothing(maybe_label)

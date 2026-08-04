@@ -12,6 +12,19 @@ using Printf
 
 export ObjectiveDecomposition, decompose_objective
 
+function _build_objective_decomposition_od_counts(data::StationSelectionData)
+    return [
+        begin
+            counts = Dict{Tuple{Int, Int}, Int}()
+            for request in eachrow(scenario.requests)
+                od = (Int(request.origin_station_id), Int(request.destination_station_id))
+                counts[od] = get(counts, od, 0) + 1
+            end
+            counts
+        end for scenario in data.scenarios
+    ]
+end
+
 
 """
     ObjectiveDecomposition
@@ -107,7 +120,7 @@ function decompose_objective(run_dir::String, data::StationSelectionData)::Objec
     export_dir = joinpath(run_dir, "variable_exports")
 
     # Step 2: Per-scenario OD counts for legacy/export formats that do not store demand counts in x values.
-    od_counts = build_od_counts_from_data(data)
+    od_counts = _build_objective_decomposition_od_counts(data)
 
     # Step 3: Assignment variables → walking cost, routing cost, activated routes
     walking_cost     = 0.0

@@ -96,6 +96,8 @@ include("opt/models/exact_darp_route_warm_start.jl")
 
 # Variable export (depends on OptResult and all mapping types)
 include("utils/analysis/export_variables.jl")
+include("utils/analysis/solution_analysis.jl")
+include("utils/analysis/objective_decomposition.jl")
 
 # Re-export key types and functions
 

@@ -371,7 +371,7 @@ function _enumerate_aggregate_od_route_station_simple_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        enqueue!(frontier, label_id => _aggregate_od_route_station_simple_label_priority(label, pricing_data, duals))
+        push!(frontier, label_id => _aggregate_od_route_station_simple_label_priority(label, pricing_data, duals))
         profile && (t_queue += time_ns() - t0)
         max_frontier_size = max(max_frontier_size, length(frontier))
         max_live_labels = max(max_live_labels, length(live_labels))
@@ -389,7 +389,7 @@ function _enumerate_aggregate_od_route_station_simple_pricing_labels(
         end
 
         t0 = profile ? time_ns() : UInt64(0)
-        label_id = dequeue!(frontier)
+        label_id = popfirst!(frontier).first
         profile && (t_queue += time_ns() - t0)
         label = get(live_labels, label_id, nothing)
         if isnothing(label)
