@@ -24,6 +24,7 @@ function _price_one_passenger_scenario(
     reward_coarsening_levels::Int=0,
     excluded_stations::Set{Int}=Set{Int}(),
     excluded_opportunities::Set{Tuple{Int, Int, Int}}=Set{Tuple{Int, Int, Int}}(),
+    allowed_stations::Union{Nothing, Set{Int}}=nothing,
 )
     md = master.master_data
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
@@ -33,10 +34,16 @@ function _price_one_passenger_scenario(
     if !isempty(excluded_opportunities)
         filter!(c -> !((c.passenger, c.origin, c.destination) in excluded_opportunities), candidates)
     end
+    if !isnothing(allowed_stations)
+        filter!(c -> c.origin in allowed_stations && c.destination in allowed_stations, candidates)
+    end
     isempty(candidates) && return PassengerFreeAssignmentRouteColumn[], true, 0
 
+    pricing_nodes = isnothing(allowed_stations) ? md.nodes :
+        [j for j in md.nodes if j in allowed_stations]
+
     exact_pricing_data = create_passenger_free_assignment_pricing_data(
-        s, md.nodes, md.travel_cost, candidates;
+        s, pricing_nodes, md.travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
         max_wait_time=md.max_wait_time,
         repositioning_time=md.repositioning_time,
@@ -52,7 +59,7 @@ function _price_one_passenger_scenario(
             candidates, reward_coarsening_levels,
         )
         create_passenger_free_assignment_pricing_data(
-            s, md.nodes, md.travel_cost, relaxed_candidates;
+            s, pricing_nodes, md.travel_cost, relaxed_candidates;
             route_regularization_weight=md.route_regularization_weight,
             max_wait_time=md.max_wait_time,
             repositioning_time=md.repositioning_time,
@@ -165,6 +172,7 @@ function _price_passenger_scenarios(
     station_reduced_cost_filter_mode::Symbol=:closed_form,
     station_filter_excluded_stations::Union{Nothing, Set{Int}}=nothing,
     station_filter_excluded_opportunities::Union{Nothing, Set{Tuple{Int, Int, Int}}}=nothing,
+    allowed_stations::Union{Nothing, Set{Int}}=nothing,
     optimizer_env=nothing,
 )
     md = master.master_data
@@ -207,6 +215,7 @@ function _price_passenger_scenarios(
                 reward_coarsening_levels=reward_coarsening_levels,
                 excluded_stations=excluded_stations,
                 excluded_opportunities=excluded_opportunities,
+                allowed_stations=allowed_stations,
             )
         end
     else
@@ -222,6 +231,7 @@ function _price_passenger_scenarios(
                 reward_coarsening_levels=reward_coarsening_levels,
                 excluded_stations=excluded_stations,
                 excluded_opportunities=excluded_opportunities,
+                allowed_stations=allowed_stations,
             )
         end
     end

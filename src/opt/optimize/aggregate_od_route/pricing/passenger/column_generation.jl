@@ -108,6 +108,174 @@ function _y_support_metrics(yv::Vector{Float64}, prev::Union{Vector{Float64}, No
         l1_move=l1_move, topl_entered=entered, topl_jaccard=jac, topl=topl)
 end
 
+function _record_priced_route!(
+    route_rows::Vector{NamedTuple}, rho_rows::Vector{NamedTuple},
+    column::PassengerFreeAssignmentRouteColumn,
+    md::PassengerFreeAssignmentMasterData,
+    alpha::Dict{Int, Float64}, gamma_o::Dict{Tuple{Int, Int}, Float64},
+    gamma_d::Dict{Tuple{Int, Int}, Float64}, source_topl::Set{Int};
+    solve_sequence::Int, round::Int, iteration::Int, phase::String, action::Symbol,
+)
+    rewards = Float64[]
+    for (p, j, k) in column.assignments
+        walk_term = md.walk_cost_weight * md.assignment_walk_cost[(p, j, k)]
+        rho = get(alpha, p, 0.0) - get(gamma_o, (p, j), 0.0) -
+            get(gamma_d, (p, k), 0.0) - walk_term
+        push!(rewards, rho)
+        push!(rho_rows, (
+            source_solve_sequence=solve_sequence, source_round=round,
+            source_iteration=iteration, source_phase=phase,
+            column_id=column.id, scenario=Int(get(column.metadata, "scenario", 0)),
+            passenger=p, pickup_index=j, dropoff_index=k,
+            alpha=get(alpha, p, 0.0), gamma_origin=get(gamma_o, (p, j), 0.0),
+            gamma_destination=get(gamma_d, (p, k), 0.0),
+            walking_dual_term=walk_term, rho=rho,
+            pickup_in_source_topl=j in source_topl,
+            dropoff_in_source_topl=k in source_topl,
+        ))
+    end
+    reward_sum = sum(rewards)
+    route_time_cost = md.route_regularization_weight *
+        (column.tau + md.repositioning_time)
+    distinct_route = Set(column.route)
+    outside = setdiff(distinct_route, source_topl)
+    push!(route_rows, (
+        source_solve_sequence=solve_sequence, source_round=round,
+        source_iteration=iteration, source_phase=phase,
+        column_id=column.id, scenario=Int(get(column.metadata, "scenario", 0)),
+        add_action=String(action), route=join(column.route, "-"),
+        n_stops=length(column.route), n_distinct_stations=length(distinct_route),
+        n_revisits=length(column.route) - length(distinct_route), tau=column.tau,
+        route_time_cost=route_time_cost, n_assignments=length(rewards),
+        rho_sum=reward_sum, rho_min=minimum(rewards), rho_mean=mean(rewards),
+        rho_max=maximum(rewards), rho_top1_share=reward_sum <= 1e-12 ? 0.0 : maximum(rewards) / reward_sum,
+        recomputed_reduced_cost=route_time_cost - reward_sum,
+        reported_reduced_cost=Float64(get(column.metadata, "reduced_cost", NaN)),
+        source_topl=join(sort!(collect(source_topl)), ";"),
+        outside_source_topl=join(sort!(collect(outside)), ";"),
+        n_distinct_outside_source_topl=length(outside),
+    ))
+    return nothing
+end
+
+function _record_station_rho_scores!(
+    rows::Vector{NamedTuple}, md::PassengerFreeAssignmentMasterData,
+    alpha::Dict{Int, Float64}, gamma_o::Dict{Tuple{Int, Int}, Float64},
+    gamma_d::Dict{Tuple{Int, Int}, Float64}, scenarios::Vector{Int};
+    solve_sequence::Int, round::Int, iteration::Int, phase::String,
+)
+    count_incident = zeros(Int, length(md.nodes))
+    sum_incident = zeros(Float64, length(md.nodes))
+    max_incident = zeros(Float64, length(md.nodes))
+    sum_pickup = zeros(Float64, length(md.nodes))
+    sum_dropoff = zeros(Float64, length(md.nodes))
+    for scenario in scenarios
+        for c in passenger_free_assignment_pricing_candidates(
+            md, alpha, gamma_o, gamma_d, scenario,
+        )
+            for j in unique((c.origin, c.destination))
+                count_incident[j] += 1
+                sum_incident[j] += c.reward
+                max_incident[j] = max(max_incident[j], c.reward)
+            end
+            sum_pickup[c.origin] += c.reward
+            sum_dropoff[c.destination] += c.reward
+        end
+    end
+    for j in eachindex(md.nodes)
+        push!(rows, (
+            solve_sequence=solve_sequence, round=round, iteration=iteration, phase=phase,
+            station_index=j, positive_rho_opportunities=count_incident[j],
+            positive_rho_sum=sum_incident[j], positive_rho_max=max_incident[j],
+            positive_rho_pickup_sum=sum_pickup[j],
+            positive_rho_dropoff_sum=sum_dropoff[j],
+        ))
+    end
+    return nothing
+end
+
+function _record_theta_snapshot!(
+    rows::Vector{NamedTuple}, summary_rows::Vector{NamedTuple},
+    master::PassengerFreeAssignmentMaster, previous::Dict{Int, Float64};
+    solve_sequence::Int, round::Int, iteration::Int, phase::String,
+)
+    current = Dict{Int, Float64}()
+    for (id, var) in master.theta
+        theta = value(var)
+        current[id] = theta
+        column = master.columns[id]
+        push!(rows, (
+            solve_sequence=solve_sequence, round=round, iteration=iteration, phase=phase,
+            column_id=id, scenario=Int(get(column.metadata, "scenario", 0)),
+            theta_value=theta, theta_previous=get(previous, id, 0.0),
+            theta_change=theta - get(previous, id, 0.0),
+            source_solve_sequence=get(column.metadata, "cg_source_solve_sequence", missing),
+            n_stops=length(column.route), n_distinct_stations=length(unique(column.route)),
+        ))
+    end
+    ids = union(keys(previous), keys(current))
+    l1_move = isempty(previous) ? missing :
+        sum(abs(get(current, id, 0.0) - get(previous, id, 0.0)) for id in ids)
+    vals = collect(values(current))
+    push!(summary_rows, (
+        solve_sequence=solve_sequence, round=round, iteration=iteration, phase=phase,
+        n_columns=length(vals), n_positive=count(>(1e-7), vals),
+        n_fractional=count(v -> 1e-7 < v < 1 - 1e-7, vals),
+        n_ge_half=count(>=(0.5), vals), n_near_one=count(>=(0.99), vals),
+        theta_sum=sum(vals), theta_max=isempty(vals) ? 0.0 : maximum(vals),
+        theta_l1_move=l1_move,
+    ))
+    empty!(previous)
+    merge!(previous, current)
+    return nothing
+end
+
+function _theta_rho_pricing_subset(
+    master::PassengerFreeAssignmentMaster,
+    alpha::Dict{Int, Float64}, gamma_o::Dict{Tuple{Int, Int}, Float64},
+    gamma_d::Dict{Tuple{Int, Int}, Float64}, scenarios::Vector{Int},
+    core_size::Int, n_outsiders::Int,
+)
+    md = master.master_data
+    load = zeros(Float64, length(md.nodes))
+    near_one = Set{Int}()
+    for (id, var) in master.theta
+        theta = value(var)
+        theta > 1e-7 || continue
+        endpoints = Set{Int}()
+        for (_, j, k) in master.columns[id].assignments
+            push!(endpoints, j)
+            push!(endpoints, k)
+        end
+        for j in endpoints
+            load[j] += theta
+            theta >= 0.99 && push!(near_one, j)
+        end
+    end
+    ranked_load = sort!(collect(eachindex(load)); by=j -> (-load[j], j))
+    ranked_near = sort!(collect(near_one); by=j -> (-load[j], j))
+    core = Set(ranked_near[1:min(core_size, length(ranked_near))])
+    for j in ranked_load
+        length(core) >= core_size && break
+        push!(core, j)
+    end
+
+    rho_score = zeros(Float64, length(md.nodes))
+    for scenario in scenarios
+        for c in passenger_free_assignment_pricing_candidates(
+            md, alpha, gamma_o, gamma_d, scenario,
+        )
+            for j in unique((c.origin, c.destination))
+                rho_score[j] += c.reward
+            end
+        end
+    end
+    ranked_outside = sort!([j for j in eachindex(rho_score) if !(j in core)];
+        by=j -> (-rho_score[j], j))
+    outsiders = ranked_outside[1:min(n_outsiders, length(ranked_outside))]
+    return union(core, outsiders), core, outsiders, load, rho_score
+end
+
 function run_passenger_free_assignment_column_generation(
     model::AggregateODRouteModel,
     data::StationSelectionData;
@@ -115,6 +283,9 @@ function run_passenger_free_assignment_column_generation(
     max_cg_iters::Int=1000,
     n_candidates::Int=20,
     max_new_columns::Int=20,
+    exhaustive_pricing_each_iteration::Bool=false,
+    theta_rho_core_size::Int=0,
+    theta_rho_n_outsiders::Int=1,
     reduced_cost_tol::Float64=1e-6,
     pricing_time_limit_sec::Float64=60.0,
     certification_time_limit_sec::Float64=600.0,
@@ -195,6 +366,9 @@ function run_passenger_free_assignment_column_generation(
             :closed_form : station_reduced_cost_filter_mode,
     )
     station_reduced_cost_filter_active = station_reduced_cost_filter_mode != :none
+    theta_rho_core_size >= 0 || throw(ArgumentError("theta_rho_core_size must be nonnegative"))
+    theta_rho_n_outsiders >= 0 || throw(ArgumentError("theta_rho_n_outsiders must be nonnegative"))
+    theta_rho_subset_active = theta_rho_core_size > 0
 
     t_start = time()
     isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
@@ -222,7 +396,17 @@ function run_passenger_free_assignment_column_generation(
 
     iteration_rows = NamedTuple[]
     y_support_rows = NamedTuple[]   # per-iteration y-support churn diagnostics
+    y_station_rows = NamedTuple[]   # station-level y values/RCs at every recorded LP solve
+    priced_route_rows = NamedTuple[] # every returned route, including duplicate/rejected routes
+    route_rho_rows = NamedTuple[]    # one row per (route, certified passenger assignment)
+    station_rho_score_rows = NamedTuple[] # candidate-subset scores from all positive rho opportunities
+    theta_rows = NamedTuple[]          # every theta value at every RMP solve
+    theta_summary_rows = NamedTuple[]  # active/fractional/near-one theta churn
+    previous_theta = Dict{Int, Float64}()
+    theta_rho_subset_rows = NamedTuple[]
     prev_yv = nothing               # previous iteration's value.(master.y)
+    solve_sequence = 0              # unique across early-return/certification solves
+    current_topl = Set{Int}()
     lp_bound = NaN
     cg_stop_reason = :max_cg_iters
     n_iters = 0
@@ -286,17 +470,64 @@ function run_passenger_free_assignment_column_generation(
             end
             lp_bound = objective_value(m)
             let yv = value.(master.y), l = round(Int, sum(value.(master.y)))
+                solve_sequence += 1
                 ym = _y_support_metrics(yv, prev_yv, l)
+                current_topl = ym.topl
                 push!(y_support_rows, (
-                    round=n_rounds, iteration=n_iters, phase="early_return",
+                    solve_sequence=solve_sequence, round=n_rounds,
+                    iteration=n_iters, phase="early_return",
                     lp_bound=lp_bound, l=l,
                     support_ge_half=ym.support_ge_half, n_fractional=ym.n_fractional,
                     l1_move=ym.l1_move, topl_entered=ym.topl_entered,
                     topl_jaccard=ym.topl_jaccard,
+                    topl_indices=join(sort!(collect(ym.topl)), ";"),
+                    topl_station_ids=join(sort!(data.array_idx_to_station_id[collect(ym.topl)]), ";"),
                 ))
+                yrc = Float64[reduced_cost(var) for var in master.y]
+                closed = sort!([j for j in eachindex(yv) if yv[j] <= 1e-7]; by=j -> (yrc[j], j))
+                closed_rank = Dict(j => rank for (rank, j) in enumerate(closed))
+                for j in eachindex(yv)
+                    push!(y_station_rows, (
+                        solve_sequence=solve_sequence, round=n_rounds,
+                        iteration=n_iters, phase="early_return",
+                        station_index=j, station_id=data.array_idx_to_station_id[j],
+                        y_value=yv[j], y_reduced_cost=yrc[j],
+                        in_topl=j in ym.topl,
+                        closed_rc_rank=get(closed_rank, j, missing),
+                    ))
+                end
                 prev_yv = yv
             end
+            _record_theta_snapshot!(
+                theta_rows, theta_summary_rows, master, previous_theta;
+                solve_sequence=solve_sequence, round=n_rounds,
+                iteration=n_iters, phase="early_return",
+            )
             alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
+            _record_station_rho_scores!(
+                station_rho_score_rows, master_data, alpha, gamma_o, gamma_d,
+                pricing_scenarios; solve_sequence=solve_sequence, round=n_rounds,
+                iteration=n_iters, phase="early_return",
+            )
+
+            allowed_stations = nothing
+            if theta_rho_subset_active
+                allowed, core, outsiders, theta_load, rho_score = _theta_rho_pricing_subset(
+                    master, alpha, gamma_o, gamma_d, pricing_scenarios,
+                    theta_rho_core_size, theta_rho_n_outsiders,
+                )
+                allowed_stations = allowed
+                push!(theta_rho_subset_rows, (
+                    solve_sequence=solve_sequence, round=n_rounds, iteration=n_iters,
+                    phase="early_return", core_size=length(core),
+                    n_outsiders=length(outsiders), allowed_size=length(allowed),
+                    core_indices=join(sort!(collect(core)), ";"),
+                    outsider_indices=join(outsiders, ";"),
+                    allowed_indices=join(sort!(collect(allowed)), ";"),
+                    core_theta_load=sum(theta_load[j] for j in core),
+                    outsider_rho_score=sum(rho_score[j] for j in outsiders),
+                ))
+            end
 
             raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
             used_stats = raw_stats
@@ -320,8 +551,8 @@ function run_passenger_free_assignment_column_generation(
             t_price = time()
             new_columns, exhausted, labels = _price_passenger_scenarios(
                 master, alpha, gamma_o, gamma_d, next_column_id;
-                n_candidates=n_candidates,
-                max_new_columns=max_new_columns,
+                n_candidates=exhaustive_pricing_each_iteration ? typemax(Int) ÷ 2 : n_candidates,
+                max_new_columns=exhaustive_pricing_each_iteration ? typemax(Int) ÷ 2 : max_new_columns,
                 time_limit=pricing_time_limit_sec,
                 reduced_cost_tol=reduced_cost_tol,
                 verify_reduced_costs=verify_reduced_costs,
@@ -336,6 +567,7 @@ function run_passenger_free_assignment_column_generation(
                     nothing : station_filter_stats.excluded_stations,
                 station_filter_excluded_opportunities=isnothing(station_filter_stats) ?
                     nothing : station_filter_stats.excluded_opportunities,
+                allowed_stations=allowed_stations,
                 optimizer_env=optimizer_env,
             )
             pricing_seconds = time() - t_price
@@ -345,7 +577,19 @@ function run_passenger_free_assignment_column_generation(
 
             added = 0
             for c in new_columns
+                c.metadata["cg_source_solve_sequence"] = solve_sequence
+                c.metadata["cg_source_round"] = n_rounds
+                c.metadata["cg_source_iteration"] = n_iters
+                c.metadata["cg_source_phase"] = "early_return"
+                c.metadata["cg_source_topl"] = sort!(collect(current_topl))
                 _theta, action = add_passenger_free_assignment_column!(master, c)
+                c.metadata["cg_add_action"] = String(action)
+                _record_priced_route!(
+                    priced_route_rows, route_rho_rows, c, master_data,
+                    alpha, gamma_o, gamma_d, current_topl;
+                    solve_sequence=solve_sequence, round=n_rounds,
+                    iteration=n_iters, phase="early_return", action=action,
+                )
                 action == :added && (added += 1)
             end
 
@@ -434,17 +678,45 @@ function run_passenger_free_assignment_column_generation(
         end
         lp_bound = objective_value(m)
         let yv = value.(master.y), l = round(Int, sum(value.(master.y)))
+            solve_sequence += 1
             ym = _y_support_metrics(yv, prev_yv, l)
+            current_topl = ym.topl
             push!(y_support_rows, (
-                round=n_rounds, iteration=n_iters, phase="certification",
+                solve_sequence=solve_sequence, round=n_rounds,
+                iteration=n_iters, phase="certification",
                 lp_bound=lp_bound, l=l,
                 support_ge_half=ym.support_ge_half, n_fractional=ym.n_fractional,
                 l1_move=ym.l1_move, topl_entered=ym.topl_entered,
                 topl_jaccard=ym.topl_jaccard,
+                topl_indices=join(sort!(collect(ym.topl)), ";"),
+                topl_station_ids=join(sort!(data.array_idx_to_station_id[collect(ym.topl)]), ";"),
             ))
+            yrc = Float64[reduced_cost(var) for var in master.y]
+            closed = sort!([j for j in eachindex(yv) if yv[j] <= 1e-7]; by=j -> (yrc[j], j))
+            closed_rank = Dict(j => rank for (rank, j) in enumerate(closed))
+            for j in eachindex(yv)
+                push!(y_station_rows, (
+                    solve_sequence=solve_sequence, round=n_rounds,
+                    iteration=n_iters, phase="certification",
+                    station_index=j, station_id=data.array_idx_to_station_id[j],
+                    y_value=yv[j], y_reduced_cost=yrc[j],
+                    in_topl=j in ym.topl,
+                    closed_rc_rank=get(closed_rank, j, missing),
+                ))
+            end
             prev_yv = yv
         end
+        _record_theta_snapshot!(
+            theta_rows, theta_summary_rows, master, previous_theta;
+            solve_sequence=solve_sequence, round=n_rounds,
+            iteration=n_iters, phase="certification",
+        )
         alpha, gamma_o, gamma_d = extract_passenger_free_assignment_duals(master)
+        _record_station_rho_scores!(
+            station_rho_score_rows, master_data, alpha, gamma_o, gamma_d,
+            pricing_scenarios; solve_sequence=solve_sequence, round=n_rounds,
+            iteration=n_iters, phase="certification",
+        )
         cert_raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
         cert_station_filter_stats = station_reduced_cost_filter_active ?
             _station_reduced_cost_filter_stats(
@@ -480,7 +752,19 @@ function run_passenger_free_assignment_column_generation(
 
         cert_added = 0
         for c in cert_columns
+            c.metadata["cg_source_solve_sequence"] = solve_sequence
+            c.metadata["cg_source_round"] = n_rounds
+            c.metadata["cg_source_iteration"] = n_iters
+            c.metadata["cg_source_phase"] = "certification"
+            c.metadata["cg_source_topl"] = sort!(collect(current_topl))
             _theta, action = add_passenger_free_assignment_column!(master, c)
+            c.metadata["cg_add_action"] = String(action)
+            _record_priced_route!(
+                priced_route_rows, route_rho_rows, c, master_data,
+                alpha, gamma_o, gamma_d, current_topl;
+                solve_sequence=solve_sequence, round=n_rounds,
+                iteration=n_iters, phase="certification", action=action,
+            )
             action == :added && (cert_added += 1)
         end
         push!(iteration_rows, (
@@ -623,10 +907,23 @@ function run_passenger_free_assignment_column_generation(
     column_rows = [(
         column_id=id,
         scenario=Int(get(column.metadata, "scenario", 0)),
+        source_solve_sequence=get(column.metadata, "cg_source_solve_sequence", missing),
+        source_round=get(column.metadata, "cg_source_round", missing),
+        source_iteration=get(column.metadata, "cg_source_iteration", missing),
+        source_phase=get(column.metadata, "cg_source_phase", "seed"),
+        add_action=get(column.metadata, "cg_add_action", "seed"),
         tau=column.tau,
-        reduced_cost=get(column.metadata, "reduced_cost", nothing),
+        reduced_cost=get(column.metadata, "reduced_cost", missing),
         route=join(column.route, "-"),
+        route_station_ids=join((data.array_idx_to_station_id[j] for j in column.route), "-"),
+        n_stops=length(column.route),
+        n_distinct_stations=length(unique(column.route)),
+        n_revisits=length(column.route) - length(unique(column.route)),
+        source_topl=join(get(column.metadata, "cg_source_topl", Int[]), ";"),
+        n_stops_outside_source_topl=count(
+            j -> !(j in get(column.metadata, "cg_source_topl", Int[])), unique(column.route)),
         assignments=join(("$p:$j:$k" for (p, j, k) in column.assignments), ";"),
+        n_assignments=length(column.assignments),
     ) for (id, column) in sort!(collect(master.columns); by=first)]
     !isnothing(iteration_log_path) && _write_aggregate_od_route_cg_log_csv(
         String(iteration_log_path), iteration_rows,
@@ -701,6 +998,16 @@ function run_passenger_free_assignment_column_generation(
             "station_simple_warm_start" => station_simple_warm_start,
             "iteration_rows" => copy(iteration_rows),
             "y_support_rows" => copy(y_support_rows),
+            "y_station_rows" => copy(y_station_rows),
+            "priced_route_rows" => copy(priced_route_rows),
+            "route_rho_rows" => copy(route_rho_rows),
+            "station_rho_score_rows" => copy(station_rho_score_rows),
+            "theta_rows" => copy(theta_rows),
+            "theta_summary_rows" => copy(theta_summary_rows),
+            "exhaustive_pricing_each_iteration" => exhaustive_pricing_each_iteration,
+            "theta_rho_subset_rows" => copy(theta_rho_subset_rows),
+            "theta_rho_core_size" => theta_rho_core_size,
+            "theta_rho_n_outsiders" => theta_rho_n_outsiders,
             "column_rows" => column_rows,
             "mean_positive_rho_used" => (pos_rho_samples == 0 ? 0.0 : pos_rho_used_sum / pos_rho_samples),
             "mean_raw_positive_rho" => (pos_rho_samples == 0 ? 0.0 : pos_rho_raw_sum / pos_rho_samples),
