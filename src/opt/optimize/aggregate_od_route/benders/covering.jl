@@ -747,6 +747,44 @@ function _extract_nearest_open_y_subproblem_coverage_duals(
     return AggregateODRouteCoverageDuals(raw, sigma)
 end
 
+"""
+    _price_aggregate_od_route_subproblem_columns(data, model, mapping, pool, duals)
+
+Run one label-pricing pass for every scenario against a Benders route
+subproblem's coverage duals. Column IDs remain unique across scenarios and
+`pricing_exhausted` is true only when every scenario search was exhausted.
+"""
+function _price_aggregate_od_route_subproblem_columns(
+    data::StationSelectionData,
+    model::AnyAggregateODRouteModel,
+    mapping::AggregateODRouteMap,
+    pool::Vector{AggregateODRouteColumn},
+    duals::AggregateODRouteCoverageDuals,
+)
+    next_column_id = isempty(pool) ? 1 : maximum(column.id for column in pool) + 1
+    all_new_columns = AggregateODRouteColumn[]
+    pricing_exhausted = true
+    for s in 1:n_scenarios(data)
+        pricing_duals = _scenario_pricing_duals(duals, s)
+        pricing_data = create_aggregate_od_route_pricing_data(model, data, mapping, s, pricing_duals)
+        new_columns_s, exhausted_s, _stats = aggregate_od_route_pricing_by_label_setting(
+            pricing_data,
+            pool,
+            pricing_duals;
+            next_column_id=next_column_id,
+            reduced_cost_tol=model.reduced_cost_tol,
+            max_new_columns=model.max_new_columns,
+            n_candidates=model.n_candidates,
+            time_limit=model.pricing_time_limit_sec,
+            max_visits_per_node=model.max_visits_per_node,
+        )
+        pricing_exhausted &= exhausted_s
+        append!(all_new_columns, new_columns_s)
+        next_column_id += length(new_columns_s)
+    end
+    return all_new_columns, pricing_exhausted
+end
+
 function _opt_result_from_benders(
     final_result::OptResult,
     metadata::Dict{String, Any},

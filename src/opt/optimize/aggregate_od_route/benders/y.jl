@@ -292,27 +292,9 @@ function _solve_nearest_open_y_subproblem_lp_with_repricing(
         rho = Dict(j => dual(con) for (j, con) in fix_cons)
 
         duals = _extract_nearest_open_y_subproblem_coverage_duals(cover_cons)
-        next_column_id = isempty(pool) ? 1 : maximum(column.id for column in pool) + 1
-        all_new_columns = AggregateODRouteColumn[]
-        pricing_exhausted = true
-        for s in 1:n_scenarios(data)
-            pricing_duals = _scenario_pricing_duals(duals, s)
-            pricing_data = create_aggregate_od_route_pricing_data(model, data, mapping, s, pricing_duals)
-            new_columns_s, exhausted_s, _stats = aggregate_od_route_pricing_by_label_setting(
-                pricing_data,
-                pool,
-                pricing_duals;
-                next_column_id=next_column_id,
-                reduced_cost_tol=model.reduced_cost_tol,
-                max_new_columns=model.max_new_columns,
-                n_candidates=model.n_candidates,
-                time_limit=model.pricing_time_limit_sec,
-                max_visits_per_node=model.max_visits_per_node,
-            )
-            pricing_exhausted &= exhausted_s
-            append!(all_new_columns, new_columns_s)
-            next_column_id += length(new_columns_s)
-        end
+        all_new_columns, pricing_exhausted = _price_aggregate_od_route_subproblem_columns(
+            data, model, mapping, pool, duals,
+        )
         if isempty(all_new_columns)
             if pricing_exhausted
                 fully_exhausted = true
