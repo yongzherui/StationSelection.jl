@@ -63,11 +63,31 @@ sole scheduler-completed `n=25,q=3` run hit the 500-iteration cap.
 
 ## Small-instance cut comparison
 
-The following are medians over successful returned runs. Times are solver-call
+The historical tables below pool `p=16` and `p=32`, so their `6/6` counts mean
+three seeds in each of two passenger-count cells. For current reporting, each
+`(n,p,q)` cell has three seeds and must be shown as `3/3`. Times are solver-call
 wall times; Slurm elapsed time is larger because each task prepares a local
-Julia depot. Multi-scenario cut totals are expected to be roughly three times
-the iteration count because the experiment uses multicut, one recourse block
-per scenario.
+Julia depot.
+
+The p-separated arithmetic means for the BendersYZ cut comparison are:
+
+| `n,q` | cut | `p=16` mean (s) | `p=32` mean (s) | p=32 success |
+|---|---|---:|---:|---:|
+| 10,1 | restricted MW | 19.2 | 26.3 | 3/3 |
+| 10,1 | zero completion | 20.9 | 26.4 | 3/3 |
+| 10,1 | standard + reprice | 23.7 | 33.0 | 3/3 |
+| 10,3 | restricted MW | 25.4 | 30.2 | 3/3 |
+| 10,3 | zero completion | 28.2 | 35.1 | 3/3 |
+| 10,3 | standard + reprice | 48.6 | 88.1 | 3/3 |
+| 15,1 | restricted MW | 80.7 | 816.1 | 3/3 |
+| 15,1 | zero completion | 144.7 | 1,465.7 | 3/3 |
+| 15,1 | standard + reprice | 202.3 | 1,862.5 | 3/3 |
+| 15,3 | restricted MW | 200.3 | 1,724.0 | 3/3 |
+| 15,3 | zero completion | 346.8 | 3,129.6 | 3/3 |
+| 15,3 | standard + reprice | 915.3 | -- | 0/3 |
+
+The cut-count columns in the historical pooled table should not be interpreted
+as p-specific measurements unless the underlying per-task logs are reaggregated.
 
 | `n,q` | Method | Successful | Median time (s) | Median iterations | Median optimality cuts |
 |---|---|---:|---:|---:|---:|
@@ -125,6 +145,26 @@ memory problem. At `n=20`, Direct remains reliable for one scenario whereas
 BendersYZ MW completes only half the cases; with three scenarios both methods
 are already unreliable. The few successful `n>=25` timings should not be read
 as population medians—the censoring rate is too high.
+
+For the corrected p-separated view, the relevant arithmetic means are:
+
+| `n,p,q` | Direct success | Direct mean (s) | BendersYZ MW success | Benders mean (s) |
+|---|---:|---:|---:|---:|
+| 10,16,1 | 3/3 | 10.6 | 3/3 | 19.2 |
+| 10,16,3 | 3/3 | 20.9 | 3/3 | 25.4 |
+| 15,16,1 | 3/3 | 46.2 | 3/3 | 80.7 |
+| 15,16,3 | 3/3 | 344.4 | 3/3 | 200.3 |
+| 20,16,1 | 3/3 | 405.8 | 3/3 | 480.7 |
+| 20,16,3 | 1/3 | 2,566.7 | 3/3 | 3,383.0 |
+| 10,32,1 | 3/3 | 13.2 | 3/3 | 26.3 |
+| 10,32,3 | 3/3 | 27.7 | 3/3 | 30.2 |
+| 15,32,1 | 3/3 | 125.0 | 3/3 | 816.1 |
+| 15,32,3 | 2/3 | 953.7 | 3/3 | 1,724.0 |
+| 20,32,1 | 3/3 | 856.9 | 0/3 | -- |
+| 20,32,3 | 0/3 | -- | 0/3 | -- |
+
+These are nearest-open results and remain distinct from the free-assignment CG
+comparison.
 
 ## Bound closure and objective agreement
 

@@ -31,11 +31,12 @@ free-assignment model and therefore provide the objective-quality check.
 - **16 GB memory limit per task**
 - 90-minute wall limit per task
 
-New CG harvests 100 candidates per scenario, globally retains up to 100 per
-iteration, and uses adaptive cluster certification with exact physical-pricing
-fallback.  Direct exhaustively enumerates the physical route universe and then
-solves the monolithic free-assignment model with explicit station-selection,
-passenger-assignment, and route variables.
+The primary new-CG benchmark harvests 100 candidates per scenario, globally
+retains up to 100 per iteration, uses one Julia thread, and certifies with the
+exact physical pricer.  Adaptive cluster certification and reduced-cost
+recomputation checks are disabled.  Direct exhaustively enumerates the physical
+route universe and then solves the monolithic free-assignment model with
+explicit station-selection, passenger-assignment, and route variables.
 
 ## Passenger free-assignment column reformulation
 
@@ -89,9 +90,10 @@ setting pricer.
 
 ## Multi-scenario parallelism in this benchmark
 
-The code path was called with `parallel_scenarios=true` (its default), but the
-replacement Slurm wrapper did not set `JULIA_NUM_THREADS` and did not launch
-Julia with `--threads`.  The loaded Julia module defaults to one Julia thread.
+The code path is called with `parallel_scenarios=true` (its default), but the
+primary Slurm rerun explicitly sets `JULIA_NUM_THREADS=1` for comparability with
+the Benders study.  The earlier diagnostic wrapper also effectively used one
+Julia thread because it did not set `JULIA_NUM_THREADS` or `--threads`.
 The implementation activates threaded scenario pricing only when both
 `parallel_scenarios=true` and `Threads.nthreads() > 1`; consequently the reported
 multi-scenario CG timings used **serial scenario pricing**.
@@ -145,23 +147,32 @@ array `19667765` contains the 72 intended tasks.
 
 ## Final completion and certification
 
-Replacement array `19667765` completed.  It produced 66 result files from 72
-tasks:
+Primary core-CG array `19672983` completed all 36 CG tasks. Direct results are
+reused from replacement array `19667765`, which produced 30 successful Direct
+results from 36 tasks. There are three seeds per `(n,p,q)` cell, so `p=16` and
+`p=32` must be reported separately rather than pooled into 6-run cells:
 
-| `n` | CG optimal/certified | Direct optimal | Direct OOM | Other failures |
-|---:|---:|---:|---:|---:|
-| 10 | 12/12 | 12/12 | 0 | 0 |
-| 15 | 12/12 | 12/12 | 0 | 0 |
-| 20 | 12/12 | 6/12 | 6 | 0 |
-| **Total** | **36/36** | **30/36** | **6** | **0** |
+| `n` | `p` | CG q=1 | CG q=3 | Direct q=1 | Direct q=3 |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 16 | 3/3 | 3/3 | 3/3 | 3/3 |
+| 10 | 32 | 3/3 | 3/3 | 3/3 | 3/3 |
+| 15 | 16 | 3/3 | 3/3 | 3/3 | 3/3 |
+| 15 | 32 | 3/3 | 3/3 | 3/3 | 3/3 |
+| 20 | 16 | 3/3 | 3/3 | 3/3 | 0/3 |
+| 20 | 32 | 3/3 | 3/3 | 3/3 | 0/3 |
+| **Total** |  | **18/18** | **18/18** | **18/18** | **12/18** |
 
-Every CG run terminated `OPTIMAL`, proved its LP bound, and required one CG
-round.  Thus the limited generation phase did not prematurely stall and restart
-in this matrix.  The six missing Direct results are exactly the six
-`n=20,q=3` cases; Slurm classified every one as `OUT_OF_MEMORY` under the stated
-16 GB limit.  There were no replacement-array timeouts or solver/harness errors.
+Every core-CG run terminated `OPTIMAL`, proved its LP bound using exact physical
+pricing, and required one CG round. Thus the limited generation phase did not
+prematurely stall and restart in this matrix.
+
+The six missing Direct results are exactly the three seeds for each
+`(n=20,p=16,q=3)` and `(n=20,p=32,q=3)` cell; all were `OUT_OF_MEMORY` under
+the stated 16 GB limit. There were no replacement-array timeouts or
+solver/harness errors.
 
 Median CG iteration counts were 34 at n=10, 36 at n=15, and 49 at n=20.
+The success counts above are per three-seed cell, not pooled across `p`.
 
 ## CG versus Direct objective validation
 
@@ -186,21 +197,29 @@ that the generated pool contained a globally optimal integer solution in these
 
 ## Runtime comparison
 
-Times below are task-internal wall times in seconds.  Direct medians use only
-successful tasks; the success count is shown to expose censoring.
+Times below are task-internal wall times in seconds. Values are arithmetic means
+over the three seeds for each `(n,p,q)` cell. Direct means use only successful
+tasks; the success count exposes censoring.
 
-| `n,q` | CG success | CG median | Direct success | Direct median | Direct / CG |
+| `n,p,q` | CG success | CG mean (s) | Direct success | Direct mean (s) | Direct / CG |
 |---:|---:|---:|---:|---:|---:|
-| 10,1 | 6/6 | 9.9 | 6/6 | 10.5 | 1.1x |
-| 10,3 | 6/6 | 12.1 | 6/6 | 24.6 | 2.0x |
-| 15,1 | 6/6 | 13.5 | 6/6 | 52.0 | 3.9x |
-| 15,3 | 6/6 | 36.5 | 6/6 | 371.9 | 10.2x |
-| 20,1 | 6/6 | 51.4 | 6/6 | 260.2 | 5.1x |
-| 20,3 | 6/6 | 206.9 | 0/6 | -- (all OOM) | -- |
+| 10,16,1 | 3/3 | 9.9 | 3/3 | 9.5 | 1.0x |
+| 10,16,3 | 3/3 | 10.9 | 3/3 | 19.0 | 1.7x |
+| 15,16,1 | 3/3 | 8.4 | 3/3 | 32.5 | 4.0x |
+| 15,16,3 | 3/3 | 15.7 | 3/3 | 330.2 | 21.0x |
+| 20,16,1 | 3/3 | 16.2 | 3/3 | 195.9 | 12.1x |
+| 20,16,3 | 3/3 | 49.9 | 0/3 | -- (all OOM) | -- |
+| 10,32,1 | 3/3 | 14.3 | 3/3 | 10.9 | 0.8x |
+| 10,32,3 | 3/3 | 18.3 | 3/3 | 28.5 | 1.6x |
+| 15,32,1 | 3/3 | 19.3 | 3/3 | 70.7 | 3.7x |
+| 15,32,3 | 3/3 | 71.3 | 3/3 | 467.9 | 6.6x |
+| 20,32,1 | 3/3 | 120.3 | 3/3 | 448.7 | 3.7x |
+| 20,32,3 | 3/3 | 484.8 | 0/3 | -- (all OOM) | -- |
 
-CG becomes increasingly favorable as scenarios and station count grow.  It is
-roughly tied with Direct at n=10,q=1, twice as fast at n=10,q=3, 4--10x faster
-at n=15, and about 5x faster for n=20,q=1.  At n=20,q=3 only CG completes.
+CG becomes increasingly favorable as scenarios and station count grow. Direct
+is slightly faster in the smallest cells, while CG's advantage reaches 21x for
+`n=15,p=16,q=3`. At `n=20,q=3`, CG completes both passenger-count regimes;
+Direct has 0/3 successful runs for either `p=16` or `p=32`.
 
 ## Memory results under the 16 GB limit
 
@@ -220,24 +239,30 @@ all corresponding cases with about one tenth of the allocation.
 
 ## Context against the nearest-open Benders study
 
-The table below places free-assignment CG medians beside the best-performing
+The table below places free-assignment CG means beside the best-performing
 nearest-open Benders configuration from the prior note, BendersYZ restricted MW.
 The data axes, route/resource limits, and 16 GB / 90-minute task limits match,
 but the assignment policies do not; these figures establish a system-level
 scaling comparison, not a controlled same-model algorithm comparison.
 
-| `n,q` | Free CG median (s) | BendersYZ MW success | BendersYZ MW median (s) | Benders / CG |
+| `n,p,q` | Core free CG mean (s) | BendersYZ MW success | BendersYZ MW mean (s) | Benders / CG |
 |---:|---:|---:|---:|---:|
-| 10,1 | 9.9 | 6/6 | 21 | 2.1x |
-| 10,3 | 12.1 | 6/6 | 29 | 2.4x |
-| 15,1 | 13.5 | 6/6 | 286 | 21.2x |
-| 15,3 | 36.5 | 6/6 | 823 | 22.5x |
-| 20,1 | 51.4 | 3/6 | 398 | 7.7x |
-| 20,3 | 206.9 | 3/6 | 3,390 | 16.4x |
+| 10,16,1 | 9.9 | 3/3 | 19.2 | 1.9x |
+| 10,16,3 | 10.9 | 3/3 | 25.4 | 2.3x |
+| 15,16,1 | 8.4 | 3/3 | 80.7 | 9.6x |
+| 15,16,3 | 15.7 | 3/3 | 200.3 | 12.8x |
+| 20,16,1 | 16.2 | 3/3 | 480.7 | 29.6x |
+| 20,16,3 | 49.9 | 3/3 | 3,383.0 | 67.8x |
+| 10,32,1 | 14.3 | 3/3 | 26.3 | 1.8x |
+| 10,32,3 | 18.3 | 3/3 | 30.2 | 1.7x |
+| 15,32,1 | 19.3 | 3/3 | 816.1 | 42.4x |
+| 15,32,3 | 71.3 | 3/3 | 1,724.0 | 24.2x |
+| 20,32,1 | 120.3 | 0/3 | -- | -- |
+| 20,32,3 | 484.8 | 0/3 | -- | -- |
 
-Free-assignment CG is faster in every cell and completes all 36 cases.  The
-largest median differences occur at n=15, where it is about 21--23x faster.
-At n=20 it is about 8--16x faster while Benders completes only half the cases.
+Free-assignment CG completes all 36 cases. It is faster in every Benders cell
+where Benders returns, and it completes all six `n=20,p=32` cases while Benders
+completes none of them. The assignment-policy caveat remains essential.
 Because nearest-open assignment imposes different structure, the defensible
 claim is:
 
@@ -252,12 +277,53 @@ problem or to compare their objective values directly.
 ## Conclusions
 
 1. New CG returned a certified optimum in 36/36 cases and needed one CG round
-   throughout the matrix.
+   throughout the matrix; every `(n,p,q)` cell is 3/3.
 2. CG and Direct objectives agree within `3.66e-8` relative error in every one
    of the 30 completed Direct pairs.
-3. Direct route enumeration becomes memory-limited: all six n=20,q=3 tasks OOM
-   at 16 GB, while CG remains below about 1.6 GB and completes.
-4. CG's median runtime advantage over Direct grows from near parity at n=10,q=1
-   to 10x at n=15,q=3; n=20,q=3 has no successful Direct comparator.
-5. Against the prior nearest-open Benders benchmark, free CG is 2--23x faster
-   by median and more reliable, with the assignment-policy caveat stated above.
+3. Direct route enumeration becomes memory-limited: all three seeds in each
+   `n=20,p=16,q=3` and `n=20,p=32,q=3` cell OOM at 16 GB, while CG completes.
+4. CG's mean runtime advantage varies by passenger count; it reaches 21x for
+   `n=15,p=16,q=3` and completes all six `n=20,p=32` cases.
+5. Against the prior nearest-open Benders benchmark, free CG completes all
+   36 cases and is faster in every Benders cell with a returned result, with
+   the assignment-policy caveat stated above.
+
+## p=32 comparison with BendersYZ restricted MW
+
+The core serial-CG array already includes all 18 p=32 cases requested here
+(n=10,15,20; seeds 42/123/999; q=1,3). The p=32-only arithmetic means are:
+
+| `n,q` | Core free CG mean (s) | BendersYZ MW p=32 success | BendersYZ MW mean (s) | Benders / CG |
+|---:|---:|---:|---:|---:|
+| 10,1 | 14.3 | 3/3 | 26.3 | 1.8x |
+| 10,3 | 18.3 | 3/3 | 30.2 | 1.7x |
+| 15,1 | 19.3 | 3/3 | 816.1 | 42.4x |
+| 15,3 | 71.3 | 3/3 | 1,724.0 | 24.2x |
+| 20,1 | 120.3 | 0/3 | -- | -- |
+| 20,3 | 484.8 | 0/3 | -- | -- |
+
+At p=32, core CG completes all 18 cases.  BendersYZ MW completes all n=10 and
+n=15 cases but none of the n=20 cases in the prior 16 GB/90-minute benchmark.
+The p=32 comparison therefore strengthens the scaling picture, while retaining
+the same assignment-policy caveat: Benders uses nearest-open assignment and CG
+uses free passenger assignment.
+
+## Core serial-CG rerun for the Benders comparison
+
+The primary tables above now use CG-only array `19672983`, which reran the same
+36 cases for the Benders comparison
+with exactly one Julia thread and the following core configuration:
+
+- `use_adaptive_cluster_certification=false`;
+- `verify_reduced_costs=false`;
+- `parallel_scenarios=true`, but `JULIA_NUM_THREADS=1`, hence serial execution;
+- `station_simple_warm_start=false`;
+- `seed_two_stop_routes=true`;
+- 100 candidates harvested and up to 100 columns added per iteration.
+
+Outputs are isolated under `results_core_serial/`; the earlier diagnostic
+results remain available for audit. The primary results are arithmetic means
+over three seeds for each `(n,p,q)` cell. The earlier pooled six-run medians
+mixed `p=16` and `p=32` and should not be used for p-specific comparisons.
+Adaptive clustering and reduced-cost verification were disabled in this core
+benchmark.

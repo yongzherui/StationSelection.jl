@@ -1,4 +1,4 @@
-# Zhuzhou n=10 common-OD MCF incremental comparison
+# Zhuzhou common-OD MCF incremental comparison
 
 ## Experiment
 
@@ -13,6 +13,10 @@ Here `q` denotes the number of demand scenarios contained in one optimization in
 instance. Under multicut Benders, `q=3` has three recourse blocks and can receive one routing cut
 per scenario in an outer iteration. It does **not** mean three independent repetitions; the three
 seeds are the independent benchmark repetitions.
+
+All result rows are therefore indexed by `(n,p,q)` and average the three seeds. A pooled `12/12`
+statement at `n=10` means four separate `(p,q)` cells, each with `3/3` success; it is not a
+12-seed cell.
 
 The five matched configurations are:
 
@@ -160,3 +164,41 @@ n—not as an improvement already demonstrated at n=10.
 - Baselines: `experiments/zhuzhou_benders_cut_scaling_ms5/` and
   `experiments/zhuzhou_branch_benders_yz_mw_no_mcf_ms5/`
 - Aggregation: `scripts/analyze_zhuzhou_mcf_increment_n10.jl`
+
+## Completed classical scaling extension: n=15 and n=20
+
+The classical common-OD array `19668469` has now drained. All twelve `n=15`
+tasks and all six `n=20, p=16` tasks completed. All six `n=20, p=32` tasks hit
+the three-hour limit without producing final result rows. There were no OOM
+failures; observed peak memory remained below the 16 GB request (maximum about
+`11.29 GiB`).
+
+Across the 30 matched completed baseline/common-OD cases (`n=10`, `n=15`, and
+`n=20,p=16`), common-OD MCF closed the final outer gap in the same `22/30` cases
+as baseline. It was faster in only `3/30`, with geometric-mean speedup `0.627x`
+(about `1.60x` slower overall), and matched the baseline incumbent in `28/30`.
+
+| n | p | scenarios | baseline wall (s) | common-OD wall (s) | speedup | baseline iterations | common-OD iterations | baseline cuts | common-OD cuts | max common-OD gap |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 16 | 1 | 19.2 | 23.2 | 0.844x | 30.3 | 28.0 | 29.3 | 27.0 | 0.000% |
+| 10 | 16 | 3 | 25.4 | 28.7 | 0.894x | 28.7 | 28.7 | 81.7 | 82.0 | 0.000% |
+| 10 | 32 | 1 | 26.3 | 43.8 | 0.623x | 30.3 | 31.7 | 29.3 | 30.7 | 0.000% |
+| 10 | 32 | 3 | 30.2 | 39.3 | 0.771x | 29.3 | 30.7 | 85.0 | 89.0 | 0.000% |
+| 15 | 16 | 1 | 80.7 | 199.1 | 0.434x | 101.0 | 77.7 | 100.0 | 76.7 | 0.000% |
+| 15 | 16 | 3 | 200.3 | 289.8 | 0.712x | 106.7 | 109.3 | 314.3 | 321.0 | 1.696% |
+| 15 | 32 | 1 | 816.1 | 3,966.9 | 0.224x | 257.3 | 267.3 | 256.3 | 266.3 | 4.858% |
+| 15 | 32 | 3 | 1,724.0 | 3,770.9 | 0.445x | 244.0 | 243.0 | 728.3 | 725.0 | 5.935% |
+| 20 | 16 | 1 | 480.7 | 715.7 | 0.872x | 217.3 | 111.3 | 216.3 | 110.3 | 0.567% |
+| 20 | 16 | 3 | 3,383.1 | 3,844.9 | 0.961x | 270.7 | 253.7 | 798.0 | 751.7 | 0.692% |
+
+`Speedup = baseline wall / common-OD wall`; values below one favor the baseline.
+The bound substantially reduced iterations for `n=20,p=16,q=1`, but its larger
+master made wall time worse. It did not rescue `n=20,p=32` within three hours.
+
+The two incumbent differences occur in non-converged `n=15,p=32` cases. For
+`seed123,q=1`, common-OD finds `26,619.9372`, exactly matching Direct enumeration
+and improving the baseline incumbent `27,046.1601`. For `seed42,q=3`, common-OD
+returns `84,856.9771`, which is `7.2` above the baseline/Direct incumbent; neither
+run closed its gap, so this is not a changed mathematical optimum.
+
+Scaling aggregation: `scripts/analyze_zhuzhou_classical_common_od_vs_baseline.jl`.
