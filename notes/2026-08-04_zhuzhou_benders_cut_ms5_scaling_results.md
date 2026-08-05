@@ -173,20 +173,20 @@ cell, counting the outer Benders master/subproblem cycles. These iteration
 counts are a descriptive work measure; they are not directly comparable to CG
 pricing iterations.
 
-| `n,p,q` | Benders success | outer iterations (mean) |
-|---|---:|---:|
-| 10,16,1 | 3/3 | 30.3 |
-| 10,16,3 | 3/3 | 28.7 |
-| 15,16,1 | 3/3 | 101.0 |
-| 15,16,3 | 3/3 | 106.7 |
-| 20,16,1 | 3/3 | 217.3 |
-| 20,16,3 | 3/3 | 270.7 |
-| 10,32,1 | 3/3 | 30.3 |
-| 10,32,3 | 3/3 | 29.3 |
-| 15,32,1 | 3/3 | 257.3 |
-| 15,32,3 | 3/3 | 244.0 |
-| 20,32,1 | 0/3 | -- |
-| 20,32,3 | 0/3 | -- |
+| `n,p,q` | Benders success | outer iterations (mean) | optimality cuts (mean) |
+|---|---:|---:|---:|
+| 10,16,1 | 3/3 | 30.3 | 29.3 |
+| 10,16,3 | 3/3 | 28.7 | 81.7 |
+| 15,16,1 | 3/3 | 101.0 | 100.0 |
+| 15,16,3 | 3/3 | 106.7 | 314.3 |
+| 20,16,1 | 3/3 | 217.3 | 216.3 |
+| 20,16,3 | 3/3 | 270.7 | 798.0 |
+| 10,32,1 | 3/3 | 30.3 | 29.3 |
+| 10,32,3 | 3/3 | 29.3 | 85.0 |
+| 15,32,1 | 3/3 | 257.3 | 256.3 |
+| 15,32,3 | 3/3 | 244.0 | 728.3 |
+| 20,32,1 | 0/3 | -- | -- |
+| 20,32,3 | 0/3 | -- | -- |
 
 ## Bound closure and objective agreement
 
