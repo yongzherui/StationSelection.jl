@@ -166,6 +166,28 @@ For the corrected p-separated view, the relevant arithmetic means are:
 These are nearest-open results and remain distinct from the free-assignment CG
 comparison.
 
+### BendersYZ--MW outer iterations
+
+The following are arithmetic means over the three seeds for each `(n,p,q)`
+cell, counting the outer Benders master/subproblem cycles. These iteration
+counts are a descriptive work measure; they are not directly comparable to CG
+pricing iterations.
+
+| `n,p,q` | Benders success | outer iterations (mean) |
+|---|---:|---:|
+| 10,16,1 | 3/3 | 30.3 |
+| 10,16,3 | 3/3 | 28.7 |
+| 15,16,1 | 3/3 | 101.0 |
+| 15,16,3 | 3/3 | 106.7 |
+| 20,16,1 | 3/3 | 217.3 |
+| 20,16,3 | 3/3 | 270.7 |
+| 10,32,1 | 3/3 | 30.3 |
+| 10,32,3 | 3/3 | 29.3 |
+| 15,32,1 | 3/3 | 257.3 |
+| 15,32,3 | 3/3 | 244.0 |
+| 20,32,1 | 0/3 | -- |
+| 20,32,3 | 0/3 | -- |
+
 ## Bound closure and objective agreement
 
 All `n=10` methods agree with Direct to floating-point precision, and every

@@ -221,6 +221,30 @@ is slightly faster in the smallest cells, while CG's advantage reaches 21x for
 `n=15,p=16,q=3`. At `n=20,q=3`, CG completes both passenger-count regimes;
 Direct has 0/3 successful runs for either `p=16` or `p=32`.
 
+### CG pricing work
+
+The `cg_iterations` field is the number of internal pricing iterations in the
+core serial run. These are arithmetic means over the three seeds; `cg_rounds`
+was 1 in every cell.
+
+| `n,p,q` | CG iterations (mean) | CG columns (mean) |
+|---|---:|---:|
+| 10,16,1 | 14.3 | -- |
+| 10,16,3 | 22.0 | -- |
+| 15,16,1 | 15.0 | -- |
+| 15,16,3 | 30.7 | -- |
+| 20,16,1 | 24.7 | -- |
+| 20,16,3 | 30.3 | -- |
+| 10,32,1 | 50.7 | -- |
+| 10,32,3 | 63.3 | -- |
+| 15,32,1 | 45.7 | -- |
+| 15,32,3 | 85.3 | -- |
+| 20,32,1 | 68.3 | -- |
+| 20,32,3 | 89.7 | -- |
+
+The column counts are available per task in the CSV outputs, but the current
+comparison reports iterations as the primary CG work measure.
+
 ## Memory results under the 16 GB limit
 
 Slurm `MaxRSS` confirms different scaling behavior:
