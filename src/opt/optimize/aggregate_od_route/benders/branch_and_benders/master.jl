@@ -266,7 +266,11 @@ function _add_branch_benders_mcf_lower_bound!(
     master, data, subproblem_model, solver, y, theta, cut_ids, requests, feasible_pairs,
 )
     mode = solver.mcf_lower_bound_mode
-    if mode == :all_scenarios
+    if mode == :none
+        # Pure Branch-and-Benders: theta is bounded only by exact-routing lazy
+        # cuts. Do not build any permanent MCF variables or constraints.
+        return (mode=mode, scenario_id=nothing, common_od_count=0)
+    elseif mode == :all_scenarios
         exprs = _build_lifted_routing_lower_bound_exprs!(
             master, data, subproblem_model, y, cut_ids, requests, feasible_pairs,
         )

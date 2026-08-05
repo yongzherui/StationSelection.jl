@@ -90,7 +90,7 @@ struct ColumnGenerationSolver <: AbstractStationSelectionSolver
         config::SolverConfig=SolverConfig(),
         max_iterations::Int=10_000,
         max_columns_per_iteration::Int=20,
-        n_candidates::Int=max_columns_per_iteration,
+        n_candidates::Int=max(100, max_columns_per_iteration),
         reduced_cost_tol::Number=1e-6,
         pricing_time_limit_sec::Number=30.0,
         final_ip_time_limit_sec::Number=3600.0,

@@ -324,7 +324,9 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         # just built, so it must be constructed after this call, not before.
         route_lb_exprs = solver.lifted_routing_lower_bound ?
             _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-            nothing
+            solver.common_od_mcf_lower_bound ?
+                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+                nothing
         route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cut_id] for cut_id in cut_ids; init=AffExpr(0.0))
         @objective(master, Min, current_beta * (sum(theta[cut_id] for cut_id in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr)
     else
@@ -334,7 +336,9 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
         )
         route_lb_exprs = solver.lifted_routing_lower_bound ?
             _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-            nothing
+            solver.common_od_mcf_lower_bound ?
+                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+                nothing
         route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cut_id] for cut_id in cut_ids; init=AffExpr(0.0))
         @objective(master, Min, sum(theta[cut_id] for cut_id in cut_ids) + route_lb_term)
     end

@@ -236,28 +236,41 @@ function _price_passenger_scenarios(
         end
     end
 
-    all_columns = PassengerFreeAssignmentRouteColumn[]
+    # Each scenario over-generates and ranks its own novel routes above.  Merge
+    # those pools, verify every reduced cost against the master convention, then
+    # impose one global column budget.  This prevents scenario order (and thread
+    # completion order) from deciding which columns enter the RMP.
+    verified_columns = PassengerFreeAssignmentRouteColumn[]
     exhausted = all(exh_by_s)
     labels_generated = sum(lab_by_s; init=0)
-    column_id = next_column_id
 
     for i in 1:n_s
         for c in cols_by_s[i]
-            renumbered = PassengerFreeAssignmentRouteColumn(
-                column_id, c.route, c.assignments, c.tau; metadata=c.metadata,
-            )
-            column_id += 1
             if verify_reduced_costs
                 ok, pricer_rc, master_rc =
-                    _verify_passenger_master_reduced_cost(renumbered, md, alpha, gamma_o, gamma_d)
+                    _verify_passenger_master_reduced_cost(c, md, alpha, gamma_o, gamma_d)
                 ok || error(
                     "passenger pricing reduced cost $(pricer_rc) disagrees with the master's " *
-                    "dual-implied $(master_rc) for column route $(renumbered.route) -- the pricer " *
+                    "dual-implied $(master_rc) for column route $(c.route) -- the pricer " *
                     "and master formulations have drifted apart",
                 )
             end
-            push!(all_columns, renumbered)
+            push!(verified_columns, c)
         end
+    end
+
+    sort!(verified_columns; by=c -> (
+        Float64(get(c.metadata, "reduced_cost", Inf)), c.tau,
+        Int(get(c.metadata, "scenario", 0)), string(c.route),
+    ))
+    resize!(verified_columns, min(length(verified_columns), max_new_columns))
+
+    all_columns = PassengerFreeAssignmentRouteColumn[]
+    for (offset, c) in enumerate(verified_columns)
+        push!(all_columns, PassengerFreeAssignmentRouteColumn(
+            next_column_id + offset - 1, c.route, c.assignments, c.tau;
+            metadata=c.metadata,
+        ))
     end
     return all_columns, exhausted, labels_generated
 end

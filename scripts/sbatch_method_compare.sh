@@ -53,8 +53,10 @@ L=$(echo          "$JOB_LINE" | cut -f3)
 N_PAIRS=$(echo    "$JOB_LINE" | cut -f4)
 SEED=$(echo       "$JOB_LINE" | cut -f5)
 METHOD=$(echo     "$JOB_LINE" | cut -f6)
+N_SCENARIOS=$(echo "$JOB_LINE" | cut -f7)
+N_SCENARIOS="${N_SCENARIOS:-3}"
 
-INST="${FAMILY}_n${N_STATIONS}_p${N_PAIRS}_s${SEED}"
+INST="${FAMILY}_n${N_STATIONS}_p${N_PAIRS}_s${SEED}_q${N_SCENARIOS}"
 
 echo "=========================================="
 echo "AggregateODRouteModel Method Comparison"
@@ -102,7 +104,7 @@ set +e
 stdbuf -o0 -e0 julia --startup-file=no \
       --project="$PROJECT_ROOT" \
       "$PROJECT_ROOT/scripts/run_method_compare_task.jl" \
-      "$BASE_OUTDIR" "$DATA_DIR" "$FAMILY" "$N_STATIONS" "$L" "$N_PAIRS" "$SEED" "$METHOD"
+      "$BASE_OUTDIR" "$DATA_DIR" "$FAMILY" "$N_STATIONS" "$L" "$N_PAIRS" "$SEED" "$METHOD" "$N_SCENARIOS"
 EXIT_CODE=$?
 set -e
 

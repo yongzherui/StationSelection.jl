@@ -1,0 +1,5 @@
+SUMMARY n=35 seed=314 scenarios=3 mode=cluster status=optimal stop=optimality_proven lp_certified=true cg_iters=26 rounds=1 columns=2673 labels=16242647 pricing_seconds=326.631285 certification_seconds=27.238178 total_seconds=358.137928 wall=373.367644
+CLUSTER attempts=3 scenario_certificates=3 certification_rounds=1 fully_certified_rounds=1 cluster_seconds=27.119306 max_clusters=26
+CLUSTER_ROW round=1 iteration=26 scenario=1 K_before=12 K_after=19 lb=0.000000000 certified=true stop=CertifiedNonnegative labels=54570 seconds=2.938186 route=25-23-19
+CLUSTER_ROW round=1 iteration=26 scenario=2 K_before=12 K_after=25 lb=-0.000000000 certified=true stop=CertifiedNonnegative labels=160558 seconds=11.249186 route=22-23-19
+CLUSTER_ROW round=1 iteration=26 scenario=3 K_before=12 K_after=26 lb=-0.000000000 certified=true stop=CertifiedNonnegative labels=182790 seconds=12.931934 route=29-25-40-31

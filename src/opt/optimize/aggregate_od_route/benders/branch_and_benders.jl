@@ -642,7 +642,9 @@ function run_opt(
                 mcf_scenario_id=something(
                     metadata["branch_benders_mcf_scenario_id"], missing,
                 ),
-                mcf_selected_scenario_id=metadata["branch_benders_mcf_selected_scenario_id"],
+                mcf_selected_scenario_id=something(
+                    metadata["branch_benders_mcf_selected_scenario_id"], missing,
+                ),
                 mcf_common_od_count=metadata["branch_benders_mcf_common_od_count"],
                 projected_mcf_separations=projected_mcf_calls[],
                 projected_mcf_cuts=projected_mcf_cuts[],

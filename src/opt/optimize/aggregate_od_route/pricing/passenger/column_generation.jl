@@ -288,7 +288,7 @@ function run_passenger_free_assignment_column_generation(
     data::StationSelectionData;
     optimizer_env=nothing,
     max_cg_iters::Int=1000,
-    n_candidates::Int=20,
+    n_candidates::Int=100,
     max_new_columns::Int=20,
     exhaustive_pricing_each_iteration::Bool=false,
     theta_rho_core_size::Int=0,
@@ -347,6 +347,14 @@ function run_passenger_free_assignment_column_generation(
     # incident assignment reward are omitted from the current pricing graph.
     use_station_reduced_cost_filter::Bool=false,
     station_reduced_cost_filter_mode::Symbol=:none,
+    # Run the adaptive station-cluster lower bound before each exhaustive exact
+    # certification pass.  A nonnegative bound for every scenario replaces that
+    # exact pass; a negative bound falls back to the unchanged exact pricer.
+    use_adaptive_cluster_certification::Bool=false,
+    cluster_initial_num_clusters::Union{Int,Nothing}=nothing,
+    cluster_max_num_clusters::Union{Int,Nothing}=nothing,
+    cluster_max_size::Union{Int,Nothing}=nothing,
+    cluster_time_limit_sec::Float64=60.0,
     unserved_penalty::Union{Float64, Nothing}=nothing,
     verify_reduced_costs::Bool=true,
     verbose::Bool=true,
@@ -358,6 +366,8 @@ function run_passenger_free_assignment_column_generation(
     ))
     max_cg_iters > 0 || throw(ArgumentError("max_cg_iters must be positive"))
     n_candidates > 0 || throw(ArgumentError("n_candidates must be positive"))
+    n_candidates >= max_new_columns ||
+        throw(ArgumentError("n_candidates must be >= max_new_columns"))
     pricing_time_limit_sec > 0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
     certification_time_limit_sec > 0 ||
         throw(ArgumentError("certification_time_limit_sec must be positive"))
@@ -412,6 +422,9 @@ function run_passenger_free_assignment_column_generation(
     theta_summary_rows = NamedTuple[]  # active/fractional/near-one theta churn
     previous_theta = Dict{Int, Float64}()
     theta_rho_subset_rows = NamedTuple[]
+    cluster_certificate_rows = NamedTuple[]
+    cluster_hierarchies = Dict{Int,StationClusterHierarchy}()
+    cluster_caches = Dict{Int,ClusterPricingCache}()
     prev_yv = nothing               # previous iteration's value.(master.y)
     solve_sequence = 0              # unique across early-return/certification solves
     current_topl = Set{Int}()
@@ -735,7 +748,55 @@ function run_passenger_free_assignment_column_generation(
         cert_budget = isfinite(total_time_limit_sec) ?
             min(certification_time_limit_sec, max(1.0, total_time_limit_sec - (time() - t_start))) :
             certification_time_limit_sec
-        cert_columns, cert_exhausted, cert_labels = _price_passenger_scenarios(
+        cluster_certified = false
+        if use_adaptive_cluster_certification
+            all_cluster_certified = true
+            for scenario in pricing_scenarios
+                candidates = passenger_free_assignment_pricing_candidates(
+                    master_data, alpha, gamma_o, gamma_d, scenario)
+                physical = create_passenger_free_assignment_pricing_data(
+                    scenario, master_data.nodes, master_data.travel_cost, candidates;
+                    route_regularization_weight=master_data.route_regularization_weight,
+                    max_wait_time=master_data.max_wait_time,
+                    repositioning_time=master_data.repositioning_time,
+                    max_stops=master_data.max_stops,
+                    max_visits_per_node=master_data.max_visits_per_node,
+                    compensated_dominance=compensated_dominance)
+                if !haskey(cluster_hierarchies, scenario)
+                    nstations=length(master_data.nodes)
+                    k0=isnothing(cluster_initial_num_clusters) ? max(2,ceil(Int,nstations/3)) : cluster_initial_num_clusters
+                    kmax=isnothing(cluster_max_num_clusters) ? nstations : cluster_max_num_clusters
+                    cfg=StationClusteringConfig(initial_num_clusters=k0,
+                        max_num_clusters=kmax,max_cluster_size=cluster_max_size,
+                        pricing_tolerance=reduced_cost_tol,time_limit=cluster_time_limit_sec)
+                    hierarchy=initial_station_clustering(master_data.travel_cost,nstations,cfg)
+                    cluster_hierarchies[scenario]=hierarchy
+                    cluster_caches[scenario]=build_cluster_pricing_cache(
+                        hierarchy,physical,candidates)
+                else
+                    refresh_cluster_rewards!(cluster_hierarchies[scenario],
+                        cluster_caches[scenario],candidates)
+                end
+                hierarchy=cluster_hierarchies[scenario]
+                cache=cluster_caches[scenario]
+                k_before=length(hierarchy.clusters)
+                ct0=time()
+                cluster_result,cluster_stop=solve_adaptive_cluster_lower_bound(hierarchy,cache)
+                cluster_seconds=time()-ct0
+                push!(cluster_certificate_rows,(
+                    round=n_rounds,iteration=n_iters,scenario=scenario,
+                    num_clusters_before=k_before,num_clusters_after=length(hierarchy.clusters),
+                    lower_bound_reduced_cost=cluster_result.lower_bound_reduced_cost,
+                    certified=cluster_result.certified_no_negative_column,
+                    stop_reason=string(cluster_stop),
+                    labels_generated=cluster_result.labels_generated,
+                    seconds=cluster_seconds,cluster_route=join(cluster_result.cluster_route,"-")))
+                all_cluster_certified &= cluster_result.certified_no_negative_column
+            end
+            cluster_certified=all_cluster_certified
+        end
+        cert_columns, cert_exhausted, cert_labels = cluster_certified ?
+            (PassengerFreeAssignmentRouteColumn[],true,0) : _price_passenger_scenarios(
             master, alpha, gamma_o, gamma_d, next_column_id;
             n_candidates=typemax(Int) ÷ 2,
             max_new_columns=typemax(Int) ÷ 2,
@@ -1015,6 +1076,8 @@ function run_passenger_free_assignment_column_generation(
             "opportunity_rho_rows" => copy(opportunity_rho_rows),
             "theta_rows" => copy(theta_rows),
             "theta_summary_rows" => copy(theta_summary_rows),
+            "adaptive_cluster_certification" => use_adaptive_cluster_certification,
+            "cluster_certificate_rows" => copy(cluster_certificate_rows),
             "exhaustive_pricing_each_iteration" => exhaustive_pricing_each_iteration,
             "theta_rho_subset_rows" => copy(theta_rho_subset_rows),
             "theta_rho_core_size" => theta_rho_core_size,

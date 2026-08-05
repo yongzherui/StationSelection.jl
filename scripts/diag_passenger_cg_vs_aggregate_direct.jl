@@ -63,6 +63,8 @@ include(joinpath(@__DIR__, "generate_zhuzhou_instance.jl"))
 
 const DATA_DIR = normpath(joinpath(@__DIR__, "..", "..", "Data", "base_data"))
 const SEED = parse(Int, get(ENV, "PFAC_SEED", "42"))
+const N_SCENARIOS = parse(Int, get(ENV, "PFAC_N_SCENARIOS", "1"))
+const USE_CLUSTER_CERT = get(ENV, "PFAC_CLUSTER_CERT", "0") in ("1","true","yes")
 const ROUTE_WEIGHT = parse(Float64, get(ENV, "PFAC_ROUTE_WEIGHT", "10.0"))
 const WALK_WEIGHT = parse(Float64, get(ENV, "PFAC_WALK_WEIGHT", "0.1"))
 const REPOSITIONING = 20.0
@@ -104,7 +106,8 @@ function main()
 
     @printf("=== passenger CG vs aggregate DirectSolver: n=%d p=%d ms=%d beta=%.3g walk=%.3g ===\n",
         n_stations, n_pairs, max_stops, ROUTE_WEIGHT, WALK_WEIGHT)
-    data, _meta = generate_zhuzhou_data(DATA_DIR, n_stations, n_pairs; n_scenarios=1, seed=SEED)
+    data, _meta = generate_zhuzhou_data(DATA_DIR, n_stations, n_pairs;
+        n_scenarios=N_SCENARIOS, seed=SEED)
     model = shared_model(n_stations, max_stops)
 
     # ── comparability guard 1: demands must all be 1 ──────────────────────────
@@ -170,9 +173,17 @@ function main()
     @printf("enumerated aggregate route columns: %d\n", n_enumerated)
     z_agg = isnothing(agg_result) ? nothing :
         (agg_result.termination_status == MOI.OPTIMAL ? agg_result.objective_value : nothing)
+    direct_stations = if isnothing(agg_result) || isnothing(z_agg)
+        Int[]
+    else
+        id_map=agg_result.mapping.array_idx_to_station_id
+        sort!([id_map[j] for j in eachindex(agg_result.model[:y])
+               if value(agg_result.model[:y][j]) > 0.5])
+    end
     @printf("AGGREGATE Direct : term=%s obj=%s wall=%.1fs\n",
         isnothing(agg_result) ? "error" : string(agg_result.termination_status),
         isnothing(z_agg) ? "-" : @sprintf("%.6f", z_agg), agg_wall)
+    println("DIRECT stations  : ",direct_stations)
     isempty(agg_err) || println("  error: $agg_err")
 
     # ── passenger free-assignment CG ──────────────────────────────────────────
@@ -181,14 +192,29 @@ function main()
         model, data; optimizer_env=GRB_ENV,
         max_cg_iters=5000, n_candidates=20, max_new_columns=20,
         pricing_time_limit_sec=120.0, certification_time_limit_sec=600.0,
-        ip_time_limit_sec=600.0, total_time_limit_sec=1800.0, verbose=false,
+        ip_time_limit_sec=600.0, total_time_limit_sec=1800.0,
+        station_simple_warm_start=false,
+        use_adaptive_cluster_certification=USE_CLUSTER_CERT,
+        cluster_initial_num_clusters=max(2,ceil(Int,n_stations/3)),
+        cluster_max_num_clusters=n_stations,cluster_time_limit_sec=300.0,
+        verbose=false,
     )
     cg_wall = time() - t1
     @printf("PASSENGER CG     : stop=%s certified=%s lp=%.6f mip=%s unserved=%d pool=%d wall=%.1fs\n",
         cg.cg_stop_reason, cg.lp_bound_certified, cg.lp_bound,
         isnothing(cg.mip_objective) ? "-" : @sprintf("%.6f", cg.mip_objective),
         length(cg.unserved_passengers), cg.n_columns, cg_wall)
+    println("CG stations      : ",cg.open_stations)
+    println("STATION SET MATCH: ",direct_stations==cg.open_stations)
     println()
+
+    if USE_CLUSTER_CERT
+        rows=get(cg.final_result.metadata,"cluster_certificate_rows",NamedTuple[])
+        @printf("CLUSTER certificates=%d/%d seconds=%.3f max_K=%d\n",
+            count(r->r.certified,rows),length(rows),
+            sum((r.seconds for r in rows);init=0.0),
+            maximum((r.num_clusters_after for r in rows);init=0))
+    end
 
     # ── comparability guard 2: no slack in use ───────────────────────────────
     ok = true

@@ -12,6 +12,7 @@ Usage:
 
 using Test
 using StationSelection
+using CSV
 using DataFrames
 using Dates
 using JuMP

@@ -59,12 +59,20 @@ struct MethodSpec
     reprice::Bool                 # benders only
     max_stops_mode::Symbol        # :ms4 | :ms3 | :uncapped
     use_station_simple::Bool      # benders/cg inner pricer: elementary-route label search vs default
+    common_od_mcf_lower_bound::Bool # classical Benders common-OD master strengthening
+    lifted_walking_objective::Bool # move exact walking cost into the Benders master
 end
 
 # Backward-compatible 6-arg constructor for every pre-existing MethodSpec(...) call site --
 # use_station_simple defaults to false (the revisit-tolerant station-age pricer, unchanged).
 MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode) =
-    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, false)
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, false, false, false)
+MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, use_station_simple) =
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, use_station_simple, false, false)
+MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode,
+           use_station_simple, common_od_mcf_lower_bound) =
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode,
+               use_station_simple, common_od_mcf_lower_bound, false)
 
 function _benders_variants(label_prefix::String, decomposition; include_mw::Bool)
     # std_noreprice (cut_derivation=:standard, reprice=false) dropped: it only ever
@@ -89,6 +97,7 @@ function _benders_variants(label_prefix::String, decomposition; include_mw::Bool
 end
 
 const METHODS = MethodSpec[
+    MethodSpec("direct_ms5",   :direct, nothing, :standard, false, :ms5),
     MethodSpec("direct_ms4",   :direct, nothing, :standard, false, :ms4),
     # direct_ms3 (max_stops=3): a cheaper fallback enumeration point kept alongside
     # direct_ms4 so Direct still has a comparison point at instance sizes where
@@ -106,6 +115,12 @@ const METHODS = MethodSpec[
     _benders_variants("bendersY",   StationSelection.BendersY();   include_mw=true)...,
     _benders_variants("bendersYZ",  StationSelection.BendersYZ();  include_mw=true)...,
     _benders_variants("bendersYZH", StationSelection.BendersYZH(); include_mw=false)...,
+    # max_stops=5 variants used by the focused synthetic-Zhuzhou scaling benchmark.
+    MethodSpec("bendersY_std_reprice_ms5", :benders, StationSelection.BendersY(), :standard, true, :ms5),
+    MethodSpec("bendersY_zerocomp_ms5", :benders, StationSelection.BendersY(), :zero_completion, false, :ms5),
+    MethodSpec("bendersY_mw_ms5", :benders, StationSelection.BendersY(), :restricted_mw_fixed_pi, false, :ms5),
+    MethodSpec("bendersYZ_std_reprice_ms5", :benders, StationSelection.BendersYZ(), :standard, true, :ms5),
+    MethodSpec("bendersYZ_zerocomp_ms5", :benders, StationSelection.BendersYZ(), :zero_completion, false, :ms5),
     # Station-simple pricer twins of BendersYZ zerocomp -- same decomposition/cut derivation/
     # max_stops_mode as their normal counterparts above, differing only in which inner-CG label
     # search prices columns (elementary station-simple vs the default revisit-tolerant
@@ -118,6 +133,10 @@ const METHODS = MethodSpec[
     # `_benders_variants` to avoid adding an ms5 variant for every other cut derivation too.
     MethodSpec("bendersYZ_mw_ms5",    :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, false),
     MethodSpec("bendersYZ_mw_ms5_ss", :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, true),
+    MethodSpec("bendersYZ_mw_common_od_ms5", :benders, StationSelection.BendersYZ(),
+               :restricted_mw_fixed_pi, false, :ms5, false, true),
+    MethodSpec("bendersYZ_mw_lifted_walking_ms5", :benders, StationSelection.BendersYZ(),
+               :restricted_mw_fixed_pi, false, :ms5, false, false, true),
 ]
 
 method_by_label(label::AbstractString) = only(filter(m -> m.label == label, METHODS))
@@ -160,7 +179,10 @@ applied at the MODEL level (AggregateODRouteModel), not baked into the input
 data, so it consistently affects every objective/dual/cut computation that
 reads walking cost (see walk_cost_weight's docstring).
 """
-function build_instance(family::AbstractString, n_stations::Int, n_pairs::Int, seed::Int, data_dir::AbstractString)
+function build_instance(
+    family::AbstractString, n_stations::Int, n_pairs::Int, seed::Int, data_dir::AbstractString;
+    n_scenarios::Int=ZZ_N_SCENARIOS,
+)
     if family == "grid"
         nx, ny = _grid_dims_for(n_stations)
         instance = generate_grid_instance(nx, ny, n_pairs; endpoint_overlap=ENDPOINT_OVERLAP, seed=seed)
@@ -170,7 +192,7 @@ function build_instance(family::AbstractString, n_stations::Int, n_pairs::Int, s
     elseif family == "zhuzhou"
         data, meta = generate_zhuzhou_data(
             data_dir, n_stations, n_pairs;
-            n_scenarios=ZZ_N_SCENARIOS, endpoint_overlap=ENDPOINT_OVERLAP, seed=seed,
+            n_scenarios=n_scenarios, endpoint_overlap=ENDPOINT_OVERLAP, seed=seed,
         )
         print_zhuzhou_data_summary(data, meta)
         return data, 600.0

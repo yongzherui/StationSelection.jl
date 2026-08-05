@@ -223,6 +223,21 @@
             data, model,
             branch_solver(BendersYZ(); cut_derivation=:restricted_mw_fixed_pi),
         )
+        no_mcf_log_dir = mktempdir()
+        result_yz_mw_no_mcf = run_opt(
+            data, model,
+            BranchAndBendersSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
+                decomposition=BendersYZ(), cut_derivation=:restricted_mw_fixed_pi,
+                inner_solver=ColumnGenerationSolver(
+                    config=SolverConfig(silent=true, mip_gap=0.0),
+                    max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
+                    final_ip_time_limit_sec=30.0,
+                ),
+                mcf_lower_bound_mode=:none, projected_mcf_user_cuts=false,
+                log_dir=no_mcf_log_dir,
+            ),
+        )
         result_yz_single_mcf = run_opt(
             data, model,
             branch_solver(BendersYZ(); mcf_mode=:single_scenario),
@@ -242,6 +257,16 @@
         @test result_yz_mw.termination_status == MOI.OPTIMAL
         @test isapprox(result_y.objective_value, result_yz.objective_value; atol=1e-6)
         @test isapprox(result_yz_mw.objective_value, result_yz.objective_value; atol=1e-6)
+        @test isapprox(result_yz_mw_no_mcf.objective_value, result_yz.objective_value; atol=1e-6)
+        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_lower_bound_mode"] == "none"
+        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_selected_scenario_id"] === nothing
+        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_common_od_count"] == 0
+        @test result_yz_mw_no_mcf.metadata["branch_benders_projected_mcf_cuts"] == 0
+        @test isfile(joinpath(no_mcf_log_dir, "aggregate_od_route_branch_benders_summary.csv"))
+        no_mcf_summary = CSV.read(
+            joinpath(no_mcf_log_dir, "aggregate_od_route_branch_benders_summary.csv"), DataFrame,
+        )
+        @test ismissing(no_mcf_summary.mcf_selected_scenario_id[1])
         @test isapprox(result_yz_single_mcf.objective_value, result_yz.objective_value; atol=1e-6)
         @test isapprox(result_yz_common_mcf.objective_value, result_yz.objective_value; atol=1e-6)
         @test isapprox(result_yz_projected_mcf.objective_value, result_yz.objective_value; atol=1e-6)
@@ -264,6 +289,9 @@
             decomposition=BendersY(), cut_derivation=:restricted_mw_fixed_pi,
         )
         @test_throws ArgumentError BranchAndBendersSolver(mcf_lower_bound_mode=:unknown)
+        @test_throws ArgumentError BranchAndBendersSolver(
+            mcf_lower_bound_mode=:none, projected_mcf_user_cuts=true,
+        )
         @test result_y.metadata["branch_benders_open_stations"] ==
               result_yz.metadata["branch_benders_open_stations"]
         @test isapprox(

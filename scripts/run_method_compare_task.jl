@@ -72,7 +72,7 @@ include(joinpath(@__DIR__, "aggregate_od_route_method_grid.jl"))
 if _RUN_AS_MAIN
     length(ARGS) >= 8 || error(
         "Usage: run_method_compare_task.jl <base_outdir> <data_dir> <family> " *
-        "<n_stations> <l> <n_pairs> <seed> <method_label>"
+        "<n_stations> <l> <n_pairs> <seed> <method_label> [n_scenarios]"
     )
 
     const BASE_OUTDIR  = ARGS[1]
@@ -83,6 +83,7 @@ if _RUN_AS_MAIN
     const N_PAIRS      = parse(Int, ARGS[6])
     const SEED         = parse(Int, ARGS[7])
     const METHOD_LABEL = ARGS[8]
+    const N_SCENARIOS  = length(ARGS) >= 9 ? parse(Int, ARGS[9]) : ZZ_N_SCENARIOS
 
     const CFG = (
         # 1e-4 matches the relative-mismatch tolerance analyze_method_compare.jl uses
@@ -106,7 +107,7 @@ if _RUN_AS_MAIN
         repositioning_time  = parse(Float64, get(ENV, "CS_REPOSITIONING_TIME",  "20.0")),
     )
 
-    const INST_NAME    = "$(FAMILY)_n$(N_STATIONS)_p$(N_PAIRS)_s$(SEED)"
+    const INST_NAME    = "$(FAMILY)_n$(N_STATIONS)_p$(N_PAIRS)_s$(SEED)_q$(N_SCENARIOS)"
     const RESULTS_DIR  = joinpath(BASE_OUTDIR, "results")
     const ITERS_DIR    = joinpath(BASE_OUTDIR, "iters")
     const SUMMARY_PATH = joinpath(RESULTS_DIR, "$(INST_NAME)__$(METHOD_LABEL).csv")
@@ -228,6 +229,13 @@ function build_solver(method::MethodSpec, cfg::NamedTuple, log_dir::String)
             reprice_subproblem=method.reprice,
             max_reprice_rounds=cfg.max_reprice_rounds,
             cut_derivation=method.cut_derivation,
+            # Use only the fixed-route NearestOpenPolicy cuts. Keep every optional
+            # guidance and lower-bound mechanism explicitly disabled.
+            lifted_walking_objective=method.lifted_walking_objective,
+            route_regularization_weight_schedule=nothing,
+            lifted_routing_lower_bound=false,
+            common_od_mcf_lower_bound=method.common_od_mcf_lower_bound,
+            direct_enumeration_guide=false,
         )
     else
         error("unknown method.kind=$(method.kind)")
@@ -253,7 +261,9 @@ function main()
                     # can appear wildly out of order in the log, making a slow-but-alive run look
                     # like it hung before even starting.
 
-    data, max_walk = build_instance(FAMILY, N_STATIONS, N_PAIRS, SEED, DATA_DIR)
+    data, max_walk = build_instance(
+        FAMILY, N_STATIONS, N_PAIRS, SEED, DATA_DIR; n_scenarios=N_SCENARIOS,
+    )
     L <= data.n_stations || error("l=$L exceeds n_stations=$(data.n_stations)")
     model = build_model(L, max_stops, max_walk, CFG; use_station_simple=method.use_station_simple)
 
@@ -272,6 +282,17 @@ function main()
         @warn "$METHOD_LABEL failed on $INST_NAME" exception=(err, catch_backtrace())
     end
     wall_time = time() - t0
+
+    # Nearest-open Benders masters eagerly enforce endpoint coverage, so these
+    # runs must never need reactive feasibility cuts. Let focused experiments
+    # turn that structural guarantee into a hard run-time assertion.
+    if method.kind == :benders && !isnothing(result) &&
+            lowercase(get(ENV, "CS_REQUIRE_ZERO_FEASIBILITY_CUTS", "false")) in ("1", "true", "yes")
+        n_feasibility_cuts = get(result.metadata, "feasibility_cuts_added", 0)
+        n_feasibility_cuts == 0 || error(
+            "$METHOD_LABEL on $INST_NAME unexpectedly added $n_feasibility_cuts feasibility cuts",
+        )
+    end
 
     selected_stations = Int[]
     if !isnothing(result)
@@ -312,6 +333,7 @@ function main()
         l                  = L,
         n_pairs            = N_PAIRS,
         seed               = SEED,
+        n_scenarios        = N_SCENARIOS,
         method             = METHOD_LABEL,
         kind               = string(method.kind),
         decomposition      = method.kind == :benders ? string(typeof(method.decomposition)) : "",
@@ -320,6 +342,8 @@ function main()
         max_stops_mode     = string(method.max_stops_mode),
         max_stops          = max_stops,
         use_station_simple = method.use_station_simple,
+        common_od_mcf_lower_bound = method.common_od_mcf_lower_bound,
+        lifted_walking_objective = method.lifted_walking_objective,
         status             = status,
         termination_status = isnothing(result) ? "" : string(result.termination_status),
         objective_value    = isnothing(result) || isnothing(result.objective_value) ? "" : string(result.objective_value),
@@ -327,6 +351,8 @@ function main()
         runtime_sec        = isnothing(result) ? "" : string(result.runtime_sec),
         n_iterations       = n_iterations,
         inner_cg_iterations = inner_cg_iterations,
+        feasibility_cuts_added = isnothing(result) ? "" : string(get(result.metadata, "feasibility_cuts_added", "")),
+        optimality_cuts_added = isnothing(result) ? "" : string(get(result.metadata, "optimality_cuts_added", "")),
         final_lower_bound  = final_lower_bound,
         final_outer_gap    = final_outer_gap,
         n_stations_selected = length(selected_stations),

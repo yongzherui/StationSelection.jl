@@ -179,3 +179,30 @@ function _build_lifted_routing_lower_bound_exprs!(
     end
     return route_lb_exprs
 end
+
+"""Build one common-OD MCF bound and expose it per scenario for residual Benders cuts."""
+function _build_common_od_mcf_lower_bound_exprs!(
+    master::Model,
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    y,
+    cut_ids::Vector{Int},
+    requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+)::Dict{Int, AffExpr}
+    od_sets = [Set((o, d) for (s, o, d) in requests if s == cut_id) for cut_id in cut_ids]
+    common_ods = isempty(od_sets) ? Set{Tuple{Int, Int}}() : intersect(od_sets...)
+    representative = first(cut_ids)
+    common_requests = [
+        request for request in requests
+        if request[1] == representative && (request[2], request[3]) in common_ods
+    ]
+    common_expr = isempty(common_requests) ? AffExpr(0.0) :
+        _build_lifted_routing_lower_bound_exprs!(
+            master, data, subproblem_model, y, [representative], common_requests, feasible_pairs,
+        )[representative]
+    # L_common(y) <= Q_s(y) for every scenario s. Classical Benders therefore
+    # uses theta_s as the residual Q_s-L_common, exactly as the full lifted MCF
+    # mode uses theta_s as Q_s-L_s.
+    return Dict(cut_id => common_expr for cut_id in cut_ids)
+end

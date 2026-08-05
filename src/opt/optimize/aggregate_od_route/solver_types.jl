@@ -278,6 +278,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
     lifted_walking_objective::Bool
     route_regularization_weight_schedule::Union{Nothing, Vector{Float64}}
     lifted_routing_lower_bound::Bool
+    common_od_mcf_lower_bound::Bool
     direct_enumeration_guide::Bool
     direct_enumeration_max_routes::Int
     direct_enumeration_time_limit_sec::Float64
@@ -289,11 +290,11 @@ struct BendersSolver <: AbstractStationSelectionSolver
         decomposition::AbstractBendersDecomposition=BendersY(),
         cut_mode::AbstractBendersCutMode=MultiCut(),
         inner_solver::Union{ColumnGenerationSolver, DirectSolver, Nothing}=nothing,
-        max_iterations::Int=10_000,
+        max_iterations::Int=2_000,
         optimality_tol::Union{Number, Nothing}=nothing,
         reduced_cost_tol::Union{Number, Nothing}=nothing,
         max_columns_per_iteration::Int=20,
-        n_candidates::Int=max_columns_per_iteration,
+        n_candidates::Int=max(100, max_columns_per_iteration),
         pricing_time_limit_sec::Number=30.0,
         final_ip_time_limit_sec::Number=3600.0,
         log_dir::Union{AbstractString, Nothing}=nothing,
@@ -303,9 +304,10 @@ struct BendersSolver <: AbstractStationSelectionSolver
         max_reprice_rounds::Int=10_000,
         cut_derivation::Symbol=:zero_completion,
         outer_gap_warning_tol::Number=0.03,
-        lifted_walking_objective::Bool=false,
+        lifted_walking_objective::Union{Bool, Nothing}=nothing,
         route_regularization_weight_schedule::Union{AbstractVector{<:Number}, Nothing}=nothing,
         lifted_routing_lower_bound::Bool=false,
+        common_od_mcf_lower_bound::Bool=false,
         direct_enumeration_guide::Bool=false,
         direct_enumeration_max_routes::Int=10_000,
         direct_enumeration_time_limit_sec::Number=30.0,
@@ -320,7 +322,9 @@ struct BendersSolver <: AbstractStationSelectionSolver
             "BendersYZH has no free dual block left to optimize once h is fixed fully -- " *
             "cut_derivation=:restricted_mw_fixed_pi would coincide exactly with :zero_completion; use that instead"
         ))
-        lifted_walking_objective && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
+        resolved_lifted_walking = isnothing(lifted_walking_objective) ?
+            decomposition isa Union{BendersY, BendersYZ} : lifted_walking_objective
+        resolved_lifted_walking && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
             "lifted_walking_objective is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
             "got $(typeof(decomposition))"
         ))
@@ -338,7 +342,16 @@ struct BendersSolver <: AbstractStationSelectionSolver
             "indexed one-per-scenario there, matching the arc-flow relaxation computed one-per-scenario; " *
             "got $(typeof(cut_mode))"
         ))
-        direct_enumeration_guide && !lifted_walking_objective && throw(ArgumentError(
+        common_od_mcf_lower_bound && !(decomposition isa BendersYZ) && throw(ArgumentError(
+            "common_od_mcf_lower_bound is only supported for decomposition isa BendersYZ"
+        ))
+        common_od_mcf_lower_bound && !(cut_mode isa MultiCut) && throw(ArgumentError(
+            "common_od_mcf_lower_bound is only supported for cut_mode isa MultiCut"
+        ))
+        common_od_mcf_lower_bound && lifted_routing_lower_bound && throw(ArgumentError(
+            "choose either common_od_mcf_lower_bound or lifted_routing_lower_bound, not both"
+        ))
+        direct_enumeration_guide && !resolved_lifted_walking && throw(ArgumentError(
             "direct_enumeration_guide requires lifted_walking_objective=true -- the exact enumerated " *
             "routing-cost term only makes sense against the same unit-weighted, x-linked master " *
             "structure lifted_walking_objective builds"
@@ -355,7 +368,7 @@ struct BendersSolver <: AbstractStationSelectionSolver
         resolved_schedule = isnothing(route_regularization_weight_schedule) ?
             nothing : Float64.(route_regularization_weight_schedule)
         if !isnothing(resolved_schedule)
-            lifted_walking_objective || throw(ArgumentError(
+            resolved_lifted_walking || throw(ArgumentError(
                 "route_regularization_weight_schedule requires lifted_walking_objective=true -- " *
                 "cuts are only guaranteed valid across route_regularization_weight values in that mode"
             ))
@@ -400,9 +413,10 @@ struct BendersSolver <: AbstractStationSelectionSolver
             max_reprice_rounds,
             cut_derivation,
             resolved_outer_gap_warning_tol,
-            lifted_walking_objective,
+            resolved_lifted_walking,
             resolved_schedule,
             lifted_routing_lower_bound,
+            common_od_mcf_lower_bound,
             direct_enumeration_guide,
             direct_enumeration_max_routes,
             Float64(direct_enumeration_time_limit_sec),
@@ -441,7 +455,7 @@ function BranchBendersCut(
     )
 end
 
-"""Single-tree branch-and-Benders solver strengthened by the MCF routing bound."""
+"""Single-tree branch-and-Benders solver, optionally strengthened by an MCF routing bound."""
 struct BranchAndBendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     decomposition::Union{BendersY, BendersYZ}
@@ -490,10 +504,13 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
         decomposition isa BendersY && cut_derivation != :standard && throw(ArgumentError(
             "BranchAndBendersSolver restricted MW integration currently supports BendersYZ only"
         ))
-        mcf_lower_bound_mode in (:all_scenarios, :single_scenario, :common_od_scaled) ||
+        mcf_lower_bound_mode in (:none, :all_scenarios, :single_scenario, :common_od_scaled) ||
             throw(ArgumentError(
-                "mcf_lower_bound_mode must be :all_scenarios, :single_scenario, or :common_od_scaled",
+                "mcf_lower_bound_mode must be :none, :all_scenarios, :single_scenario, or :common_od_scaled",
             ))
+        mcf_lower_bound_mode == :none && projected_mcf_user_cuts && throw(ArgumentError(
+            "projected_mcf_user_cuts requires an MCF lower-bound mode; use projected_mcf_user_cuts=false with mcf_lower_bound_mode=:none",
+        ))
         !isnothing(mcf_scenario_id) && mcf_scenario_id <= 0 &&
             throw(ArgumentError("mcf_scenario_id must be positive"))
         projected_mcf_max_separations >= 0 || throw(ArgumentError(

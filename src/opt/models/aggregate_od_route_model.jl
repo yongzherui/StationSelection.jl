@@ -136,7 +136,7 @@ struct AggregateODRouteModel <: AbstractODModel
             max_stops::Union{Nothing, Int}=nothing,
             max_visits_per_node::Int=typemax(Int),
             max_new_columns::Int=20,
-            n_candidates::Int=max_new_columns,
+            n_candidates::Int=max(100, max_new_columns),
             pricing_time_limit_sec::Number=30.0,
             reduced_cost_tol::Number=1e-6,
             initial_columns::Union{Nothing, Vector{AggregateODRouteColumn}}=nothing,

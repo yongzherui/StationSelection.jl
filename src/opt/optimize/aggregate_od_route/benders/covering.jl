@@ -176,18 +176,9 @@ function run_opt(
     formulation::AggregateODRouteModel,
     solver::DirectSolver,
 )
-    formulation.assignment_policy isa NearestOpenAggregateODAssignmentPolicy ||
-        return _run_opt_impl(
-            formulation,
-            instance;
-            optimizer_env=solver.config.optimizer_env,
-            silent=solver.config.silent,
-            show_counts=solver.config.show_counts,
-            do_optimize=solver.config.do_optimize,
-            warm_start=solver.config.warm_start,
-            check_feasibility=solver.config.check_feasibility,
-            mip_gap=solver.config.mip_gap,
-        )
+    # DirectSolver always means exhaustive route enumeration followed by the
+    # monolithic solve.  Free assignment keeps its explicit x assignment
+    # variables; only the complete theta route universe is supplied here.
     return _run_direct_enumerated_aggregate_od_route(instance, formulation, solver)
 end
 
