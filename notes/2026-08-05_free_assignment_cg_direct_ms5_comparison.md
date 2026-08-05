@@ -37,6 +37,71 @@ fallback.  Direct exhaustively enumerates the physical route universe and then
 solves the monolithic free-assignment model with explicit station-selection,
 passenger-assignment, and route variables.
 
+## Passenger free-assignment column reformulation
+
+The monolithic Direct model contains physical passenger assignment variables
+`x[p,j,k]` in addition to station variables `y[j]` and route-use variables.  The
+passenger column-generation model applies a Dantzig--Wolfe reformulation: each
+route column `r` contains both a physical route and its passenger assignments.
+Consequently the ordinary `x[p,j,k]` variables disappear from the generated
+master.  Its core decisions are:
+
+- `y[j]`: whether physical station `j` is selected;
+- `lambda[r]` (called `theta[r]` in code): whether passenger-assignment route
+  column `r` is used.
+
+For a column `r`, let `a[r,p]` indicate that it serves passenger `p`, and let
+`aO[r,p,j]` and `aD[r,p,k]` identify its pickup and dropoff stations.  The core
+master is
+
+```text
+min  sum_r c_r lambda_r
+
+s.t. sum_r a[r,p] lambda_r                         >= 1       for each p
+     sum_r aO[r,p,j] lambda_r                      <= y_j     for each p,j
+     sum_r aD[r,p,k] lambda_r                      <= y_k     for each p,k
+     sum_j y_j                                      = l
+     y binary, lambda >= 0 (binary in the final restricted-master MIP).
+```
+
+Here `c_r` includes route/repositioning cost and the walking cost of the
+passenger assignments embedded in the column.  Thus the station-pair assignment
+choice is priced jointly with routing rather than retained as a separate master
+variable block.
+
+Two small auxiliary blocks are required in the implemented exact formulation:
+`v[p]` keeps an initially empty restricted master feasible with a dominated
+unserved penalty, and `x_same[p,j]` represents the special no-vehicle case where
+pickup and dropoff use the same station.  Therefore “only y and lambda” is an
+accurate description of the generated routing/assignment core, but the literal
+implementation is `(y, lambda, v, x_same)`.  Ordinary `x[p,j,k]` variables for
+`j != k` are fully absorbed into `lambda` columns.
+
+The reduced cost is
+
+```text
+rc_r = beta * (tau_r + repositioning)
+       - sum_p (alpha_p - gammaO[p,j(r,p)] - gammaD[p,k(r,p)] - walk[p,j,k]),
+```
+
+which is the joint passenger-assignment-and-routing problem solved by the label
+setting pricer.
+
+## Multi-scenario parallelism in this benchmark
+
+The code path was called with `parallel_scenarios=true` (its default), but the
+replacement Slurm wrapper did not set `JULIA_NUM_THREADS` and did not launch
+Julia with `--threads`.  The loaded Julia module defaults to one Julia thread.
+The implementation activates threaded scenario pricing only when both
+`parallel_scenarios=true` and `Threads.nthreads() > 1`; consequently the reported
+multi-scenario CG timings used **serial scenario pricing**.
+
+Log lines such as `Threads : 30` are emitted by Gurobi and do not establish
+Julia pricing parallelism.  Future parallel benchmarks must explicitly use, for
+example, `JULIA_NUM_THREADS=$SLURM_CPUS_PER_TASK` (the jobs request four CPUs) or
+`julia --threads=$SLURM_CPUS_PER_TASK`, and must log `Threads.nthreads()` in each
+result.  The current timings must not be labeled as the parallelized variation.
+
 ## Validation criteria
 
 For every matched CG/Direct case, record:
