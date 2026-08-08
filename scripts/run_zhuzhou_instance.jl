@@ -17,7 +17,7 @@ Arguments:
     endpoint_overlap  Zipf exponent for demand concentration (higher → more hub-like)
     seed              random seed for OD pair sampling
 
-Output:
+Output (via scripts/lib/aggregate_od_route_run_instance.jl):
     <base_outdir>/results/<instance>.csv
     <base_outdir>/iters/<instance>_iters.csv
     <base_outdir>/columns/<instance>_columns.csv
@@ -41,6 +41,9 @@ Environment variables (with defaults):
 """
 
 using CSV, DataFrames, Dates, Printf, StationSelection
+
+include(joinpath(@__DIR__, "lib", "aggregate_od_route_run_instance.jl"))
+include(joinpath(@__DIR__, "generate_zhuzhou_instance.jl"))
 
 const _RUN_AS_MAIN = abspath(PROGRAM_FILE) == @__FILE__
 
@@ -72,20 +75,9 @@ if _RUN_AS_MAIN
     const ROUTE_REG_WEIGHT   = parse(Float64, get(ENV, "CS_ROUTE_REG_WEIGHT",   "1.0"))
     const REPOSITIONING_TIME = parse(Float64, get(ENV, "CS_REPOSITIONING_TIME", "20.0"))
     ov_str = replace(string(ENDPOINT_OVERLAP), "." => "p")
-    const INST_NAME    = "zz_n$(N_STATIONS)_l$(L)_p$(N_PAIRS)_ov$(ov_str)_s$(SEED)"
-    const RESULTS_DIR  = joinpath(BASE_OUTDIR, "results")
-    const ITERS_DIR    = joinpath(BASE_OUTDIR, "iters")
-    const COLUMNS_DIR  = joinpath(BASE_OUTDIR, "columns")
-    const DUALS_DIR    = joinpath(BASE_OUTDIR, "duals")
-    const SELECTED_DIR = joinpath(BASE_OUTDIR, "selected")
-    const CSV_PATH      = joinpath(RESULTS_DIR,  "$(INST_NAME).csv")
-    const ITER_PATH     = joinpath(ITERS_DIR,    "$(INST_NAME)_iters.csv")
-    const COLUMN_PATH   = joinpath(COLUMNS_DIR,  "$(INST_NAME)_columns.csv")
-    const DUAL_PATH     = joinpath(DUALS_DIR,    "$(INST_NAME)_duals.csv")
-    const SELECTED_PATH = joinpath(SELECTED_DIR, "$(INST_NAME)_selected.csv")
+    const INST_NAME = "zz_n$(N_STATIONS)_l$(L)_p$(N_PAIRS)_ov$(ov_str)_s$(SEED)"
+    const PATHS     = aor_instance_paths(BASE_OUTDIR, INST_NAME)
 end
-
-include(joinpath(@__DIR__, "generate_zhuzhou_instance.jl"))
 
 function _zz_resolve_max_walking_distance(
     data     :: StationSelectionData,
@@ -100,42 +92,9 @@ function _zz_resolve_max_walking_distance(
     return parse(Float64, env_val)
 end
 
-function _write_namedtuple_rows(path::AbstractString, rows::Vector{<:NamedTuple})
-    df = isempty(rows) ? DataFrame() : DataFrame(rows)
-    CSV.write(path, df)
-end
-
-function _write_summary(path::AbstractString, row::NamedTuple)
-    CSV.write(path, DataFrame([row]))
-end
-
-function _write_selected_columns(
-    path   :: AbstractString,
-    result :: AggregateODRouteColumnGenerationResult,
-)
-    column_by_id = Dict(col.id => col for col in result.final_result.mapping.columns)
-    rows = NamedTuple[]
-    for column_id in result.selected_column_ids
-        col = get(column_by_id, column_id, nothing)
-        col === nothing && continue
-        push!(rows, (
-            column_id = col.id,
-            n_pairs   = length(col.od_pairs),
-            tau       = col.tau,
-            metadata  = string(col.metadata),
-            pairs     = string(Tuple(col.od_pairs)),
-        ))
-    end
-    _write_namedtuple_rows(path, rows)
-end
-
 function main()
-    mkpath.((RESULTS_DIR, ITERS_DIR, COLUMNS_DIR, DUALS_DIR, SELECTED_DIR))
-
-    if isfile(CSV_PATH) && countlines(CSV_PATH) >= 2
-        println("=== Skipping $INST_NAME — result already exists ===")
-        return
-    end
+    isfile(PATHS.csv_path) && countlines(PATHS.csv_path) >= 2 &&
+        (println("=== Skipping $INST_NAME — result already exists ==="); return)
 
     println("===========================================")
     println("AggregateODRouteModel — Zhuzhou Experiment")
@@ -168,12 +127,13 @@ function main()
     @printf("  Max stops        : %d\n", max_stops)
     println()
 
-    _model_kwargs = (
+    model = AggregateODRouteModel(
+        L;
         route_regularization_weight = ROUTE_REG_WEIGHT,
         repositioning_time          = REPOSITIONING_TIME,
         max_walking_distance        = max_walking_distance,
         max_wait_time               = MAX_WAIT_TIME,
-        detour_factor               = DETOUR_FACTOR,
+        detour_factor                 = DETOUR_FACTOR,
         max_stops                   = max_stops,
         max_visits_per_node         = 2,
         max_new_columns             = MAX_NEW_COLS,
@@ -181,82 +141,23 @@ function main()
         pricing_time_limit_sec      = PRICING_TIME,
         relax_integrality           = false,
     )
-    model = AggregateODRouteModel(L; _model_kwargs...)
 
-    t0 = time()
-    result = run_aggregate_od_route_column_generation(
-        model,
-        data;
-        verbose                = false,
-        cg_log_path            = ITER_PATH,
-        column_log_path        = COLUMN_PATH,
-        dual_log_path          = DUAL_PATH,
-        max_cg_iters           = MAX_CG_ITERS,
-        max_new_columns        = MAX_NEW_COLS,
-        n_candidates           = max(MAX_NEW_COLS, 20),
-        reduced_cost_tol       = 1e-6,
-        pricing_time_limit_sec = PRICING_TIME,
-        ip_time_limit_sec      = IP_TIME_LIMIT,
-        mip_gap                = MIP_GAP,
-        silent                 = true,
+    aor_run_and_report(
+        INST_NAME, PATHS, model, data;
+        max_cg_iters=MAX_CG_ITERS, max_new_cols=MAX_NEW_COLS, pricing_time=PRICING_TIME,
+        ip_time_limit=IP_TIME_LIMIT, mip_gap=MIP_GAP,
+        extra_summary_fields=(
+            model_type="AggregateODRouteModel",
+            n_stations=meta.n_stations_actual, l=L, n_scenarios=meta.n_scenarios_actual,
+            n_pairs_requested=N_PAIRS, n_pairs_actual=sum(meta.pairs_per_scenario),
+            endpoint_overlap=ENDPOINT_OVERLAP, seed=SEED,
+            max_walking_distance=max_walking_distance, max_wait_time=MAX_WAIT_TIME,
+            detour_factor=DETOUR_FACTOR, max_stops=max_stops,
+            route_reg_weight=ROUTE_REG_WEIGHT, repositioning_time=REPOSITIONING_TIME,
+        ),
     )
-    wall_time = time() - t0
-
-    ip_obj  = result.final_result.objective_value
-    lp_bnd  = result.lp_bound
-    gap_pct = if !isnothing(ip_obj) && isfinite(ip_obj) && isfinite(lp_bnd) && ip_obj > 1e-10
-        100.0 * (ip_obj - lp_bnd) / ip_obj
-    else
-        NaN
-    end
-
-    @printf("  Status           : %s\n", result.status)
-    @printf("  IP objective     : %s\n", isnothing(ip_obj) ? "n/a" : @sprintf("%.4f", ip_obj))
-    @printf("  LP bound         : %s\n", isfinite(lp_bnd) ? @sprintf("%.4f", lp_bnd) : "n/a")
-    @printf("  Gap %%            : %s\n", isnan(gap_pct) ? "n/a" : @sprintf("%.2f%%", gap_pct))
-    @printf("  CG iters         : %d  (%s)\n", result.n_cg_iters, result.cg_stop_reason)
-    @printf("  Wall time        : %.1fs\n", wall_time)
-    println()
-
-    summary_row = (
-        instance             = INST_NAME,
-        model_type           = "AggregateODRouteModel",
-        n_stations           = meta.n_stations_actual,
-        l                    = L,
-        n_scenarios          = meta.n_scenarios_actual,
-        n_pairs_requested    = N_PAIRS,
-        n_pairs_actual       = sum(meta.pairs_per_scenario),
-        endpoint_overlap     = ENDPOINT_OVERLAP,
-        seed                 = SEED,
-        max_walking_distance = max_walking_distance,
-        max_wait_time        = MAX_WAIT_TIME,
-        detour_factor        = DETOUR_FACTOR,
-        max_stops            = max_stops,
-        route_reg_weight     = ROUTE_REG_WEIGHT,
-        repositioning_time   = REPOSITIONING_TIME,
-        status               = string(result.status),
-        termination_status   = string(result.final_result.termination_status),
-        ip_objective         = isnothing(ip_obj) ? "" : string(ip_obj),
-        lp_bound             = string(lp_bnd),
-        integrality_gap_pct  = isnan(gap_pct) ? "" : string(gap_pct),
-        n_cg_iters           = result.n_cg_iters,
-        cg_stop_reason       = string(result.cg_stop_reason),
-        n_generated_columns  = length(result.generated_columns),
-        n_selected_columns   = length(result.selected_column_ids),
-        wall_time_sec        = wall_time,
-    )
-    _write_summary(CSV_PATH, summary_row)
-    _write_namedtuple_rows(COLUMN_PATH, result.column_log_rows)
-    _write_namedtuple_rows(DUAL_PATH, result.dual_log_rows)
-    _write_selected_columns(SELECTED_PATH, result)
-
-    println("Written: $CSV_PATH")
-    println("Written: $ITER_PATH")
-    println("Written: $COLUMN_PATH")
-    println("Written: $DUAL_PATH")
-    println("Written: $SELECTED_PATH")
 end
 
-if abspath(PROGRAM_FILE) == @__FILE__
+if _RUN_AS_MAIN
     main()
 end

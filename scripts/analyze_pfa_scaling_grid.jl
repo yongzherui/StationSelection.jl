@@ -1,8 +1,10 @@
 """
     scripts/analyze_pfa_scaling_grid.jl
 
-Aggregate the (n_stations x n_pairs) scaling grid produced by
-`scripts/sbatch_pfa_scaling_grid.sh` and fit how solve time scales.
+Aggregate the (n_stations x n_pairs) scaling grid produced by an array of
+`scripts/passenger_free_assignment_cg_scaling.jl` runs (via
+`scripts/sbatch_passenger_free_assignment_cg_scaling.sh`) and fit how solve
+time scales.
 
 Each array cell writes its own `combined_results.csv`; this collects them into
 one table, prints wall-time and label-count grids, and fits a power law

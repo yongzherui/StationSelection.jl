@@ -75,7 +75,7 @@ winning route. What it changed was the cost of the scan:
     (`_make_passenger_free_assignment_label_bitsets`).
 
 Measured census over 456M tested pairs
-(`scripts/audit_pfa_dominance_conditions.jl`): 48% of pairs are rejected on
+(`julia scripts/diagnose.jl dominance_audit`): 48% of pairs are rejected on
 `time`, a further 39-44% on the support mask, 7-9% on the support size. Under 2%
 ever reach the station-age walk and under 0.5% the reward compensation -- which is
 why the order of these conditions is worth this much.
@@ -559,7 +559,7 @@ production search never sets; with `Instrumented = false` the increments are
 constant-folded away, so an uninstrumented scan pays nothing for their existence.
 Ordering the conditions cheapest-and-likeliest-to-reject first is only meaningful
 against measured rejection rates, and this is where those come from -- see
-`scripts/audit_pfa_dominance_conditions.jl`.
+`julia scripts/diagnose.jl dominance_audit`.
 """
 const PFA_DOMINANCE_CONDITIONS = (
     :time, :live_clock_support, :route_length, :visited_mask,
@@ -615,7 +615,7 @@ leverage; the rest is a few instructions. Every condition is exact, so no
 ordering here can change *which* pairs dominate -- only how much work is done to
 find out.
 
-MEASURED (`scripts/audit_pfa_dominance_conditions.jl`, share of all tested pairs
+MEASURED (`julia scripts/diagnose.jl dominance_audit`, share of all tested pairs
 each condition is the *first* to reject; n=15/ms=6/s=3 and n=20/ms=5/s=3):
 
 | condition | rejects |

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=zz_scaling
+#SBATCH --job-name=zz_instance
 #SBATCH --partition=mit_preemptable
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -11,11 +11,13 @@
 
 set -euo pipefail
 
-# Zhuzhou AggregateODRouteModel scaling experiment — SLURM array runner.
-# Each task reads one line from the job list and solves one Zhuzhou instance.
+# Zhuzhou AggregateODRouteModel experiment -- SLURM array runner. Each task
+# reads one line from the job list and solves one Zhuzhou instance. Generic
+# across every Zhuzhou sweep (scenario count, route-weight, etc. are all
+# CS_* env overrides below) -- see submit_zhuzhou.sh.
 #
-# Usage (via submit_zhuzhou_scaling.sh — do not call directly):
-#   sbatch --array=1-<N> \
+# Usage (via submit_zhuzhou.sh -- do not call directly):
+#   sbatch --array=1-<N> --job-name=<name> \
 #          --output=<exp_dir>/slurm_logs/%A_%a.out \
 #          --error=<exp_dir>/slurm_logs/%A_%a.err \
 #          scripts/sbatch_zhuzhou_instance.sh <jobs_file> <base_outdir> <data_dir>
@@ -52,7 +54,7 @@ OV_STR="${OV//./_}"
 INST="zz_n${N_STATIONS}_l${L}_p${N_PAIRS}_ov${OV_STR}_s${SEED}"
 
 echo "=========================================="
-echo "AggregateODRouteModel — Zhuzhou Scaling"
+echo "AggregateODRouteModel — Zhuzhou"
 echo "Array job:  ${SLURM_ARRAY_JOB_ID}  task: ${TASK}"
 echo "Instance:   ${INST}"
 echo "Node:       ${SLURM_NODELIST}"
@@ -61,34 +63,7 @@ echo "Project:    ${PROJECT_ROOT}"
 echo "=========================================="
 echo ""
 
-echo "===== Loading modules ====="
-JULIA_MODULE="${CS_JULIA_MODULE:-julia/1.12.6}"
-GUROBI_MODULE="${CS_GUROBI_MODULE:-}"
-
-module load "$JULIA_MODULE"
-if [ -n "$GUROBI_MODULE" ]; then
-    module load "$GUROBI_MODULE"
-fi
-julia --version
-echo ""
-
-echo "===== Setting up Julia depot ====="
-JULIA_VERSION=$(julia --startup-file=no -e 'print(VERSION)')
-COPY_DEPOT="${CS_COPY_DEPOT:-1}"
-if [ "$COPY_DEPOT" = "0" ]; then
-    export JULIA_DEPOT_PATH="${JULIA_DEPOT_PATH:-$HOME/.julia}"
-    echo "Using existing depot: $JULIA_DEPOT_PATH"
-else
-    if [ -n "${SLURM_TMPDIR:-}" ]; then
-        export JULIA_DEPOT_PATH="$SLURM_TMPDIR/julia_depot_v${JULIA_VERSION}"
-    else
-        export JULIA_DEPOT_PATH="/tmp/$USER/julia_depot_v${JULIA_VERSION}_${SLURM_ARRAY_JOB_ID}_${TASK}"
-    fi
-    mkdir -p "$JULIA_DEPOT_PATH"
-    rsync -a --exclude='compiled/' --exclude='logs/' ~/.julia/ "$JULIA_DEPOT_PATH/"
-    echo "Depot ready: $JULIA_DEPOT_PATH"
-fi
-echo ""
+source "$(dirname "${BASH_SOURCE[0]}")/lib/slurm_array_task_env.sh"
 
 cd "$PROJECT_ROOT"
 

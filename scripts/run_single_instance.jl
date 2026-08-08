@@ -9,7 +9,7 @@ Designed to be called as a SLURM array task via `sbatch_single_instance.sh`.
 Usage:
     julia --project=. scripts/run_single_instance.jl <base_outdir> <nx> <ny> <n_requests> <seed>
 
-Output:
+Output (via scripts/lib/aggregate_od_route_run_instance.jl):
     <base_outdir>/results/<instance>.csv
     <base_outdir>/iters/<instance>_iters.csv
     <base_outdir>/columns/<instance>_columns.csv
@@ -17,12 +17,9 @@ Output:
     <base_outdir>/selected/<instance>_selected.csv
 """
 
-using CSV
-using DataFrames
-using Dates
-using Printf
-using Random
-using StationSelection
+using CSV, DataFrames, Dates, Printf, Random, StationSelection
+
+include(joinpath(@__DIR__, "lib", "aggregate_od_route_run_instance.jl"))
 
 const _RUN_AS_MAIN = abspath(PROGRAM_FILE) == @__FILE__
 
@@ -50,16 +47,7 @@ if _RUN_AS_MAIN
     const REPOSITIONING_TIME = parse(Float64, get(ENV, "CS_REPOSITIONING_TIME", "20.0"))
 
     const INST_NAME = "g$(NX)x$(NY)_r$(N_REQUESTS)_s$(SEED)"
-    const RESULTS_DIR = joinpath(BASE_OUTDIR, "results")
-    const ITERS_DIR = joinpath(BASE_OUTDIR, "iters")
-    const COLUMNS_DIR = joinpath(BASE_OUTDIR, "columns")
-    const DUALS_DIR = joinpath(BASE_OUTDIR, "duals")
-    const SELECTED_DIR = joinpath(BASE_OUTDIR, "selected")
-    const CSV_PATH = joinpath(RESULTS_DIR, "$(INST_NAME).csv")
-    const ITER_PATH = joinpath(ITERS_DIR, "$(INST_NAME)_iters.csv")
-    const COLUMN_PATH = joinpath(COLUMNS_DIR, "$(INST_NAME)_columns.csv")
-    const DUAL_PATH = joinpath(DUALS_DIR, "$(INST_NAME)_duals.csv")
-    const SELECTED_PATH = joinpath(SELECTED_DIR, "$(INST_NAME)_selected.csv")
+    const PATHS = aor_instance_paths(BASE_OUTDIR, INST_NAME)
 end
 
 function _station_grid(nx::Int, ny::Int)
@@ -141,45 +129,9 @@ function _build_data(nx::Int, ny::Int, n_requests::Int, seed::Int)
     return stations, requests, data, walking_costs, demand_station_ids
 end
 
-function _write_namedtuple_rows(path::AbstractString, rows::Vector{<:NamedTuple})
-    df = isempty(rows) ? DataFrame() : DataFrame(rows)
-    CSV.write(path, df)
-end
-
-function _write_summary(path::AbstractString, row::NamedTuple)
-    CSV.write(path, DataFrame([row]))
-end
-
-function _write_selected_columns(path::AbstractString, result::AggregateODRouteColumnGenerationResult)
-    column_by_id = Dict(column.id => column for column in result.final_result.mapping.columns)
-    rows = NamedTuple[]
-    for column_id in result.selected_column_ids
-        column = get(column_by_id, column_id, nothing)
-        column === nothing && continue
-        push!(rows, (
-            column_id=column.id,
-            n_pairs=length(column.od_pairs),
-            tau=column.tau,
-            metadata=string(column.metadata),
-            pairs=string(Tuple(column.od_pairs)),
-        ))
-    end
-    _write_namedtuple_rows(path, rows)
-end
-
 function main()
-    mkpath.((
-        RESULTS_DIR,
-        ITERS_DIR,
-        COLUMNS_DIR,
-        DUALS_DIR,
-        SELECTED_DIR,
-    ))
-
-    if isfile(CSV_PATH) && countlines(CSV_PATH) >= 2
-        println("=== Skipping $INST_NAME — result already exists ===")
-        return
-    end
+    isfile(PATHS.csv_path) && countlines(PATHS.csv_path) >= 2 &&
+        (println("=== Skipping $INST_NAME — result already exists ==="); return)
 
     println("===========================================")
     println("AggregateODRouteModel Scaling Experiment")
@@ -215,76 +167,19 @@ function main()
         relax_integrality=false,
     )
 
-    t0 = time()
-    result = run_aggregate_od_route_column_generation(
-        model,
-        data;
-        verbose=false,
-        cg_log_path=ITER_PATH,
-        column_log_path=COLUMN_PATH,
-        dual_log_path=DUAL_PATH,
-        max_cg_iters=MAX_CG_ITERS,
-        max_new_columns=MAX_NEW_COLS,
-        n_candidates=max(MAX_NEW_COLS, 20),
-        reduced_cost_tol=1e-6,
-        pricing_time_limit_sec=PRICING_TIME,
-        ip_time_limit_sec=IP_TIME_LIMIT,
-        mip_gap=MIP_GAP,
-        silent=true,
+    aor_run_and_report(
+        INST_NAME, PATHS, model, data;
+        max_cg_iters=MAX_CG_ITERS, max_new_cols=MAX_NEW_COLS, pricing_time=PRICING_TIME,
+        ip_time_limit=IP_TIME_LIMIT, mip_gap=MIP_GAP,
+        extra_summary_fields=(
+            nx=NX, ny=NY, n_stations=nrow(stations), n_requests=nrow(requests), seed=SEED,
+            max_walking_distance=max_walking_distance,
+            route_regularization_weight=ROUTE_REGULARIZATION_WEIGHT,
+            repositioning_time=REPOSITIONING_TIME,
+        ),
     )
-    wall_time = time() - t0
-
-    objective_value = result.final_result.objective_value
-    lp_bound = result.lp_bound
-    gap_pct = if !isnothing(objective_value) && isfinite(objective_value) &&
-                 isfinite(lp_bound) && objective_value > 1e-10
-        100.0 * (objective_value - lp_bound) / objective_value
-    else
-        NaN
-    end
-
-    @printf("  Status       : %s\n", result.status)
-    @printf("  IP objective : %s\n", isnothing(objective_value) ? "n/a" : @sprintf("%.4f", objective_value))
-    @printf("  LP bound     : %s\n", isfinite(lp_bound) ? @sprintf("%.4f", lp_bound) : "n/a")
-    @printf("  Gap %%        : %s\n", isnan(gap_pct) ? "n/a" : @sprintf("%.2f%%", gap_pct))
-    @printf("  CG iters     : %d  (%s)\n", result.n_cg_iters, result.cg_stop_reason)
-    @printf("  Wall time    : %.1fs\n", wall_time)
-    println()
-
-    summary_row = (
-        instance=INST_NAME,
-        nx=NX,
-        ny=NY,
-        n_stations=nrow(stations),
-        n_requests=nrow(requests),
-        seed=SEED,
-        max_walking_distance=max_walking_distance,
-        route_regularization_weight=ROUTE_REGULARIZATION_WEIGHT,
-        repositioning_time=REPOSITIONING_TIME,
-        status=string(result.status),
-        termination_status=string(result.final_result.termination_status),
-        objective_value=isnothing(objective_value) ? "" : string(objective_value),
-        lp_bound=string(lp_bound),
-        integrality_gap_pct=isnan(gap_pct) ? "" : string(gap_pct),
-        n_cg_iters=result.n_cg_iters,
-        cg_stop_reason=string(result.cg_stop_reason),
-        n_generated_columns=length(result.generated_columns),
-        n_selected_columns=length(result.selected_column_ids),
-        wall_time_sec=wall_time,
-    )
-    _write_summary(CSV_PATH, summary_row)
-    println("Written: $CSV_PATH")
-
-    _write_namedtuple_rows(ITER_PATH, result.iteration_rows)
-    _write_namedtuple_rows(COLUMN_PATH, result.column_log_rows)
-    _write_namedtuple_rows(DUAL_PATH, result.dual_log_rows)
-    _write_selected_columns(SELECTED_PATH, result)
-    println("Written: $ITER_PATH")
-    println("Written: $COLUMN_PATH")
-    println("Written: $DUAL_PATH")
-    println("Written: $SELECTED_PATH")
 end
 
-if abspath(PROGRAM_FILE) == @__FILE__
+if _RUN_AS_MAIN
     main()
 end

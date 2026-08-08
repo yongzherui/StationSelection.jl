@@ -164,13 +164,13 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     # Count which dominance condition rejected each tested pair, into
     # `PFA_DOMINANCE_REJECTIONS`. Off in production: it selects an instrumented
     # specialization of the dominance predicate, so the counters cost nothing at
-    # all when this is `false`. See `scripts/audit_pfa_dominance_conditions.jl`.
+    # all when this is `false`. See `julia scripts/diagnose.jl dominance_audit`.
     dominance_census::Bool=false,
     stop_if=label -> false,
     # Diagnostic hook: called once per label that survives dominance and enters the
     # frontier. `nothing` (the default) costs one branch per insertion and nothing
     # else -- production pricing never sets it. Used by
-    # `scripts/diag_passenger_split_census.jl` to census the live-label population
+    # `julia scripts/diagnose.jl split_census` to census the live-label population
     # (live-clock support, pickup-phase membership) without duplicating this loop.
     label_observer=nothing,
 )

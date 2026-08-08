@@ -7,7 +7,7 @@ Each CG iteration prices with a small `n_candidates`, so the label search stops
 as soon as it has that many improving columns instead of exploring to
 exhaustion. That is a large speed win per iteration but returns *weak* columns
 -- measured at up to ~89% short of the true pricing optimum on n=10 zhuzhou
-instances (see scripts/diag_passenger_free_assignment_ncandidates_sensitivity.jl),
+instances (see `julia scripts/diagnose.jl ncandidates_sensitivity`),
 because acceptance keys on assignment-signature novelty rather than reduced cost.
 
 Weak columns cost iterations, not correctness: any negative-reduced-cost column

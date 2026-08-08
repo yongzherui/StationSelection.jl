@@ -14,11 +14,7 @@ set -uo pipefail
 PROJECT_ROOT="/home/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl"
 OUTDIR="${PFA_OUTDIR:-$PROJECT_ROOT/experiments/passenger_free_assignment_cg_scaling}"
 
-module load gcc/12.2.0
-module load community-modules
-module load StdEnv
-module load gurobi/12.0.3
-module load julia/1.12.6
+source "$(dirname "${BASH_SOURCE[0]}")/lib/slurm_modules.sh"
 
 cd "$PROJECT_ROOT"
 # One Julia thread per allocated CPU: the per-scenario label searches run

@@ -13,11 +13,7 @@ set -euo pipefail
 
 PROJECT_ROOT="/home/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl"
 
-module load gcc/12.2.0
-module load community-modules
-module load StdEnv
-module load gurobi/12.0.3
-module load julia/1.12.6
+source "$(dirname "${BASH_SOURCE[0]}")/lib/slurm_modules.sh"
 
 cd "$PROJECT_ROOT"
 julia --startup-file=no --project="$PROJECT_ROOT" -e 'using Pkg; Pkg.test()'
