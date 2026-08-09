@@ -1,2 +1,0 @@
-SUMMARY n=20 seed=42 scenarios=3 max_stops=10 max_visits=uncapped n_candidates=100 max_new_columns=100 mode=baseline status=optimal stop=optimality_proven lp_certified=true cg_iters=32 rounds=1 columns=2828 labels=18662208 pricing_seconds=168.481962 certification_seconds=6.034941 total_seconds=178.633266 wall=191.597928
-CLUSTER attempts=0 scenario_certificates=0 certification_rounds=0 fully_certified_rounds=0 cluster_seconds=0.000000 max_clusters=0
