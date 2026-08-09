@@ -122,6 +122,33 @@ struct MultiCut <: AbstractBendersCutMode
 end
 
 """
+    _validate_cut_derivation_compatibility(decomposition, cut_derivation; allowed_modes, forbidden)
+
+Shared cross-field validation between `BendersSolver`'s and `BranchAndBendersSolver`'s
+constructors: `cut_derivation` must be a member of `allowed_modes` (each caller has its own,
+different set -- `BendersSolver` allows `:zero_completion` too, `BranchAndBendersSolver` doesn't),
+then each `(predicate, message)` pair in `forbidden` is checked in order and throws `message` if
+`predicate(decomposition, cut_derivation)` holds (each caller's decomposition-specific exclusion
+rule is different in substance -- `BendersYZH` vs. `:restricted_mw_fixed_pi` for `BendersSolver`,
+`BendersY` vs. anything non-`:standard` for `BranchAndBendersSolver` -- so those stay
+caller-supplied rather than hardcoded here).
+"""
+function _validate_cut_derivation_compatibility(
+    decomposition::AbstractBendersDecomposition,
+    cut_derivation::Symbol;
+    allowed_modes::Tuple{Vararg{Symbol}},
+    forbidden::Vector{<:Tuple{<:Function, <:AbstractString}}=Tuple{Function, String}[],
+)
+    cut_derivation in allowed_modes || throw(ArgumentError(
+        "cut_derivation must be one of $(allowed_modes); got $(cut_derivation)"
+    ))
+    for (predicate, message) in forbidden
+        predicate(decomposition, cut_derivation) && throw(ArgumentError(message))
+    end
+    return nothing
+end
+
+"""
     BendersSolver
 
 # `cut_derivation`
@@ -261,6 +288,7 @@ choices exact-cost-guided, so an LP-relaxed route selection is a legitimate, muc
 substitute whenever the underlying route-covering LP/IP gap is small. Defaults to `false`
 (today's binary behavior).
 """
+
 struct BendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     decomposition::AbstractBendersDecomposition
@@ -316,12 +344,15 @@ struct BendersSolver <: AbstractStationSelectionSolver
     )
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
-        cut_derivation in (:standard, :zero_completion, :restricted_mw_fixed_pi) ||
-            throw(ArgumentError("cut_derivation must be :standard, :zero_completion, or :restricted_mw_fixed_pi"))
-        decomposition isa BendersYZH && cut_derivation == :restricted_mw_fixed_pi && throw(ArgumentError(
-            "BendersYZH has no free dual block left to optimize once h is fixed fully -- " *
-            "cut_derivation=:restricted_mw_fixed_pi would coincide exactly with :zero_completion; use that instead"
-        ))
+        _validate_cut_derivation_compatibility(
+            decomposition, cut_derivation;
+            allowed_modes=(:standard, :zero_completion, :restricted_mw_fixed_pi),
+            forbidden=[
+                ((d, c) -> d isa BendersYZH && c == :restricted_mw_fixed_pi,
+                 "BendersYZH has no free dual block left to optimize once h is fixed fully -- " *
+                 "cut_derivation=:restricted_mw_fixed_pi would coincide exactly with :zero_completion; use that instead"),
+            ],
+        )
         resolved_lifted_walking = isnothing(lifted_walking_objective) ?
             decomposition isa Union{BendersY, BendersYZ} : lifted_walking_objective
         resolved_lifted_walking && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
@@ -498,12 +529,14 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
     )
         initial_benders_cut_rounds >= 0 || throw(ArgumentError("initial_benders_cut_rounds must be non-negative"))
         max_reprice_rounds > 0 || throw(ArgumentError("max_reprice_rounds must be positive"))
-        cut_derivation in (:standard, :restricted_mw_fixed_pi) || throw(ArgumentError(
-            "BranchAndBendersSolver cut_derivation must be :standard or :restricted_mw_fixed_pi"
-        ))
-        decomposition isa BendersY && cut_derivation != :standard && throw(ArgumentError(
-            "BranchAndBendersSolver restricted MW integration currently supports BendersYZ only"
-        ))
+        _validate_cut_derivation_compatibility(
+            decomposition, cut_derivation;
+            allowed_modes=(:standard, :restricted_mw_fixed_pi),
+            forbidden=[
+                ((d, c) -> d isa BendersY && c != :standard,
+                 "BranchAndBendersSolver restricted MW integration currently supports BendersYZ only"),
+            ],
+        )
         mcf_lower_bound_mode in (:none, :all_scenarios, :single_scenario, :common_od_scaled) ||
             throw(ArgumentError(
                 "mcf_lower_bound_mode must be :none, :all_scenarios, :single_scenario, or :common_od_scaled",

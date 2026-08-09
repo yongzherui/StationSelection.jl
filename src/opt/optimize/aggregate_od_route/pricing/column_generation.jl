@@ -584,14 +584,6 @@ end
 
 function run_opt(
     instance::StationSelectionData,
-    formulation::AnyAggregateODRouteModel,
-    solver::ColumnGenerationSolver,
-)
-    return _run_aggregate_od_route_column_generation_opt(instance, formulation, solver)
-end
-
-function run_opt(
-    instance::StationSelectionData,
     formulation::RouteCoveringProblem,
     solver::ColumnGenerationSolver,
 )

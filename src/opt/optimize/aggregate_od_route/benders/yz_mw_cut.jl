@@ -349,27 +349,19 @@ end
 # Assemble the cut
 # ---------------------------------------------------------------------------
 
-struct AggregateODRouteYZCutResult
-    status::Symbol   # :ok or :completion_infeasible
-    Q_bar::Float64
-    cut_constant::Float64
-    beta::Dict{Tuple{Any, Int}, Float64}
-    n_routes::Int
-    n_cg_iterations::Int
-    completion_runtime_sec::Float64
-    phi_core::Float64
-    phi_core_baseline::Union{Nothing, Float64}
-end
+const AggregateODRouteYZCutResult = AggregateODRouteRestrictedCutResult{Tuple{Any, Int}}
 
 """
     _restricted_yz_optimality_cut(data, model, solver, requests, feasible_pairs, z_hat,
                                    assignments, open_stations, z_core, optimizer_env,
                                    objective_mode; certified=nothing, Q_bar=nothing)
 
-`BendersYZ` analogue of `_restricted_mw_optimality_cut`: certifies `pi_full`/`Q_bar` (reusing the
-caller's if already computed), solves the requested completion (`:maximize_core` or `:zero`), and
-(only for `:maximize_core`) also solves the `:zero` baseline to sanity-check
-`Phi(z_core;d_star) >= Phi(z_core;d_baseline)`. Never mutates `master`.
+`BendersYZ` entry point into the shared `_restricted_completion_optimality_cut`
+(`y_mw_cut.jl`) -- the `BendersYZ` analogue of `_restricted_mw_optimality_cut`: certifies
+`pi_full`/`Q_bar` (reusing the caller's if already computed), solves the requested completion
+(`:maximize_core` or `:zero`) via `_solve_yz_completion`, and (only for `:maximize_core`) also
+solves the `:zero` baseline to sanity-check `Phi(z_core;d_star) >= Phi(z_core;d_baseline)`. Never
+mutates `master`.
 """
 function _restricted_yz_optimality_cut(
     data::StationSelectionData,
@@ -386,44 +378,10 @@ function _restricted_yz_optimality_cut(
     certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
     Q_bar::Union{Nothing, Float64}=nothing,
 )::AggregateODRouteYZCutResult
-    model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
-        model.assignment_policy.feasibility_cut_style == :big_m_nearest ||
-        throw(ArgumentError("restricted YZ cut derivation only supports NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"))
-    model.allow_walk_only &&
-        throw(ArgumentError("restricted YZ cut derivation does not support allow_walk_only=true"))
-
-    if isnothing(certified) || isnothing(Q_bar)
-        cg_result = _solve_fixed_route_covering_by_cg(data, model, assignments, solver, nothing, open_stations)
-        certified, Q_bar = _certified_qbar(data, model, cg_result, requests, assignments)
-    end
-    pi_full = _zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
-
-    silent = solver.config.silent
-    completion = _solve_yz_completion(
-        data, model, requests, feasible_pairs, z_hat, z_core, pi_full, Q_bar, objective_mode, optimizer_env, silent,
-    )
-    completion.status == :optimal || return AggregateODRouteYZCutResult(
-        :completion_infeasible, Q_bar, NaN, Dict{Tuple{Any, Int}, Float64}(), length(certified.pool),
-        certified.n_cg_iterations, completion.runtime_sec, NaN, nothing,
-    )
-
-    phi_core_baseline = nothing
-    if objective_mode == :maximize_core
-        baseline = _solve_yz_completion(
-            data, model, requests, feasible_pairs, z_hat, z_core, pi_full, Q_bar, :zero, optimizer_env, silent,
-        )
-        if baseline.status == :optimal
-            phi_core_baseline = baseline.phi_core
-            completion.phi_core >= baseline.phi_core - 1e-4 * max(1.0, abs(baseline.phi_core)) ||
-                @warn "restricted YZ cut: maximize-core completion's Phi(z_core) is worse than the " *
-                    "zero-completion baseline's -- should not happen for a correctly-solved maximization" phi_core =
-                    completion.phi_core baseline = baseline.phi_core
-        end
-    end
-
-    return AggregateODRouteYZCutResult(
-        :ok, Q_bar, completion.cut_constant, completion.beta, length(certified.pool),
-        certified.n_cg_iterations, completion.runtime_sec, completion.phi_core, phi_core_baseline,
+    return _restricted_completion_optimality_cut(
+        "YZ", _solve_yz_completion, Tuple{Any, Int},
+        data, model, solver, requests, feasible_pairs, z_hat, assignments, open_stations, z_core,
+        optimizer_env, objective_mode; certified=certified, Q_bar=Q_bar,
     )
 end
 

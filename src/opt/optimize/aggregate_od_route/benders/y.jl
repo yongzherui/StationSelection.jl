@@ -420,32 +420,14 @@ function _run_aggregate_od_route_nearest_open_benders_y(
     y_hat_repeat_streak = 0
 
     for iteration in 1:solver.max_iterations
-        master_start = time()
-        optimize!(master)
-        master_solve_seconds = time() - master_start
-        primal_status(master) == MOI.FEASIBLE_POINT ||
-            throw(ArgumentError("BendersY master failed with status $(termination_status(master))"))
-        # Captured here, not at the log push below: this iteration's cuts get added to `master`
-        # further down (before the log row is built), and JuMP resets a solved model's cached
-        # termination status to OPTIMIZE_NOT_CALLED as soon as it's mutated. Reading
-        # `termination_status(master)` at the log push would therefore always report
-        # OPTIMIZE_NOT_CALLED regardless of how the solve actually went -- capture the real status
-        # right after `optimize!` instead.
-        master_termination_status = termination_status(master)
-        lower_bound = objective_bound(master)
+        master_termination_status, lower_bound, master_solve_seconds = _benders_solve_master!(master, "BendersY")
         y_hat = [round(value(y[j])) for j in 1:data.n_stations]
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
 
-        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
-        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
-        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
-        if y_hat_changed && !isnothing(previous_y_hat_signature)
-            println(
-                "  [BendersY iteration $iteration] master lower-bound y changed (lower_bound=",
-                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
-            )
-            flush(stdout)
-        end
+        y_hat_signature, y_hat_changed, y_hat_repeat_streak = _benders_y_hat_bookkeeping(
+            mapping, y_hat, iteration, "BendersY", lower_bound,
+            previous_y_hat_signature, y_hat_repeat_streak,
+        )
         previous_y_hat_signature = y_hat_signature
 
         assignments, infeasible = _fixed_assignments_from_y(
@@ -729,6 +711,5 @@ function _run_aggregate_od_route_nearest_open_benders_y(
             ), solver; phase1_guided=!isnothing(direct_enumeration_pool))
         end
     end
-    isnothing(best_result) && throw(ArgumentError("BendersY did not find a feasible incumbent"))
-    throw(ArgumentError("BendersY did not converge within max_iterations=$(solver.max_iterations)"))
+    _benders_not_converged!("BendersY", solver, best_result)
 end

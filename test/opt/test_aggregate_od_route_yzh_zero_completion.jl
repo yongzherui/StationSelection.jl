@@ -180,6 +180,7 @@
 
         for (cut_derivation, reprice) in ((:standard, true), (:zero_completion, false))
             @testset "cut_derivation=$cut_derivation, reprice_subproblem=$reprice" begin
+                iter_log_dir = mktempdir()
                 result = run_opt(
                     data, model,
                     BendersSolver(
@@ -193,10 +194,20 @@
                         max_iterations=50,
                         reprice_subproblem=reprice,
                         cut_derivation=cut_derivation,
+                        log_dir=iter_log_dir,
                     ),
                 )
                 @test result.termination_status == MOI.OPTIMAL
                 @test isapprox(result.objective_value, ground_truth.objective_value; atol=1e-6)
+
+                # Regression check: master_status must reflect the actual per-iteration solve
+                # outcome, not JuMP's OPTIMIZE_NOT_CALLED reset that fires once `master` is
+                # mutated by that same iteration's cuts (see y.jl's status-capture comment).
+                iter_log = CSV.read(
+                    joinpath(iter_log_dir, "aggregate_od_route_benders_iterations.csv"), DataFrame,
+                )
+                @test !isempty(iter_log.master_status)
+                @test all(!=("OPTIMIZE_NOT_CALLED"), iter_log.master_status)
             end
         end
     end

@@ -36,31 +36,32 @@ struct AggregateODRouteStationSimpleLabel
     reduced_cost::Float64
 end
 
+"""
+`live_origin_age` is stored sparse -- `(age_idx, age_val, age_mask)`, the same
+representation `_make_sparse_station_ages` (`mechanics.jl`) builds for the
+revisit-tolerant pricer and for the PFA station-simple pricer -- rather than a
+dense `Vector` over every node, since a partial elementary route typically has
+only a handful of live pickup clocks regardless of network size.
+"""
 struct AggregateODRouteStationSimpleBitsets
     visited_bits::BitSet
-    live_origin_bits::BitSet
-    live_origin_age::Vector{Float64}
+    age_idx::Vector{Int32}
+    age_val::Vector{Float64}
+    age_mask::UInt64
 end
 
 function _make_aggregate_od_route_station_simple_bitsets(
     label::AggregateODRouteStationSimpleLabel,
     node_index::Dict{Int, Int},
-    n_nodes::Int,
 )::AggregateODRouteStationSimpleBitsets
     visited_bits = BitSet()
     for node in label.visited
         push!(visited_bits, node_index[node])
     end
 
-    live_origin_bits = BitSet()
-    live_origin_age = fill(Inf, n_nodes)
-    for (origin, age) in label.live_origin_age
-        idx = node_index[origin]
-        push!(live_origin_bits, idx)
-        live_origin_age[idx] = age
-    end
+    age_idx, age_val, age_mask = _make_sparse_station_ages(label.live_origin_age, node_index)
 
-    return AggregateODRouteStationSimpleBitsets(visited_bits, live_origin_bits, live_origin_age)
+    return AggregateODRouteStationSimpleBitsets(visited_bits, age_idx, age_val, age_mask)
 end
 
 _aggregate_od_route_station_simple_dominance_signature(
@@ -85,10 +86,12 @@ function _dominates_aggregate_od_route_station_simple_label(
     abs.visited_bits == bbs.visited_bits || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
     a.time <= b.time + 1e-9 || return false
-    issubset(bbs.live_origin_bits, abs.live_origin_bits) || return false
-    for idx in bbs.live_origin_bits
-        abs.live_origin_age[idx] <= bbs.live_origin_age[idx] + 1e-9 || return false
-    end
+    # dom(b) ⊆ dom(a) and age_a(j) <= age_b(j) for j in dom(b) -- shared with the
+    # revisit-tolerant bitset dominance and the PFA station-simple pricer via
+    # `mechanics.jl`.
+    _sparse_station_ages_dominate(
+        abs.age_idx, abs.age_val, abs.age_mask, bbs.age_idx, bbs.age_val, bbs.age_mask,
+    ) || return false
     return true
 end
 
@@ -332,7 +335,6 @@ function _enumerate_aggregate_od_route_station_simple_pricing_labels(
     best_by_signature = Dict{Any, AggregateODRouteStationSimpleLabel}()
 
     node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
-    n_nodes = length(pricing_data.nodes)
 
     exhausted = true
     t_start = time()
@@ -353,7 +355,7 @@ function _enumerate_aggregate_od_route_station_simple_pricing_labels(
         next_label_id += 1
         labels_generated += 1
         live_labels[label_id] = label
-        label_bs = _make_aggregate_od_route_station_simple_bitsets(label, node_index, n_nodes)
+        label_bs = _make_aggregate_od_route_station_simple_bitsets(label, node_index)
         signature = _aggregate_od_route_station_simple_dominance_signature(label, label_bs)
         bucket = get!(() -> SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId}(), dominance_buckets, signature)
 

@@ -829,6 +829,82 @@
             readdir(benders_log_dir),
         )
 
+        # _run_aggregate_od_route_free_benders_xy (the FreeAggregateODAssignmentPolicy
+        # BendersXY path) was previously only exercised above by a single-scenario,
+        # single-request fixture that converges without ever adding a cut. Cover a
+        # multi-scenario case that forces at least one non-trivial optimality-cut
+        # round: 4 stations, l=2 (a real build tradeoff), 2 time-separated scenarios
+        # each with 2 requests, and routing costs steep enough that the master's
+        # first-pass x_hat routinely underestimates true subproblem cost.
+        multi_scenario_stations = DataFrame(id=[1, 2, 3, 4], lon=[0.0, 1.0, 2.0, 3.0], lat=[0.0, 0.0, 0.0, 0.0])
+        multi_scenario_requests = DataFrame(
+            id=[1, 2, 3, 4],
+            start_station_id=[1, 2, 1, 3],
+            end_station_id=[4, 3, 3, 4],
+            request_time=[
+                DateTime(2024, 1, 1, 8), DateTime(2024, 1, 1, 8, 5),
+                DateTime(2024, 1, 1, 10), DateTime(2024, 1, 1, 10, 5),
+            ],
+        )
+        multi_scenario_walking = Dict{Tuple{Int, Int}, Float64}()
+        multi_scenario_routing = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:4, j in 1:4
+            multi_scenario_walking[(i, j)] = abs(i - j)
+            multi_scenario_routing[(i, j)] = i == j ? 0.0 : 5.0 * abs(i - j)
+        end
+        multi_scenario_data = create_station_selection_data(
+            multi_scenario_stations,
+            multi_scenario_requests,
+            multi_scenario_walking;
+            routing_costs=multi_scenario_routing,
+            scenarios=[
+                ("2024-01-01 08:00:00", "2024-01-01 09:00:00"),
+                ("2024-01-01 10:00:00", "2024-01-01 11:00:00"),
+            ],
+        )
+        @test n_scenarios(multi_scenario_data) == 2
+
+        multi_scenario_model = AggregateODRouteModel(
+            2;
+            max_walking_distance=10.0,
+            route_regularization_weight=1.0,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=100.0,
+            max_new_columns=2,
+            n_candidates=2,
+            pricing_time_limit_sec=2.0,
+        )
+        multi_scenario_result = run_opt(
+            multi_scenario_data,
+            multi_scenario_model,
+            BendersSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                decomposition=BendersXY(),
+                max_iterations=20,
+                inner_solver=ColumnGenerationSolver(
+                    config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                    max_iterations=20,
+                    max_columns_per_iteration=2,
+                    n_candidates=2,
+                    pricing_time_limit_sec=2.0,
+                ),
+            ),
+        )
+        @test multi_scenario_result.termination_status == MOI.OPTIMAL
+        @test multi_scenario_result.metadata["solve_method"] == "benders"
+        @test multi_scenario_result.metadata["benders_decomposition"] == "BendersXY"
+        @test multi_scenario_result.metadata["benders_iterations"] >= 2
+        @test multi_scenario_result.metadata["optimality_cuts_added"] >= 1
+
+        multi_scenario_direct = run_opt(
+            multi_scenario_data,
+            multi_scenario_model,
+            DirectSolver(optimizer_env=Gurobi.Env(), silent=true, max_enumeration_time_sec=5.0),
+        )
+        @test multi_scenario_direct.termination_status == MOI.OPTIMAL
+        @test multi_scenario_result.objective_value ≈ multi_scenario_direct.objective_value
+
         # A walking distance wide enough that pickup and dropoff candidate
         # sets fully coincide ({1,2,3} on both sides) must still build: the
         # off-diagonal (j != k) pair list is necessarily a strict subset of
@@ -990,6 +1066,98 @@
         @test route_direct_result.metadata["solve_method"] == "route_enumeration"
     end
 
+    @testset "run_opt(AggregateODRouteModel, ColumnGenerationSolver) dispatches on assignment_policy" begin
+        # Pins the branch in run_opt(::AggregateODRouteModel, ::ColumnGenerationSolver)
+        # (pricing/passenger/column_generation.jl) that routes FreeAggregateODAssignmentPolicy
+        # to the passenger free-assignment CG engine and everything else to the aggregate
+        # station-pair CG engine -- previously untested via run_opt itself.
+        gurobi_available = try
+            using Gurobi
+            true
+        catch
+            false
+        end
+        if !gurobi_available
+            @warn "Gurobi not available, skipping run_opt CG dispatch test"
+            @test true
+            return
+        end
+
+        stations = DataFrame(id=[1, 2, 3], lon=[0.0, 1.0, 2.0], lat=[0.0, 0.0, 0.0])
+        requests = DataFrame(
+            id=[1, 2],
+            start_station_id=[1, 1],
+            end_station_id=[3, 3],
+            request_time=[DateTime(2024, 1, 1, 8), DateTime(2024, 1, 1, 8, 5)],
+        )
+        walking_costs = Dict{Tuple{Int, Int}, Float64}()
+        routing_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:3, j in 1:3
+            walking_costs[(i, j)] = abs(i - j)
+            routing_costs[(i, j)] = abs(i - j) + 1.0
+        end
+        data = create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
+
+        free_model = AggregateODRouteModel(
+            2;
+            assignment_policy=FreeAggregateODAssignmentPolicy(),
+            max_walking_distance=10.0,
+            route_regularization_weight=1.0,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=100.0,
+            max_new_columns=2,
+            n_candidates=2,
+            pricing_time_limit_sec=2.0,
+        )
+        free_result = run_opt(
+            data,
+            free_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                max_iterations=20,
+                max_columns_per_iteration=2,
+                n_candidates=2,
+                pricing_time_limit_sec=2.0,
+            ),
+        )
+        @test free_result.termination_status == MOI.OPTIMAL
+        @test free_result.metadata["solve_method"] == "column_generation"
+        @test free_result.metadata["assignment_policy"] == "FreeAggregateODAssignmentPolicy"
+
+        nearest_model = AggregateODRouteModel(
+            2;
+            assignment_policy=NearestOpenAggregateODAssignmentPolicy(),
+            max_walking_distance=10.0,
+            route_regularization_weight=1.0,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=100.0,
+            max_new_columns=2,
+            n_candidates=2,
+            pricing_time_limit_sec=2.0,
+        )
+        nearest_result = run_opt(
+            data,
+            nearest_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                max_iterations=20,
+                max_columns_per_iteration=2,
+                n_candidates=2,
+                pricing_time_limit_sec=2.0,
+            ),
+        )
+        @test nearest_result.termination_status == MOI.OPTIMAL
+        # The aggregate station-pair CG engine's OptResult never sets "assignment_policy" or
+        # "solve_method" -- only "build_time_sec"/"solve_time_sec"/"cg_time_sec" -- so the
+        # absence of the PFA-only keys plus presence of the CG-only key confirms this went
+        # through _run_aggregate_od_route_column_generation_opt, not the PFA engine.
+        @test !haskey(nearest_result.metadata, "assignment_policy")
+        @test !haskey(nearest_result.metadata, "solve_method")
+        @test haskey(nearest_result.metadata, "cg_time_sec")
+    end
+
     @testset "station-simple label-setting pricing" begin
         @testset "initial labels only open positive-dual origins" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3), (2, 4)])
@@ -1069,10 +1237,10 @@
             )
 
             node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
-            better_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_better, node_index, 4)
-            worse_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_worse, node_index, 4)
-            different_visited_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_visited, node_index, 4)
-            different_current_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_current, node_index, 4)
+            better_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_better, node_index)
+            worse_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_worse, node_index)
+            different_visited_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_visited, node_index)
+            different_current_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_current, node_index)
 
             @test StationSelection._dominates_aggregate_od_route_station_simple_label(
                 same_visited_better, same_visited_worse, better_bs, worse_bs,

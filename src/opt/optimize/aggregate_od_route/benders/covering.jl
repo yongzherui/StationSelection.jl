@@ -884,6 +884,71 @@ function _flush_benders_iteration_log!(
     return nothing
 end
 
+"""
+    _benders_solve_master!(master, decomposition_name) -> (master_status, lower_bound, master_solve_seconds)
+
+Solves `master`, verifies primal feasibility, and captures `termination_status(master)`
+immediately after the solve -- before this iteration's cuts get added to `master` further
+down each outer loop. JuMP resets a solved model's cached termination status to
+`OPTIMIZE_NOT_CALLED` as soon as it's mutated, so reading `termination_status(master)` at
+the log-push point instead (rather than the value returned here) would always report
+`OPTIMIZE_NOT_CALLED` regardless of how the solve actually went.
+"""
+function _benders_solve_master!(master::Model, decomposition_name::AbstractString)
+    master_start = time()
+    optimize!(master)
+    master_solve_seconds = time() - master_start
+    primal_status(master) == MOI.FEASIBLE_POINT ||
+        throw(ArgumentError("$decomposition_name master failed with status $(termination_status(master))"))
+    master_status = termination_status(master)
+    lower_bound = objective_bound(master)
+    return (master_status, lower_bound, master_solve_seconds)
+end
+
+"""
+    _benders_y_hat_bookkeeping(mapping, y_hat, iteration, decomposition_name, lower_bound,
+                                previous_signature, previous_streak) -> (signature, changed, streak)
+
+Computes this iteration's `y_hat` signature via `_benders_y_hat_signature`, updates the
+changed/repeat-streak bookkeeping relative to the previous iteration's signature, and prints
+a progress line (mirrored to `stdout`) whenever the master's lower-bound-optimal `y` jumps to
+a different first-stage candidate.
+"""
+function _benders_y_hat_bookkeeping(
+    mapping::AggregateODRouteMap,
+    y_hat,
+    iteration::Int,
+    decomposition_name::AbstractString,
+    lower_bound::Float64,
+    previous_signature::Union{Nothing, String},
+    previous_streak::Int,
+)
+    y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
+    y_hat_changed = isnothing(previous_signature) || y_hat_signature != previous_signature
+    y_hat_repeat_streak = y_hat_changed ? 1 : previous_streak + 1
+    if y_hat_changed && !isnothing(previous_signature)
+        println(
+            "  [$decomposition_name iteration $iteration] master lower-bound y changed (lower_bound=",
+            "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
+        )
+        flush(stdout)
+    end
+    return (y_hat_signature, y_hat_changed, y_hat_repeat_streak)
+end
+
+"""
+    _benders_not_converged!(decomposition_name, solver, best_result)
+
+Throws the standard end-of-loop `ArgumentError` when a Benders outer loop exhausts
+`solver.max_iterations` without converging: "no feasible incumbent found at all" if
+`best_result` is still `nothing`, otherwise "ran out of iterations short of the convergence
+tolerance". Never returns.
+"""
+function _benders_not_converged!(decomposition_name::AbstractString, solver::BendersSolver, best_result)
+    isnothing(best_result) && throw(ArgumentError("$decomposition_name did not find a feasible incumbent"))
+    throw(ArgumentError("$decomposition_name did not converge within max_iterations=$(solver.max_iterations)"))
+end
+
 function _outer_gap(lb::Float64, ub::Float64)
     isfinite(lb) && isfinite(ub) || return nothing
     abs(ub) <= 1e-9 && return abs(ub - lb)

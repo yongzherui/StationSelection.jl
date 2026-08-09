@@ -645,16 +645,102 @@ end
 # Section H: assemble and (by the caller) add the cut
 # ---------------------------------------------------------------------------
 
-struct AggregateODRouteRestrictedMWCutResult
+"""
+    AggregateODRouteRestrictedCutResult{K}
+
+Shared result struct for the restricted-completion cut derivations: `_restricted_mw_optimality_cut`
+(BendersY, `K=Int` -- `beta` keyed by station id, since `y` is the fixed master variable and `z` is
+free) and `_restricted_yz_optimality_cut` (BendersYZ, `yz_mw_cut.jl`, `K=Tuple{Any, Int}` -- `beta`
+keyed by endpoint-chain `(key, index)`, since `z` is the fixed master variable directly). `status`
+is `:ok` or `:completion_infeasible`.
+"""
+struct AggregateODRouteRestrictedCutResult{K}
     status::Symbol   # :ok or :completion_infeasible
     Q_bar::Float64
     cut_constant::Float64
-    beta::Dict{Int, Float64}
+    beta::Dict{K, Float64}
     n_routes::Int
     n_cg_iterations::Int
     completion_runtime_sec::Float64
     phi_core::Float64
     phi_core_baseline::Union{Nothing, Float64}
+end
+
+const AggregateODRouteRestrictedMWCutResult = AggregateODRouteRestrictedCutResult{Int}
+
+"""
+    _restricted_completion_optimality_cut(decomposition_name, completion_solver, ::Type{K},
+        data, model, solver, requests, feasible_pairs, fixed_hat, assignments, open_stations,
+        fixed_core, optimizer_env, objective_mode; certified=nothing, Q_bar=nothing)
+
+Shared Sections C-H assembly behind both `_restricted_mw_optimality_cut` (BendersY, below) and
+`_restricted_yz_optimality_cut` (BendersYZ, `yz_mw_cut.jl`): certifies `pi_full`/`Q_bar` (reusing
+the caller's if already computed), solves the requested completion via `completion_solver` --
+`_solve_restricted_mw_completion` for BendersY's y-fixed/z-free chain completion (extra
+lambda/mu/nu dual block for z's Big-M chain structure, since z lives in the subproblem) or
+`_solve_yz_completion` for BendersYZ's z-fixed direct completion (no chain block needed, z is
+already a master variable) -- the one genuinely decomposition-specific piece, deliberately NOT
+merged here. For `objective_mode=:maximize_core`, also solves the `:zero` baseline purely to
+sanity-check `Phi(core;d_star) >= Phi(core;d_baseline)`. Never mutates `master`; the caller adds
+the JuMP constraint.
+"""
+function _restricted_completion_optimality_cut(
+    decomposition_name::AbstractString,
+    completion_solver,
+    ::Type{K},
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    solver::BendersSolver,
+    requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    fixed_hat,
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+    fixed_core,
+    optimizer_env,
+    objective_mode::Symbol;
+    certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
+    Q_bar::Union{Nothing, Float64}=nothing,
+) where {K}
+    model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+        model.assignment_policy.feasibility_cut_style == :big_m_nearest ||
+        throw(ArgumentError("restricted $(decomposition_name) cut derivation only supports NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"))
+    model.allow_walk_only &&
+        throw(ArgumentError("restricted $(decomposition_name) cut derivation does not support allow_walk_only=true"))
+
+    if isnothing(certified) || isnothing(Q_bar)
+        cg_result = _solve_fixed_route_covering_by_cg(data, model, assignments, solver, nothing, open_stations)
+        certified, Q_bar = _certified_qbar(data, model, cg_result, requests, assignments)
+    end
+    pi_full = _zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
+
+    silent = solver.config.silent
+    completion = completion_solver(
+        data, model, requests, feasible_pairs, fixed_hat, fixed_core, pi_full, Q_bar, objective_mode, optimizer_env, silent,
+    )
+    completion.status == :optimal || return AggregateODRouteRestrictedCutResult{K}(
+        :completion_infeasible, Q_bar, NaN, Dict{K, Float64}(), length(certified.pool),
+        certified.n_cg_iterations, completion.runtime_sec, NaN, nothing,
+    )
+
+    phi_core_baseline = nothing
+    if objective_mode == :maximize_core
+        baseline = completion_solver(
+            data, model, requests, feasible_pairs, fixed_hat, fixed_core, pi_full, Q_bar, :zero, optimizer_env, silent,
+        )
+        if baseline.status == :optimal
+            phi_core_baseline = baseline.phi_core
+            completion.phi_core >= baseline.phi_core - 1e-4 * max(1.0, abs(baseline.phi_core)) ||
+                @warn "restricted $(decomposition_name) cut: maximize-core completion's Phi(core) is worse " *
+                    "than the zero-completion baseline's -- should not happen for a correctly-solved " *
+                    "maximization" phi_core = completion.phi_core baseline = baseline.phi_core
+        end
+    end
+
+    return AggregateODRouteRestrictedCutResult{K}(
+        :ok, Q_bar, completion.cut_constant, completion.beta, length(certified.pool),
+        certified.n_cg_iterations, completion.runtime_sec, completion.phi_core, phi_core_baseline,
+    )
 end
 
 """
@@ -714,17 +800,18 @@ end
                                    assignments, open_stations, y_core, optimizer_env,
                                    objective_mode; certified=nothing, Q_bar=nothing)
 
-Sections C-H end to end for one cut group: certifies `pi_full`/`Q_bar` (reusing the
+`BendersY` entry point into the shared `_restricted_completion_optimality_cut` (Sections C-H end
+to end for one cut group, see its docstring): certifies `pi_full`/`Q_bar` (reusing the
 already-computed `certified`/`Q_bar` if the caller passed them, e.g. from an earlier
 `_certified_qbar` call used for the gating decision, rather than re-running CG), solves the
-requested completion (`objective_mode ∈ (:maximize_core, :zero)`), and (only for
-`:maximize_core`) also solves the `:zero` baseline purely to verify
-`Phi(y_core;d_star) >= Phi(y_core;d_baseline)` before returning -- both completions reuse the
-same fixed `pi_full`/`Q_bar`, so this is one extra small LP solve, not another pricing pass
-(`n_pricing_calls_during_completion` is always zero: Sections E-G never call the pricing
-oracle). Never mutates `master`; the caller adds the JuMP constraint. A non-`:ok` completion is
-fatal because falling back to a restricted-pool standard cut would discard the certification
-guarantee.
+requested completion (`objective_mode ∈ (:maximize_core, :zero)`) via
+`_solve_restricted_mw_completion`, and (only for `:maximize_core`) also solves the `:zero`
+baseline purely to verify `Phi(y_core;d_star) >= Phi(y_core;d_baseline)` before returning -- both
+completions reuse the same fixed `pi_full`/`Q_bar`, so this is one extra small LP solve, not
+another pricing pass (`n_pricing_calls_during_completion` is always zero: Sections E-G never call
+the pricing oracle). Never mutates `master`; the caller adds the JuMP constraint. A non-`:ok`
+completion is fatal because falling back to a restricted-pool standard cut would discard the
+certification guarantee.
 """
 function _restricted_mw_optimality_cut(
     data::StationSelectionData,
@@ -741,44 +828,10 @@ function _restricted_mw_optimality_cut(
     certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
     Q_bar::Union{Nothing, Float64}=nothing,
 )::AggregateODRouteRestrictedMWCutResult
-    model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
-        model.assignment_policy.feasibility_cut_style == :big_m_nearest ||
-        throw(ArgumentError("restricted MW cut derivation only supports NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)"))
-    model.allow_walk_only &&
-        throw(ArgumentError("restricted MW cut derivation does not support allow_walk_only=true"))
-
-    if isnothing(certified) || isnothing(Q_bar)
-        cg_result = _solve_fixed_route_covering_by_cg(data, model, assignments, solver, nothing, open_stations)
-        certified, Q_bar = _certified_qbar(data, model, cg_result, requests, assignments)
-    end
-    pi_full = _zero_extended_pi(requests, feasible_pairs, assignments, certified.pi_by_request)
-
-    silent = solver.config.silent
-    completion = _solve_restricted_mw_completion(
-        data, model, requests, feasible_pairs, y_hat, y_core, pi_full, Q_bar, objective_mode, optimizer_env, silent,
-    )
-    completion.status == :optimal || return AggregateODRouteRestrictedMWCutResult(
-        :completion_infeasible, Q_bar, NaN, Dict{Int, Float64}(), length(certified.pool),
-        certified.n_cg_iterations, completion.runtime_sec, NaN, nothing,
-    )
-
-    phi_core_baseline = nothing
-    if objective_mode == :maximize_core
-        baseline = _solve_restricted_mw_completion(
-            data, model, requests, feasible_pairs, y_hat, y_core, pi_full, Q_bar, :zero, optimizer_env, silent,
-        )
-        if baseline.status == :optimal
-            phi_core_baseline = baseline.phi_core
-            completion.phi_core >= baseline.phi_core - 1e-4 * max(1.0, abs(baseline.phi_core)) ||
-                @warn "restricted MW cut: maximize-core completion's Phi(y_core) is worse than the " *
-                    "zero-completion baseline's -- should not happen for a correctly-solved maximization" phi_core =
-                    completion.phi_core baseline = baseline.phi_core
-        end
-    end
-
-    return AggregateODRouteRestrictedMWCutResult(
-        :ok, Q_bar, completion.cut_constant, completion.beta, length(certified.pool),
-        certified.n_cg_iterations, completion.runtime_sec, completion.phi_core, phi_core_baseline,
+    return _restricted_completion_optimality_cut(
+        "MW", _solve_restricted_mw_completion, Int,
+        data, model, solver, requests, feasible_pairs, y_hat, assignments, open_stations, y_core,
+        optimizer_env, objective_mode; certified=certified, Q_bar=Q_bar,
     )
 end
 

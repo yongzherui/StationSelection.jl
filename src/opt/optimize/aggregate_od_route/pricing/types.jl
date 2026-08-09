@@ -71,4 +71,18 @@ end
 
 const AggregateODRouteDominanceBucket = Vector{AggregateODRouteBucketEntry}
 
-struct AggregateODRouteDominanceRules{BoundedStops} end
+"""
+Marker supertype for a pricer's dominance-rule switches, which each concrete
+pricer encodes as its own type parameters (e.g. `AggregateODRouteDominanceRules{BoundedStops}`
+below, `PassengerFreeAssignmentDominanceRules{BoundedStops,BoundedStations,Compensated,Instrumented}`
+in `pricing/passenger/types.jl`) for zero-cost specialization -- see either
+concrete type's own docstring for why. This common supertype does not unify
+their field/parameter shapes (those differ for real reasons); it exists so
+future shared dispatch has somewhere to hang. Defined here (rather than in
+`mechanics.jl`, where the rest of the cross-pricer shared code lives) because
+this file loads first among the pricing files, before any concrete dominance
+rules struct needs it as a supertype.
+"""
+abstract type AbstractPricingDominanceRules end
+
+struct AggregateODRouteDominanceRules{BoundedStops} <: AbstractPricingDominanceRules end

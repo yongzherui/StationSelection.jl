@@ -517,12 +517,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
     _diag_dump = NamedTuple[]
 
     for iteration in 1:solver.max_iterations
-        master_start = time()
-        optimize!(master)
-        master_solve_seconds = time() - master_start
-        primal_status(master) == MOI.FEASIBLE_POINT ||
-            throw(ArgumentError("BendersYZH master failed with status $(termination_status(master))"))
-        lower_bound = objective_bound(master)
+        master_termination_status, lower_bound, master_solve_seconds = _benders_solve_master!(master, "BendersYZH")
         assert_endpoint_chain_near_binary(master)
 
         h_hat = Dict(key => round(value(var)) for (key, var) in h)
@@ -530,16 +525,10 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         theta_hat = Dict(cut_id => value(theta[cut_id]) for cut_id in cut_ids)
         assignments = _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat)
 
-        y_hat_signature = _benders_y_hat_signature(mapping, _open_station_values(y_hat))
-        y_hat_changed = isnothing(previous_y_hat_signature) || y_hat_signature != previous_y_hat_signature
-        y_hat_repeat_streak = y_hat_changed ? 1 : y_hat_repeat_streak + 1
-        if y_hat_changed && !isnothing(previous_y_hat_signature)
-            println(
-                "  [BendersYZH iteration $iteration] master lower-bound y changed (lower_bound=",
-                "$(round(lower_bound, digits=2))): stations=$(y_hat_signature)",
-            )
-            flush(stdout)
-        end
+        y_hat_signature, y_hat_changed, y_hat_repeat_streak = _benders_y_hat_bookkeeping(
+            mapping, y_hat, iteration, "BendersYZH", lower_bound,
+            previous_y_hat_signature, y_hat_repeat_streak,
+        )
         previous_y_hat_signature = y_hat_signature
 
         cg_start = time()
@@ -635,7 +624,7 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
         end
         push!(benders_rows, (
             iteration=iteration,
-            master_status=string(termination_status(master)),
+            master_status=string(master_termination_status),
             lower_bound=lower_bound,
             incumbent_objective=isfinite(best_ub) ? best_ub : nothing,
             outer_gap=_outer_gap(lower_bound, best_ub),
@@ -718,6 +707,5 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
             ), solver)
         end
     end
-    isnothing(best_result) && throw(ArgumentError("BendersYZH did not find a feasible incumbent"))
-    throw(ArgumentError("BendersYZH did not converge within max_iterations=$(solver.max_iterations)"))
+    _benders_not_converged!("BendersYZH", solver, best_result)
 end

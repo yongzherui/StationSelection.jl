@@ -174,16 +174,27 @@
                 end
                 assert_nearest_open_assignments(data, benders_y)
 
+                benders_xy_log_dir = mktempdir()
                 benders_xy = run_opt(
                     data, model,
                     BendersSolver(
                         config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
                         decomposition=BendersXY(), inner_solver=inner_cg, max_iterations=50,
+                        log_dir=benders_xy_log_dir,
                     ),
                 )
                 @test benders_xy.termination_status == MOI.OPTIMAL
                 @test isapprox(benders_xy.objective_value, ground_truth.objective_value; atol=1e-6)
                 assert_nearest_open_assignments(data, benders_xy)
+
+                # Regression check: master_status must reflect the actual per-iteration solve
+                # outcome, not JuMP's OPTIMIZE_NOT_CALLED reset that fires once `master` is
+                # mutated by that same iteration's cuts (see y.jl's status-capture comment).
+                benders_xy_iter_log = CSV.read(
+                    joinpath(benders_xy_log_dir, "aggregate_od_route_benders_iterations.csv"), DataFrame,
+                )
+                @test !isempty(benders_xy_iter_log.master_status)
+                @test all(!=("OPTIMIZE_NOT_CALLED"), benders_xy_iter_log.master_status)
 
                 # BendersYZ (master = y,z; subproblem = x,θ) only supports the
                 # endpoint-nearest styles -- :pair_chain has no addressable z

@@ -109,33 +109,16 @@ struct PassengerFreeAssignmentStationSimpleAges
 end
 
 """
-Sorted in place by insertion sort rather than via `sortperm` + two gathers: this
-runs once per generated label over one to four live clocks, where the permutation
-vector and gathered copies were three allocations to avoid a handful of compares.
-See the twin in `labels.jl` for the full argument.
+Delegates to the shared `_make_sparse_station_ages` (`mechanics.jl`), which runs
+the identical insertion sort used by the revisit-tolerant pricer's twin in
+`labels.jl` -- only the return type differs (wrapped here in
+`PassengerFreeAssignmentStationSimpleAges`).
 """
 function _make_passenger_free_assignment_station_simple_ages(
     label::PassengerFreeAssignmentStationSimpleLabel,
     node_index::Dict{Int, Int},
 )::PassengerFreeAssignmentStationSimpleAges
-    n_live = length(label.station_age)
-    age_idx = Vector{Int32}(undef, n_live)
-    age_val = Vector{Float64}(undef, n_live)
-    age_mask = UInt64(0)
-    i = 0
-    @inbounds for (station, age) in label.station_age
-        idx = Int32(node_index[station])
-        age_mask |= UInt64(1) << ((idx - 1) & 63)
-        j = i
-        while j >= 1 && age_idx[j] > idx
-            age_idx[j + 1] = age_idx[j]
-            age_val[j + 1] = age_val[j]
-            j -= 1
-        end
-        age_idx[j + 1] = idx
-        age_val[j + 1] = age
-        i += 1
-    end
+    age_idx, age_val, age_mask = _make_sparse_station_ages(label.station_age, node_index)
     return PassengerFreeAssignmentStationSimpleAges(age_idx, age_val, age_mask)
 end
 
@@ -232,13 +215,12 @@ live-clock count or reduced cost is never dereferenced into its label at all.
 )::Bool
     a_time <= b_time + 1e-9 || return false
     # `dom(age_b) ⊆ dom(age_a)` is required below, so `a` cannot have fewer live
-    # clocks than `b` -- two lengths, ahead of anything that reads set contents.
-    na = Int(a_n_ages)
-    nb = Int(b_n_ages)
-    na >= nb || return false
-    # `dom(age_b) ⊆ dom(age_a)` as one instruction, in front of the merge walk
-    # that would otherwise establish it out of two heap arrays.
-    b_ages.age_mask & ~a_ages.age_mask == 0 || return false
+    # clocks than `b`, nor a mask missing any of `b`'s -- both cheap, ahead of
+    # anything that reads set contents. Shared with the revisit-tolerant bitset
+    # dominance via `mechanics.jl`.
+    _sparse_station_age_support_rejection(
+        a_ages.age_idx, a_ages.age_mask, b_ages.age_idx, b_ages.age_mask,
+    ) == 0 || return false
     budget = b_reduced_cost - a_reduced_cost + 1e-9
     budget >= 0.0 || return false
     # `visited` and `activated_reward_layers` are read straight off the labels --
@@ -246,16 +228,11 @@ live-clock count or reduced cost is never dereferenced into its label at all.
     # bitset reconstruction.
     issubset(a.visited, b.visited) || return false
     # `dom(age_b) ⊆ dom(age_a)` and `age_a(j) <= age_b(j)` for j in dom(age_b) --
-    # the same O(#live) merge as the revisit-tolerant bitset dominance.
-    ia = 1
-    @inbounds for ib in Base.OneTo(nb)
-        j = b_ages.age_idx[ib]
-        while ia <= na && a_ages.age_idx[ia] < j
-            ia += 1
-        end
-        (ia <= na && a_ages.age_idx[ia] == j) || return false
-        a_ages.age_val[ia] <= b_ages.age_val[ib] + 1e-9 || return false
-    end
+    # the same O(#live) merge as the revisit-tolerant bitset dominance, shared via
+    # `mechanics.jl`.
+    _sparse_station_age_values_dominate(
+        a_ages.age_idx, a_ages.age_val, b_ages.age_idx, b_ages.age_val,
+    ) || return false
     _passenger_free_assignment_compensation(
         a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
     ) <= budget || return false

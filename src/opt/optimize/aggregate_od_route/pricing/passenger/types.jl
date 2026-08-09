@@ -262,7 +262,7 @@ against a bucket scan that is hundreds to thousands of entries long, so it is no
 measurable. Do not push the object any deeper (e.g. per scanned entry) expecting
 the same to hold.
 """
-struct PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented} end
+struct PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented} <: AbstractPricingDominanceRules end
 
 function _passenger_free_assignment_dominance_rules(
     bounded_max_stops::Bool,
