@@ -160,7 +160,6 @@ function main()
         repositioning_time=REPOSITIONING_TIME,
         max_walking_distance=max_walking_distance,
         max_stops=2,
-        max_visits_per_node=2,
         max_new_columns=MAX_NEW_COLS,
         n_candidates=max(MAX_NEW_COLS, 20),
         pricing_time_limit_sec=PRICING_TIME,

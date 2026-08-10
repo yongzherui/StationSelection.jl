@@ -38,7 +38,6 @@
             max_wait_time               = 100.0,
             detour_factor               = 2.0,
             max_stops                   = 4,
-            max_visits_per_node         = 2,
         )
         return data, model
     end
@@ -118,7 +117,6 @@
                 max_wait_time=md.max_wait_time,
                 repositioning_time=md.repositioning_time,
                 max_stops=md.max_stops,
-                max_visits_per_node=md.max_visits_per_node,
             )
             for c in cols
                 _asg, _tau, exact_rc = StationSelection._passenger_free_assignment_column_from_route(
@@ -145,7 +143,6 @@
                 max_wait_time=md.max_wait_time,
                 repositioning_time=md.repositioning_time,
                 max_stops=md.max_stops,
-                max_visits_per_node=md.max_visits_per_node,
             )
             exact_pd = create_passenger_free_assignment_pricing_data(
                 s, md.nodes, md.travel_cost, candidates; pd_kwargs...,

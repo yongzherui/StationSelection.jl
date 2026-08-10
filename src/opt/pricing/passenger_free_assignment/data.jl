@@ -183,8 +183,6 @@ function create_passenger_free_assignment_pricing_data(
     max_wait_time::Float64,
     repositioning_time::Float64=0.0,
     max_stops::Int=typemax(Int),
-    max_visits_per_node::Int=typemax(Int),
-    max_distinct_stations::Int=typemax(Int),
     compensated_dominance::Bool=true,
 )::PassengerFreeAssignmentPricingData
     layer_weight, assignment_layer_mask, positive_candidates = _build_passenger_reward_layers(candidates)
@@ -207,21 +205,7 @@ function create_passenger_free_assignment_pricing_data(
     end
 
     bounded_max_stops = max_stops != typemax(Int)
-    resolved_max_stops = _resolve_aggregate_od_route_pricing_max_stops(max_stops, max_visits_per_node, length(nodes))
-
-    station_bit = Dict{Int, UInt64}()
-    if length(nodes) <= 64
-        for (i, node) in enumerate(nodes)
-            station_bit[node] = UInt64(1) << (i - 1)
-        end
-    end
-    bounded_distinct_stations = max_distinct_stations < typemax(Int) &&
-        max_distinct_stations < length(nodes)
-    if bounded_distinct_stations && length(nodes) > 64
-        @warn "max_distinct_stations ignored: the station-budget cap uses a UInt64 " *
-              "visited mask and this instance has more than 64 stations" n_stations=length(nodes)
-        bounded_distinct_stations = false
-    end
+    resolved_max_stops = _resolve_aggregate_od_route_pricing_max_stops(max_stops)
 
     return PassengerFreeAssignmentPricingData(
         scenario,
@@ -231,11 +215,7 @@ function create_passenger_free_assignment_pricing_data(
         repositioning_time,
         max_wait_time,
         resolved_max_stops,
-        max_visits_per_node,
         bounded_max_stops,
-        max_distinct_stations,
-        bounded_distinct_stations,
-        station_bit,
         compensated_dominance,
         n_layers,
         layer_weight,

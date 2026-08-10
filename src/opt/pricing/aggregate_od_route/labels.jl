@@ -83,8 +83,7 @@ end
 function _aggregate_od_route_candidate_next_nodes(
     label::AggregateODRoutePricingLabel,
     pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals;
-    max_visits_per_node::Int=pricing_data.max_visits_per_node,
+    duals::AggregateODRoutePricingDuals,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
     past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
@@ -106,14 +105,6 @@ function _aggregate_od_route_candidate_next_nodes(
         origin_age = get(label.station_age, origin, Inf)
         origin_age + _aggregate_od_route_travel(pricing_data, label.current, destination) <=
             _direct_ride_limit(pricing_data, pair) + 1e-9 && push!(candidate_nodes, destination)
-    end
-
-    if max_visits_per_node < typemax(Int)
-        visit_counts = Dict{Int, Int}()
-        for node in label.route
-            visit_counts[node] = get(visit_counts, node, 0) + 1
-        end
-        filter!(node -> get(visit_counts, node, 0) < max_visits_per_node, candidate_nodes)
     end
 
     return sort!(collect(candidate_nodes))

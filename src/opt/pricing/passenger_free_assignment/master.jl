@@ -67,7 +67,6 @@ export build_passenger_free_assignment_master
 export passenger_free_assignment_two_stop_seed_columns
 export extract_passenger_free_assignment_duals
 export passenger_free_assignment_pricing_candidates
-export passenger_free_assignment_station_reduced_cost_eliminations
 
 struct PassengerFreeAssignmentPassenger
     id::Int
@@ -97,7 +96,6 @@ struct PassengerFreeAssignmentMasterData
     repositioning_time::Float64
     max_wait_time::Float64
     max_stops::Int
-    max_visits_per_node::Int
     l::Int
     unserved_penalty::Float64
     # No-vehicle-route ("same-station") options: passenger p walks to j and from j
@@ -272,7 +270,6 @@ function create_passenger_free_assignment_master_data(
         base_model.repositioning_time,
         base_model.max_wait_time,
         base_model.max_stops,
-        base_model.max_visits_per_node,
         base_model.l,
         penalty,
         same_station_options,
@@ -466,64 +463,6 @@ function passenger_free_assignment_pricing_candidates(
         end
     end
     return candidates
-end
-
-"""
-    passenger_free_assignment_station_reduced_cost_eliminations(candidates, y_value, y_lower_rc; kwargs...)
-
-Certified iteration-only station eliminations from closed-station reduced-cost
-slack. For each closed station `j`, the test computes the minimum increase in
-that station's linking duals needed to make every positive pricing opportunity
-incident to `j` nonpositive:
-
-    Q_j = sum_p (max_k [rho_pjk]_+ + max_i [rho_pij]_+)
-
-If `Q_j <= rc(y_j) - tol`, the same RMP-optimal dual face contains a dual point
-where station `j` has no positive-reward route-pricing endpoint, so all
-opportunities incident to `j` may be dropped for this pricing iteration.
-
-This passenger master has `x_same[p,j]` variables in the RMP, not `(p,j,j)`
-route-pricing opportunities, so there is no same-station `C_pj` term here:
-increasing the linking duals only relaxes those existing `x_same` constraints.
-"""
-function passenger_free_assignment_station_reduced_cost_eliminations(
-    candidates::AbstractVector{PassengerAssignmentCandidate},
-    y_value::AbstractVector{<:Real},
-    y_lower_rc::AbstractVector{<:Real};
-    closed_tol::Float64=1e-7,
-    reward_tol::Float64=1e-9,
-    slack_tol::Float64=1e-7,
-)
-    length(y_value) == length(y_lower_rc) ||
-        throw(ArgumentError("y_value and y_lower_rc must have the same length"))
-    n = length(y_value)
-    origin_need = Dict{Tuple{Int, Int}, Float64}()
-    destination_need = Dict{Tuple{Int, Int}, Float64}()
-    for c in candidates
-        c.reward > reward_tol || continue
-        1 <= c.origin <= n || throw(ArgumentError("candidate origin $(c.origin) outside 1:$n"))
-        1 <= c.destination <= n ||
-            throw(ArgumentError("candidate destination $(c.destination) outside 1:$n"))
-        key_o = (c.passenger, c.origin)
-        origin_need[key_o] = max(get(origin_need, key_o, 0.0), c.reward)
-        key_d = (c.passenger, c.destination)
-        destination_need[key_d] = max(get(destination_need, key_d, 0.0), c.reward)
-    end
-
-    required = zeros(Float64, n)
-    passenger_station = union(keys(origin_need), keys(destination_need))
-    for key in passenger_station
-        _p, j = key
-        required[j] += get(origin_need, key, 0.0) + get(destination_need, key, 0.0)
-    end
-
-    eliminated = Set{Int}()
-    for j in 1:n
-        y_value[j] <= closed_tol || continue
-        y_lower_rc[j] > slack_tol || continue
-        required[j] <= y_lower_rc[j] - slack_tol && push!(eliminated, j)
-    end
-    return eliminated, required
 end
 
 """

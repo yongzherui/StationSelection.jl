@@ -16,7 +16,6 @@ struct AggregateODRoutePricingData
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
-    max_visits_per_node::Int
     bounded_max_stops::Bool
 end
 

@@ -180,7 +180,6 @@ struct PassengerFreeAssignmentSearchContext{D<:Function, O} <: AbstractPricingSe
     Int, RewardLayerBitset,
 }
     pricing_data::PassengerFreeAssignmentPricingData
-    max_visits_per_node::Int
     use_post_w_completion_bound::Bool
     dominates::D
     search_index::PassengerFreeAssignmentSearchIndex
@@ -196,7 +195,6 @@ end
 
 function PassengerFreeAssignmentSearchContext(
     pricing_data::PassengerFreeAssignmentPricingData;
-    max_visits_per_node::Int,
     use_post_w_completion_bound::Bool=false,
     # Count which dominance condition rejected each tested pair, into
     # `PFA_DOMINANCE_REJECTIONS`. Off in production: it selects an instrumented
@@ -217,7 +215,6 @@ function PassengerFreeAssignmentSearchContext(
     # compiles down to only the conditions this configuration actually uses.
     dominance_rules = _passenger_free_assignment_dominance_rules(
         pricing_data.bounded_max_stops,
-        pricing_data.bounded_distinct_stations,
         pricing_data.compensated_dominance,
         dominance_census,
     )
@@ -225,7 +222,7 @@ function PassengerFreeAssignmentSearchContext(
         x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.layer_weight, dominance_rules,
     )
     return PassengerFreeAssignmentSearchContext(
-        pricing_data, max_visits_per_node, use_post_w_completion_bound, dominates,
+        pricing_data, use_post_w_completion_bound, dominates,
         search_index, bound_workspace, n_nodes, label_observer,
         Ref(0.0), Ref(0.0), Ref(0), Ref(0), Ref(0.0),
     )
@@ -266,7 +263,7 @@ _pricing_route_length(::PassengerFreeAssignmentSearchContext, label::PassengerFr
 _pricing_max_route_length(ctx::PassengerFreeAssignmentSearchContext) = ctx.pricing_data.max_stops
 
 _pricing_candidate_next_nodes(ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel) =
-    _passenger_free_assignment_candidate_next_nodes(label, ctx.pricing_data; max_visits_per_node=ctx.max_visits_per_node)
+    _passenger_free_assignment_candidate_next_nodes(label, ctx.pricing_data)
 
 # One child per stop, returned directly: see `_extend_passenger_free_assignment_pricing_label`.
 _pricing_extend_label(ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel, next_node::Int) =
@@ -289,7 +286,6 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     pricing_data::PassengerFreeAssignmentPricingData;
     time_limit::Float64,
     reduced_cost_tol::Float64,
-    max_visits_per_node::Int,
     use_reduced_cost_pruning::Bool=true,
     use_post_w_completion_bound::Bool=false,
     profile::Bool=false,
@@ -299,7 +295,6 @@ function _enumerate_passenger_free_assignment_pricing_labels(
 )
     ctx = PassengerFreeAssignmentSearchContext(
         pricing_data;
-        max_visits_per_node=max_visits_per_node,
         use_post_w_completion_bound=use_post_w_completion_bound,
         dominance_census=dominance_census,
         label_observer=label_observer,
@@ -432,7 +427,6 @@ function passenger_free_assignment_pricing_by_label_setting(
     max_new_columns::Int=1,
     n_candidates::Int=max_new_columns,
     time_limit::Float64=30.0,
-    max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
     use_post_w_completion_bound::Bool=false,
     dominance_census::Bool=false,
@@ -470,7 +464,6 @@ function passenger_free_assignment_pricing_by_label_setting(
         pricing_data;
         time_limit=time_limit,
         reduced_cost_tol=reduced_cost_tol,
-        max_visits_per_node=max_visits_per_node,
         profile=profile,
         use_post_w_completion_bound=use_post_w_completion_bound,
         dominance_census=dominance_census,

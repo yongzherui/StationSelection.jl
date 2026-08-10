@@ -213,7 +213,6 @@ function _certified_route_covering_pi(
             next_column_id=(isempty(pool) ? 1 : maximum(c.id for c in pool) + 1),
             reduced_cost_tol=lp_problem.reduced_cost_tol, max_new_columns=lp_problem.max_new_columns,
             n_candidates=lp_problem.n_candidates, time_limit=lp_problem.pricing_time_limit_sec,
-            max_visits_per_node=lp_problem.max_visits_per_node,
         )
         exhausted ||
             throw(ArgumentError("restricted MW cut: certification pricing pass hit its time limit for scenario $(s)"))

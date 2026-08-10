@@ -8,12 +8,11 @@
     ]
     physical = create_passenger_free_assignment_pricing_data(
         1, nodes, travel, candidates; route_regularization_weight=1.0,
-        max_wait_time=2.0, max_stops=4, max_visits_per_node=2)
+        max_wait_time=2.0, max_stops=4)
 
     function exact_optimum(pd)
         labels, exhausted, _ = StationSelection._enumerate_passenger_free_assignment_pricing_labels(
-            pd; time_limit=10.0, reduced_cost_tol=1e-9,
-            max_visits_per_node=pd.max_visits_per_node, use_reduced_cost_pruning=false)
+            pd; time_limit=10.0, reduced_cost_tol=1e-9, use_reduced_cost_pruning=false)
         @test exhausted
         minimum(l.reduced_cost for l in labels)
     end

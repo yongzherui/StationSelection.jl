@@ -114,7 +114,6 @@ struct AggregateODRouteModel <: AbstractODModel
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
-    max_visits_per_node::Int
     max_new_columns::Int
     n_candidates::Int
     pricing_time_limit_sec::Float64
@@ -134,7 +133,6 @@ struct AggregateODRouteModel <: AbstractODModel
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
-            max_visits_per_node::Int=typemax(Int),
             max_new_columns::Int=20,
             n_candidates::Int=max(100, max_new_columns),
             pricing_time_limit_sec::Number=30.0,
@@ -161,8 +159,6 @@ struct AggregateODRouteModel <: AbstractODModel
         resolved_max_stops = isnothing(max_stops) ? typemax(Int) : max_stops
         resolved_max_stops >= 2 ||
             throw(ArgumentError("max_stops must be at least 2"))
-        max_visits_per_node >= 1 ||
-            throw(ArgumentError("max_visits_per_node must be positive"))
         max_new_columns > 0 ||
             throw(ArgumentError("max_new_columns must be positive"))
         n_candidates >= max_new_columns ||
@@ -180,7 +176,6 @@ struct AggregateODRouteModel <: AbstractODModel
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
-            max_visits_per_node,
             max_new_columns,
             n_candidates,
             Float64(pricing_time_limit_sec),

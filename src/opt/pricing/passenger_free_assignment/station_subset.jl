@@ -257,13 +257,10 @@ function price_exact_on_stations(
         max_wait_time=data.max_wait_time,
         repositioning_time=data.repositioning_time,
         max_stops=data.bounded_max_stops ? data.max_stops : typemax(Int),
-        max_visits_per_node=data.max_visits_per_node,
-        max_distinct_stations=typemax(Int),
         compensated_dominance=data.compensated_dominance,
     )
     labels, exhausted, stats = _enumerate_passenger_free_assignment_pricing_labels(
         restricted; time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
-        max_visits_per_node=restricted.max_visits_per_node,
         use_reduced_cost_pruning=use_reduced_cost_pruning,
         use_post_w_completion_bound=use_post_w_completion_bound,
         stop_if=_ -> false,
@@ -512,8 +509,6 @@ function price_by_station_subset_branch_and_bound(
     search_budget = L
     if settings.use_route_station_cap
         data.bounded_max_stops && (search_budget = min(search_budget, data.max_stops))
-        data.bounded_distinct_stations &&
-            (search_budget = min(search_budget, data.max_distinct_stations))
     end
     reward_data = PassengerRewardBoundData(data)
     routing_bound_enabled = settings.use_routing_reward_bound

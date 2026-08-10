@@ -46,10 +46,7 @@ function passenger_free_assignment_post_w_completion(
         end
         depth >= max_suffix_stops && continue
         current.route_length >= pricing_data.max_stops && continue
-        next_nodes = _passenger_free_assignment_candidate_next_nodes(
-            current, pricing_data;
-            max_visits_per_node=pricing_data.max_visits_per_node,
-        )
+        next_nodes = _passenger_free_assignment_candidate_next_nodes(current, pricing_data)
         for next_node in next_nodes
             next_node in suffix_visited && continue
             for child in extend_passenger_free_assignment_pricing_label(

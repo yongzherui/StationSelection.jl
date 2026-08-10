@@ -22,53 +22,6 @@
         return only(filter(l -> l.current == current, labels))
     end
 
-    @testset "closed-station reduced-cost slack certifies pricing eliminations" begin
-        candidates = [
-            PassengerAssignmentCandidate(1, 2, 1, 10.0, 2.0),
-            PassengerAssignmentCandidate(1, 2, 3, 10.0, 1.0),  # same origin side: max stays 2
-            PassengerAssignmentCandidate(1, 1, 2, 10.0, 1.0),
-            PassengerAssignmentCandidate(2, 2, 3, 10.0, 1.5),
-            PassengerAssignmentCandidate(3, 3, 2, 10.0, -9.0),
-        ]
-        y_value = [1.0, 0.0, 0.0]
-        y_lower_rc = [0.0, 5.0, 1.0]
-
-        eliminated, required =
-            passenger_free_assignment_station_reduced_cost_eliminations(
-                candidates, y_value, y_lower_rc; slack_tol=1e-7,
-            )
-
-        @test 2 in eliminated
-        @test !(1 in eliminated)  # open stations are never certified by lower-bound slack
-        @test !(3 in eliminated)
-        @test required[2] ≈ 4.5   # p1: 2 + 1, p2: 1.5
-        @test required[3] ≈ 2.5
-    end
-
-    @testset "joint reduced-cost slack filter suppresses individual opportunities" begin
-        using Gurobi
-        env = Gurobi.Env()
-        candidates = [
-            PassengerAssignmentCandidate(1, 2, 3, 10.0, 3.0),
-            PassengerAssignmentCandidate(1, 2, 4, 10.0, 8.0),
-            PassengerAssignmentCandidate(1, 5, 3, 10.0, 8.0),
-        ]
-        y_value = [1.0, 0.0, 0.0, 1.0, 1.0]
-        y_lower_rc = [0.0, 2.0, 1.0, 0.0, 0.0]
-
-        joint = StationSelection._station_reduced_cost_joint_lp_filter(
-            candidates, y_value, y_lower_rc, env;
-            closed_tol=1e-7, reward_tol=1e-7, slack_tol=1e-7,
-        )
-
-        @test (1, 2, 3) in joint.excluded_opportunities
-        @test !((1, 2, 4) in joint.excluded_opportunities)
-        @test !((1, 5, 3) in joint.excluded_opportunities)
-        @test joint.adjusted_rewards[(1, 2, 3)] <= 1e-7
-        @test all(joint.adjusted_rewards[(c.passenger, c.origin, c.destination)] <=
-                  c.reward + 1e-8 for c in candidates)
-    end
-
     @testset "reward coarsening rounds upward and preserves exact default" begin
         candidates = [
             PassengerAssignmentCandidate(1, 1, 2, 100.0, 2.0),
@@ -114,7 +67,7 @@
         exact = create_passenger_free_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
             route_regularization_weight=1.0, max_wait_time=10.0,
-            max_stops=4, max_visits_per_node=2,
+            max_stops=4,
         )
         bound, certified, stats = passenger_free_assignment_lagrangian_bound(
             exact, candidates; max_iterations=3, time_limit=20.0,
@@ -145,7 +98,7 @@
             exact = create_passenger_free_assignment_pricing_data(
                 trial, collect(1:5), travel, candidates;
                 route_regularization_weight=1.0, max_wait_time=10.0,
-                max_stops=5, max_visits_per_node=2,
+                max_stops=5,
             )
             exact_columns, exact_exhausted, _stats =
                 passenger_free_assignment_pricing_by_label_setting(
@@ -166,73 +119,6 @@
         end
     end
 
-    @testset "passenger-DSSR promotes duplicated passengers and becomes exact" begin
-        travel = line_travel_cost(4)
-        candidates = [
-            PassengerAssignmentCandidate(1, 1, 2, 10.0, 4.0),
-            PassengerAssignmentCandidate(1, 1, 3, 10.0, 8.0),
-            PassengerAssignmentCandidate(2, 2, 4, 10.0, 7.0),
-        ]
-        exact = create_passenger_free_assignment_pricing_data(
-            1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
-            max_stops=4, max_visits_per_node=2,
-        )
-        bound, certified, stats = passenger_free_assignment_passenger_dssr_bound(
-            exact, candidates; max_rounds=5, time_limit=20.0,
-        )
-        @test certified
-        @test stats.exact
-        @test stats.rounds == 2
-        @test stats.promoted_by_round[1] == [1]
-        @test issorted(stats.bound_trajectory)
-        @test bound ≈ -12.0
-        @test bound ≈ stats.best_exact_replay_rc
-        @test_throws ArgumentError passenger_free_assignment_passenger_dssr_bound(
-            exact, candidates; max_rounds=0,
-        )
-    end
-
-    @testset "passenger-DSSR randomized bound validity and monotonicity" begin
-        rng = MersenneTwister(913)
-        travel = line_travel_cost(5)
-        for trial in 1:10
-            candidates = PassengerAssignmentCandidate[]
-            for passenger in 1:3, origin in 1:4, destination in (origin + 1):5
-                rand(rng) < 0.5 || continue
-                push!(candidates, PassengerAssignmentCandidate(
-                    passenger, origin, destination, 10.0,
-                    1.0 + 9.0 * rand(rng),
-                ))
-            end
-            isempty(candidates) && continue
-            exact = create_passenger_free_assignment_pricing_data(
-                trial, collect(1:5), travel, candidates;
-                route_regularization_weight=1.0, max_wait_time=10.0,
-                max_stops=5, max_visits_per_node=2,
-            )
-            exact_columns, exact_exhausted, _stats =
-                passenger_free_assignment_pricing_by_label_setting(
-                    exact, PassengerFreeAssignmentRouteColumn[];
-                    next_column_id=1, reduced_cost_tol=1e-9,
-                    max_new_columns=typemax(Int) ÷ 2,
-                    n_candidates=typemax(Int) ÷ 2,
-                    time_limit=20.0,
-                )
-            @test exact_exhausted
-            exact_optimum = isempty(exact_columns) ? 0.0 : minimum(
-                Float64(column.metadata["reduced_cost"]) for column in exact_columns
-            )
-            bound, certified, dssr_stats = passenger_free_assignment_passenger_dssr_bound(
-                exact, candidates; max_rounds=10, time_limit=20.0,
-            )
-            @test certified
-            @test bound <= exact_optimum + 1e-6
-            @test all(diff(dssr_stats.bound_trajectory) .>= -1e-6)
-            dssr_stats.exact && @test bound ≈ exact_optimum atol = 1e-6
-        end
-    end
-
     @testset "post-W destination-only completion" begin
         travel = line_travel_cost(3)
         candidates = [
@@ -242,11 +128,11 @@
         pricing_data = create_passenger_free_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
             route_regularization_weight=1.0, max_wait_time=5.0,
-            max_stops=5, max_visits_per_node=3,
+            max_stops=5,
         )
         post_w = PassengerFreeAssignmentPricingLabel(
             1, [1], 5.0, Dict(1 => 0.0), RewardLayerBitset(),
-            0.0, 0.0, 1, pricing_data.station_bit[1],
+            0.0, 0.0, 1,
         )
         best, exhausted, stats = passenger_free_assignment_post_w_completion(
             post_w, pricing_data; time_limit=10.0,
@@ -259,7 +145,7 @@
 
         pre_w = PassengerFreeAssignmentPricingLabel(
             1, [1], 4.0, Dict(1 => 0.0), RewardLayerBitset(),
-            0.0, 0.0, 1, pricing_data.station_bit[1],
+            0.0, 0.0, 1,
         )
         @test_throws ArgumentError passenger_free_assignment_post_w_completion(
             pre_w, pricing_data,
@@ -391,7 +277,6 @@
         )
         label0 = PassengerFreeAssignmentPricingLabel(
             1, [1], 0.0, Dict(1 => 0.0), RewardLayerBitset(), 0.0, 0.0, 1,
-            pricing_data.station_bit[1],
         )
         late_visit = only(extend_passenger_free_assignment_pricing_label(label0, 2, pricing_data))
         @test late_visit.time == 1.0
@@ -399,81 +284,6 @@
 
         not_certified = only(extend_passenger_free_assignment_pricing_label(late_visit, 3, pricing_data))
         @test isempty(not_certified.activated_reward_layers)
-    end
-
-    @testset "station budget cap (max_distinct_stations)" begin
-        travel = line_travel_cost(4)
-        candidates = [
-            PassengerAssignmentCandidate(1, 1, 2, 100.0, 10.0),
-            PassengerAssignmentCandidate(2, 3, 4, 100.0, 10.0),
-        ]
-
-        @testset "uncapped: nothing is restricted" begin
-            pd = create_passenger_free_assignment_pricing_data(
-                1, [1, 2, 3, 4], travel, candidates;
-                route_regularization_weight=1.0, max_wait_time=100.0,
-            )
-            @test !pd.bounded_distinct_stations
-            label = only_at(initial_passenger_free_assignment_pricing_labels(pd), 1)
-            @test StationSelection._passenger_free_assignment_station_budget_allows(label, 3, pd)
-        end
-
-        @testset "capped: a new station is refused once the budget is spent" begin
-            pd = create_passenger_free_assignment_pricing_data(
-                1, [1, 2, 3, 4], travel, candidates;
-                route_regularization_weight=1.0, max_wait_time=100.0,
-                max_distinct_stations=2,
-            )
-            @test pd.bounded_distinct_stations
-            label = only_at(initial_passenger_free_assignment_pricing_labels(pd), 1)
-            at2 = only(extend_passenger_free_assignment_pricing_label(label, 2, pd))
-            @test count_ones(at2.visited_mask) == 2
-            # Budget is spent: a third distinct station is refused...
-            @test !StationSelection._passenger_free_assignment_station_budget_allows(at2, 3, pd)
-            # ...but revisiting one already paid for is always free.
-            @test StationSelection._passenger_free_assignment_station_budget_allows(at2, 1, pd)
-            @test 3 ∉ StationSelection._passenger_free_assignment_candidate_next_nodes(at2, pd)
-        end
-
-        @testset "capped search never exceeds the budget, and matches brute force under it" begin
-            pd_capped = create_passenger_free_assignment_pricing_data(
-                1, [1, 2, 3, 4], travel, candidates;
-                route_regularization_weight=0.1, max_wait_time=100.0,
-                max_stops=4, max_visits_per_node=2, max_distinct_stations=2,
-            )
-            cols, _exhausted, _stats = passenger_free_assignment_pricing_by_label_setting(
-                pd_capped, PassengerFreeAssignmentRouteColumn[];
-                next_column_id=1, max_new_columns=50, n_candidates=1000, time_limit=30.0,
-            )
-            @test !isempty(cols)
-            for c in cols
-                @test length(unique(c.route)) <= 2
-            end
-
-            # The capped search must attain the best reduced cost over exactly the
-            # routes the cap permits -- checked against explicit enumeration, since
-            # the cap is a restriction and cannot be validated against the
-            # unrestricted optimum.
-            best_allowed = Inf
-            nodes = [1, 2, 3, 4]
-            function visit!(route)
-                if length(route) >= 2
-                    _a, _t, rc = StationSelection._passenger_free_assignment_column_from_route(route, pd_capped)
-                    isempty(_a) || (best_allowed = min(best_allowed, rc))
-                end
-                length(route) >= 4 && return
-                for nd in nodes
-                    nd == route[end] && continue
-                    count(==(nd), route) < 2 || continue
-                    length(unique(vcat(route, nd))) <= 2 || continue
-                    visit!(vcat(route, nd))
-                end
-            end
-            for start in nodes
-                visit!([start])
-            end
-            @test minimum(c.metadata["reduced_cost"] for c in cols) ≈ best_allowed
-        end
     end
 
     @testset "dominance" begin
@@ -493,7 +303,6 @@
         mklabel(current, time, station_age, layers, rc) =
             PassengerFreeAssignmentPricingLabel(
                 current, [current], time, station_age, layers, time, rc, 1,
-                pricing_data.station_bit[current],
             )
 
         @testset "dominates when time/rc/layers/station-ages are all no worse" begin
@@ -560,7 +369,6 @@
                 route_length = rand(rng, 1:4)
                 return PassengerFreeAssignmentPricingLabel(
                     current, [current], t, station_age, layers, t, rc, route_length,
-                    UInt64(1) << (node_index[current] - 1),
                 )
             end
 
@@ -602,7 +410,7 @@
 
             pricing_data = create_passenger_free_assignment_pricing_data(
                 1, nodes, travel, candidates;
-                route_regularization_weight=0.1, max_wait_time=3.0, max_visits_per_node=2,
+                route_regularization_weight=0.1, max_wait_time=3.0,
             )
             isempty(pricing_data.opportunities) && continue
 
@@ -657,7 +465,7 @@
         ]
         pricing_data = create_passenger_free_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0, max_stops=3, max_visits_per_node=1,
+            route_regularization_weight=1.0, max_wait_time=10.0, max_stops=3,
         )
 
         function brute_force_best_reduced_cost()
@@ -669,7 +477,7 @@
                 end
                 length(route) >= 3 && return
                 for nd in nodes
-                    nd in route && continue
+                    nd == route[end] && continue
                     haskey(travel, (route[end], nd)) || continue
                     visit!(vcat(route, nd))
                 end
@@ -684,7 +492,7 @@
 
         columns, _exhausted, _stats = passenger_free_assignment_pricing_by_label_setting(
             pricing_data, PassengerFreeAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=10, n_candidates=10, time_limit=10.0, max_visits_per_node=1,
+            next_column_id=1, max_new_columns=10, n_candidates=10, time_limit=10.0,
         )
         search_best = isempty(columns) ? Inf : minimum(c.metadata["reduced_cost"] for c in columns)
         @test isapprox(search_best, brute_best; atol=1e-6)
@@ -704,13 +512,13 @@
             PassengerAssignmentCandidate(2, 2, 4, 6.0, 9.0),
             PassengerAssignmentCandidate(3, 1, 4, 8.0, 7.0),
         ]
-        mk(max_stops, max_visits) = create_passenger_free_assignment_pricing_data(
+        mk(max_stops) = create_passenger_free_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
             route_regularization_weight=0.5, max_wait_time=3.0,
-            max_stops=max_stops, max_visits_per_node=max_visits,
+            max_stops=max_stops,
         )
 
-        unbounded = mk(typemax(Int), typemax(Int))
+        unbounded = mk(typemax(Int))
         @test unbounded.max_stops == typemax(Int)
         @test unbounded.bounded_max_stops == false
 
@@ -722,7 +530,7 @@
         @test !isempty(cols_unb)
 
         # generous explicit cap, far above the implicit one
-        generous = mk(30, 30)
+        generous = mk(30)
         cols_gen, exhausted_gen, _st2 = passenger_free_assignment_pricing_by_label_setting(
             generous, PassengerFreeAssignmentRouteColumn[];
             next_column_id=1, max_new_columns=10^6, n_candidates=10^6, time_limit=60.0,
@@ -747,12 +555,11 @@
         pricing_data = create_passenger_free_assignment_pricing_data(
             1, nodes, travel, candidates;
             route_regularization_weight=0.5, max_wait_time=20.0,
-            max_stops=4, max_visits_per_node=2,
+            max_stops=4,
         )
 
         best_bf = Inf
         route = Int[]
-        counts = Dict{Int, Int}()
         function dfs!()
             if length(route) >= 2
                 a, _t, rc = StationSelection._passenger_free_assignment_column_from_route(
@@ -763,14 +570,13 @@
             length(route) >= 4 && return
             for nd in nodes
                 !isempty(route) && nd == route[end] && continue
-                get(counts, nd, 0) < 2 || continue
-                push!(route, nd); counts[nd] = get(counts, nd, 0) + 1
+                push!(route, nd)
                 dfs!()
-                counts[nd] -= 1; pop!(route)
+                pop!(route)
             end
         end
         for s in nodes
-            push!(route, s); counts[s] = 1; dfs!(); counts[s] = 0; pop!(route)
+            push!(route, s); dfs!(); pop!(route)
         end
 
         cols, exhausted, _st = passenger_free_assignment_pricing_by_label_setting(

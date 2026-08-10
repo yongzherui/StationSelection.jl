@@ -135,7 +135,6 @@ function main()
         max_wait_time               = MAX_WAIT_TIME,
         detour_factor                 = DETOUR_FACTOR,
         max_stops                   = max_stops,
-        max_visits_per_node         = 2,
         max_new_columns             = MAX_NEW_COLS,
         n_candidates                = max(MAX_NEW_COLS, 20),
         pricing_time_limit_sec      = PRICING_TIME,

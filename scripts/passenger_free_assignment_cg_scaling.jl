@@ -31,7 +31,6 @@ Env overrides:
     PFA_CERT_TIME       default 900 (exhaustive certification budget, seconds)
     PFA_IP_TIME         default 600
     PFA_MAX_CG_ITERS    default 2000
-    PFA_STATION_RC_FILTER default 0 (`0`, `1`/`closed_form`, or `joint_lp`)
 """
 
 using CSV, DataFrames, Gurobi, JuMP, Printf, StationSelection
@@ -46,11 +45,9 @@ const N_SCENARIOS = parse(Int, get(ENV, "PFA_N_SCENARIOS", "1"))
 # sentinel. That is NOT the same as a large finite cap -- a finite value (even
 # 10^6) sets `bounded_max_stops=true`, which makes label dominance additionally
 # compare `route_length` and is materially SLOWER than the genuinely uncapped
-# path. Same for `PFA_MAX_VISITS=0`.
+# path.
 const _RAW_MAX_STOPS = parse(Int, get(ENV, "PFA_MAX_STOPS", "4"))
 const MAX_STOPS = _RAW_MAX_STOPS <= 0 ? typemax(Int) : _RAW_MAX_STOPS
-const _RAW_MAX_VISITS = parse(Int, get(ENV, "PFA_MAX_VISITS", "3"))
-const MAX_VISITS = _RAW_MAX_VISITS <= 0 ? typemax(Int) : _RAW_MAX_VISITS
 const N_CANDIDATES = parse(Int, get(ENV, "PFA_N_CANDIDATES", "20"))
 const PRICING_TIME = parse(Float64, get(ENV, "PFA_PRICING_TIME", "60"))
 const CERT_TIME = parse(Float64, get(ENV, "PFA_CERT_TIME", "900"))
@@ -70,25 +67,6 @@ const WALK_WEIGHT = parse(Float64, get(ENV, "PFA_WALK_WEIGHT", "0.1"))
 # Concurrent per-scenario pricing. Exact and deterministic either way; set to 0 to
 # force the sequential path for an A/B timing comparison.
 const PARALLEL_SCENARIOS = get(ENV, "PFA_PARALLEL_SCENARIOS", "1") in ("1", "true", "yes")
-# Restrict pricing to columns with at most `l` distinct stations. Slower to price,
-# but excludes the broad multi-station "hub" columns that earn LP dual credit
-# while being unusable in any integer solution -- so the metric to watch here is
-# `lp_mip_gap_pct`, not wall time.
-const STATION_BUDGET_CAP = get(ENV, "PFA_STATION_BUDGET_CAP", "0") in ("1", "true", "yes")
-function _station_rc_filter_mode()
-    raw = lowercase(strip(get(ENV, "PFA_STATION_RC_FILTER", "0")))
-    raw in ("0", "false", "no", "none") && return :none
-    raw in ("1", "true", "yes", "closed_form") && return :closed_form
-    raw == "joint_lp" && return :joint_lp
-    error("PFA_STATION_RC_FILTER must be 0, 1, closed_form, or joint_lp")
-end
-
-# Closed-station reduced-cost slack filter for the pricing graph. Exact and
-# iteration-only; `joint_lp` can suppress individual opportunities jointly across
-# endpoints, while `closed_form` only deletes whole stations by the independent
-# one-station test.
-const STATION_RC_FILTER_MODE = _station_rc_filter_mode()
-const STATION_RC_FILTER = STATION_RC_FILTER_MODE != :none
 # Compensated layer dominance. On by default; set 0 to fall back to the plain
 # `A_a subseteq A_b` rule. Faster pricing but fewer columns per search, so this
 # exists to settle the tradeoff end to end rather than on pricing speed alone.
@@ -102,8 +80,7 @@ const SEED_TWO_STOP = get(ENV, "PFA_SEED_TWO_STOP", "1") in ("1", "true", "yes")
 const GRB_ENV = Gurobi.Env()
 
 # Build budget as a divisor of n: `l = ceil(n / PFA_L_DIV)`. Default 2 preserves
-# the historical `l = n/2` behaviour; set 4 or 3 to test whether a smaller build
-# budget opens a reduced-cost gap on closed stations (the station-filter lever).
+# the historical `l = n/2` behaviour; set 4 or 3 to test a smaller build budget.
 const L_DIV = parse(Float64, get(ENV, "PFA_L_DIV", "2"))
 _l_for(n::Int) = max(2, ceil(Int, n / L_DIV))
 
@@ -117,15 +94,13 @@ function build_model_for(n_stations::Int)
         max_wait_time               = 900.0,
         detour_factor               = 2.0,
         max_stops                   = MAX_STOPS,
-        max_visits_per_node         = MAX_VISITS,
     )
 end
 
 function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::String)
     # scenario count is part of the identity: passengers = n_pairs * n_scenarios, so a
     # 1-scenario and 3-scenario run of the same (n, p) are different problems.
-    suffix = STATION_RC_FILTER_MODE == :none ? "nofilter" : string(STATION_RC_FILTER_MODE)
-    case = "pfa_n$(n_stations)_p$(N_PAIRS)_sc$(N_SCENARIOS)_s$(seed)_ms$(MAX_STOPS == typemax(Int) ? "inf" : string(MAX_STOPS))_$(suffix)"
+    case = "pfa_n$(n_stations)_p$(N_PAIRS)_sc$(N_SCENARIOS)_s$(seed)_ms$(MAX_STOPS == typemax(Int) ? "inf" : string(MAX_STOPS))"
     @printf("=== %s ===\n", case)
     flush(stdout)
 
@@ -150,9 +125,6 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
             ip_time_limit_sec=IP_TIME,
             total_time_limit_sec=CASE_TIME,
             parallel_scenarios=PARALLEL_SCENARIOS,
-            station_budget_cap=STATION_BUDGET_CAP,
-            use_station_reduced_cost_filter=STATION_RC_FILTER,
-            station_reduced_cost_filter_mode=STATION_RC_FILTER_MODE,
             compensated_dominance=COMPENSATED_DOMINANCE,
             seed_two_stop_routes=SEED_TWO_STOP,
             verify_reduced_costs=true,
@@ -183,20 +155,6 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
         end
     end
 
-    station_filter_rows = isnothing(result) ? NamedTuple[] :
-        [r for r in result.iteration_rows if !ismissing(r.station_filter_positive_rho_reduction)]
-    mean_station_filter_opp_reduction = isempty(station_filter_rows) ? missing :
-        sum(r.station_filter_positive_rho_reduction for r in station_filter_rows) / length(station_filter_rows)
-    mean_station_filter_station_reduction = isempty(station_filter_rows) ? missing :
-        sum(r.station_filter_positive_rho_station_reduction for r in station_filter_rows) / length(station_filter_rows)
-    mean_station_filter_excluded_stations = isempty(station_filter_rows) ? missing :
-        sum(r.station_filter_excluded_stations for r in station_filter_rows) / length(station_filter_rows)
-    mean_station_filter_excluded_opportunities = isempty(station_filter_rows) ? missing :
-        sum(r.station_filter_excluded_opportunities for r in station_filter_rows) / length(station_filter_rows)
-    mean_station_filter_slack_need_ratio = isempty(station_filter_rows) ? missing :
-        sum(skipmissing((r.station_filter_mean_slack_need_ratio for r in station_filter_rows))) /
-        max(1, count(r -> !ismissing(r.station_filter_mean_slack_need_ratio), station_filter_rows))
-
     summary = (
         case = case,
         n_stations = n_stations,
@@ -205,7 +163,6 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
         seed = seed,
         l = _l_for(n_stations),
         max_stops = MAX_STOPS == typemax(Int) ? -1 : MAX_STOPS,
-        max_visits = MAX_VISITS == typemax(Int) ? -1 : MAX_VISITS,
         truly_unbounded_stops = MAX_STOPS == typemax(Int),
         n_candidates = N_CANDIDATES,
         status = status,
@@ -233,21 +190,11 @@ function run_one(n_stations::Int, seed::Int, results_dir::String, iters_dir::Str
         seed_two_stop = SEED_TWO_STOP,
         n_seed_columns = isnothing(result) ? missing :
             get(result.final_result.metadata, "seed_two_stop_columns", missing),
-        station_rc_filter = STATION_RC_FILTER,
-        station_rc_filter_mode = string(STATION_RC_FILTER_MODE),
         parallel_scenarios = PARALLEL_SCENARIOS,
         n_threads = Threads.nthreads(),
-        mean_positive_rho_used = isnothing(result) ? missing : result.mean_positive_rho_used,
         mean_raw_positive_rho = isnothing(result) ? missing : result.mean_raw_positive_rho,
-        mean_positive_rho_stations_used = isnothing(result) ? missing :
-            result.mean_positive_rho_stations_used,
         mean_raw_positive_rho_stations = isnothing(result) ? missing :
             result.mean_raw_positive_rho_stations,
-        mean_station_filter_positive_rho_reduction = mean_station_filter_opp_reduction,
-        mean_station_filter_positive_rho_station_reduction = mean_station_filter_station_reduction,
-        mean_station_filter_excluded_stations = mean_station_filter_excluded_stations,
-        mean_station_filter_excluded_opportunities = mean_station_filter_excluded_opportunities,
-        mean_station_filter_slack_need_ratio = mean_station_filter_slack_need_ratio,
         open_stations = isnothing(result) ? "" : string(result.open_stations),
         wall_time_sec = wall,
     )
@@ -280,7 +227,6 @@ function main()
             "n_pairs=$N_PAIRS seeds=$(SEEDS) n_scenarios=$N_SCENARIOS max_stops=$MAX_STOPS")
     println("n_candidates=$N_CANDIDATES pricing_time=$(PRICING_TIME)s cert_time=$(CERT_TIME)s case_time=$(CASE_TIME)s")
     println("max_stops=$(MAX_STOPS == typemax(Int) ? "typemax(Int) [TRUE UNBOUNDED]" : string(MAX_STOPS))  " *
-            "max_visits=$(MAX_VISITS == typemax(Int) ? "typemax(Int)" : string(MAX_VISITS))  " *
             "threads=$(Threads.nthreads())")
     println()
 

@@ -53,7 +53,7 @@ Scoreboard of what was tried, each measured on its own
 | label inlined into bucket entry (`types.jl`) | **1.1-1.15x** |
 | reuse popped priority (`search.jl`) | no effect; the bound is ~0.6% of runtime |
 | travel-discounted reward bound (`search.jl`) | no effect at cold-start duals |
-| station-budget cap at `l` (this file) | **off by default** -- slower, and the LP bound did not move |
+| station-budget cap at `l` (removed 2026-08-10) | measured off by default -- pricing-neutral to 1.7x slower, LP bound identical to 10 decimals at n=10/n=15; removed rather than kept dark |
 | compatibility-component decomposition | not built: the reward graph is one component holding 100% of opportunities |
 
 | **mechanical pass, 2026-08-03** (below) | **6-17x on the dominance scan, 1.7-9.2x wall** |
@@ -80,9 +80,7 @@ Measured census over 456M tested pairs
 ever reach the station-age walk and under 0.5% the reward compensation -- which is
 why the order of these conditions is worth this much.
 
-Any exact change must leave the benchmark's `best_rc` bit-identical; the
-station-budget cap is the one deliberate exception, since it restricts the column
-set on purpose.
+Any exact change must leave the benchmark's `best_rc` bit-identical.
 """
 
 export initial_passenger_free_assignment_pricing_labels
@@ -109,68 +107,9 @@ function initial_passenger_free_assignment_pricing_labels(
             0.0,
             pricing_data.route_regularization_weight * pricing_data.repositioning_time,
             1,
-            get(pricing_data.station_bit, node, UInt64(0)),
         ))
     end
     return labels
-end
-
-"""
-    _passenger_free_assignment_station_budget_allows(label, next_node, pricing_data)
-
-Whether extending to `next_node` keeps the route inside the station budget
-`l` (`max_distinct_stations`), i.e. `|U(route) ∪ {next_node}| <= l`. Revisiting
-an already-used station is always free.
-
-# Why capping *visited* stations is valid
-
-Only stations that end up carrying an assignment need `y_j = 1`, and in an
-integer master `theta_r >= 1` forces `y_j = 1` for each of them, so
-`|A_r| <= sum(y) = l`: columns above that are unusable by any integer solution.
-Dropping them leaves the IP optimum untouched and *tightens* the LP bound (the
-LP over the restricted pool is still a relaxation of the same IP, so it remains a
-valid lower bound while being no smaller).
-
-Capping *visited* stations rather than assignment-carrying ones is a stronger
-restriction, and it is still lossless for pricing. A visited station that carries
-no assignment in the replayed column can be deleted from the route: by the
-triangle inequality `travel(a, b) <= travel(a, k) + travel(k, b)`, removing `k`
-lowers `tau` and makes every later arrival *earlier*, which only relaxes ride
-limits and opens more pickup clocks -- so reward cannot fall and reduced cost
-cannot rise. Hence for every column with `|A_r| <= l` there is one with reduced
-cost no worse whose route visits only assignment-carrying stations, and searching
-`{|visited| <= l}` attains the same pricing minimum as searching `{|A_r| <= l}`.
-
-The cap is what makes the extra dominance condition in
-`_dominates_passenger_free_assignment_label` necessary: once station budget is a
-consumed resource, a label that has spent more of it cannot stand in for one that
-has spent less.
-
-MEASURED: **default off, because it does not pay on either metric it was meant
-to.** Pricing is neutral to 1.7x *slower* with stops unbounded -- the `U_a ⊆ U_b`
-companion drops the domination rate 80.7% -> 74.4%, so buckets grow and the
-dominance scan costs more than the branch pruning saves. And through the full CG
-loop the LP bound is identical to ten decimal places at n=10 and n=15: the LP
-optimum never wanted a wider column.
-
-Two structural reasons it binds so weakly, both worth knowing before re-enabling
-it: ride limits plus the pickup window already hold the best routes to 6-8
-distinct stations at n=15 (so `l = 8` constrains nothing), and the per-passenger
-*maximum* reward structure means a route cannot buy extra dual credit by touching
-more stations -- unlike the aggregate pricer, whose summed per-pair reward is what
-produced the hub-route LP-IP gap this cap was meant to close. Worth revisiting
-only where feasibility does not already bound distinct stations below `l`, and
-only after re-measuring `lp_bound` there.
-"""
-function _passenger_free_assignment_station_budget_allows(
-    label::PassengerFreeAssignmentPricingLabel,
-    next_node::Int,
-    pricing_data::PassengerFreeAssignmentPricingData,
-)::Bool
-    pricing_data.bounded_distinct_stations || return true
-    bit = pricing_data.station_bit[next_node]
-    label.visited_mask & bit != 0 && return true  # revisit costs no budget
-    return count_ones(label.visited_mask) < pricing_data.max_distinct_stations
 end
 
 # `label` is untyped so both the revisit-tolerant and the elementary
@@ -207,8 +146,7 @@ re-checked once its age actually becomes live).
 """
 function _passenger_free_assignment_candidate_next_nodes(
     label::PassengerFreeAssignmentPricingLabel,
-    pricing_data::PassengerFreeAssignmentPricingData;
-    max_visits_per_node::Int=pricing_data.max_visits_per_node,
+    pricing_data::PassengerFreeAssignmentPricingData,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
     past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
@@ -238,18 +176,6 @@ function _passenger_free_assignment_candidate_next_nodes(
                 opp.ride_limit + 1e-9 || continue
             push!(candidate_nodes, opp.destination)
         end
-    end
-
-    if max_visits_per_node < typemax(Int)
-        visit_counts = Dict{Int, Int}()
-        for node in label.route
-            visit_counts[node] = get(visit_counts, node, 0) + 1
-        end
-        filter!(node -> get(visit_counts, node, 0) < max_visits_per_node, candidate_nodes)
-    end
-
-    if pricing_data.bounded_distinct_stations
-        filter!(node -> _passenger_free_assignment_station_budget_allows(label, node, pricing_data), candidate_nodes)
     end
 
     return sort!(collect(candidate_nodes))
@@ -323,7 +249,6 @@ function _extend_passenger_free_assignment_pricing_label(
         new_tau,
         label.reduced_cost + pricing_data.route_regularization_weight * travel_time - reward,
         label.route_length + 1,
-        label.visited_mask | get(pricing_data.station_bit, next_node, UInt64(0)),
     )
 end
 
@@ -505,15 +430,10 @@ function _dominates_passenger_free_assignment_label(
     b::PassengerFreeAssignmentPricingLabel,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
-    bounded_distinct_stations::Bool=false,
     compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
-    # Station budget is a consumed resource once capped: any suffix feasible for
-    # `b` must also be feasible for `a`, which needs `U_a subseteq U_b`. Skipped
-    # entirely when uncapped, since it would only weaken dominance for nothing.
-    (!bounded_distinct_stations || a.visited_mask & ~b.visited_mask == 0) || return false
     a.time <= b.time + 1e-9 || return false
     budget = b.reduced_cost - a.reduced_cost + 1e-9
     budget >= 0.0 || return false
@@ -535,7 +455,6 @@ function _dominates_passenger_free_assignment_label(
     bbs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
-    bounded_distinct_stations::Bool=false,
     compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
@@ -544,7 +463,7 @@ function _dominates_passenger_free_assignment_label(
         PassengerFreeAssignmentDominanceFilters(b, bbs), bbs,
         layer_weight,
         _passenger_free_assignment_dominance_rules(
-            bounded_max_stops, bounded_distinct_stations, compensated_dominance,
+            bounded_max_stops, compensated_dominance,
         ),
     )
 end
@@ -561,7 +480,7 @@ against measured rejection rates, and this is where those come from -- see
 `julia scripts/diagnose.jl dominance_audit`.
 """
 const PFA_DOMINANCE_CONDITIONS = (
-    :time, :live_clock_support, :route_length, :visited_mask,
+    :time, :live_clock_support, :route_length,
     :reduced_cost, :station_age, :compensation, :dominates, :age_mask,
 )
 const PFA_DOMINANCE_REJECTIONS = zeros(Int, length(PFA_DOMINANCE_CONDITIONS))
@@ -596,20 +515,19 @@ possible:
     `UInt64` test, standing in front of the walk that would otherwise establish
     it element by element out of two heap arrays (see
     `PassengerFreeAssignmentLabelBitsets.age_mask`).
- 4. `route_length`, 5. `visited_mask` -- compiled out entirely unless the
-    corresponding cap is on.
- 6. `reduced_cost` -- guaranteed non-negative when called from the bucket scan
+ 4. `route_length` -- compiled out entirely unless `max_stops` is bounded.
+ 5. `reduced_cost` -- guaranteed non-negative when called from the bucket scan
     (the walk splits on exactly this), kept because the compensation's early bail
     is defined in terms of a non-negative budget.
- 7. **station ages** -- an `O(#live)` merge walk over two sorted `Int32`/`Float64`
+ 6. **station ages** -- an `O(#live)` merge walk over two sorted `Int32`/`Float64`
     arrays, no allocation, no hashing. Everything above it is scalar and reads
     only fields the bucket entry carries inline, so a rejected pair never touches
     the arrays.
- 8. **reward-layer compensation** -- the only test that touches the layer bitsets,
+ 7. **reward-layer compensation** -- the only test that touches the layer bitsets,
     now last. It was previously ahead of the station-age walk, so every pair that
     the ages were going to reject paid a bitset traversal first.
 
-Swapping 7 and 8, and putting 3 in front of 7, are the reorderings with real
+Swapping 6 and 7, and putting 3 in front of 6, are the reorderings with real
 leverage; the rest is a few instructions. Every condition is exact, so no
 ordering here can change *which* pairs dominate -- only how much work is done to
 find out.
@@ -623,24 +541,23 @@ each condition is the *first* to reject; n=15/ms=6/s=3 and n=20/ms=5/s=3):
 | 3 age mask | 39.5% / 43.6% |
 | 2 support size | 9.1% / 6.6% |
 | 4 route length | 0.7% / 0.6% |
-| 7 station ages | 1.1% / 0.7% |
-| 8 compensation | 0.2% / 0.5% |
+| 6 station ages | 1.1% / 0.7% |
+| 7 compensation | 0.2% / 0.5% |
 | dominates | 0.10% / 0.06% |
 
 So three scalar tests dispose of ~96% of pairs, and the two conditions that touch
-heap data run on under 2%. `visited_mask` and `reduced_cost` recorded **zero**
-rejections in 456M pairs -- the former because the station budget is off by
-default (and then compiled out), the latter because the bucket walk splits on
-exactly that comparison, so it is already guaranteed when this is reached. It is
-kept as a one-instruction guard for the non-bucket caller and because the
-compensation's early bail is defined against a non-negative budget.
+heap data run on under 2%. `reduced_cost` recorded **zero** rejections in 456M
+pairs, because the bucket walk splits on exactly that comparison, so it is
+already guaranteed when this is reached. It is kept as a one-instruction guard
+for the non-bucket caller and because the compensation's early bail is defined
+against a non-negative budget.
 """
 @inline function _pricing_dominates_in_bucket(
     af::PassengerFreeAssignmentDominanceFilters, abs::PassengerFreeAssignmentLabelBitsets,
     bf::PassengerFreeAssignmentDominanceFilters, bbs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
-    ::PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented},
-)::Bool where {BoundedStops, BoundedStations, Compensated, Instrumented}
+    ::PassengerFreeAssignmentDominanceRules{BoundedStops, Compensated, Instrumented},
+)::Bool where {BoundedStops, Compensated, Instrumented}
     @inline _reject(i::Int) = (Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[i] += 1); false)
 
     af.time <= bf.time + 1e-9 || return _reject(1)
@@ -652,19 +569,14 @@ compensation's early bail is defined against a non-negative budget.
         abs.age_idx, af.age_mask, bbs.age_idx, bf.age_mask,
     )
     age_rejection == 1 && return _reject(2)
-    age_rejection == 2 && return _reject(9)
+    age_rejection == 2 && return _reject(8)
 
     if BoundedStops
         af.route_length <= bf.route_length || return _reject(3)
     end
-    # See the 6-argument method: `U_a subseteq U_b`, one instruction, and only
-    # when the station budget is actually capped.
-    if BoundedStations
-        af.visited_mask & ~bf.visited_mask == 0 || return _reject(4)
-    end
 
     budget = bf.reduced_cost - af.reduced_cost + 1e-9
-    budget >= 0.0 || return _reject(5)
+    budget >= 0.0 || return _reject(4)
 
     # `dom(age_b) subseteq dom(age_a)` and `age_a(j) <= age_b(j)` for all j in
     # dom(age_b) -- exactly equivalent to the dense "all stations, missing = Inf"
@@ -673,7 +585,7 @@ compensation's early bail is defined against a non-negative budget.
     # instead of O(n_nodes). Both arrays are sorted, so one merge walk suffices.
     _sparse_station_age_values_dominate(
         abs.age_idx, abs.age_val, bbs.age_idx, bbs.age_val,
-    ) || return _reject(6)
+    ) || return _reject(5)
 
     # See the 6-argument method for why the reward test is a compensated
     # reduced-cost budget rather than `issubset`. There is no `length` prefilter
@@ -681,9 +593,9 @@ compensation's early bail is defined against a non-negative budget.
     # `a`'s reduced-cost advantage covers their weight.
     _passenger_free_assignment_compensation(
         abs.activated_bits, bbs.activated_bits, layer_weight, budget, Val(Compensated),
-    ) <= budget || return _reject(7)
+    ) <= budget || return _reject(6)
 
-    Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[8] += 1)
+    Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[7] += 1)
     return true
 end
 

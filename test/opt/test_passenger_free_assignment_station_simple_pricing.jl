@@ -158,7 +158,7 @@
         ]
         pd = create_passenger_free_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3, max_visits_per_node=2,
+            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3,
         )
         rev_cols, _e1, _s1 = passenger_free_assignment_pricing_by_label_setting(
             pd, PassengerFreeAssignmentRouteColumn[];
@@ -185,7 +185,7 @@
         ]
         pd = create_passenger_free_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3, max_visits_per_node=2,
+            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3,
         )
 
         rev_cols, _e1, _s1 = passenger_free_assignment_pricing_by_label_setting(

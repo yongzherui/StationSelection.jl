@@ -38,7 +38,6 @@ function _unit_weighted_routing_model(
         max_wait_time=model.max_wait_time,
         detour_factor=model.detour_factor,
         max_stops=max_stops,
-        max_visits_per_node=model.max_visits_per_node,
         max_new_columns=model.max_new_columns,
         n_candidates=model.n_candidates,
         pricing_time_limit_sec=model.pricing_time_limit_sec,

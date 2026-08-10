@@ -72,7 +72,6 @@ function diag_zz_model(n_stations::Int;
     max_wait_time                :: Float64 = 900.0,
     detour_factor                :: Float64 = 2.0,
     max_stops                    :: Int      = 4,
-    max_visits_per_node          :: Int      = 3,
     kwargs...,
 )
     return AggregateODRouteModel(
@@ -84,7 +83,6 @@ function diag_zz_model(n_stations::Int;
         max_wait_time=max_wait_time,
         detour_factor=detour_factor,
         max_stops=max_stops,
-        max_visits_per_node=max_visits_per_node,
         kwargs...,
     )
 end

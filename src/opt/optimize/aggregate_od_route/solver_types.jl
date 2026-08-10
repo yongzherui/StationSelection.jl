@@ -617,13 +617,10 @@ struct PassengerFreeAssignmentCG <: AbstractColumnGenerationAlgorithm
     total_time_limit_sec::Float64
     seed_two_stop_routes::Bool
     parallel_scenarios::Bool
-    station_budget_cap::Bool
     compensated_dominance::Bool
     use_station_simple::Bool
     station_simple_warm_start::Bool
     reward_coarsening_levels::Int
-    use_station_reduced_cost_filter::Bool
-    station_reduced_cost_filter_mode::Symbol
     use_adaptive_cluster_certification::Bool
     cluster_initial_num_clusters::Union{Nothing, Int}
     cluster_max_num_clusters::Union{Nothing, Int}
@@ -643,13 +640,10 @@ struct PassengerFreeAssignmentCG <: AbstractColumnGenerationAlgorithm
         total_time_limit_sec::Number=Inf,
         seed_two_stop_routes::Bool=true,
         parallel_scenarios::Bool=true,
-        station_budget_cap::Bool=false,
         compensated_dominance::Bool=true,
         use_station_simple::Bool=false,
         station_simple_warm_start::Bool=true,
         reward_coarsening_levels::Int=0,
-        use_station_reduced_cost_filter::Bool=false,
-        station_reduced_cost_filter_mode::Symbol=:none,
         use_adaptive_cluster_certification::Bool=false,
         cluster_initial_num_clusters::Union{Int, Nothing}=nothing,
         cluster_max_num_clusters::Union{Int, Nothing}=nothing,
@@ -675,17 +669,13 @@ struct PassengerFreeAssignmentCG <: AbstractColumnGenerationAlgorithm
         theta_rho_n_outsiders >= 0 ||
             throw(ArgumentError("theta_rho_n_outsiders must be nonnegative"))
         cluster_time_limit_sec > 0 || throw(ArgumentError("cluster_time_limit_sec must be positive"))
-        resolved_filter_mode = _normal_station_reduced_cost_filter_mode(
-            use_station_reduced_cost_filter && station_reduced_cost_filter_mode == :none ?
-                :closed_form : station_reduced_cost_filter_mode,
-        )
         new(
             exhaustive_pricing_each_iteration, theta_rho_core_size,
             theta_rho_n_outsiders, Float64(certification_time_limit_sec),
             Float64(total_time_limit_sec), seed_two_stop_routes, parallel_scenarios,
-            station_budget_cap, compensated_dominance, use_station_simple,
-            station_simple_warm_start, reward_coarsening_levels, use_station_reduced_cost_filter,
-            resolved_filter_mode, use_adaptive_cluster_certification, cluster_initial_num_clusters,
+            compensated_dominance, use_station_simple,
+            station_simple_warm_start, reward_coarsening_levels,
+            use_adaptive_cluster_certification, cluster_initial_num_clusters,
             cluster_max_num_clusters, cluster_max_size, Float64(cluster_time_limit_sec),
             isnothing(unserved_penalty) ? nothing : Float64(unserved_penalty),
             verify_reduced_costs,

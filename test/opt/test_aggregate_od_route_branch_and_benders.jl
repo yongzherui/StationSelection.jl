@@ -355,7 +355,6 @@
                 reduced_cost_tol=diag_solver.pricing_tolerance,
                 max_new_columns=20, n_candidates=20,
                 time_limit=diag_solver.inner_solver.pricing_time_limit_sec,
-                max_visits_per_node=diag_unit_model.max_visits_per_node,
             )
             best_reduced_cost = isempty(priced) ? missing : minimum(
                 Float64(get(column.metadata, "reduced_cost", Inf)) for column in priced

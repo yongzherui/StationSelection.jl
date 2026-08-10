@@ -25,7 +25,6 @@ function _build_aggregate_od_route_core!(
     m[:aggregate_od_route_max_wait_time] = base_model.max_wait_time
     m[:aggregate_od_route_detour_factor] = base_model.detour_factor
     m[:aggregate_od_route_max_stops] = base_model.max_stops
-    m[:aggregate_od_route_max_visits_per_node] = base_model.max_visits_per_node
     m[:aggregate_od_route_use_station_simple] = base_model.use_station_simple
     m[:aggregate_od_route_max_new_columns] = base_model.max_new_columns
     m[:aggregate_od_route_n_candidates] = base_model.n_candidates

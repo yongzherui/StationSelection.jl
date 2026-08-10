@@ -60,15 +60,7 @@ struct PassengerFreeAssignmentPricingData
     repositioning_time::Float64
     max_wait_time::Float64
     max_stops::Int
-    max_visits_per_node::Int
     bounded_max_stops::Bool
-    # Station-budget cap: no route may visit more than this many DISTINCT stations.
-    # See `_passenger_free_assignment_station_budget_allows` for why this is valid.
-    # `typemax(Int)` disables it; it is also disabled (with a warning) above 64
-    # stations, since `visited_mask` is a `UInt64`.
-    max_distinct_stations::Int
-    bounded_distinct_stations::Bool
-    station_bit::Dict{Int, UInt64}
     # Whether dominance uses the compensated reward test `rc_a + w(A_a \ A_b) <= rc_b`
     # or the older plain `A_a subseteq A_b`. A toggle only because the compensated
     # rule trades away column diversity per search for speed -- measured 2.5-3.9x
@@ -104,10 +96,6 @@ struct PassengerFreeAssignmentPricingLabel
     tau::Float64
     reduced_cost::Float64
     route_length::Int
-    # Distinct stations visited so far, one bit per station index. Only meaningful
-    # when `pricing_data.bounded_distinct_stations`; maintained unconditionally
-    # because it is a single OR per extension.
-    visited_mask::UInt64
 end
 
 const PassengerFreeAssignmentLabelId = Int
@@ -152,7 +140,6 @@ that embeds it inside one 64-byte cache line.
 struct PassengerFreeAssignmentDominanceFilters
     reduced_cost::Float64
     time::Float64
-    visited_mask::UInt64
     age_mask::UInt64
     route_length::Int32
     n_live_ages::Int32
@@ -163,7 +150,7 @@ function PassengerFreeAssignmentDominanceFilters(
     bitsets::PassengerFreeAssignmentLabelBitsets,
 )
     return PassengerFreeAssignmentDominanceFilters(
-        label.reduced_cost, label.time, label.visited_mask, bitsets.age_mask,
+        label.reduced_cost, label.time, bitsets.age_mask,
         Int32(label.route_length), Int32(length(bitsets.age_idx)),
     )
 end
@@ -226,17 +213,17 @@ PricingBucketEntry(
 ) = PricingBucketEntry(PassengerFreeAssignmentDominanceFilters(label, bitsets), id, label, bitsets)
 
 """
-    PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented}
+    PassengerFreeAssignmentDominanceRules{BoundedStops, Compensated, Instrumented}
 
-The four dominance switches, carried in the *type* rather than as `Bool`
+The three dominance switches, carried in the *type* rather than as `Bool`
 arguments.
 
-They are constants for a whole pricing call, but as ordinary arguments they cost
-a branch per scanned bucket entry, and in the default configuration two of them
-(`BoundedStops`, `BoundedStations`) are `false`, so the branch is paid only to
-skip the code it guards. Encoding them as type parameters lets the compiler
-delete the disabled conditions outright and specialize the reward-layer
-compensation on `Compensated`.
+They are constants for a whole pricing call, but as an ordinary argument
+`BoundedStops` costs a branch per scanned bucket entry, and in the default
+configuration it is `false`, so the branch is paid only to skip the code it
+guards. Encoding it as a type parameter lets the compiler delete the disabled
+condition outright and specialize the reward-layer compensation on
+`Compensated`.
 
 The cost is one dynamic dispatch where the rules object reaches the `dominates`
 closure each search builds once and hands to the shared
@@ -245,16 +232,15 @@ insertion*, against a bucket scan that is hundreds to thousands of entries long,
 so it is not measurable. Do not push the object any deeper (e.g. per scanned
 entry) expecting the same to hold.
 """
-struct PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented} <: AbstractPricingDominanceRules end
+struct PassengerFreeAssignmentDominanceRules{BoundedStops, Compensated, Instrumented} <: AbstractPricingDominanceRules end
 
 function _passenger_free_assignment_dominance_rules(
     bounded_max_stops::Bool,
-    bounded_distinct_stations::Bool,
     compensated_dominance::Bool,
     instrumented::Bool=false,
 )
     return PassengerFreeAssignmentDominanceRules{
-        bounded_max_stops, bounded_distinct_stations, compensated_dominance, instrumented,
+        bounded_max_stops, compensated_dominance, instrumented,
     }()
 end
 

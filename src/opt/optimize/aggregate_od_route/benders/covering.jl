@@ -50,7 +50,6 @@ function _copy_with_initial_columns(
         max_wait_time=model.max_wait_time,
         detour_factor=model.detour_factor,
         max_stops=model.max_stops,
-        max_visits_per_node=model.max_visits_per_node,
         max_new_columns=model.max_new_columns,
         n_candidates=model.n_candidates,
         pricing_time_limit_sec=model.pricing_time_limit_sec,
@@ -77,7 +76,6 @@ function _copy_with_initial_columns(
         max_wait_time=model.max_wait_time,
         detour_factor=model.detour_factor,
         max_stops=model.max_stops,
-        max_visits_per_node=model.max_visits_per_node,
         max_new_columns=model.max_new_columns,
         n_candidates=model.n_candidates,
         pricing_time_limit_sec=model.pricing_time_limit_sec,
@@ -493,7 +491,6 @@ function _route_covering_problem_from_assignments(
         max_wait_time=base.max_wait_time,
         detour_factor=base.detour_factor,
         max_stops=base.max_stops,
-        max_visits_per_node=base.max_visits_per_node,
         max_new_columns=base.max_new_columns,
         n_candidates=base.n_candidates,
         pricing_time_limit_sec=base.pricing_time_limit_sec,
@@ -673,7 +670,6 @@ function _price_aggregate_od_route_subproblem_columns(
             max_new_columns=model.max_new_columns,
             n_candidates=model.n_candidates,
             time_limit=model.pricing_time_limit_sec,
-            max_visits_per_node=model.max_visits_per_node,
         )
         pricing_exhausted &= exhausted_s
         append!(all_new_columns, new_columns_s)

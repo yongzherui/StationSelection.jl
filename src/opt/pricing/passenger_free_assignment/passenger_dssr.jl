@@ -75,7 +75,6 @@ function passenger_free_assignment_passenger_dssr_bound(
             repositioning_time=exact_data.repositioning_time,
             max_stops=exact_data.max_stops,
             max_visits_per_node=exact_data.max_visits_per_node,
-            max_distinct_stations=exact_data.max_distinct_stations,
             compensated_dominance=exact_data.compensated_dominance,
         )
         labels, round_exhausted, search_stats =

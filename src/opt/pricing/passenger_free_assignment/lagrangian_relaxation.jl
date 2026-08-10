@@ -85,15 +85,12 @@ function passenger_free_assignment_lagrangian_bound(
             max_wait_time=exact_pricing_data.max_wait_time,
             repositioning_time=exact_pricing_data.repositioning_time,
             max_stops=exact_pricing_data.max_stops,
-            max_visits_per_node=exact_pricing_data.max_visits_per_node,
-            max_distinct_stations=exact_pricing_data.max_distinct_stations,
             compensated_dominance=exact_pricing_data.compensated_dominance,
         )
         labels, exhausted, search_stats = _enumerate_passenger_free_assignment_pricing_labels(
             relaxed_data;
             time_limit=remaining,
             reduced_cost_tol=reduced_cost_tol,
-            max_visits_per_node=relaxed_data.max_visits_per_node,
             use_reduced_cost_pruning=false,
         )
         total_labels += search_stats.labels_generated

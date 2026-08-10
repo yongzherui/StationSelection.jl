@@ -79,9 +79,7 @@ struct PassengerFreeAssignmentCGResult
     iteration_rows::Vector{NamedTuple}
     total_seconds::Float64
     # Mean count of attractive `(p,j,k)` opportunities under the raw RMP duals.
-    mean_positive_rho_used::Float64
     mean_raw_positive_rho::Float64
-    mean_positive_rho_stations_used::Float64
     mean_raw_positive_rho_stations::Float64
 end
 
@@ -170,6 +168,39 @@ function _record_priced_route!(
         n_distinct_outside_source_topl=length(outside),
     ))
     return nothing
+end
+
+"""
+Positive-reward pricing graph size under the given duals.
+
+`n_positive_rho` counts attractive opportunities `(p,j,k)`. `j_positive_rho`
+counts endpoint stations incident to at least one attractive opportunity. Pricing
+cost usually tracks the first more directly; the second measures whether the
+station endpoint set itself is shrinking.
+"""
+function _positive_rho_stats(
+    md::PassengerFreeAssignmentMasterData,
+    alpha::Dict{Int, Float64},
+    gamma_o::Dict{Tuple{Int, Int}, Float64},
+    gamma_d::Dict{Tuple{Int, Int}, Float64};
+    tol::Float64=1e-9,
+)::NamedTuple{(:n_positive_rho, :j_positive_rho), Tuple{Int, Int}}
+    n = 0
+    stations = Set{Int}()
+    for p in md.passengers
+        a = get(alpha, p.id, 0.0)
+        a > tol || continue
+        for (j, k) in md.feasible_assignments[p.id]
+            rho = a - get(gamma_o, (p.id, j), 0.0) - get(gamma_d, (p.id, k), 0.0) -
+                md.walk_cost_weight * md.assignment_walk_cost[(p.id, j, k)]
+            if rho > tol
+                n += 1
+                push!(stations, j)
+                push!(stations, k)
+            end
+        end
+    end
+    return (n_positive_rho=n, j_positive_rho=length(stations))
 end
 
 function _record_station_rho_scores!(
@@ -335,12 +366,9 @@ mutable struct PassengerFreeAssignmentCGState <: AbstractCGState
     certification_time_limit_sec::Float64
     total_time_limit_sec::Float64
     parallel_scenarios::Bool
-    station_budget_cap::Bool
     compensated_dominance::Bool
     station_simple_warm_start::Bool
     reward_coarsening_levels::Int
-    station_reduced_cost_filter_active::Bool
-    station_reduced_cost_filter_mode::Symbol
     use_adaptive_cluster_certification::Bool
     cluster_initial_num_clusters::Union{Int, Nothing}
     cluster_max_num_clusters::Union{Int, Nothing}
@@ -384,9 +412,7 @@ mutable struct PassengerFreeAssignmentCGState <: AbstractCGState
     total_pricing_seconds::Float64
     total_lp_seconds::Float64
     total_labels::Int
-    pos_rho_used_sum::Int
     pos_rho_raw_sum::Int
-    pos_rho_stations_used_sum::Int
     pos_rho_stations_raw_sum::Int
     pos_rho_samples::Int
 
@@ -412,9 +438,8 @@ function PassengerFreeAssignmentCGState(;
     theta_rho_n_outsiders::Int, theta_rho_subset_active::Bool,
     reduced_cost_tol::Float64, pricing_time_limit_sec::Float64,
     certification_time_limit_sec::Float64, total_time_limit_sec::Float64,
-    parallel_scenarios::Bool, station_budget_cap::Bool, compensated_dominance::Bool,
+    parallel_scenarios::Bool, compensated_dominance::Bool,
     station_simple_warm_start::Bool, reward_coarsening_levels::Int,
-    station_reduced_cost_filter_active::Bool, station_reduced_cost_filter_mode::Symbol,
     use_adaptive_cluster_certification::Bool,
     cluster_initial_num_clusters::Union{Int, Nothing},
     cluster_max_num_clusters::Union{Int, Nothing}, cluster_max_size::Union{Int, Nothing},
@@ -426,9 +451,8 @@ function PassengerFreeAssignmentCGState(;
         max_cg_iters, n_candidates, max_new_columns, exhaustive_pricing_each_iteration,
         theta_rho_core_size, theta_rho_n_outsiders, theta_rho_subset_active,
         reduced_cost_tol, pricing_time_limit_sec, certification_time_limit_sec,
-        total_time_limit_sec, parallel_scenarios, station_budget_cap, compensated_dominance,
-        station_simple_warm_start, reward_coarsening_levels, station_reduced_cost_filter_active,
-        station_reduced_cost_filter_mode, use_adaptive_cluster_certification,
+        total_time_limit_sec, parallel_scenarios, compensated_dominance,
+        station_simple_warm_start, reward_coarsening_levels, use_adaptive_cluster_certification,
         cluster_initial_num_clusters, cluster_max_num_clusters, cluster_max_size,
         cluster_time_limit_sec, verify_reduced_costs, verbose, optimizer_env, t_start,
         pricing_scenarios,
@@ -444,7 +468,7 @@ function PassengerFreeAssignmentCGState(;
         station_simple_warm_start,
         0, 1, 1, NaN, 0, Set{Int}(), nothing, Dict{Int, Float64}(),
         0.0, false, 0.0, 0.0, 0,
-        0, 0, 0, 0, 0,
+        0, 0, 0,
         NamedTuple[], NamedTuple[], NamedTuple[], NamedTuple[], NamedTuple[],
         NamedTuple[], NamedTuple[], NamedTuple[], NamedTuple[], NamedTuple[],
         NamedTuple[], Dict{Int, StationClusterHierarchy}(), Dict{Int, ClusterPricingCache}(),
@@ -498,12 +522,9 @@ function _cg_build_master(
         certification_time_limit_sec=algorithm.certification_time_limit_sec,
         total_time_limit_sec=algorithm.total_time_limit_sec,
         parallel_scenarios=algorithm.parallel_scenarios,
-        station_budget_cap=algorithm.station_budget_cap,
         compensated_dominance=algorithm.compensated_dominance,
         station_simple_warm_start=algorithm.station_simple_warm_start,
         reward_coarsening_levels=algorithm.reward_coarsening_levels,
-        station_reduced_cost_filter_active=algorithm.use_station_reduced_cost_filter,
-        station_reduced_cost_filter_mode=algorithm.station_reduced_cost_filter_mode,
         use_adaptive_cluster_certification=algorithm.use_adaptive_cluster_certification,
         cluster_initial_num_clusters=algorithm.cluster_initial_num_clusters,
         cluster_max_num_clusters=algorithm.cluster_max_num_clusters,
@@ -723,22 +744,8 @@ function _pfa_price_early_return!(
     end
 
     raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
-    used_stats = raw_stats
-
-    station_filter_stats = state.station_reduced_cost_filter_active ?
-        _station_reduced_cost_filter_stats(
-            master, alpha, gamma_o, gamma_d, state.pricing_scenarios, state.reduced_cost_tol,
-            state.optimizer_env, state.station_reduced_cost_filter_mode) : nothing
-    if !isnothing(station_filter_stats)
-        used_stats = (
-            n_positive_rho=station_filter_stats.filtered_positive_rho,
-            j_positive_rho=station_filter_stats.filtered_positive_rho_stations,
-        )
-    end
     state.pos_rho_raw_sum += raw_stats.n_positive_rho
-    state.pos_rho_used_sum += used_stats.n_positive_rho
     state.pos_rho_stations_raw_sum += raw_stats.j_positive_rho
-    state.pos_rho_stations_used_sum += used_stats.j_positive_rho
     state.pos_rho_samples += 1
 
     t_price = time()
@@ -750,18 +757,10 @@ function _pfa_price_early_return!(
         reduced_cost_tol=state.reduced_cost_tol,
         verify_reduced_costs=state.verify_reduced_costs,
         parallel_scenarios=state.parallel_scenarios,
-        station_budget_cap=state.station_budget_cap,
         compensated_dominance=state.compensated_dominance,
         use_station_simple=state.pricing_station_simple,
         reward_coarsening_levels=state.reward_coarsening_levels,
-        use_station_reduced_cost_filter=state.station_reduced_cost_filter_active,
-        station_reduced_cost_filter_mode=state.station_reduced_cost_filter_mode,
-        station_filter_excluded_stations=isnothing(station_filter_stats) ?
-            nothing : station_filter_stats.excluded_stations,
-        station_filter_excluded_opportunities=isnothing(station_filter_stats) ?
-            nothing : station_filter_stats.excluded_opportunities,
         allowed_stations=allowed_stations,
-        optimizer_env=state.optimizer_env,
     )
     pricing_seconds = time() - t_price
     state.total_pricing_seconds += pricing_seconds
@@ -797,37 +796,7 @@ function _pfa_price_early_return!(
         columns_priced=length(new_columns), columns_added=added,
         best_reduced_cost=best_rc, pricing_exhausted=exhausted,
         raw_positive_rho=raw_stats.n_positive_rho,
-        used_positive_rho=used_stats.n_positive_rho,
         raw_positive_rho_stations=raw_stats.j_positive_rho,
-        used_positive_rho_stations=used_stats.j_positive_rho,
-        station_filter_raw_positive_rho=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.raw_positive_rho,
-        station_filter_positive_rho=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.filtered_positive_rho,
-        station_filter_positive_rho_reduction=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.positive_rho_reduction,
-        station_filter_raw_positive_rho_stations=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.raw_positive_rho_stations,
-        station_filter_positive_rho_stations=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.filtered_positive_rho_stations,
-        station_filter_positive_rho_station_reduction=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.positive_rho_station_reduction,
-        station_filter_closed_stations=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.n_closed_stations,
-        station_filter_closed_stations_with_positive_need=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.n_closed_stations_with_positive_need,
-        station_filter_excluded_stations=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.n_excluded_stations,
-        station_filter_excluded_opportunities=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.n_excluded_opportunities,
-        station_filter_joint_lp_objective=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.joint_lp_objective,
-        station_filter_min_slack_need_ratio=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.min_slack_need_ratio,
-        station_filter_mean_slack_need_ratio=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.mean_slack_need_ratio,
-        station_filter_max_slack_need_ratio=isnothing(station_filter_stats) ?
-            missing : station_filter_stats.max_slack_need_ratio,
         pool_size=length(master.theta),
     ))
     state.verbose && @printf(
@@ -856,10 +825,6 @@ function _pfa_price_certification!(
 )
     t_cert = state.phase_start_time
     cert_raw_stats = _positive_rho_stats(master_data, alpha, gamma_o, gamma_d)
-    cert_station_filter_stats = state.station_reduced_cost_filter_active ?
-        _station_reduced_cost_filter_stats(
-            master, alpha, gamma_o, gamma_d, state.pricing_scenarios, state.reduced_cost_tol,
-            state.optimizer_env, state.station_reduced_cost_filter_mode) : nothing
     cert_budget = isfinite(state.total_time_limit_sec) ?
         min(state.certification_time_limit_sec, max(1.0, state.total_time_limit_sec - (time() - state.t_start))) :
         state.certification_time_limit_sec
@@ -875,7 +840,6 @@ function _pfa_price_certification!(
                 max_wait_time=master_data.max_wait_time,
                 repositioning_time=master_data.repositioning_time,
                 max_stops=master_data.max_stops,
-                max_visits_per_node=master_data.max_visits_per_node,
                 compensated_dominance=state.compensated_dominance)
             if !haskey(state.cluster_hierarchies, scenario)
                 nstations = length(master_data.nodes)
@@ -919,17 +883,9 @@ function _pfa_price_certification!(
         reduced_cost_tol=state.reduced_cost_tol,
         verify_reduced_costs=state.verify_reduced_costs,
         parallel_scenarios=state.parallel_scenarios,
-        station_budget_cap=state.station_budget_cap,
         compensated_dominance=state.compensated_dominance,
         use_station_simple=state.pricing_station_simple,
         reward_coarsening_levels=0,
-        use_station_reduced_cost_filter=state.station_reduced_cost_filter_active,
-        station_reduced_cost_filter_mode=state.station_reduced_cost_filter_mode,
-        station_filter_excluded_stations=isnothing(cert_station_filter_stats) ?
-            nothing : cert_station_filter_stats.excluded_stations,
-        station_filter_excluded_opportunities=isnothing(cert_station_filter_stats) ?
-            nothing : cert_station_filter_stats.excluded_opportunities,
-        optimizer_env=state.optimizer_env,
     )
     round_cert_seconds = time() - t_cert
     state.certification_seconds += round_cert_seconds
@@ -964,39 +920,7 @@ function _pfa_price_certification!(
             minimum(Float64(get(c.metadata, "reduced_cost", Inf)) for c in cert_columns),
         pricing_exhausted=cert_exhausted,
         raw_positive_rho=cert_raw_stats.n_positive_rho,
-        used_positive_rho=isnothing(cert_station_filter_stats) ?
-            cert_raw_stats.n_positive_rho : cert_station_filter_stats.filtered_positive_rho,
         raw_positive_rho_stations=cert_raw_stats.j_positive_rho,
-        used_positive_rho_stations=isnothing(cert_station_filter_stats) ?
-            cert_raw_stats.j_positive_rho : cert_station_filter_stats.filtered_positive_rho_stations,
-        station_filter_raw_positive_rho=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.raw_positive_rho,
-        station_filter_positive_rho=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.filtered_positive_rho,
-        station_filter_positive_rho_reduction=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.positive_rho_reduction,
-        station_filter_raw_positive_rho_stations=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.raw_positive_rho_stations,
-        station_filter_positive_rho_stations=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.filtered_positive_rho_stations,
-        station_filter_positive_rho_station_reduction=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.positive_rho_station_reduction,
-        station_filter_closed_stations=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.n_closed_stations,
-        station_filter_closed_stations_with_positive_need=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.n_closed_stations_with_positive_need,
-        station_filter_excluded_stations=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.n_excluded_stations,
-        station_filter_excluded_opportunities=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.n_excluded_opportunities,
-        station_filter_joint_lp_objective=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.joint_lp_objective,
-        station_filter_min_slack_need_ratio=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.min_slack_need_ratio,
-        station_filter_mean_slack_need_ratio=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.mean_slack_need_ratio,
-        station_filter_max_slack_need_ratio=isnothing(cert_station_filter_stats) ?
-            missing : cert_station_filter_stats.max_slack_need_ratio,
         pool_size=length(master.theta),
     ))
     state.verbose && println(
@@ -1241,10 +1165,7 @@ function _cg_finalize_result(
             "theta_rho_core_size" => state.theta_rho_core_size,
             "theta_rho_n_outsiders" => state.theta_rho_n_outsiders,
             "column_rows" => column_rows,
-            "mean_positive_rho_used" => (state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_used_sum / state.pos_rho_samples),
             "mean_raw_positive_rho" => (state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_raw_sum / state.pos_rho_samples),
-            "mean_positive_rho_stations_used" =>
-                (state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_stations_used_sum / state.pos_rho_samples),
             "mean_raw_positive_rho_stations" =>
                 (state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_stations_raw_sum / state.pos_rho_samples),
             "iteration_log_path" => algorithm.iteration_log_path,
@@ -1282,11 +1203,6 @@ function run_passenger_free_assignment_column_generation(
     # Run the per-scenario label searches concurrently. Exact and deterministic
     # (see `_price_passenger_scenarios`); a no-op with one thread or one scenario.
     parallel_scenarios::Bool=true,
-    # Restrict pricing to columns with at most `l` distinct stations -- the most
-    # any integer solution can open. Exact for the IP and cannot loosen `lp_bound`,
-    # but measured inert on bound quality here and slower to price; see
-    # notes/2026-07-30_passenger_pricing_label_search_optimizations.md.
-    station_budget_cap::Bool=false,
     # Dominance rule for the label search. `true` is the compensated rule
     # `rc_a + w(A_a \ A_b) <= rc_b`; `false` is the plain `A_a subseteq A_b`.
     # Compensated prices 2.5-3.9x faster but yields ~50% fewer distinct columns
@@ -1312,11 +1228,6 @@ function run_passenger_free_assignment_column_generation(
     # measured best quality/speed compromise. Every candidate route is replayed
     # with exact rewards, and exhaustive certification always uses level 0.
     reward_coarsening_levels::Int=0,
-    # Iteration-only exact station restriction: at each RMP optimum, closed
-    # stations whose lower-bound reduced-cost slack can absorb every positive
-    # incident assignment reward are omitted from the current pricing graph.
-    use_station_reduced_cost_filter::Bool=false,
-    station_reduced_cost_filter_mode::Symbol=:none,
     # Run the adaptive station-cluster lower bound before each exhaustive exact
     # certification pass.  A nonnegative bound for every scenario replaces that
     # exact pass; a negative bound falls back to the unchanged exact pricer.
@@ -1368,13 +1279,10 @@ function run_passenger_free_assignment_column_generation(
             total_time_limit_sec=total_time_limit_sec,
             seed_two_stop_routes=seed_two_stop_routes,
             parallel_scenarios=parallel_scenarios,
-            station_budget_cap=station_budget_cap,
             compensated_dominance=compensated_dominance,
             use_station_simple=use_station_simple,
             station_simple_warm_start=station_simple_warm_start,
             reward_coarsening_levels=reward_coarsening_levels,
-            use_station_reduced_cost_filter=use_station_reduced_cost_filter,
-            station_reduced_cost_filter_mode=station_reduced_cost_filter_mode,
             use_adaptive_cluster_certification=use_adaptive_cluster_certification,
             cluster_initial_num_clusters=cluster_initial_num_clusters,
             cluster_max_num_clusters=cluster_max_num_clusters,
@@ -1410,9 +1318,7 @@ function run_passenger_free_assignment_column_generation(
         state.certification_seconds, state.cert_exhausted,
         state.total_pricing_seconds, state.total_lp_seconds, state.total_labels,
         state.iteration_rows, final_result.runtime_sec,
-        state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_used_sum / state.pos_rho_samples,
         state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_raw_sum / state.pos_rho_samples,
-        state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_stations_used_sum / state.pos_rho_samples,
         state.pos_rho_samples == 0 ? 0.0 : state.pos_rho_stations_raw_sum / state.pos_rho_samples,
     )
 end

@@ -22,7 +22,6 @@ struct AggregateODRouteSearchContext{D<:Function} <: AbstractPricingSearchContex
 }
     pricing_data::AggregateODRoutePricingData
     duals::AggregateODRoutePricingDuals
-    max_visits_per_node::Int
     dominates::D
     n_pairs::Int
     pair_index::Dict{Tuple{Int, Int}, Int}
@@ -38,7 +37,6 @@ end
 function AggregateODRouteSearchContext(
     pricing_data::AggregateODRoutePricingData,
     duals::AggregateODRoutePricingDuals,
-    max_visits_per_node::Int,
 )
     n_pairs = length(pricing_data.active_pairs)
     pair_index = Dict(pair => i for (i, pair) in enumerate(pricing_data.active_pairs))
@@ -60,7 +58,7 @@ function AggregateODRouteSearchContext(
         max(0.0, get(duals.sigma, pair, 0.0)) for pair in pricing_data.active_pairs
     ]
     return AggregateODRouteSearchContext(
-        pricing_data, duals, max_visits_per_node, dominates,
+        pricing_data, duals, dominates,
         n_pairs, pair_index, node_index, n_nodes,
         pair_origin_idx, pair_dest_idx, pair_ride_limit, travel_matrix, positive_pair_rewards,
     )
@@ -105,9 +103,7 @@ _pricing_route_length(::AggregateODRouteSearchContext, label::AggregateODRoutePr
 _pricing_max_route_length(ctx::AggregateODRouteSearchContext) = ctx.pricing_data.max_stops
 
 _pricing_candidate_next_nodes(ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel) =
-    _aggregate_od_route_candidate_next_nodes(
-        label, ctx.pricing_data, ctx.duals; max_visits_per_node=ctx.max_visits_per_node,
-    )
+    _aggregate_od_route_candidate_next_nodes(label, ctx.pricing_data, ctx.duals)
 
 _pricing_extend_label(ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel, next_node::Int) =
     _extend_aggregate_od_route_pricing_label(label, next_node, ctx.pricing_data, ctx.duals)
@@ -119,12 +115,11 @@ function _enumerate_aggregate_od_route_pricing_labels(
     duals::AggregateODRoutePricingDuals;
     time_limit::Float64,
     reduced_cost_tol::Float64,
-    max_visits_per_node::Int,
     use_reduced_cost_pruning::Bool=true,
     profile::Bool=false,
     stop_if=label -> false,
 )
-    ctx = AggregateODRouteSearchContext(pricing_data, duals, max_visits_per_node)
+    ctx = AggregateODRouteSearchContext(pricing_data, duals)
     return _run_pricing_label_search(
         ctx;
         time_limit=time_limit,
@@ -144,7 +139,6 @@ function aggregate_od_route_pricing_by_label_setting(
     max_new_columns::Int=1,
     n_candidates::Int=max_new_columns,
     time_limit::Float64=30.0,
-    max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
 )
     max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
@@ -182,7 +176,6 @@ function aggregate_od_route_pricing_by_label_setting(
         duals;
         time_limit=time_limit,
         reduced_cost_tol=reduced_cost_tol,
-        max_visits_per_node=max_visits_per_node,
         profile=profile,
         stop_if=accept_pricing_label!,
     )

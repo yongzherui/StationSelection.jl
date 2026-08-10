@@ -67,9 +67,8 @@ export passenger_free_assignment_pricing_by_station_simple_label_setting
 
 """
 A partial elementary route. Same fields as `PassengerFreeAssignmentPricingLabel`
-minus `visited_mask` (the `UInt64` distinct-station budget mask, which had a
-64-station ceiling and is now subsumed) and plus an authoritative `visited` set.
-`route_length == length(visited)` always holds here.
+plus an authoritative `visited` set. `route_length == length(visited)` always
+holds here.
 
 `visited` is a `BitSet` (over station ids), not a `Set{Int}`: the dominance scan's
 `issubset(a.visited, b.visited)` is then a word-wise AND rather than a per-element
@@ -274,8 +273,7 @@ end
 """
 Candidate next nodes for an elementary label: the revisit-tolerant
 `_passenger_free_assignment_candidate_next_nodes` restricted to unvisited nodes,
-with the `max_visits_per_node` and station-budget branches removed (both
-subsumed by elementarity).
+with the station-budget branch removed (subsumed by elementarity).
 """
 function _passenger_free_assignment_station_simple_candidate_next_nodes(
     label::PassengerFreeAssignmentStationSimpleLabel,

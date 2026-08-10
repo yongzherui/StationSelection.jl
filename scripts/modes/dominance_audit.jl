@@ -38,7 +38,7 @@ function _dominance_audit_case(n_stations::Int, raw_max_stops::Int, scenario::In
     pricing_data = create_passenger_free_assignment_pricing_data(
         scenario, collect(1:n_stations), travel_cost, candidates;
         route_regularization_weight=10.0, max_wait_time=900.0,
-        repositioning_time=20.0, max_stops=max_stops, max_visits_per_node=3,
+        repositioning_time=20.0, max_stops=max_stops,
     )
 
     StationSelection.passenger_free_assignment_dominance_rejections(; reset=true)

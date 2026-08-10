@@ -74,13 +74,8 @@ function enumerate_aggregate_od_route_columns(
     active_pairs = _all_active_aggregate_od_route_pairs(mapping)
     isempty(active_pairs) && return AggregateODRouteColumn[]
 
-    max_visits_per_node = base_model.max_visits_per_node
     nodes = _od_route_relevant_nodes(active_pairs)
-    max_stops = _resolve_aggregate_od_route_max_stops(
-        base_model.max_stops,
-        max_visits_per_node,
-        length(nodes),
-    )
+    max_stops = _resolve_aggregate_od_route_max_stops(base_model.max_stops)
     travel = _od_route_travel_lookup(data, nodes)
     pricing_data = AggregateODRoutePricingData(
         0,
@@ -92,7 +87,6 @@ function enumerate_aggregate_od_route_columns(
         base_model.max_wait_time,
         base_model.detour_factor,
         max_stops,
-        max_visits_per_node,
         base_model.max_stops != typemax(Int),
     )
     # Uniform positive rewards make every active pair visible to the shared
@@ -127,8 +121,7 @@ function enumerate_aggregate_od_route_columns(
         next_nodes = _aggregate_od_route_candidate_next_nodes(
             label,
             pricing_data,
-            enumeration_duals;
-            max_visits_per_node=max_visits_per_node,
+            enumeration_duals,
         )
         for next_node in next_nodes
             for child in extend_aggregate_od_route_pricing_label(

@@ -13,7 +13,7 @@
     data = create_passenger_free_assignment_pricing_data(
         1, station_ids, travel, candidates;
         route_regularization_weight=1.0, max_wait_time=10.0,
-        max_stops=5, max_visits_per_node=2,
+        max_stops=5,
     )
     reward_data = PassengerRewardBoundData(data)
 
@@ -28,7 +28,7 @@
                 PassengerAssignmentCandidate(1,10,20,10.0,5.0),
                 PassengerAssignmentCandidate(2,40,50,10.0,5.0),
             ]; route_regularization_weight=1.0,max_wait_time=0.0,
-            max_stops=4,max_visits_per_node=2)
+            max_stops=4)
         tight_reward=PassengerRewardBoundData(tight_wait)
         incompatible=build_pairwise_assignment_routing_bounds(tight_wait,tight_reward)
         @test incompatible.conflicts == [(1,2)]
@@ -92,7 +92,7 @@
         capped_data = create_passenger_free_assignment_pricing_data(
             3, station_ids, travel, candidates;
             route_regularization_weight=1.0, max_wait_time=10.0,
-            max_stops=3, max_visits_per_node=2,
+            max_stops=3,
         )
         reduced = price_by_station_subset_branch_and_bound(capped_data, 5;
             settings=StationSubsetPricingSettings(use_reward_lp=false,
@@ -130,7 +130,7 @@
                 PassengerAssignmentCandidate(2, 40, 50, 10.0, 5.0),
                 PassengerAssignmentCandidate(3, 20, 50, 10.0, 5.0),
             ]; route_regularization_weight=1.0, max_wait_time=0.0,
-            max_stops=6, max_visits_per_node=2)
+            max_stops=6)
         conflicted = build_triple_assignment_routing_bounds(tight, PassengerRewardBoundData(tight))
         @test length(conflicted.conflicts) == 1
         @test isempty(conflicted.joint_cost_lower_bounds)
@@ -154,7 +154,7 @@
         no_improvement = create_passenger_free_assignment_pricing_data(
             2, station_ids, travel, weak;
             route_regularization_weight=1.0, max_wait_time=10.0,
-            max_stops=3, max_visits_per_node=1,
+            max_stops=3,
         )
         certificate = price_by_station_subset_branch_and_bound(no_improvement, 2;
             settings=StationSubsetPricingSettings(use_reward_lp=false,

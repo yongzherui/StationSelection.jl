@@ -18,22 +18,13 @@ function _price_one_passenger_scenario(
     max_new_columns::Int,
     time_limit::Float64,
     reduced_cost_tol::Float64,
-    station_budget_cap::Bool=false,
     compensated_dominance::Bool=true,
     use_station_simple::Bool=false,
     reward_coarsening_levels::Int=0,
-    excluded_stations::Set{Int}=Set{Int}(),
-    excluded_opportunities::Set{Tuple{Int, Int, Int}}=Set{Tuple{Int, Int, Int}}(),
     allowed_stations::Union{Nothing, Set{Int}}=nothing,
 )
     md = master.master_data
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, s)
-    if !isempty(excluded_stations)
-        filter!(c -> !(c.origin in excluded_stations || c.destination in excluded_stations), candidates)
-    end
-    if !isempty(excluded_opportunities)
-        filter!(c -> !((c.passenger, c.origin, c.destination) in excluded_opportunities), candidates)
-    end
     if !isnothing(allowed_stations)
         filter!(c -> c.origin in allowed_stations && c.destination in allowed_stations, candidates)
     end
@@ -48,8 +39,6 @@ function _price_one_passenger_scenario(
         max_wait_time=md.max_wait_time,
         repositioning_time=md.repositioning_time,
         max_stops=md.max_stops,
-        max_visits_per_node=md.max_visits_per_node,
-        max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
         compensated_dominance=compensated_dominance,
     )
     isempty(exact_pricing_data.opportunities) && return PassengerFreeAssignmentRouteColumn[], true, 0
@@ -64,8 +53,6 @@ function _price_one_passenger_scenario(
             max_wait_time=md.max_wait_time,
             repositioning_time=md.repositioning_time,
             max_stops=md.max_stops,
-            max_visits_per_node=md.max_visits_per_node,
-            max_distinct_stations=station_budget_cap ? md.l : typemax(Int),
             compensated_dominance=compensated_dominance,
         )
     else
@@ -164,32 +151,14 @@ function _price_passenger_scenarios(
     reduced_cost_tol::Float64,
     verify_reduced_costs::Bool,
     parallel_scenarios::Bool=true,
-    station_budget_cap::Bool=false,
     compensated_dominance::Bool=true,
     use_station_simple::Bool=false,
     reward_coarsening_levels::Int=0,
-    use_station_reduced_cost_filter::Bool=false,
-    station_reduced_cost_filter_mode::Symbol=:closed_form,
-    station_filter_excluded_stations::Union{Nothing, Set{Int}}=nothing,
-    station_filter_excluded_opportunities::Union{Nothing, Set{Tuple{Int, Int, Int}}}=nothing,
     allowed_stations::Union{Nothing, Set{Int}}=nothing,
-    optimizer_env=nothing,
 )
     md = master.master_data
     scenarios = sort!(collect(keys(md.passengers_by_scenario)))
     n_s = length(scenarios)
-
-    excluded_stations = Set{Int}()
-    if !isnothing(station_filter_excluded_stations)
-        excluded_stations = station_filter_excluded_stations
-    elseif use_station_reduced_cost_filter
-        excluded_stations = _station_reduced_cost_filter_stats(
-            master, alpha, gamma_o, gamma_d, scenarios, reduced_cost_tol,
-            optimizer_env, station_reduced_cost_filter_mode,
-        ).excluded_stations
-    end
-    excluded_opportunities = isnothing(station_filter_excluded_opportunities) ?
-        Set{Tuple{Int, Int, Int}}() : station_filter_excluded_opportunities
 
     empty_pool = PassengerFreeAssignmentRouteColumn[]
     existing_by_scenario = Dict{Int, Vector{PassengerFreeAssignmentRouteColumn}}()
@@ -209,12 +178,9 @@ function _price_passenger_scenarios(
                 get(existing_by_scenario, scenarios[i], empty_pool);
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
-                station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
                 use_station_simple=use_station_simple,
                 reward_coarsening_levels=reward_coarsening_levels,
-                excluded_stations=excluded_stations,
-                excluded_opportunities=excluded_opportunities,
                 allowed_stations=allowed_stations,
             )
         end
@@ -225,12 +191,9 @@ function _price_passenger_scenarios(
                 get(existing_by_scenario, scenarios[i], empty_pool);
                 n_candidates=n_candidates, max_new_columns=max_new_columns,
                 time_limit=time_limit, reduced_cost_tol=reduced_cost_tol,
-                station_budget_cap=station_budget_cap,
                 compensated_dominance=compensated_dominance,
                 use_station_simple=use_station_simple,
                 reward_coarsening_levels=reward_coarsening_levels,
-                excluded_stations=excluded_stations,
-                excluded_opportunities=excluded_opportunities,
                 allowed_stations=allowed_stations,
             )
         end

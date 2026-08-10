@@ -37,7 +37,6 @@
             max_wait_time               = 100.0,
             detour_factor               = detour_factor,
             max_stops                   = 3,
-            max_visits_per_node         = 2,
         )
         return data, model
     end

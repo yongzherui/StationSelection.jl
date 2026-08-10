@@ -16,7 +16,6 @@
             max_wait_time=10.0,
             detour_factor=1.5,
             max_stops=5,
-            max_visits_per_node=2,
             bounded_max_stops=true,
         )
         return AggregateODRoutePricingData(
@@ -29,7 +28,6 @@
             max_wait_time,
             detour_factor,
             max_stops,
-            max_visits_per_node,
             bounded_max_stops,
         )
     end
@@ -38,27 +36,17 @@
         return only(filter(label -> label.current == current, labels))
     end
 
-    @testset "unbounded max_stops uses the finite visit ceiling" begin
-        @test StationSelection._resolve_aggregate_od_route_max_stops(
-            typemax(Int), 3, 4,
-        ) == 12
-        @test StationSelection._resolve_aggregate_od_route_max_stops(7, 3, 4) == 7
-        @test_throws ArgumentError StationSelection._resolve_aggregate_od_route_max_stops(
-            typemax(Int), typemax(Int), 4,
-        )
+    @testset "exhaustive enumeration requires a finite max_stops" begin
+        @test StationSelection._resolve_aggregate_od_route_max_stops(7) == 7
+        @test_throws ArgumentError StationSelection._resolve_aggregate_od_route_max_stops(typemax(Int))
     end
 
     @testset "pricing max_stops resolution allows fully unbounded search" begin
-        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(
-            typemax(Int), 3, 4,
-        ) == 12
-        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(7, 3, 4) == 7
-        # unlike enumeration's resolver, both limits unbounded is a legitimate
-        # pricing configuration (dominance/reduced-cost bound the search instead
-        # of a route-length ceiling), not an error.
-        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(
-            typemax(Int), typemax(Int), 4,
-        ) == typemax(Int)
+        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(7) == 7
+        # unlike enumeration's resolver, unbounded max_stops is a legitimate pricing
+        # configuration (dominance/reduced-cost bound the search instead of a
+        # route-length ceiling), not an error.
+        @test StationSelection._resolve_aggregate_od_route_pricing_max_stops(typemax(Int)) == typemax(Int)
     end
 
     @testset "initial labels remember pickup station age" begin
@@ -127,7 +115,7 @@
         )
         active_pairs = [(1, 3), (2, 3)]
 
-        function brute_signature_costs(max_wait_time::Float64, max_stops::Int, max_visits::Int)
+        function brute_signature_costs(max_wait_time::Float64, max_stops::Int)
             best = Dict{Tuple{Vararg{Tuple{Int, Int}}}, Float64}()
             function visit!(route::Vector{Int}, times::Vector{Float64})
                 if length(route) >= 2
@@ -150,7 +138,6 @@
                 length(route) >= max_stops && return
                 for next_node in 1:3
                     next_node == route[end] && continue
-                    count(==(next_node), route) < max_visits || continue
                     visit!(vcat(route, next_node), vcat(times, times[end] + routing_costs[(route[end], next_node)]))
                 end
             end
@@ -168,7 +155,6 @@
                 max_wait_time=max_wait_time,
                 detour_factor=2.0,
                 max_stops=max_stops,
-                max_visits_per_node=2,
                 repositioning_time=0.0,
             )
             columns = enumerate_aggregate_od_route_columns(
@@ -181,7 +167,7 @@
                 Tuple(sort(column.od_pairs)) => column.tau
                 for column in columns
             )
-            @test actual == brute_signature_costs(max_wait_time, max_stops, 2)
+            @test actual == brute_signature_costs(max_wait_time, max_stops)
         end
     end
 
@@ -286,36 +272,6 @@
         @test bs.age_idx == Int32[node_index[1], node_index[2]]
         @test bs.age_val == [1.0, 0.0]
         @test bs.age_mask == 0x03
-    end
-
-    @testset "label-setting candidate generation enforces max visits per node" begin
-        pricing_data = line_pricing_data(
-            active_pairs=[(1, 2)],
-            detour_factor=3.0,
-            max_stops=4,
-            max_visits_per_node=1,
-        )
-        duals = AggregateODRoutePricingDuals(Dict((1, 2) => 10.0))
-        label = AggregateODRoutePricingLabel(
-            1,
-            [1, 2, 1],
-            2.0,
-            Dict(1 => 0.0),
-            Set{Tuple{Int, Int}}(),
-            2.0,
-            -1.0,
-            3,
-        )
-
-        candidates = StationSelection._aggregate_od_route_candidate_next_nodes(label, pricing_data, duals)
-        @test isempty(candidates)
-        relaxed_candidates = StationSelection._aggregate_od_route_candidate_next_nodes(
-            label,
-            pricing_data,
-            duals;
-            max_visits_per_node=2,
-        )
-        @test relaxed_candidates == [2]
     end
 
     @testset "candidate generation can open fresh origins before pickup cutoff" begin
@@ -437,7 +393,6 @@
         build_result.model[:aggregate_od_route_max_wait_time] = model.max_wait_time
         build_result.model[:aggregate_od_route_detour_factor] = model.detour_factor
         build_result.model[:aggregate_od_route_max_stops] = model.max_stops
-        build_result.model[:aggregate_od_route_max_visits_per_node] = model.max_visits_per_node
         build_result.model[:aggregate_od_route_max_new_columns] = model.max_new_columns
         build_result.model[:aggregate_od_route_n_candidates] = model.n_candidates
         build_result.model[:aggregate_od_route_pricing_time_limit_sec] = model.pricing_time_limit_sec

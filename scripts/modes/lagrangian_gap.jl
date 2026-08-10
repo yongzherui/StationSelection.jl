@@ -3,9 +3,7 @@
     relaxation (and the post-W completion bound) on the first seeded RMP dual
     snapshot. A cheap gate before integrating either into the full CG
     trajectory. Reports bound validity, repeated-passenger multiplicity, exact
-    replayed route quality, labels, and wall time for 1/3/5 multiplier rounds,
-    plus a DSSR (dynamic subset-of-stations relaxation) sweep over how many
-    passengers start "exact".
+    replayed route quality, labels, and wall time for 1/3/5 multiplier rounds.
 
 Usage:
     julia --project=. scripts/diagnose.jl lagrangian_gap <n_stations>
@@ -138,26 +136,6 @@ function run_lagrangian_gap(args::Vector{String})
                 stats.max_passenger_multiplicity, stats.repeated_passenger_count,
                 stats.best_exact_replay_rc, stats.labels_generated,
                 exact_stats.labels_generated, stats.wall_seconds, exact_wall, string(exact_exhausted),
-            )
-        end
-
-        max_reward = Dict{Int, Float64}()
-        for candidate in candidates
-            max_reward[candidate.passenger] = max(get(max_reward, candidate.passenger, 0.0), candidate.reward)
-        end
-        ranked = sort!(collect(keys(max_reward)); by=p -> (-max_reward[p], p))
-        for initial_k in (0, 4, 8)
-            initial = Set(ranked[1:min(initial_k, length(ranked))])
-            dssr_bound, dssr_certified, dssr =
-                passenger_free_assignment_passenger_dssr_bound(
-                    exact_data, candidates; initial_exact_passengers=initial, max_rounds=20, time_limit=time_limit,
-                )
-            @printf(
-                "DSSR\tn=%d\ts=%d\tinitial_k=%d\tbound=%.3f\texact=%.3f\tgap=%.3f\tvalid=%s\texact_match=%s\trounds=%d\texact_passengers=%d\tlabels=%d\texact_labels=%d\treplay=%.3f\twall=%.3f\texact_wall=%.3f\n",
-                n, scenario, initial_k, dssr_bound, exact_rc, exact_rc - dssr_bound,
-                string(dssr_certified && dssr_bound <= exact_rc + 1e-6),
-                string(dssr.exact), dssr.rounds, dssr.n_exact_passengers,
-                dssr.labels_generated, exact_stats.labels_generated, dssr.best_exact_replay_rc, dssr.wall_seconds, exact_wall,
             )
         end
     end

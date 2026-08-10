@@ -161,8 +161,8 @@ end
 
 Mutable state for one `AggregateODRouteCG` solve -- the local variables
 `run_aggregate_od_route_column_generation`'s original single-function loop closed over, now
-threaded explicitly through the generic hooks. `pricing_*`/`use_station_simple`/
-`max_visits_per_node` are the already-resolved (non-`nothing`) values (see `_cg_build_master`);
+threaded explicitly through the generic hooks. `pricing_*`/`use_station_simple`
+are the already-resolved (non-`nothing`) values (see `_cg_build_master`);
 `pi_by_request` is `nothing` until `_cg_finalize_result` fills it in.
 """
 mutable struct AggregateODRouteCGState <: AbstractCGState
@@ -176,7 +176,6 @@ mutable struct AggregateODRouteCGState <: AbstractCGState
     generated_columns::Vector{AggregateODRouteColumn}
     last_status::Symbol
     columns_before::Int
-    max_visits_per_node::Int
     pricing_initial_sec::Float64
     pricing_ramp_factor::Float64
     use_station_simple::Bool
@@ -201,8 +200,7 @@ Builds the LP-relaxed restricted master (`Method=1`, `Presolve=0`, matching the 
 function's Gurobi tuning) and its `AggregateODRouteCGState`, resolving `algorithm`'s
 `Union{Nothing,_}` sentinel fields against `formulation`/`solver` exactly as
 `run_aggregate_od_route_column_generation`'s own kwarg defaults did
-(`max_visits_per_node=model.max_visits_per_node`, `pricing_initial_sec=pricing_time_limit_sec`,
-`use_station_simple=model.use_station_simple`).
+(`pricing_initial_sec=pricing_time_limit_sec`, `use_station_simple=model.use_station_simple`).
 """
 function _cg_build_master(
     data::StationSelectionData,
@@ -237,7 +235,6 @@ function _cg_build_master(
         AggregateODRouteColumn[],
         :error,
         0,
-        isnothing(algorithm.max_visits_per_node) ? formulation.max_visits_per_node : algorithm.max_visits_per_node,
         isnothing(algorithm.pricing_initial_sec) ? solver.pricing_time_limit_sec : algorithm.pricing_initial_sec,
         algorithm.pricing_ramp_factor,
         isnothing(algorithm.use_station_simple) ? formulation.use_station_simple : algorithm.use_station_simple,
@@ -351,19 +348,6 @@ function _cg_price_and_add_columns!(
     for s in 1:n_scenarios(data)
         pricing_duals = _scenario_pricing_duals(duals, s)
         pricing_data = create_aggregate_od_route_pricing_data(model, data, mapping, s, pricing_duals)
-        pricing_data = AggregateODRoutePricingData(
-            pricing_data.scenario,
-            pricing_data.nodes,
-            pricing_data.travel_cost,
-            pricing_data.active_pairs,
-            pricing_data.route_regularization_weight,
-            pricing_data.repositioning_time,
-            pricing_data.max_wait_time,
-            pricing_data.detour_factor,
-            pricing_data.max_stops,
-            state.max_visits_per_node,
-            pricing_data.bounded_max_stops,
-        )
         new_columns_s, exhausted_s, stats_s = _aggregate_od_route_price_columns(
             state.use_station_simple,
             pricing_data,
@@ -374,7 +358,6 @@ function _cg_price_and_add_columns!(
             max_new_columns=state.max_new_columns,
             n_candidates=state.n_candidates,
             time_limit=iter_pricing_sec,
-            max_visits_per_node=state.max_visits_per_node,
             profile=state.profile_pricing,
         )
         pricing_exhausted &= exhausted_s

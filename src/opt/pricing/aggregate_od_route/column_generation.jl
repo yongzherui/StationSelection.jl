@@ -59,9 +59,7 @@ function _selected_aggregate_od_route_column_ids(result::OptResult)::Vector{Int}
 end
 
 """
-Dispatches to whichever pricer `use_station_simple` selects. The station-simple
-pricer has no `max_visits_per_node` concept (elementary routes never revisit a
-station at all), so that kwarg is only forwarded to the revisit-tolerant pricer.
+Dispatches to whichever pricer `use_station_simple` selects.
 """
 function _aggregate_od_route_price_columns(
     use_station_simple::Bool,
@@ -73,7 +71,6 @@ function _aggregate_od_route_price_columns(
     max_new_columns::Int,
     n_candidates::Int,
     time_limit::Float64,
-    max_visits_per_node::Int=pricing_data.max_visits_per_node,
     profile::Bool=false,
 )
     use_station_simple && return aggregate_od_route_pricing_by_station_simple_label_setting(
@@ -96,7 +93,6 @@ function _aggregate_od_route_price_columns(
         max_new_columns=max_new_columns,
         n_candidates=n_candidates,
         time_limit=time_limit,
-        max_visits_per_node=max_visits_per_node,
         profile=profile,
     )
 end
@@ -116,7 +112,6 @@ function generate_aggregate_od_route_columns(
         max_wait_time=Float64(m[:aggregate_od_route_max_wait_time]),
         detour_factor=Float64(m[:aggregate_od_route_detour_factor]),
         max_stops=Int(m[:aggregate_od_route_max_stops]),
-        max_visits_per_node=Int(m[:aggregate_od_route_max_visits_per_node]),
         max_new_columns=Int(m[:aggregate_od_route_max_new_columns]),
         n_candidates=Int(m[:aggregate_od_route_n_candidates]),
         pricing_time_limit_sec=Float64(m[:aggregate_od_route_pricing_time_limit_sec]),
@@ -168,7 +163,6 @@ function _clone_for_final_mip(model::AggregateODRouteModel, columns::Vector{Aggr
         max_wait_time               = model.max_wait_time,
         detour_factor               = model.detour_factor,
         max_stops                   = model.max_stops,
-        max_visits_per_node         = model.max_visits_per_node,
         max_new_columns             = model.max_new_columns,
         n_candidates                = model.n_candidates,
         pricing_time_limit_sec      = model.pricing_time_limit_sec,
@@ -193,7 +187,6 @@ function _clone_for_final_mip(model::RouteCoveringProblem, columns::Vector{Aggre
         max_wait_time               = model.max_wait_time,
         detour_factor               = model.detour_factor,
         max_stops                   = model.max_stops,
-        max_visits_per_node         = model.max_visits_per_node,
         max_new_columns             = model.max_new_columns,
         n_candidates                = model.n_candidates,
         pricing_time_limit_sec      = model.pricing_time_limit_sec,
@@ -282,7 +275,6 @@ function run_aggregate_od_route_column_generation(
     max_iterations::Union{Nothing, Int}=nothing,
     max_new_columns::Int=model.max_new_columns,
     n_candidates::Int=max(model.n_candidates, max_new_columns),
-    max_visits_per_node::Int=model.max_visits_per_node,
     reduced_cost_tol::Float64=model.reduced_cost_tol,
     pricing_time_limit_sec::Float64=model.pricing_time_limit_sec,
     pricing_initial_sec::Float64=pricing_time_limit_sec,
@@ -312,7 +304,6 @@ function run_aggregate_od_route_column_generation(
         pricing_time_limit_sec=pricing_time_limit_sec,
         final_ip_time_limit_sec=ip_time_limit_sec,
         algorithm=AggregateODRouteCG(
-            max_visits_per_node=max_visits_per_node,
             pricing_initial_sec=pricing_initial_sec,
             pricing_ramp_factor=pricing_ramp_factor,
             use_station_simple=use_station_simple,

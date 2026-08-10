@@ -10,7 +10,7 @@ types that plug into the generics here.
 """
 Marker supertype for a pricer's dominance-rule switches, which each concrete
 pricer encodes as its own type parameters (e.g. `AggregateODRouteDominanceRules{BoundedStops}`
-in `aggregate_od_route/types.jl`, `PassengerFreeAssignmentDominanceRules{BoundedStops,BoundedStations,Compensated,Instrumented}`
+in `aggregate_od_route/types.jl`, `PassengerFreeAssignmentDominanceRules{BoundedStops,Compensated,Instrumented}`
 in `passenger_free_assignment/types.jl`) for zero-cost specialization -- see either
 concrete type's own docstring for why. This common supertype does not unify
 their field/parameter shapes (those differ for real reasons); it exists so

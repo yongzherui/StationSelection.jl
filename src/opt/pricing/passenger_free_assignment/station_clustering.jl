@@ -91,7 +91,6 @@ mutable struct ClusterPricingCache
     repositioning_time::Float64
     max_wait_time::Float64
     max_stops::Int
-    max_visits_per_node::Int
     aggregate_build_time::Float64
 end
 
@@ -184,7 +183,7 @@ function build_cluster_pricing_cache(h::StationClusterHierarchy,
     end
     ClusterPricingCache(arcs, rewards, relaxed, copy(candidates), travel_time, travel_cost,
         physical.scenario, physical.route_regularization_weight, physical.repositioning_time,
-        physical.max_wait_time, physical.max_stops, physical.max_visits_per_node, time()-t0)
+        physical.max_wait_time, physical.max_stops, time()-t0)
 end
 
 """Recompute only dual-dependent reward/feasibility aggregates; keep geography."""
@@ -267,7 +266,7 @@ function _cluster_pricing_data(h, cache)
     pd = create_passenger_free_assignment_pricing_data(cache.scenario, virtual_ids, unified, virtual_candidates;
         route_regularization_weight=cache.route_regularization_weight,
         repositioning_time=cache.repositioning_time, max_wait_time=cache.max_wait_time,
-        max_stops=cache.max_stops, max_visits_per_node=cache.max_visits_per_node)
+        max_stops=cache.max_stops)
     return pd, node_to_cluster
 end
 
@@ -277,7 +276,7 @@ function solve_cluster_pricer(h::StationClusterHierarchy, cache::ClusterPricingC
     pd, node_to_cluster = _cluster_pricing_data(h, cache)
     labels, exhausted, stats = _enumerate_passenger_free_assignment_pricing_labels(pd;
         time_limit=time_limit, reduced_cost_tol=h.config.pricing_tolerance,
-        max_visits_per_node=pd.max_visits_per_node, use_reduced_cost_pruning=false)
+        use_reduced_cost_pruning=false)
     best = isempty(labels) ? nothing : argmin(l -> l.reduced_cost, labels)
     lb = exhausted ? (isnothing(best) ? pd.route_regularization_weight * pd.repositioning_time : best.reduced_cost) : -Inf
     virtual_route = isnothing(best) ? Int[] : best.route
