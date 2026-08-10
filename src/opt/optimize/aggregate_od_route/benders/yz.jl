@@ -37,34 +37,33 @@ function _build_yz_route_subproblem_lp(
     set_optimizer_attribute(m, "Method", 1)
     set_optimizer_attribute(m, "Presolve", 0)
 
-    z_cache = Dict{_AggregateODRouteEndpointChainKey, Vector{VariableRef}}()
-    fix_cons = Dict{Tuple{_AggregateODRouteEndpointChainKey, Int}, ConstraintRef}()
-    fixed_z! = key -> get!(z_cache, key) do
-        haskey(z_hat, key) || throw(ArgumentError(
-            "BendersYZ subproblem: no master z_hat entry for chain key $(key)"
-        ))
-        n = length(key[2])
-        zvar = @variable(m, [1:n], lower_bound = 0.0, upper_bound = 1.0)
-        for i in 1:n
-            fix_cons[(key, i)] = @constraint(m, zvar[i] == z_hat[key][i])
-        end
-        zvar
+    # One pre-pass to resolve each request's pickup/dropoff chain key (and sorted-candidate
+    # list, reused below to avoid recomputing it) so add_fixed_endpoint_chain_variables! can
+    # eagerly build z for exactly the keys this group's requests need -- not every key in z_hat,
+    # which is the master's full nearest_endpoint_chain_cache (see that function's docstring).
+    chain_info = Dict{NTuple{3, Int}, Any}()
+    needed_keys = Set{keytype(z_hat)}()
+    for request in requests
+        _s, o, d = request
+        pickup_key, sorted_pickups, _pickup_costs = _sorted_endpoint_chain(data, o, model.max_walking_distance, :pickup)
+        dropoff_key, sorted_dropoffs, _dropoff_costs = _sorted_endpoint_chain(data, d, model.max_walking_distance, :dropoff)
+        chain_info[request] = (pickup_key, sorted_pickups, dropoff_key, sorted_dropoffs)
+        push!(needed_keys, pickup_key)
+        push!(needed_keys, dropoff_key)
     end
+    z_by_key, fix_cons = add_fixed_endpoint_chain_variables!(m, z_hat, needed_keys)
 
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
-        _s, o, d = request
         pairs = feasible_pairs[request]
-        for pair in pairs
-            x[(request, pair)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
+        x_by_pair, _sum_con = add_unlinked_pair_assignment_constraints!(m, request, pairs)
+        for (pair, var) in x_by_pair
+            x[(request, pair)] = var
         end
-        @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
-        x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
 
-        pickup_key, sorted_pickups, _pickup_costs = _sorted_endpoint_chain(data, o, model.max_walking_distance, :pickup)
-        dropoff_key, sorted_dropoffs, _dropoff_costs = _sorted_endpoint_chain(data, d, model.max_walking_distance, :dropoff)
-        zp = fixed_z!(pickup_key)
-        zd = fixed_z!(dropoff_key)
+        pickup_key, sorted_pickups, dropoff_key, sorted_dropoffs = chain_info[request]
+        zp = z_by_key[pickup_key]
+        zd = z_by_key[dropoff_key]
         pickup_rank = Dict(station => idx for (idx, station) in enumerate(sorted_pickups))
         dropoff_rank = Dict(station => idx for (idx, station) in enumerate(sorted_dropoffs))
         real_pairs = filter(!is_walk_only_pair, pairs)
@@ -73,38 +72,14 @@ function _build_yz_route_subproblem_lp(
         )
     end
 
-    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
-    cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
-    for request in requests
-        s, _o, _d = request
-        for pair in feasible_pairs[request]
-            # See _build_nearest_open_y_subproblem_lp: walk-only and same-station
-            # assignments use no vehicle route, so no coverage row for them.
-            requires_no_vehicle_route(pair) && continue
-            covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
-            cover_cons[(request, pair)] =
-                @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= x[(request, pair)])
-        end
-    end
+    lambda = add_benders_lambda_variables!(m, columns, n_scenarios(data))
+    # See _build_nearest_open_y_subproblem_lp: walk-only and same-station assignments use no
+    # vehicle route, so no coverage row for them -- already handled inside the shared function.
+    cover_cons = add_benders_route_coverage_constraints!(m, lambda, requests, feasible_pairs, columns, x)
 
-    obj = AffExpr(0.0)
-    for request in requests
-        for pair in feasible_pairs[request]
-            add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=model.walk_cost_weight), x[(request, pair)])
-        end
-    end
-    for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
-        add_to_expression!(
-            obj,
-            aggregate_od_route_column_objective_coefficient(
-                model.route_regularization_weight,
-                model.repositioning_time,
-                column,
-            ),
-            lambda[idx, s],
-        )
-    end
-    @objective(m, Min, obj)
+    walking_expr = assignment_walking_cost_expr(data, requests, feasible_pairs, x; weight=model.walk_cost_weight)
+    route_expr = benders_route_regularization_cost_expr(model, columns, lambda, n_scenarios(data))
+    set_benders_subproblem_objective!(m, walking_expr, route_expr)
     m[:x] = x
     return m, fix_cons, cover_cons
 end

@@ -96,48 +96,18 @@ function _build_yzh_route_subproblem_lp(
     set_optimizer_attribute(m, "Method", 1)
     set_optimizer_attribute(m, "Presolve", 0)
 
-    group_occurrences = Dict{Tuple{Int, Int}, Vector{Int}}()
-    for (s, o, d) in group_requests
-        push!(get!(group_occurrences, (o, d), Int[]), s)
-    end
-    group_physical_pairs = collect(keys(group_occurrences))
+    group_physical_pairs, group_occurrences = _yzh_group_physical_pairs(group_requests)
+    h, fix_cons = add_fixed_physical_pair_variables!(m, group_physical_pairs, feasible_pairs_by_p, h_hat)
 
-    h = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, VariableRef}()
-    fix_cons = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, ConstraintRef}()
-    for p in group_physical_pairs, pair in feasible_pairs_by_p[p]
-        key = (p, pair)
-        h[key] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
-        fix_cons[key] = @constraint(m, h[key] == get(h_hat, key, 0.0))
-    end
+    lambda = add_benders_lambda_variables!(m, columns, n_scenarios(data))
+    # Walk-only and same-station assignments use no vehicle route, so no route column can (or
+    # needs to) cover them -- already handled inside the shared function.
+    cover_cons = add_benders_route_coverage_constraints!(
+        m, lambda, group_physical_pairs, group_occurrences, feasible_pairs_by_p, columns, h,
+    )
 
-    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
-    cover_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
-    for p in group_physical_pairs
-        for pair in feasible_pairs_by_p[p]
-            # Walk-only and same-station assignments use no vehicle route, so
-            # no route column can (or needs to) cover them.
-            requires_no_vehicle_route(pair) && continue
-            covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
-            for s in group_occurrences[p]
-                con = @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= h[(p, pair)])
-                cover_cons[((s, p[1], p[2]), pair)] = con
-            end
-        end
-    end
-
-    obj = AffExpr(0.0)
-    for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
-        add_to_expression!(
-            obj,
-            aggregate_od_route_column_objective_coefficient(
-                model.route_regularization_weight,
-                model.repositioning_time,
-                column,
-            ),
-            lambda[idx, s],
-        )
-    end
-    @objective(m, Min, obj)
+    route_expr = benders_route_regularization_cost_expr(model, columns, lambda, n_scenarios(data))
+    set_benders_subproblem_objective!(m, AffExpr(0.0), route_expr)
     return m, fix_cons, cover_cons
 end
 

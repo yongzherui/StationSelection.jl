@@ -53,18 +53,10 @@ function _add_unrestricted_master_x!(
 )
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
-        pairs = feasible_pairs[request]
-        isempty(pairs) && throw(ArgumentError("BendersXY master has no feasible station pair for $(request)"))
-        for pair in pairs
-            var = @variable(master, binary = true)
+        x_by_pair, _sum_con = add_free_pair_assignment_constraints!(master, y, request, feasible_pairs[request])
+        for (pair, var) in x_by_pair
             x[(request, pair)] = var
-            if !is_walk_only_pair(pair)
-                j, k = pair
-                @constraint(master, var <= y[j])
-                @constraint(master, var <= y[k])
-            end
         end
-        @constraint(master, sum(x[(request, pair)] for pair in pairs) == 1.0)
     end
     return x
 end
@@ -85,19 +77,11 @@ function _add_nearest_open_master_x!(
     end
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
-        ranked = _ranked_request_pairs(data, request, feasible_pairs[request])
-        for pair in ranked
-            x[(request, pair)] = @variable(master, binary = true)
-        end
-        @constraint(master, sum(x[(request, pair)] for pair in ranked) == 1.0)
-        for (rank_idx, pair) in enumerate(ranked)
-            j, k = pair
-            @constraint(master, x[(request, pair)] <= y[j])
-            @constraint(master, x[(request, pair)] <= y[k])
-            for prior in ranked[1:max(rank_idx - 1, 0)]
-                pj, pk = prior
-                @constraint(master, x[(request, pair)] <= 2.0 - y[pj] - y[pk])
-            end
+        x_by_pair, _sum_con = add_ranked_pair_assignment_constraints!(
+            master, data, y, request, feasible_pairs[request]; binary=true,
+        )
+        for (pair, var) in x_by_pair
+            x[(request, pair)] = var
         end
     end
     return x
@@ -118,41 +102,15 @@ function _build_xy_route_subproblem_lp(
     set_optimizer_attribute(m, "Method", 1)
     set_optimizer_attribute(m, "Presolve", 0)
 
-    x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    fix_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
-    for request in requests, pair in feasible_pairs[request]
-        key = (request, pair)
-        x[key] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
-        fix_cons[key] = @constraint(m, x[key] == get(x_hat, key, 0.0))
-    end
+    x, fix_cons = add_fixed_pair_assignment_variables!(m, requests, feasible_pairs, x_hat)
+    lambda = add_benders_lambda_variables!(m, columns, n_scenarios(data))
+    # Walk-only and same-station assignments use no vehicle route, so no route column can (or
+    # needs to) cover them — a coverage row here would force x[(request, pair)] to 0 even when
+    # the master fixed it to 1. add_benders_route_coverage_constraints! already skips these.
+    add_benders_route_coverage_constraints!(m, lambda, requests, feasible_pairs, columns, x)
 
-    @variable(m, lambda[1:length(columns), 1:n_scenarios(data)] >= 0)
-    for request in requests
-        s, _o, _d = request
-        for pair in feasible_pairs[request]
-            # Walk-only and same-station assignments use no vehicle route, so
-            # no route column can (or needs to) cover them — a coverage row
-            # here would force x[(request, pair)] to 0 even when the master
-            # fixed it to 1.
-            requires_no_vehicle_route(pair) && continue
-            covering = [idx for (idx, column) in enumerate(columns) if pair in column.od_pairs]
-            @constraint(m, sum(lambda[idx, s] for idx in covering; init=0.0) >= x[(request, pair)])
-        end
-    end
-
-    obj = AffExpr(0.0)
-    for (idx, column) in enumerate(columns), s in 1:n_scenarios(data)
-        add_to_expression!(
-            obj,
-            aggregate_od_route_column_objective_coefficient(
-                model.route_regularization_weight,
-                model.repositioning_time,
-                column,
-            ),
-            lambda[idx, s],
-        )
-    end
-    @objective(m, Min, obj)
+    route_expr = benders_route_regularization_cost_expr(model, columns, lambda, n_scenarios(data))
+    set_benders_subproblem_objective!(m, AffExpr(0.0), route_expr)
     return m, fix_cons
 end
 
