@@ -187,66 +187,16 @@ function _solve_yzh_route_subproblem_lp_with_repricing(
     silent::Bool;
     max_reprice_rounds::Int=10_000,
 )
-    pool = copy(columns)
-    v_hat = NaN
-    baseline_v_hat = nothing
-    max_objective_delta = 0.0
-    rho = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64}()
-    n_new_columns_total = 0
-    rounds = 0
-    fully_exhausted = false
-    for round in 1:max_reprice_rounds
-        rounds = round
-        m, fix_cons, cover_cons = _build_yzh_route_subproblem_lp(
-            data, model, group_requests, feasible_pairs_by_p, pool, h_hat, optimizer_env, silent
-        )
-        optimize!(m)
-        primal_status(m) == MOI.FEASIBLE_POINT ||
-            throw(ArgumentError("BendersYZH repricing subproblem LP failed with status $(termination_status(m))"))
-        v_hat = objective_value(m)
-        if isnothing(baseline_v_hat)
-            baseline_v_hat = v_hat
-        else
-            objective_delta = abs(v_hat - baseline_v_hat)
-            max_objective_delta = max(max_objective_delta, objective_delta)
-            objective_delta <= 1e-6 * max(1.0, abs(baseline_v_hat)) || throw(ArgumentError(
-                "BendersYZH repricing changed subproblem objective: before=$(baseline_v_hat), " *
-                "after=$(v_hat), delta=$(objective_delta). Repricing is expected to certify the " *
-                "same LP value, not improve it."
-            ))
-        end
-        rho = Dict(key => dual(con) for (key, con) in fix_cons)
-
-        duals = _extract_nearest_open_y_subproblem_coverage_duals(cover_cons)
-        all_new_columns, pricing_exhausted = _price_aggregate_od_route_subproblem_columns(
-            data, model, mapping, pool, duals,
-        )
-        if isempty(all_new_columns)
-            if pricing_exhausted
-                fully_exhausted = true
-                break
-            end
-            round == max_reprice_rounds && throw(ArgumentError(
-                "BendersYZH repricing did not exhaust pricing within max_reprice_rounds=$(max_reprice_rounds); " *
-                "no cut can be certified from the current duals."
-            ))
-            continue
-        end
-        pricing_exhausted ||
-            @warn "BendersYZH subproblem repricing: pricing hit its time limit before exhausting the search " *
-                "while new columns were still being found -- completeness not fully proven this round" round
-        @warn "BendersYZH subproblem repricing found columns beyond the seeded pool -- pool was not complete " *
-            "for this subproblem's own dual structure (dual degeneracy or genuine pool gap)" round n_new=length(all_new_columns)
-        n_new_columns_total += length(all_new_columns)
-        pool = _deduplicate_aggregate_od_route_columns(vcat(pool, all_new_columns))
-        round == max_reprice_rounds && throw(ArgumentError(
-            "BendersYZH repricing found negative route columns in the final allowed round " *
-            "max_reprice_rounds=$(max_reprice_rounds); the expanded LP must be re-solved and " *
-            "re-priced to exhaustion before its cut is valid."
-        ))
-    end
-    fully_exhausted || throw(ArgumentError("BendersYZH repricing terminated without pricing exhaustion"))
-    return v_hat, rho, pool, n_new_columns_total, rounds, fully_exhausted, max_objective_delta
+    return _solve_benders_subproblem_lp_with_repricing(
+        data, model, mapping, columns, optimizer_env, silent, "BendersYZH";
+        build_lp=pool -> begin
+            m, fix_cons, cover_cons = _build_yzh_route_subproblem_lp(
+                data, model, group_requests, feasible_pairs_by_p, pool, h_hat, optimizer_env, silent,
+            )
+            (m, fix_cons, cover_cons, nothing)
+        end,
+        max_reprice_rounds=max_reprice_rounds,
+    )
 end
 
 """
