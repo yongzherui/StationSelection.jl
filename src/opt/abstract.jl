@@ -18,10 +18,24 @@ AbstractStationSelectionModel
 using JuMP
 using DataFrames
 
+export AbstractOptimizationProblem
 export AbstractStationSelectionModel
 export AbstractSingleScenarioModel
 export AbstractMultiScenarioModel
 export AbstractTwoStageModel
+export AbstractBendersDualProblem
+
+"""
+    AbstractOptimizationProblem
+
+Root type for anything `run_opt`/`build_model` can construct and solve --
+not just station-selection models (`AbstractStationSelectionModel`) but also
+auxiliary problems that share the `build_model(problem, data) -> BuildResult`
+/ `run_opt(data, problem, solver) -> OptResult` contract without themselves
+selecting stations or assignments, e.g. a Benders decomposition's
+cut-derivation LPs (see [`AbstractBendersDualProblem`](@ref)).
+"""
+abstract type AbstractOptimizationProblem end
 
 """
     AbstractStationSelectionModel
@@ -33,7 +47,7 @@ Each concrete type must implement:
 - `build_model(model, data; optimizer_env=nothing)` - construct the JuMP model
 - `extract_result(model, m, data)` - extract results after optimization
 """
-abstract type AbstractStationSelectionModel end
+abstract type AbstractStationSelectionModel <: AbstractOptimizationProblem end
 
 """
     AbstractSingleScenarioModel <: AbstractStationSelectionModel
@@ -70,3 +84,19 @@ abstract type AbstractTwoStageModel <: AbstractMultiScenarioModel end
 Two-stage models with OD (origin-destination) pair assignment.
 """
 abstract type AbstractODModel <: AbstractTwoStageModel end
+
+"""
+    AbstractBendersDualProblem <: AbstractOptimizationProblem
+
+Sibling of `AbstractStationSelectionModel`, not a subtype of it: these are
+dual-feasibility LPs over a Benders decomposition's own cut algebra (e.g. a
+Magnanti-Wong-style core-point finder, or a fixed-dual-block completion LP)
+-- their variables are duals (`alpha`, `rho`, `sigma`, a core-point `delta`,
+...), not stations or OD assignments, so there is no meaningful
+`mapping::AbstractStationSelectionMap` for them to report. `build_model`
+still returns a `BuildResult` (with `mapping=EmptyStationSelectionMap()`,
+the same placeholder `run_opt`'s pre-solve feasibility short-circuit already
+uses) and `run_opt` still returns an `OptResult`, but callers should read
+the solved dual values off `OptResult.duals`, not `OptResult.solution`.
+"""
+abstract type AbstractBendersDualProblem <: AbstractOptimizationProblem end

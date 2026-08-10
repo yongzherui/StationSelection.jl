@@ -141,5 +141,6 @@ function _with_objective_value(result::OptResult, objective_value::Float64)::Opt
         result.counts,
         result.warm_start_solution,
         result.metadata,
+        result.duals,
     )
 end
