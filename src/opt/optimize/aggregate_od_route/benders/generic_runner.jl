@@ -21,9 +21,35 @@ goes through the new `run_opt`-based `BendersSubproblemModel`.
 """
 
 # ---------------------------------------------------------------------------
-# Decomposition-dispatched hooks. BendersY methods only; BendersXY/YZ/YZH add
+# Decomposition-dispatched hooks. BendersY/BendersXY methods; BendersYZ/YZH add
 # their own methods here in later passes.
 # ---------------------------------------------------------------------------
+
+"""
+    _benders_uses_certified_cut_derivation(decomposition, solver) -> Bool
+
+Whether this decomposition's optimality cut ever needs `_certified_qbar`-based `v_hat`
+tightening. Default (`BendersY`/`BendersYZ`): whenever `solver.cut_derivation != :standard`.
+`BendersXY` overrides to always `false` -- its `cut_derivation` field is documented as
+ignored, always using the plain subgradient cut.
+"""
+_benders_uses_certified_cut_derivation(::D, solver::BendersSolver) where {D <: AbstractBendersDecomposition} =
+    solver.cut_derivation != :standard
+_benders_uses_certified_cut_derivation(::BendersXY, ::BendersSolver) = false
+
+"""
+    _benders_needs_core_point(decomposition, solver) -> Bool
+
+Whether this decomposition's cut derivation needs a Magnanti-Wong-style core point
+(`BendersCorePointProblem`). Default mirrors `_benders_uses_certified_cut_derivation`
+(true for `BendersY`/`BendersYZ` whenever `cut_derivation != :standard`); overridden
+separately for decompositions (`BendersXY` here, `BendersYZH` later) that either never
+certify or certify without ever needing a core point (`BendersYZH` has no free dual block
+left once `h` is fixed, so its `:zero_completion` mode needs no core point at all).
+"""
+_benders_needs_core_point(::D, solver::BendersSolver) where {D <: AbstractBendersDecomposition} =
+    solver.cut_derivation != :standard
+_benders_needs_core_point(::BendersXY, ::BendersSolver) = false
 
 """
     _benders_hat_point(master::Model, decomposition) -> NamedTuple
@@ -147,6 +173,92 @@ function _benders_add_optimality_cut!(
 end
 
 # ---------------------------------------------------------------------------
+# BendersXY hooks: master fixes y AND x jointly, so the subproblem has no free
+# assignment variable at all (only route selection) -- no feasibility-cut
+# machinery, no repricing, no core-point/completion (cut_derivation ignored).
+# ---------------------------------------------------------------------------
+
+function _benders_hat_point(master::Model, ::BendersXY)
+    n = length(master[:y])
+    y_hat = [round(value(master[:y][j])) for j in 1:n]
+    x_hat = Dict(key => round(value(var)) for (key, var) in master[:x])
+    return (y_hat=y_hat, x_hat=x_hat)
+end
+
+function _benders_priming_assignments(
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    ::BendersXY,
+    requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+)
+    assignments = _selected_assignments_from_x(requests, feasible_pairs, hat.x_hat)
+    return assignments, _open_station_values(hat.y_hat)
+end
+
+"""
+    _benders_solve_subproblem(..., decomposition::BendersXY, ...) -> (v_hat, duals, pool, n_new, exhausted)
+
+`x` is fixed fully in the subproblem, so CG-priming is always exhaustive for this LP's own
+dual structure (see `BendersXY`'s docstring) -- no repricing companion exists, unlike
+`BendersY`. `pool`/`n_new` are always unchanged/`0`.
+"""
+function _benders_solve_subproblem(
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    mapping::AggregateODRouteMap,
+    decomposition::BendersXY,
+    hat,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    columns::Vector{AggregateODRouteColumn},
+    solver::BendersSolver,
+    optimizer_env,
+    silent::Bool,
+)
+    sub_problem = BendersSubproblemModel(subproblem_model, hat.x_hat, group_requests, feasible_pairs, columns, decomposition)
+    sub_result = run_opt(data, sub_problem, DirectSolver(config=SolverConfig(optimizer_env=optimizer_env, silent=silent)))
+    sub_result.termination_status == MOI.OPTIMAL ||
+        throw(ArgumentError("BendersXY subproblem failed with status $(sub_result.termination_status)"))
+    return sub_result.objective_value, sub_result.duals, columns, 0, true
+end
+
+"""
+    _benders_add_optimality_cut!(..., decomposition::BendersXY, ...)
+
+Always the plain subgradient cut (`cut_derivation` is ignored for `BendersXY`, see its own
+docstring) -- byte-identical formula to the original inline
+`_run_aggregate_od_route_nearest_open_benders_xy`/`_run_aggregate_od_route_free_benders_xy`.
+"""
+function _benders_add_optimality_cut!(
+    master::Model,
+    decomposition::BendersXY,
+    cut_id::Int,
+    data::StationSelectionData,
+    base::AggregateODRouteModel,
+    solver::BendersSolver,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+    core_point,
+    optimizer_env,
+    v_hat::Float64,
+    sub_duals::Dict;
+    certified=nothing,
+    Q_bar=nothing,
+    certification_already_failed::Bool=false,
+)
+    x = master[:x]
+    x_hat = hat.x_hat
+    @constraint(master, master[:theta][cut_id] >= v_hat + sum(sub_duals[key] * (x[key] - get(x_hat, key, 0.0)) for key in keys(sub_duals)))
+    cut_constant = v_hat - sum(sub_duals[key] * get(x_hat, key, 0.0) for key in keys(sub_duals); init=0.0)
+    return (cut_constant=cut_constant, coeffs=sub_duals)
+end
+
+# ---------------------------------------------------------------------------
 # The generic outer loop.
 # ---------------------------------------------------------------------------
 
@@ -180,15 +292,19 @@ function _run_benders_decomposition(
     direct_solver = DirectSolver(config=SolverConfig(optimizer_env=optimizer_env, silent=cfg.silent))
 
     mapping = create_map(model, data)
-    model.assignment_policy.feasibility_cut_style == :pair_chain &&
+    # FreeAggregateODAssignmentPolicy (BendersXY's free-assignment path) has no
+    # feasibility_cut_style field at all -- this check only applies to the NearestOpen family.
+    if model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+       model.assignment_policy.feasibility_cut_style == :pair_chain
         assert_no_walk_only_pairs(mapping, "AggregateODRouteModel Benders ($(decomposition_name), NearestOpen, :pair_chain)")
+    end
     requests, _demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
     isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
     _check_aggregate_od_route_endpoint_feasibility!(data, model, requests, optimizer_env, cfg.silent)
     cut_groups = _benders_cut_groups(requests, solver.cut_mode)
     cut_ids = sort!(collect(keys(cut_groups)))
 
-    if solver.cut_derivation != :standard
+    if _benders_uses_certified_cut_derivation(decomposition, solver)
         (model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
             model.assignment_policy.feasibility_cut_style == :big_m_nearest) ||
             throw(ArgumentError(
@@ -199,7 +315,8 @@ function _run_benders_decomposition(
             "BendersSolver(cut_derivation=$(solver.cut_derivation)) does not support allow_walk_only=true"
         ))
     end
-    if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
+    if model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy &&
+       _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)
     end
 
@@ -207,11 +324,11 @@ function _run_benders_decomposition(
     # `subproblem_model` (walk_cost_weight=0, route_regularization_weight=1) instead of `model`
     # -- see benders/lifted_walking.jl. `model` is kept for everything master-side.
     subproblem_model = solver.lifted_walking_objective ? _unit_weighted_routing_model(model) : model
-    core_point = if solver.cut_derivation == :standard
-        nothing
-    else
+    core_point = if _benders_needs_core_point(decomposition, solver)
         cp_result = run_opt(data, BendersCorePointProblem(subproblem_model, requests, decomposition), direct_solver)
         cp_result.metadata["core_point"]
+    else
+        nothing
     end
 
     # See BendersSolver's `route_regularization_weight_schedule` docstring: a single implicit
@@ -305,7 +422,7 @@ function _run_benders_decomposition(
 
             certified_for_cut = nothing
             qbar_for_cut = nothing
-            if solver.cut_derivation != :standard
+            if _benders_uses_certified_cut_derivation(decomposition, solver)
                 certified_for_cut, qbar_for_cut = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments)
                 v_hat = min(v_hat, qbar_for_cut)
             end
@@ -417,7 +534,8 @@ function _run_benders_decomposition(
                 "best_upper_bound" => best_ub,
                 "selected_assignment_count" => length(assignments),
                 "generated_column_pool_size" => length(shared_pool),
-                "feasibility_cut_style" => string(model.assignment_policy.feasibility_cut_style),
+                "feasibility_cut_style" => model.assignment_policy isa NearestOpenAggregateODAssignmentPolicy ?
+                    string(model.assignment_policy.feasibility_cut_style) : "free",
                 "cut_derivation" => string(solver.cut_derivation),
             ), solver; phase1_guided=!isnothing(direct_enumeration_pool))
         end

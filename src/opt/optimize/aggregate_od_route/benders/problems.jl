@@ -124,15 +124,18 @@ end
 `.base::AggregateODRouteModel` is whatever model the caller wants priced against --
 already resolved for `lifted_walking_objective` (the outer loop's unit-weighted
 `_unit_weighted_routing_model` swap when that's active, or the real model otherwise);
-this type is agnostic to that choice. `y_hat` is fixed via an equality constraint on a
-continuous `[0,1]` `y` (not the master's own binary `y`) so its dual is a valid
-subgradient -- mirrors `_build_nearest_open_y_subproblem_lp` exactly. `requests`/
+this type is agnostic to that choice. `hat` is the fixed decision each decomposition's
+subproblem builds around -- `y_hat::Vector{Float64}` for `BendersY`,
+`x_hat::Dict{...,Float64}` for `BendersXY`, `z_hat`/`h_hat` for `BendersYZ`/`BendersYZH` --
+deliberately untyped since its shape is decomposition-specific; each `build_model` method
+knows how to interpret its own. Fixed via an equality constraint on a continuous relaxation
+of the real (binary/chain) variable so its dual is a valid subgradient. `requests`/
 `feasible_pairs`/`columns` are per-call inputs (one cut group's requests, the current
 shared column pool), not re-derivable from `(base, data)` alone.
 """
 struct BendersSubproblemModel{D <: AbstractBendersDecomposition} <: AbstractODModel
     base::AggregateODRouteModel
-    y_hat::Vector{Float64}
+    hat
     requests::Vector{NTuple{3, Int}}
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}
     columns::Vector{AggregateODRouteColumn}
@@ -141,14 +144,14 @@ struct BendersSubproblemModel{D <: AbstractBendersDecomposition} <: AbstractODMo
 
     function BendersSubproblemModel(
         base::AggregateODRouteModel,
-        y_hat::Vector{Float64},
+        hat,
         requests::Vector{NTuple{3, Int}},
         feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
         columns::Vector{AggregateODRouteColumn},
         decomposition::D;
         lambda_binary::Bool=false,
     ) where {D <: AbstractBendersDecomposition}
-        new{D}(base, y_hat, requests, feasible_pairs, columns, decomposition, lambda_binary)
+        new{D}(base, hat, requests, feasible_pairs, columns, decomposition, lambda_binary)
     end
 end
 
@@ -161,7 +164,7 @@ function build_model(
     mapping = create_map(model.base, data)
     m, fix_cons, x, cover_cons = _build_nearest_open_y_subproblem_lp(
         data, model.base, mapping, model.requests, nothing, model.feasible_pairs,
-        model.columns, model.y_hat, optimizer_env, false;
+        model.columns, model.hat, optimizer_env, false;
         lambda_binary=model.lambda_binary,
     )
     metadata = Dict{String, Any}("fix_cons" => fix_cons, "x" => x, "cover_cons" => cover_cons)
@@ -202,6 +205,120 @@ function run_opt(
     end
     fix_cons = build_result.metadata["fix_cons"]
     rho = Dict(j => dual(con) for (j, con) in fix_cons)
+    return OptResult(
+        term_status, objective_value(m), nothing, runtime_sec, m, build_result.mapping,
+        nothing, nothing, nothing, build_result.metadata, rho,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# BendersXY: master = y,x (full nearest-open resolution + assignment, or free
+# assignment); subproblem = theta (route covering) only. Two master variants
+# selected by base.assignment_policy -- no lifted_walking_objective/
+# direct_enumeration_guide/route_regularization_weight_schedule support needed
+# (all three are forbidden for BendersXY at BendersSolver construction), and
+# cut_derivation is ignored (always the plain subgradient cut, see BendersXY's
+# own docstring), so this build_model is simpler than BendersY's.
+# ---------------------------------------------------------------------------
+
+function build_model(
+    model::BendersMasterModel{BendersXY},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    base = model.base
+    cut_ids = model.cut_ids
+    mapping = create_map(base, data)
+    requests, _demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
+    isempty(requests) && throw(ArgumentError("AggregateODRouteModel Benders requires positive demand"))
+
+    master = Model(() -> Gurobi.Optimizer(optimizer_env))
+    variable_counts = Dict{String, Int}()
+    constraint_counts = Dict{String, Int}()
+
+    variable_counts["station_selection"] = add_station_selection_variables!(master, data)
+    y = master[:y]
+    variable_counts["benders_cut_placeholder"] = add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    constraint_counts["station_limit"] = add_station_limit_constraint!(master, data, base.l)
+    constraint_counts["endpoint_coverage"] =
+        _add_default_endpoint_coverage_constraints!(master, y, data, base, requests)
+
+    x = if base.assignment_policy isa NearestOpenAggregateODAssignmentPolicy
+        if _is_endpoint_nearest_style(base.assignment_policy.feasibility_cut_style)
+            validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base.allow_walk_only)
+        else
+            assert_no_walk_only_pairs(mapping, "AggregateODRouteModel Benders (BendersXY, NearestOpen, :pair_chain)")
+        end
+        _add_nearest_open_master_x!(master, data, base, y, requests, feasible_pairs)
+    else
+        for request in requests
+            isempty(feasible_pairs[request]) &&
+                throw(ArgumentError("BendersXY master has no open feasible pair candidate for $(request)"))
+        end
+        _add_unrestricted_master_x!(master, y, requests, feasible_pairs)
+    end
+    master[:x] = x
+
+    obj = AffExpr(0.0)
+    for request in requests, pair in feasible_pairs[request]
+        add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=base.walk_cost_weight), x[(request, pair)])
+    end
+    for cut_id in cut_ids
+        add_to_expression!(obj, 1.0, theta[cut_id])
+    end
+    @objective(master, Min, obj)
+
+    counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
+    metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)
+    return BuildResult(master, mapping, nothing, counts, metadata)
+end
+
+function build_model(
+    model::BendersSubproblemModel{BendersXY},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    m, fix_cons = _build_xy_route_subproblem_lp(
+        data, model.base, model.requests, model.feasible_pairs, model.columns, model.hat, optimizer_env, false,
+    )
+    mapping = create_map(model.base, data)
+    metadata = Dict{String, Any}("fix_cons" => fix_cons)
+    return BuildResult(m, mapping, nothing, nothing, metadata)
+end
+
+"""
+    run_opt(instance, problem::BendersSubproblemModel{BendersXY}, solver::DirectSolver) -> OptResult
+
+`x` is fixed fully (unlike `BendersY`, where only `y` is fixed and `x` stays free) -- no
+repricing companion exists or is needed for `BendersXY`, since CG-priming against a fully
+fixed assignment is always exhaustive for exactly this LP's own dual structure (see
+`BendersXY`'s docstring). `OptResult.duals` is `rho`, keyed by `(request, pair)`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersSubproblemModel{BendersXY},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    build_result = build_model(problem, instance; optimizer_env=optimizer_env)
+    m = build_result.model
+    cfg.silent && set_silent(m)
+    optimize!(m)
+    runtime_sec = time() - start
+    term_status = termination_status(m)
+    if primal_status(m) != MOI.FEASIBLE_POINT
+        return OptResult(
+            term_status, nothing, nothing, runtime_sec, m, build_result.mapping,
+            nothing, nothing, nothing, build_result.metadata,
+        )
+    end
+    fix_cons = build_result.metadata["fix_cons"]
+    rho = Dict(key => dual(con) for (key, con) in fix_cons)
     return OptResult(
         term_status, objective_value(m), nothing, runtime_sec, m, build_result.mapping,
         nothing, nothing, nothing, build_result.metadata, rho,
