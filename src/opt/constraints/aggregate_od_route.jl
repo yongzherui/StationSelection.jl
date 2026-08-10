@@ -704,6 +704,44 @@ function _add_nearest_open_endpoint_linked_x!(
     return nothing
 end
 
+"""
+    _add_nearest_open_pair_assignment!(m, data, y, request, pairs, max_walking_distance; allow_walk_only, selector_style, debug_key_prefix=nothing)
+        -> (x_by_pair::Dict{Tuple{Int,Int}, VariableRef}, sum_con::ConstraintRef)
+
+One request's continuous `[0,1]` assignment variable per feasible `(j,k)` pair
+(`sum(x_by_pair) == 1`), linked to the request's `zp`/`zd` endpoint selectors
+via [`_add_nearest_open_endpoint_linked_x!`](@ref). Shared skeleton behind the
+Benders masters/subproblems that each build a *fresh* per-request `x` this
+way (`BendersXY`'s master, `BendersY`'s subproblem,
+`lifted_walking_objective`'s master walking-cost term) -- each call site
+still owns its own outer `(request, pair) => VariableRef` dict (keying and
+walking-cost accumulation, if any, differ per caller) and merges this
+function's `x_by_pair` into it. Not used by `BendersYZ`'s subproblem, which
+looks up already-fixed `zp`/`zd` from `z_hat` rather than building a fresh
+chain here.
+"""
+function _add_nearest_open_pair_assignment!(
+    m::Model,
+    data::StationSelectionData,
+    y,
+    request::NTuple{3, Int},
+    pairs::Vector{Tuple{Int, Int}},
+    max_walking_distance::Float64;
+    allow_walk_only::Bool,
+    selector_style::Symbol,
+    debug_key_prefix=nothing,
+)::Tuple{Dict{Tuple{Int, Int}, VariableRef}, ConstraintRef}
+    _s, o, d = request
+    x_by_pair = Dict(pair => @variable(m, lower_bound = 0.0, upper_bound = 1.0) for pair in pairs)
+    sum_con = @constraint(m, sum(x_by_pair[pair] for pair in pairs; init=0.0) == 1.0)
+    _add_nearest_open_endpoint_linked_x!(
+        m, data, y, o, d, pairs, x_by_pair, max_walking_distance;
+        binary=false, allow_walk_only=allow_walk_only, selector_style=selector_style,
+        debug_key_prefix=debug_key_prefix,
+    )
+    return x_by_pair, sum_con
+end
+
 function add_nearest_open_endpoint_constraints!(
     m::Model,
     data::StationSelectionData,

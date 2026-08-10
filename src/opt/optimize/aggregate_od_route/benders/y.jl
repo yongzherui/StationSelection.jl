@@ -31,19 +31,17 @@ function _build_nearest_open_y_subproblem_lp(
     m[:debug_sum_x_cons] = Dict{NTuple{3, Int}, ConstraintRef}()  # DEBUG (temporary instrumentation)
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         for request in requests
-            _s, o, d = request
             pairs = feasible_pairs[request]
-            for pair in pairs
-                x[(request, pair)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0)
-            end
-            m[:debug_sum_x_cons][request] = @constraint(m, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
-            x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
-            _add_nearest_open_endpoint_linked_x!(
-                m, data, y, o, d, pairs, x_by_pair, model.max_walking_distance;
-                binary=false, allow_walk_only=model.allow_walk_only,
+            x_by_pair, sum_con = _add_nearest_open_pair_assignment!(
+                m, data, y, request, pairs, model.max_walking_distance;
+                allow_walk_only=model.allow_walk_only,
                 selector_style=model.assignment_policy.feasibility_cut_style,
                 debug_key_prefix=request,
             )
+            m[:debug_sum_x_cons][request] = sum_con
+            for (pair, var) in x_by_pair
+                x[(request, pair)] = var
+            end
         end
     else
         for request in requests

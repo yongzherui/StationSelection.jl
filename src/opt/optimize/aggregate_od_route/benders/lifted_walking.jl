@@ -81,13 +81,10 @@ function _add_nearest_open_master_walking_cost!(
     walking_cost = AffExpr(0.0)
     x_by_pair_full = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
-        _s, o, d = request
         pairs = feasible_pairs[request]
-        x_by_pair = Dict(pair => @variable(master, lower_bound = 0.0, upper_bound = 1.0) for pair in pairs)
-        @constraint(master, sum(x_by_pair[pair] for pair in pairs; init=0.0) == 1.0)
-        _add_nearest_open_endpoint_linked_x!(
-            master, data, y, o, d, pairs, x_by_pair, model.max_walking_distance;
-            binary=false, allow_walk_only=model.allow_walk_only,
+        x_by_pair, _sum_con = _add_nearest_open_pair_assignment!(
+            master, data, y, request, pairs, model.max_walking_distance;
+            allow_walk_only=model.allow_walk_only,
             selector_style=model.assignment_policy.feasibility_cut_style,
         )
         for pair in pairs

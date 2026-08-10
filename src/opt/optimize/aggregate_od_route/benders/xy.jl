@@ -33,17 +33,14 @@ function _add_nearest_open_endpoint_master_x!(
 )
     x = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
     for request in requests
-        _s, o, d = request
         pairs = feasible_pairs[request]
-        for pair in pairs
-            x[(request, pair)] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
-        end
-        @constraint(master, sum(x[(request, pair)] for pair in pairs; init=0.0) == 1.0)
-        x_by_pair = Dict(pair => x[(request, pair)] for pair in pairs)
-        _add_nearest_open_endpoint_linked_x!(
-            master, data, y, o, d, pairs, x_by_pair, max_walking_distance;
-            binary=false, allow_walk_only=allow_walk_only, selector_style=selector_style,
+        x_by_pair, _sum_con = _add_nearest_open_pair_assignment!(
+            master, data, y, request, pairs, max_walking_distance;
+            allow_walk_only=allow_walk_only, selector_style=selector_style,
         )
+        for (pair, var) in x_by_pair
+            x[(request, pair)] = var
+        end
     end
     return x
 end
