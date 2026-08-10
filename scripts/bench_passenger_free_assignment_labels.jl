@@ -3,7 +3,7 @@
 
 Fixed benchmark for the passenger free-assignment label search, used to accept or
 reject incremental pruning/dominance changes to
-`src/opt/optimize/aggregate_od_route/pricing/passenger/`.
+`src/pricing/passenger_free_assignment/`.
 
 Unlike `diag_passenger_free_assignment_pricing_scale.jl` (which stops at
 `n_candidates=5` and therefore measures "time to five columns", a quantity that

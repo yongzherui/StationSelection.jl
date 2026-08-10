@@ -69,13 +69,6 @@ _aggregate_od_route_station_simple_dominance_signature(
     bs::AggregateODRouteStationSimpleBitsets,
 ) = (label.current, bs.visited_bits)
 
-function _aggregate_od_route_station_simple_order_key(
-    label::AggregateODRouteStationSimpleLabel,
-    label_id::AggregateODRouteLabelId,
-)::AggregateODRouteLabelOrderKey
-    return (label.reduced_cost, label.time, length(label.route), label_id)
-end
-
 function _dominates_aggregate_od_route_station_simple_label(
     a::AggregateODRouteStationSimpleLabel,
     b::AggregateODRouteStationSimpleLabel,
@@ -95,46 +88,52 @@ function _dominates_aggregate_od_route_station_simple_label(
     return true
 end
 
-function _add_aggregate_od_route_station_simple_label_to_bucket!(
-    bucket::SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId},
-    live_labels::Dict{Int, AggregateODRouteStationSimpleLabel},
-    label_bitsets::Dict{Int, AggregateODRouteStationSimpleBitsets},
-    label::AggregateODRouteStationSimpleLabel,
-    label_id::Int,
-    label_bs::AggregateODRouteStationSimpleBitsets,
+"""
+Inline scalar fields the bucket scan needs, read straight off the entry rather
+than chasing into `label`/`bitsets` -- same rationale as
+`AggregateODRouteDominanceFilters` (`labels.jl`). `current`/`visited_bits` are
+not carried here because the bucket is keyed by exactly that signature (see
+`_aggregate_od_route_station_simple_dominance_signature`), so every pair the
+bucket scan tests already agrees on them.
+"""
+struct AggregateODRouteStationSimpleDominanceFilters
+    reduced_cost::Float64
+    time::Float64
+    route_length::Int32
+end
+
+AggregateODRouteStationSimpleDominanceFilters(
+    label::AggregateODRouteStationSimpleLabel, ::AggregateODRouteStationSimpleBitsets,
+) = AggregateODRouteStationSimpleDominanceFilters(
+    label.reduced_cost, label.time, Int32(length(label.route)),
 )
-    inserted = true
-    dominated_ids = Int[]
-    switched = false
 
-    for (_existing_key, existing_id) in pairs(bucket)
-        existing_label = live_labels[existing_id]
-        existing_bs = label_bitsets[existing_id]
+PricingBucketEntry(id::Int, label::AggregateODRouteStationSimpleLabel, bs::AggregateODRouteStationSimpleBitsets) =
+    PricingBucketEntry(AggregateODRouteStationSimpleDominanceFilters(label, bs), id, label, bs)
 
-        if !switched && label.reduced_cost > existing_label.reduced_cost + 1e-9
-            if _dominates_aggregate_od_route_station_simple_label(existing_label, label, existing_bs, label_bs)
-                inserted = false
-                break
-            end
-            continue
-        end
+"""Dominance-rule marker for the station-simple pricer; no switches yet, unlike
+the revisit-tolerant pricer's `BoundedStops` (elementary routes have no
+analogous optional cap to toggle)."""
+struct AggregateODRouteStationSimpleDominanceRules <: AbstractPricingDominanceRules end
 
-        switched = true
-        if _dominates_aggregate_od_route_station_simple_label(label, existing_label, label_bs, existing_bs)
-            push!(dominated_ids, existing_id)
-        end
-    end
-
-    if inserted
-        for id in dominated_ids
-            delete!(bucket, _aggregate_od_route_station_simple_order_key(live_labels[id], id))
-            delete!(live_labels, id)
-            delete!(label_bitsets, id)
-        end
-        bucket[_aggregate_od_route_station_simple_order_key(label, label_id)] = label_id
-        label_bitsets[label_id] = label_bs
-    end
-    return inserted, length(dominated_ids)
+"""
+Bucket-scan fast path for `_dominates_aggregate_od_route_station_simple_label`:
+identical dominance test, minus the `current`/`visited_bits` signature check,
+which the bucket key already guarantees for every pair this is called on (see
+the 4-argument method's docstring above, and `_dominates_passenger_free_assignment_in_bucket`
+in `passenger/labels.jl` for the same convention on the other pricer).
+"""
+@inline function _pricing_dominates_in_bucket(
+    af::AggregateODRouteStationSimpleDominanceFilters, abs::AggregateODRouteStationSimpleBitsets,
+    bf::AggregateODRouteStationSimpleDominanceFilters, bbs::AggregateODRouteStationSimpleBitsets,
+    ::AggregateODRouteStationSimpleDominanceRules,
+)::Bool
+    af.time <= bf.time + 1e-9 || return false
+    af.reduced_cost <= bf.reduced_cost + 1e-9 || return false
+    _sparse_station_ages_dominate(
+        abs.age_idx, abs.age_val, abs.age_mask, bbs.age_idx, bbs.age_val, bbs.age_mask,
+    ) || return false
+    return true
 end
 
 function _initial_aggregate_od_route_station_simple_labels(
@@ -320,6 +319,64 @@ _aggregate_od_route_column_from_label(
     ),
 )
 
+"""
+Context for the elementary-route `AggregateODRouteCG` search
+(`use_station_simple=true`): bundles `pricing_data`/`duals`, the once-built
+`dominates` closure, and `node_index` (the only precomputed index this pricer's
+reward bound needs -- unlike the revisit-tolerant twin, it has no travel matrix
+or per-pair arrays to precompute, since `_aggregate_od_route_station_simple_future_reward_bound`
+iterates `active_pairs` directly). Plugs into the shared `_run_pricing_label_search`
+(`pricing/types.jl`); see `_enumerate_aggregate_od_route_station_simple_pricing_labels`
+below for how it is built.
+"""
+struct AggregateODRouteStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
+    AggregateODRouteStationSimpleDominanceFilters, AggregateODRouteStationSimpleLabel, AggregateODRouteStationSimpleBitsets,
+    Tuple{Int, BitSet}, Tuple{Vararg{Tuple{Int, Int}}},
+}
+    pricing_data::AggregateODRoutePricingData
+    duals::AggregateODRoutePricingDuals
+    dominates::D
+    node_index::Dict{Int, Int}
+end
+
+function AggregateODRouteStationSimpleSearchContext(
+    pricing_data::AggregateODRoutePricingData, duals::AggregateODRoutePricingDuals,
+)
+    rules = AggregateODRouteStationSimpleDominanceRules()
+    dominates(x::PricingBucketEntry, y::PricingBucketEntry) =
+        _pricing_dominates_in_bucket(x.filters, x.bitsets, y.filters, y.bitsets, rules)
+    node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
+    return AggregateODRouteStationSimpleSearchContext(pricing_data, duals, dominates, node_index)
+end
+
+_pricing_initial_labels(ctx::AggregateODRouteStationSimpleSearchContext) =
+    _initial_aggregate_od_route_station_simple_labels(ctx.pricing_data, ctx.duals)
+
+_pricing_make_bitsets(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel) =
+    _make_aggregate_od_route_station_simple_bitsets(label, ctx.node_index)
+
+_pricing_bucket_signature(
+    ::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel, label_bs::AggregateODRouteStationSimpleBitsets,
+) = _aggregate_od_route_station_simple_dominance_signature(label, label_bs)
+
+_pricing_label_priority(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel, ::AggregateODRouteStationSimpleBitsets) =
+    _aggregate_od_route_station_simple_label_priority(label, ctx.pricing_data, ctx.duals)
+
+_pricing_best_signature(::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel) =
+    isempty(label.served_pairs) ? nothing : _aggregate_od_route_column_signature(label.served_pairs)
+
+_pricing_route_length(::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel) = length(label.route)
+
+_pricing_max_route_length(ctx::AggregateODRouteStationSimpleSearchContext) = ctx.pricing_data.max_stops
+
+_pricing_candidate_next_nodes(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel) =
+    _aggregate_od_route_station_simple_candidate_next_nodes(label, ctx.pricing_data, ctx.duals)
+
+_pricing_extend_label(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel, next_node::Int) =
+    _extend_aggregate_od_route_station_simple_label(label, next_node, ctx.pricing_data, ctx.duals)
+
+_pricing_dominates_fn(ctx::AggregateODRouteStationSimpleSearchContext) = ctx.dominates
+
 function _enumerate_aggregate_od_route_station_simple_pricing_labels(
     pricing_data::AggregateODRoutePricingData,
     duals::AggregateODRoutePricingDuals;
@@ -328,117 +385,10 @@ function _enumerate_aggregate_od_route_station_simple_pricing_labels(
     profile::Bool=false,
     stop_if=label -> false,
 )
-    frontier = PriorityQueue{Int, Float64}()
-    live_labels = Dict{Int, AggregateODRouteStationSimpleLabel}()
-    label_bitsets = Dict{Int, AggregateODRouteStationSimpleBitsets}()
-    dominance_buckets = Dict{Tuple{Int, BitSet}, SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId}}()
-    best_by_signature = Dict{Any, AggregateODRouteStationSimpleLabel}()
-
-    node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
-
-    exhausted = true
-    t_start = time()
-    next_label_id = 1
-    labels_generated = 0
-    labels_rejected_by_dominance = 0
-    labels_removed_by_dominance = 0
-    stale_pops = 0
-    max_frontier_size = 0
-    max_live_labels = 0
-    t_queue = UInt64(0)
-    t_candidates = UInt64(0)
-    t_extension = UInt64(0)
-    t_dominance = UInt64(0)
-
-    function add_label!(label::AggregateODRouteStationSimpleLabel)
-        label_id = next_label_id
-        next_label_id += 1
-        labels_generated += 1
-        live_labels[label_id] = label
-        label_bs = _make_aggregate_od_route_station_simple_bitsets(label, node_index)
-        signature = _aggregate_od_route_station_simple_dominance_signature(label, label_bs)
-        bucket = get!(() -> SortedDict{AggregateODRouteLabelOrderKey, AggregateODRouteLabelId}(), dominance_buckets, signature)
-
-        t0 = profile ? time_ns() : UInt64(0)
-        inserted, removed = _add_aggregate_od_route_station_simple_label_to_bucket!(
-            bucket, live_labels, label_bitsets, label, label_id, label_bs,
-        )
-        profile && (t_dominance += time_ns() - t0)
-        labels_removed_by_dominance += removed
-
-        if !inserted
-            delete!(live_labels, label_id)
-            labels_rejected_by_dominance += 1
-            return nothing
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        push!(frontier, label_id => _aggregate_od_route_station_simple_label_priority(label, pricing_data, duals))
-        profile && (t_queue += time_ns() - t0)
-        max_frontier_size = max(max_frontier_size, length(frontier))
-        max_live_labels = max(max_live_labels, length(live_labels))
-        return nothing
-    end
-
-    for label in _initial_aggregate_od_route_station_simple_labels(pricing_data, duals)
-        add_label!(label)
-    end
-
-    while !isempty(frontier)
-        if time() - t_start > time_limit
-            exhausted = false
-            break
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        label_id = popfirst!(frontier).first
-        profile && (t_queue += time_ns() - t0)
-        label = get(live_labels, label_id, nothing)
-        if isnothing(label)
-            stale_pops += 1
-            continue
-        end
-
-        if !isempty(label.served_pairs)
-            signature = _aggregate_od_route_column_signature(label.served_pairs)
-            incumbent = get(best_by_signature, signature, nothing)
-            if isnothing(incumbent) || label.tau < incumbent.tau - 1e-9
-                best_by_signature[signature] = label
-                if stop_if(label)
-                    exhausted = false
-                    break
-                end
-            end
-        end
-
-        length(label.route) >= pricing_data.max_stops && continue
-        _aggregate_od_route_station_simple_label_priority(label, pricing_data, duals) >= -reduced_cost_tol && continue
-
-        t0 = profile ? time_ns() : UInt64(0)
-        next_nodes = _aggregate_od_route_station_simple_candidate_next_nodes(label, pricing_data, duals)
-        profile && (t_candidates += time_ns() - t0)
-
-        for next_node in next_nodes
-            t0 = profile ? time_ns() : UInt64(0)
-            child = _extend_aggregate_od_route_station_simple_label(label, next_node, pricing_data, duals)
-            profile && (t_extension += time_ns() - t0)
-            add_label!(child)
-        end
-    end
-
-    stats = (
-        labels_generated=labels_generated,
-        labels_rejected_by_dominance=labels_rejected_by_dominance,
-        labels_removed_by_dominance=labels_removed_by_dominance,
-        stale_pops=stale_pops,
-        max_frontier_size=max_frontier_size,
-        max_live_labels=max_live_labels,
-        t_queue_sec=t_queue * 1e-9,
-        t_candidates_sec=t_candidates * 1e-9,
-        t_extension_sec=t_extension * 1e-9,
-        t_dominance_sec=t_dominance * 1e-9,
+    ctx = AggregateODRouteStationSimpleSearchContext(pricing_data, duals)
+    return _run_pricing_label_search(
+        ctx; time_limit=time_limit, reduced_cost_tol=reduced_cost_tol, profile=profile, stop_if=stop_if,
     )
-    return collect(values(best_by_signature)), exhausted, stats
 end
 
 function aggregate_od_route_pricing_by_station_simple_label_setting(

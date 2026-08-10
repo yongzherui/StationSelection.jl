@@ -24,6 +24,7 @@ export AbstractSingleScenarioModel
 export AbstractMultiScenarioModel
 export AbstractTwoStageModel
 export AbstractBendersDualProblem
+export AbstractColumnGenerationAlgorithm
 
 """
     AbstractOptimizationProblem
@@ -100,3 +101,15 @@ uses) and `run_opt` still returns an `OptResult`, but callers should read
 the solved dual values off `OptResult.duals`, not `OptResult.solution`.
 """
 abstract type AbstractBendersDualProblem <: AbstractOptimizationProblem end
+
+"""
+    AbstractColumnGenerationAlgorithm
+
+Root type for the column-generation algorithm dispatched on by
+`ColumnGenerationSolver.algorithm` (mirroring `AbstractBendersDecomposition` for
+`BendersSolver.decomposition`) -- e.g. `AggregateODRouteCG`, `PassengerFreeAssignmentCG`. Each
+concrete algorithm supplies its own methods for the shared column-generation outer loop's
+dispatched hooks (see `pricing/generic_runner.jl`): build the restricted master, solve it, extract
+duals, price and add columns, and finalize the result.
+"""
+abstract type AbstractColumnGenerationAlgorithm end

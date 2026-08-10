@@ -122,37 +122,38 @@ function _make_passenger_free_assignment_station_simple_ages(
     return PassengerFreeAssignmentStationSimpleAges(age_idx, age_val, age_mask)
 end
 
-_passenger_free_assignment_station_simple_entry_order_key(entry) =
-    (entry.reduced_cost, entry.time, entry.route_length, entry.id)
-
 """
-Scalar dominance state is copied into the entry so that the bucket scan rejects
-the common case without dereferencing `label` at all -- see
-`PassengerFreeAssignmentBucketEntry` in `types.jl` for the full rationale.
+Scalar dominance state, copied out of the label so the bucket scan rejects the
+common case without dereferencing `label`/`ages` at all -- same rationale as
+`PassengerFreeAssignmentDominanceFilters` (`types.jl`). `visited` and
+`activated_reward_layers` are not carried here (unlike the revisit-tolerant
+pricer's filters): both are already `BitSet`s on the label, compared directly,
+so mirroring them would only add a redundant copy -- see this file's module
+docstring.
 """
-struct PassengerFreeAssignmentStationSimpleBucketEntry
+struct PassengerFreeAssignmentStationSimpleDominanceFilters
     reduced_cost::Float64
     time::Float64
     route_length::Int32
     n_live_ages::Int32
-    id::PassengerFreeAssignmentLabelId
-    label::PassengerFreeAssignmentStationSimpleLabel
-    ages::PassengerFreeAssignmentStationSimpleAges
 end
 
-function PassengerFreeAssignmentStationSimpleBucketEntry(
+PassengerFreeAssignmentStationSimpleDominanceFilters(
+    label::PassengerFreeAssignmentStationSimpleLabel, ages::PassengerFreeAssignmentStationSimpleAges,
+) = PassengerFreeAssignmentStationSimpleDominanceFilters(
+    label.reduced_cost, label.time, Int32(label.route_length), Int32(length(ages.age_idx)),
+)
+
+PricingBucketEntry(
     id::PassengerFreeAssignmentLabelId,
     label::PassengerFreeAssignmentStationSimpleLabel,
     ages::PassengerFreeAssignmentStationSimpleAges,
-)
-    return PassengerFreeAssignmentStationSimpleBucketEntry(
-        label.reduced_cost, label.time, Int32(label.route_length),
-        Int32(length(ages.age_idx)), id, label, ages,
-    )
-end
+) = PricingBucketEntry(PassengerFreeAssignmentStationSimpleDominanceFilters(label, ages), id, label, ages)
 
-const PassengerFreeAssignmentStationSimpleDominanceBucket =
-    Vector{PassengerFreeAssignmentStationSimpleBucketEntry}
+"""Dominance-rule marker for the passenger station-simple pricer; no switches
+yet, unlike the revisit-tolerant pricer's four (elementary routes have no
+analogous optional caps to toggle)."""
+struct PassengerFreeAssignmentStationSimpleDominanceRules <: AbstractPricingDominanceRules end
 
 """
     _dominates_passenger_free_assignment_station_simple_label(a, b, abs, bbs, layer_weight)
@@ -180,7 +181,7 @@ revisit-tolerant pricer's:
   - every live station age in `a` is no larger than `b`'s (sparse merge walk).
 
 Conditions are ordered cheapest-and-likeliest-to-reject first, exactly as in
-`_dominates_passenger_free_assignment_in_bucket`: scalars, then the word-wise
+`_pricing_dominates_in_bucket` (passenger method): scalars, then the word-wise
 `visited` subset, then the `O(#live)` age walk, and only last the reward-layer
 compensation, which is the one test that has to sum weights. `a.current ==
 b.current` is *not* checked -- both bucket signatures (`current` under `:subset`,
@@ -194,26 +195,30 @@ function _dominates_passenger_free_assignment_station_simple_label(
     b_ages::PassengerFreeAssignmentStationSimpleAges,
     layer_weight::Vector{Float64},
 )::Bool
-    return _dominates_passenger_free_assignment_station_simple_label(
-        a.reduced_cost, a.time, Int32(length(a_ages.age_idx)), a, a_ages,
-        b.reduced_cost, b.time, Int32(length(b_ages.age_idx)), b, b_ages,
-        layer_weight,
+    return _pricing_dominates_in_bucket(
+        PassengerFreeAssignmentStationSimpleDominanceFilters(a, a_ages), a, a_ages,
+        PassengerFreeAssignmentStationSimpleDominanceFilters(b, b_ages), b, b_ages,
+        layer_weight, PassengerFreeAssignmentStationSimpleDominanceRules(),
     )
 end
 
 """
 The form the bucket scan calls: the scalars come from
-`PassengerFreeAssignmentStationSimpleBucketEntry`, so an entry rejected on time,
-live-clock count or reduced cost is never dereferenced into its label at all.
+`PassengerFreeAssignmentStationSimpleDominanceFilters`, so an entry rejected on
+time, live-clock count or reduced cost is never dereferenced into its label at
+all. `visited`/`activated_reward_layers` are read off `a`/`b` directly (see
+`PassengerFreeAssignmentStationSimpleDominanceFilters`'s docstring for why they
+are not mirrored into the filters/ages, unlike the revisit-tolerant pricer).
 """
-@inline function _dominates_passenger_free_assignment_station_simple_label(
-    a_reduced_cost::Float64, a_time::Float64, a_n_ages::Int32,
+@inline function _pricing_dominates_in_bucket(
+    af::PassengerFreeAssignmentStationSimpleDominanceFilters,
     a::PassengerFreeAssignmentStationSimpleLabel, a_ages::PassengerFreeAssignmentStationSimpleAges,
-    b_reduced_cost::Float64, b_time::Float64, b_n_ages::Int32,
+    bf::PassengerFreeAssignmentStationSimpleDominanceFilters,
     b::PassengerFreeAssignmentStationSimpleLabel, b_ages::PassengerFreeAssignmentStationSimpleAges,
     layer_weight::Vector{Float64},
+    ::PassengerFreeAssignmentStationSimpleDominanceRules,
 )::Bool
-    a_time <= b_time + 1e-9 || return false
+    af.time <= bf.time + 1e-9 || return false
     # `dom(age_b) ⊆ dom(age_a)` is required below, so `a` cannot have fewer live
     # clocks than `b`, nor a mask missing any of `b`'s -- both cheap, ahead of
     # anything that reads set contents. Shared with the revisit-tolerant bitset
@@ -221,7 +226,7 @@ live-clock count or reduced cost is never dereferenced into its label at all.
     _sparse_station_age_support_rejection(
         a_ages.age_idx, a_ages.age_mask, b_ages.age_idx, b_ages.age_mask,
     ) == 0 || return false
-    budget = b_reduced_cost - a_reduced_cost + 1e-9
+    budget = bf.reduced_cost - af.reduced_cost + 1e-9
     budget >= 0.0 || return false
     # `visited` and `activated_reward_layers` are read straight off the labels --
     # both are `BitSet`s, so `issubset`/compensation are word-wise with no per-label
@@ -237,67 +242,6 @@ live-clock count or reduced cost is never dereferenced into its label at all.
         a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
     ) <= budget || return false
     return true
-end
-
-"""
-Insert `label` into its dominance bucket unless an incumbent dominates it, evict
-the incumbents it dominates. Identical structure to
-`_add_passenger_free_assignment_label_to_bucket!` (reduced-cost-ordered `Vector`,
-split-at-`rc` walk, in-order eviction); see that function's docstring.
-"""
-function _add_passenger_free_assignment_station_simple_label_to_bucket!(
-    bucket::PassengerFreeAssignmentStationSimpleDominanceBucket,
-    live_labels::Vector{Union{Nothing, PassengerFreeAssignmentStationSimpleLabel}},
-    label::PassengerFreeAssignmentStationSimpleLabel,
-    label_id::Int,
-    label_ages::PassengerFreeAssignmentStationSimpleAges,
-    layer_weight::Vector{Float64},
-    dominated::Vector{Int},
-)
-    inserted = true
-    empty!(dominated)
-    switched = false
-    # Hoisted: the scan reads these on every entry.
-    label_rc = label.reduced_cost
-    label_time = label.time
-    label_n_ages = Int32(length(label_ages.age_idx))
-
-    @inbounds for i in eachindex(bucket)
-        entry = bucket[i]
-
-        # `entry.reduced_cost` is the entry's own copy: the split test never has to
-        # chase the pointer to `entry.label`.
-        if !switched && label_rc > entry.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_station_simple_label(
-                    entry.reduced_cost, entry.time, entry.n_live_ages, entry.label, entry.ages,
-                    label_rc, label_time, label_n_ages, label, label_ages,
-                    layer_weight)
-                inserted = false
-                break
-            end
-            continue
-        end
-
-        switched = true
-        if _dominates_passenger_free_assignment_station_simple_label(
-                label_rc, label_time, label_n_ages, label, label_ages,
-                entry.reduced_cost, entry.time, entry.n_live_ages, entry.label, entry.ages,
-                layer_weight)
-            push!(dominated, i)
-        end
-    end
-
-    n_dominated = length(dominated)
-    if inserted
-        @inbounds for i in dominated
-            live_labels[bucket[i].id] = nothing
-        end
-        deleteat!(bucket, dominated)
-        new_entry = PassengerFreeAssignmentStationSimpleBucketEntry(label_id, label, label_ages)
-        pos = searchsortedfirst(bucket, new_entry; by=_passenger_free_assignment_station_simple_entry_order_key)
-        insert!(bucket, pos, new_entry)
-    end
-    return inserted, n_dominated
 end
 
 function _initial_passenger_free_assignment_station_simple_labels(
@@ -420,6 +364,81 @@ function _extend_passenger_free_assignment_station_simple_label(
     )
 end
 
+"""
+Context for the elementary-route `PassengerFreeAssignmentCG` search
+(`use_station_simple`/`station_simple_warm_start`): bundles `pricing_data`,
+`dominance_mode` (`:exact` buckets on `(current, visited)`; `:subset` buckets
+on `current` alone, pairing it with a shared `empty_visited` so both modes
+share one concrete bucket-key type), the once-built `dominates` closure, and
+the `search_index`/`bound_workspace` the shared remaining-reward bound needs.
+Plugs into `_run_pricing_label_search` (`pricing/types.jl`); see
+`_enumerate_passenger_free_assignment_station_simple_pricing_labels` below.
+"""
+struct PassengerFreeAssignmentStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
+    PassengerFreeAssignmentStationSimpleDominanceFilters, PassengerFreeAssignmentStationSimpleLabel, PassengerFreeAssignmentStationSimpleAges,
+    Tuple{Int, BitSet}, RewardLayerBitset,
+}
+    pricing_data::PassengerFreeAssignmentPricingData
+    dominance_mode::Symbol
+    dominates::D
+    search_index::PassengerFreeAssignmentSearchIndex
+    bound_workspace::PassengerFreeAssignmentBoundWorkspace
+    node_index::Dict{Int, Int}
+    empty_visited::BitSet
+end
+
+function PassengerFreeAssignmentStationSimpleSearchContext(
+    pricing_data::PassengerFreeAssignmentPricingData; dominance_mode::Symbol=:exact,
+)
+    dominance_mode in (:subset, :exact) ||
+        throw(ArgumentError("dominance_mode must be :subset or :exact, got $(dominance_mode)"))
+    rules = PassengerFreeAssignmentStationSimpleDominanceRules()
+    dominates(x::PricingBucketEntry, y::PricingBucketEntry) = _pricing_dominates_in_bucket(
+        x.filters, x.label, x.bitsets, y.filters, y.label, y.bitsets, pricing_data.layer_weight, rules,
+    )
+    n_nodes = length(pricing_data.nodes)
+    search_index = _build_passenger_free_assignment_search_index(pricing_data)
+    bound_workspace = _create_passenger_free_assignment_bound_workspace(n_nodes)
+    return PassengerFreeAssignmentStationSimpleSearchContext(
+        pricing_data, dominance_mode, dominates, search_index, bound_workspace, search_index.node_index, BitSet(),
+    )
+end
+
+_pricing_initial_labels(ctx::PassengerFreeAssignmentStationSimpleSearchContext) =
+    _initial_passenger_free_assignment_station_simple_labels(ctx.pricing_data)
+
+_pricing_make_bitsets(ctx::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel) =
+    _make_passenger_free_assignment_station_simple_ages(label, ctx.node_index)
+
+# `:subset` buckets on `current` alone; pairing it with the shared `empty_visited`
+# keeps a single concrete key type for both modes.
+_pricing_bucket_signature(
+    ctx::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel, ::PassengerFreeAssignmentStationSimpleAges,
+) = ctx.dominance_mode === :exact ? (label.current, label.visited) : (label.current, ctx.empty_visited)
+
+# The reward bound reads only `current`/`time`/`activated_reward_layers` from the
+# label and `age_idx`/`age_val` from the ages mirror, so the revisit-tolerant
+# pricer's bound (`search.jl`) applies unchanged here.
+_pricing_label_priority(
+    ctx::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel, label_ages::PassengerFreeAssignmentStationSimpleAges,
+) = label.reduced_cost -
+    _passenger_free_assignment_remaining_reward_bound(label, label_ages, ctx.pricing_data, ctx.search_index, ctx.bound_workspace)
+
+_pricing_best_signature(::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel) =
+    isempty(label.activated_reward_layers) ? nothing : label.activated_reward_layers
+
+_pricing_route_length(::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel) = label.route_length
+
+_pricing_max_route_length(ctx::PassengerFreeAssignmentStationSimpleSearchContext) = ctx.pricing_data.max_stops
+
+_pricing_candidate_next_nodes(ctx::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel) =
+    _passenger_free_assignment_station_simple_candidate_next_nodes(label, ctx.pricing_data)
+
+_pricing_extend_label(ctx::PassengerFreeAssignmentStationSimpleSearchContext, label::PassengerFreeAssignmentStationSimpleLabel, next_node::Int) =
+    _extend_passenger_free_assignment_station_simple_label(label, next_node, ctx.pricing_data)
+
+_pricing_dominates_fn(ctx::PassengerFreeAssignmentStationSimpleSearchContext) = ctx.dominates
+
 function _enumerate_passenger_free_assignment_station_simple_pricing_labels(
     pricing_data::PassengerFreeAssignmentPricingData;
     time_limit::Float64,
@@ -429,154 +448,15 @@ function _enumerate_passenger_free_assignment_station_simple_pricing_labels(
     profile::Bool=false,
     stop_if=label -> false,
 )
-    dominance_mode in (:subset, :exact) ||
-        throw(ArgumentError("dominance_mode must be :subset or :exact, got $(dominance_mode)"))
-    frontier = PriorityQueue{Int, Float64}()
-    # Indexed by label id (handed out sequentially from 1), `nothing` marking an
-    # evicted label -- no hashing, and evicted labels still become garbage. See
-    # the twin in `search.jl`.
-    live_labels = Union{Nothing, PassengerFreeAssignmentStationSimpleLabel}[]
-    n_live_labels = 0
-    # Keyed by the dominance signature: `current` alone under `:subset` (coarse
-    # buckets, cross-domination) or `(current, visited)` under `:exact` (fine
-    # buckets). Both are carried in one concrete key shape -- `:subset` pairs
-    # `current` with a shared empty `BitSet` -- so this `Dict` is typed rather
-    # than `Any`-keyed, which boxed every signature and dispatched its hash
-    # dynamically once per generated label.
-    dominance_buckets = Dict{Tuple{Int, BitSet}, PassengerFreeAssignmentStationSimpleDominanceBucket}()
-    best_by_signature = Dict{RewardLayerBitset, PassengerFreeAssignmentStationSimpleLabel}()
-
-    n_nodes = length(pricing_data.nodes)
-    search_index = _build_passenger_free_assignment_search_index(pricing_data)
-    bound_workspace = _create_passenger_free_assignment_bound_workspace(n_nodes)
-    node_index = search_index.node_index
-    # Reused across every bucket insertion: indices of the entries the incoming
-    # label dominates, in ascending order.
-    dominated_scratch = Int[]
-
-    exhausted = true
-    t_start = time()
-    next_label_id = 1
-    labels_generated = 0
-    labels_rejected_by_dominance = 0
-    labels_removed_by_dominance = 0
-    stale_pops = 0
-    max_frontier_size = 0
-    max_live_labels = 0
-    t_queue = UInt64(0)
-    t_candidates = UInt64(0)
-    t_extension = UInt64(0)
-    t_dominance = UInt64(0)
-
-    # The reward bound reads only `current`/`time`/`activated_reward_layers` from the
-    # label and `age_idx`/`age_val` from the ages mirror, so it applies unchanged
-    # here (its `label`/`label_bs` annotations were loosened for exactly this reuse).
-    remaining_reward_bound(label, label_ages) =
-        _passenger_free_assignment_remaining_reward_bound(
-            label, label_ages, pricing_data, search_index, bound_workspace,
-        )
-
-    label_priority(label, label_ages) = label.reduced_cost - remaining_reward_bound(label, label_ages)
-
-    # `:subset` buckets on `current` alone; pairing it with one shared empty
-    # `BitSet` keeps a single concrete key type for both modes.
-    empty_visited = BitSet()
-    signature_of(label) = dominance_mode === :exact ?
-        (label.current, label.visited) : (label.current, empty_visited)
-
-    function add_label!(label::PassengerFreeAssignmentStationSimpleLabel)
-        label_id = next_label_id
-        next_label_id += 1
-        labels_generated += 1
-        push!(live_labels, label)
-        n_live_labels += 1
-        label_ages = _make_passenger_free_assignment_station_simple_ages(label, node_index)
-        signature = signature_of(label)
-        bucket = get!(() -> PassengerFreeAssignmentStationSimpleDominanceBucket(), dominance_buckets, signature)
-        t0 = profile ? time_ns() : UInt64(0)
-        inserted, removed = _add_passenger_free_assignment_station_simple_label_to_bucket!(
-            bucket, live_labels, label, label_id, label_ages,
-            pricing_data.layer_weight, dominated_scratch,
-        )
-        profile && (t_dominance += time_ns() - t0)
-        labels_removed_by_dominance += removed
-        n_live_labels -= removed
-        if inserted
-            t0 = profile ? time_ns() : UInt64(0)
-            push!(frontier, label_id => label_priority(label, label_ages))
-            profile && (t_queue += time_ns() - t0)
-            max_frontier_size = max(max_frontier_size, length(frontier))
-            max_live_labels = max(max_live_labels, n_live_labels)
-        else
-            live_labels[label_id] = nothing
-            n_live_labels -= 1
-            labels_rejected_by_dominance += 1
-        end
-        return label_ages
-    end
-
-    for label in _initial_passenger_free_assignment_station_simple_labels(pricing_data)
-        add_label!(label)
-    end
-
-    while !isempty(frontier)
-        if time() - t_start > time_limit
-            exhausted = false
-            break
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        label_id, popped_priority = popfirst!(frontier)
-        profile && (t_queue += time_ns() - t0)
-        maybe_label = live_labels[label_id]
-        if isnothing(maybe_label)
-            stale_pops += 1
-            continue
-        end
-        label = maybe_label::PassengerFreeAssignmentStationSimpleLabel
-
-        if !isempty(label.activated_reward_layers)
-            signature = label.activated_reward_layers
-            incumbent = get(best_by_signature, signature, nothing)
-            if isnothing(incumbent) || label.tau < incumbent.tau - 1e-9
-                best_by_signature[signature] = label
-                if stop_if(label)
-                    exhausted = false
-                    break
-                end
-            end
-        end
-
-        label.route_length >= pricing_data.max_stops && continue
-        if use_reduced_cost_pruning
-            popped_priority >= -reduced_cost_tol && continue
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        next_nodes = _passenger_free_assignment_station_simple_candidate_next_nodes(label, pricing_data)
-        profile && (t_candidates += time_ns() - t0)
-
-        for next_node in next_nodes
-            t0 = profile ? time_ns() : UInt64(0)
-            child = _extend_passenger_free_assignment_station_simple_label(label, next_node, pricing_data)
-            profile && (t_extension += time_ns() - t0)
-            add_label!(child)
-        end
-    end
-
-    stats = (
-        labels_generated=labels_generated,
-        labels_rejected_by_dominance=labels_rejected_by_dominance,
-        labels_removed_by_dominance=labels_removed_by_dominance,
-        stale_pops=stale_pops,
-        max_frontier_size=max_frontier_size,
-        max_live_labels=max_live_labels,
-        t_queue_sec=t_queue * 1e-9,
-        t_candidates_sec=t_candidates * 1e-9,
-        t_extension_sec=t_extension * 1e-9,
-        t_dominance_sec=t_dominance * 1e-9,
+    ctx = PassengerFreeAssignmentStationSimpleSearchContext(pricing_data; dominance_mode=dominance_mode)
+    return _run_pricing_label_search(
+        ctx;
+        time_limit=time_limit,
+        reduced_cost_tol=reduced_cost_tol,
+        use_reduced_cost_pruning=use_reduced_cost_pruning,
+        profile=profile,
+        stop_if=stop_if,
     )
-    return collect(values(best_by_signature)), exhausted, stats
 end
 
 """

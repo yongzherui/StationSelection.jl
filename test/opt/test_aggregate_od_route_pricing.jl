@@ -1068,7 +1068,7 @@
 
     @testset "run_opt(AggregateODRouteModel, ColumnGenerationSolver) dispatches on assignment_policy" begin
         # Pins the branch in run_opt(::AggregateODRouteModel, ::ColumnGenerationSolver)
-        # (pricing/passenger/column_generation.jl) that routes FreeAggregateODAssignmentPolicy
+        # (pricing/aggregate_od_route/dispatch.jl) that routes FreeAggregateODAssignmentPolicy
         # to the passenger free-assignment CG engine and everything else to the aggregate
         # station-pair CG engine -- previously untested via run_opt itself.
         gurobi_available = try
@@ -1156,6 +1156,106 @@
         @test !haskey(nearest_result.metadata, "assignment_policy")
         @test !haskey(nearest_result.metadata, "solve_method")
         @test haskey(nearest_result.metadata, "cg_time_sec")
+    end
+
+    @testset "ColumnGenerationSolver(algorithm=...) explicit override and mismatch errors" begin
+        # Pins pricing/dispatch.jl's `_resolved_cg_algorithm`: an explicit `algorithm` kwarg
+        # takes priority over `_default_cg_algorithm`'s assignment_policy-based inference, and a
+        # mismatched explicit choice throws ArgumentError rather than silently falling through.
+        gurobi_available = try
+            using Gurobi
+            true
+        catch
+            false
+        end
+        if !gurobi_available
+            @warn "Gurobi not available, skipping ColumnGenerationSolver(algorithm=...) test"
+            @test true
+            return
+        end
+
+        stations = DataFrame(id=[1, 2, 3], lon=[0.0, 1.0, 2.0], lat=[0.0, 0.0, 0.0])
+        requests = DataFrame(
+            id=[1, 2],
+            start_station_id=[1, 1],
+            end_station_id=[3, 3],
+            request_time=[DateTime(2024, 1, 1, 8), DateTime(2024, 1, 1, 8, 5)],
+        )
+        walking_costs = Dict{Tuple{Int, Int}, Float64}()
+        routing_costs = Dict{Tuple{Int, Int}, Float64}()
+        for i in 1:3, j in 1:3
+            walking_costs[(i, j)] = abs(i - j)
+            routing_costs[(i, j)] = abs(i - j) + 1.0
+        end
+        data = create_station_selection_data(stations, requests, walking_costs; routing_costs=routing_costs)
+
+        free_model = AggregateODRouteModel(
+            2;
+            assignment_policy=FreeAggregateODAssignmentPolicy(),
+            max_walking_distance=10.0,
+            route_regularization_weight=1.0,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=100.0,
+            max_new_columns=2,
+            n_candidates=2,
+            pricing_time_limit_sec=2.0,
+        )
+        nearest_model = AggregateODRouteModel(
+            2;
+            assignment_policy=NearestOpenAggregateODAssignmentPolicy(),
+            max_walking_distance=10.0,
+            route_regularization_weight=1.0,
+            repositioning_time=0.0,
+            max_stops=3,
+            max_wait_time=100.0,
+            max_new_columns=2,
+            n_candidates=2,
+            pricing_time_limit_sec=2.0,
+        )
+
+        # explicit, matching algorithm behaves identically to auto-inference
+        explicit_free_result = run_opt(
+            data,
+            free_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                max_iterations=20, max_columns_per_iteration=2, n_candidates=2,
+                pricing_time_limit_sec=2.0, algorithm=PassengerFreeAssignmentCG(),
+            ),
+        )
+        @test explicit_free_result.termination_status == MOI.OPTIMAL
+        @test explicit_free_result.metadata["solve_method"] == "column_generation"
+
+        explicit_nearest_result = run_opt(
+            data,
+            nearest_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                max_iterations=20, max_columns_per_iteration=2, n_candidates=2,
+                pricing_time_limit_sec=2.0, algorithm=AggregateODRouteCG(),
+            ),
+        )
+        @test explicit_nearest_result.termination_status == MOI.OPTIMAL
+        @test haskey(explicit_nearest_result.metadata, "cg_time_sec")
+
+        # explicit, mismatched algorithm throws rather than silently falling through
+        @test_throws ArgumentError run_opt(
+            data,
+            free_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                algorithm=AggregateODRouteCG(),
+            ),
+        )
+        @test_throws ArgumentError run_opt(
+            data,
+            nearest_model,
+            ColumnGenerationSolver(
+                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
+                algorithm=PassengerFreeAssignmentCG(),
+            ),
+        )
     end
 
     @testset "station-simple label-setting pricing" begin

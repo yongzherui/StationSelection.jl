@@ -76,6 +76,22 @@ function DirectSolver(;
     )
 end
 
+"""
+    ColumnGenerationSolver
+
+# `algorithm`
+
+Selects which column-generation algorithm to run (mirroring `BendersSolver.decomposition`) --
+`AggregateODRouteCG()` (aggregate station-pair CG) or `PassengerFreeAssignmentCG(...)` (passenger
+free-assignment CG). Defaults to `nothing`, stored **unresolved**: unlike `BendersSolver`'s
+nilable-kwarg-resolved-at-construction-time fields, this cannot resolve at construction time
+because the discriminant (`formulation.assignment_policy`) is not visible until
+`run_opt(instance, formulation, solver)` is called. Resolution happens once, at the CG dispatch
+choke point (`pricing/dispatch.jl`'s `_default_cg_algorithm`), reproducing today's implicit
+`formulation.assignment_policy`-based fork exactly when left as `nothing` -- so every existing bare
+`ColumnGenerationSolver()` call site keeps working unchanged. An explicitly-set `algorithm` that
+mismatches the formulation's assignment policy throws `ArgumentError` at dispatch time.
+"""
 struct ColumnGenerationSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     max_iterations::Int
@@ -85,6 +101,7 @@ struct ColumnGenerationSolver <: AbstractStationSelectionSolver
     pricing_time_limit_sec::Float64
     final_ip_time_limit_sec::Float64
     log_dir::Union{String, Nothing}
+    algorithm::Union{Nothing, AbstractColumnGenerationAlgorithm}
 
     function ColumnGenerationSolver(;
         config::SolverConfig=SolverConfig(),
@@ -95,6 +112,7 @@ struct ColumnGenerationSolver <: AbstractStationSelectionSolver
         pricing_time_limit_sec::Number=30.0,
         final_ip_time_limit_sec::Number=3600.0,
         log_dir::Union{AbstractString, Nothing}=nothing,
+        algorithm::Union{AbstractColumnGenerationAlgorithm, Nothing}=nothing,
     )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         max_columns_per_iteration > 0 ||
@@ -116,6 +134,7 @@ struct ColumnGenerationSolver <: AbstractStationSelectionSolver
             Float64(pricing_time_limit_sec),
             Float64(final_ip_time_limit_sec),
             isnothing(log_dir) ? nothing : String(log_dir),
+            algorithm,
         )
     end
 end

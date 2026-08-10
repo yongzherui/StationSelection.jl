@@ -287,6 +287,11 @@ Build the RMP with no columns yet. Constraint rows depend only on passengers, so
 they are created once here; `add_passenger_free_assignment_column!` later grows
 the model by adding `theta` variables and setting their coefficients in these
 existing rows.
+
+Thin orchestration only -- every `@variable`/`@constraint`/`@objective` call lives in
+`variables|constraints|objectives/aggregate_od_route/column_generation/master.jl`, matching the
+convention `AggregateODRouteModel`'s own `build.jl` already follows (see those files' module
+docstrings for why `master_data` is passed there untyped).
 """
 function build_passenger_free_assignment_master(
     master_data::PassengerFreeAssignmentMasterData,
@@ -294,68 +299,14 @@ function build_passenger_free_assignment_master(
     relax_integrality::Bool=true,
 )::PassengerFreeAssignmentMaster
     m = Model(() -> Gurobi.Optimizer(optimizer_env))
-    n = length(master_data.nodes)
 
-    if relax_integrality
-        y = @variable(m, [1:n], lower_bound = 0.0, upper_bound = 1.0, base_name = "y")
-    else
-        y = @variable(m, [1:n], Bin, base_name = "y")
-    end
-    m[:y] = y
-
-    v = Dict{Int, VariableRef}()
-    for p in master_data.passengers
-        v[p.id] = @variable(m, lower_bound = 0.0, base_name = "v[$(p.id)]")
-    end
-    m[:v] = v
-
-    coverage = Dict{Int, ConstraintRef}()
-    for p in master_data.passengers
-        coverage[p.id] = @constraint(m, v[p.id] >= 1)
-    end
-    pickup_link = Dict{Tuple{Int, Int}, ConstraintRef}()
-    dropoff_link = Dict{Tuple{Int, Int}, ConstraintRef}()
-    # Written as `-y <= 0` rather than `0 <= y` so the normalized form JuMP stores
-    # is unambiguous: adding a column's `theta` coefficient of +1.0 via
-    # `set_normalized_coefficient` then yields exactly `theta - y[j] <= 0`.
-    for p in master_data.passengers
-        for j in master_data.feasible_pickups[p.id]
-            pickup_link[(p.id, j)] = @constraint(m, -y[j] <= 0.0)
-        end
-        for k in master_data.feasible_dropoffs[p.id]
-            dropoff_link[(p.id, k)] = @constraint(m, -y[k] <= 0.0)
-        end
-    end
-
-    # No-vehicle-route options, added into the SAME coverage and linking rows the
-    # route columns use. Sharing the linking rows (rather than giving these their
-    # own) keeps `gamma^O_pj`/`gamma^D_pj` meaning "the price of using station j
-    # for passenger p", however p gets there, and makes the row
-    # `sum_r a^O_rpj theta_r + x_same[p,j] <= y[j]` tighter than two separate rows:
-    # it forbids paying for both a route pickup and a walk-only leg at the same
-    # station for the same passenger, which is never useful under `>=` coverage.
-    x_same = Dict{Tuple{Int, Int}, VariableRef}()
-    for p in master_data.passengers
-        for j in master_data.same_station_options[p.id]
-            # No explicit upper bound: `x_same[p,j] <= y[j] <= 1` already implies it
-            # via the pickup row. Stating it again would add a dual variable that the
-            # dual selector (dual_selection.jl) would then have to carry for nothing.
-            x = @variable(m, lower_bound = 0.0, base_name = "x_same[$(p.id),$j]")
-            x_same[(p.id, j)] = x
-            set_normalized_coefficient(coverage[p.id], x, 1.0)
-            haskey(pickup_link, (p.id, j)) && set_normalized_coefficient(pickup_link[(p.id, j)], x, 1.0)
-            haskey(dropoff_link, (p.id, j)) && set_normalized_coefficient(dropoff_link[(p.id, j)], x, 1.0)
-        end
-    end
-    m[:x_same] = x_same
-
-    station_budget = @constraint(m, sum(y) == master_data.l)
-    m[:station_budget] = station_budget
-    @objective(m, Min,
-        sum(master_data.unserved_penalty * v[p.id] for p in master_data.passengers; init = 0.0) +
-        sum(master_data.walk_cost_weight * master_data.same_station_walk_cost[key] * var
-            for (key, var) in x_same; init = 0.0),
-    )
+    y = add_passenger_free_assignment_station_variables!(m, master_data; relax_integrality=relax_integrality)
+    v = add_passenger_slack_variables!(m, master_data)
+    coverage = add_passenger_coverage_constraints!(m, master_data, v)
+    pickup_link, dropoff_link = add_passenger_station_linking_constraints!(m, master_data, y)
+    x_same = add_passenger_same_station_variables!(m, master_data, coverage, pickup_link, dropoff_link)
+    add_passenger_station_budget_constraint!(m, master_data)
+    set_passenger_free_assignment_objective!(m, master_data, v, x_same)
 
     theta = Dict{Int, VariableRef}()
     columns = Dict{Int, PassengerFreeAssignmentRouteColumn}()
@@ -457,43 +408,6 @@ function passenger_free_assignment_two_stop_seed_columns(
         id += 1
     end
     return columns
-end
-
-"""
-    add_passenger_free_assignment_column!(master, column) -> (theta, action)
-
-`action` is `:added`, or `:skipped` when an identical assignment signature is
-already in the pool at no greater `tau` (the pool keeps the cheapest route per
-signature, mirroring the pricer's own dedup rule).
-"""
-function add_passenger_free_assignment_column!(
-    master::PassengerFreeAssignmentMaster,
-    column::PassengerFreeAssignmentRouteColumn,
-)
-    signature = _passenger_free_assignment_column_signature(column)
-    existing_id = get(master.column_signatures, signature, nothing)
-    if !isnothing(existing_id)
-        master.columns[existing_id].tau <= column.tau + 1e-9 &&
-            return master.theta[existing_id], :skipped
-    end
-
-    m = master.model
-    md = master.master_data
-    theta = @variable(m, lower_bound = 0.0, base_name = "theta[$(column.id)]")
-    master.theta[column.id] = theta
-    master.columns[column.id] = column
-    master.column_signatures[signature] = column.id
-
-    set_objective_coefficient(m, theta, passenger_free_assignment_column_cost(column, md))
-    for (p, j, k) in column.assignments
-        haskey(master.coverage, p) || continue
-        set_normalized_coefficient(master.coverage[p], theta, 1.0)
-        haskey(master.pickup_link, (p, j)) &&
-            set_normalized_coefficient(master.pickup_link[(p, j)], theta, 1.0)
-        haskey(master.dropoff_link, (p, k)) &&
-            set_normalized_coefficient(master.dropoff_link[(p, k)], theta, 1.0)
-    end
-    return theta, :added
 end
 
 """

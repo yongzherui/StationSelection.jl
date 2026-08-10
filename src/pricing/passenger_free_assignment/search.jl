@@ -153,20 +153,56 @@ function _passenger_free_assignment_remaining_reward_bound(
     return best
 end
 
-function _enumerate_passenger_free_assignment_pricing_labels(
+"""
+Context for the revisit-tolerant `PassengerFreeAssignmentCG` search: bundles
+`pricing_data`, the once-built `dominates` closure, the precomputed
+`search_index`/`bound_workspace` `_pricing_label_priority`'s remaining-reward
+bound needs, and the two optional production knobs that have no counterpart on
+the aggregate side:
+
+  - `use_post_w_completion_bound` -- when set, `_pricing_label_priority` tries
+    an exact completion oracle once a label is past the pickup window, which
+    needs the search's own remaining time budget. Since hooks only ever see
+    `ctx` and the label, that budget is stashed into the mutable `t_start`/
+    `time_limit` fields by `_pricing_search_started!` (called once, before the
+    loop starts) rather than threaded through every hook's signature.
+  - `label_observer` -- an optional diagnostic callback invoked via
+    `_pricing_on_label_inserted`.
+
+The three post-`W` bound counters (`post_w_bound_calls`, `post_w_bound_states`,
+`t_post_w_bound`) are mutable fields for the same reason: `_pricing_label_priority`
+is the only place that produces them, and the shared engine's returned `stats`
+has no slot for pricer-specific extras, so the wrapper below reads them back
+out of `ctx` after the search returns and merges them in.
+"""
+struct PassengerFreeAssignmentSearchContext{D<:Function, O} <: AbstractPricingSearchContext{
+    PassengerFreeAssignmentDominanceFilters, PassengerFreeAssignmentPricingLabel, PassengerFreeAssignmentLabelBitsets,
+    Int, RewardLayerBitset,
+}
+    pricing_data::PassengerFreeAssignmentPricingData
+    max_visits_per_node::Int
+    use_post_w_completion_bound::Bool
+    dominates::D
+    search_index::PassengerFreeAssignmentSearchIndex
+    bound_workspace::PassengerFreeAssignmentBoundWorkspace
+    n_nodes::Int
+    label_observer::O
+    t_start::Base.RefValue{Float64}
+    time_limit::Base.RefValue{Float64}
+    post_w_bound_calls::Base.RefValue{Int}
+    post_w_bound_states::Base.RefValue{Int}
+    t_post_w_bound::Base.RefValue{Float64}
+end
+
+function PassengerFreeAssignmentSearchContext(
     pricing_data::PassengerFreeAssignmentPricingData;
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
     max_visits_per_node::Int,
-    use_reduced_cost_pruning::Bool=true,
     use_post_w_completion_bound::Bool=false,
-    profile::Bool=false,
     # Count which dominance condition rejected each tested pair, into
     # `PFA_DOMINANCE_REJECTIONS`. Off in production: it selects an instrumented
     # specialization of the dominance predicate, so the counters cost nothing at
     # all when this is `false`. See `julia scripts/diagnose.jl dominance_audit`.
     dominance_census::Bool=false,
-    stop_if=label -> false,
     # Diagnostic hook: called once per label that survives dominance and enters the
     # frontier. `nothing` (the default) costs one branch per insertion and nothing
     # else -- production pricing never sets it. Used by
@@ -174,25 +210,9 @@ function _enumerate_passenger_free_assignment_pricing_labels(
     # (live-clock support, pickup-phase membership) without duplicating this loop.
     label_observer=nothing,
 )
-    frontier = PriorityQueue{Int, Float64}()
-    # Label ids are handed out sequentially from 1, so this is a plain array
-    # indexed by id, with `nothing` marking a label that dominance has evicted --
-    # no hashing, and (unlike an always-append `Vector{Label}`) evicted labels
-    # still become garbage promptly, which matters at millions of labels each
-    # holding a route vector and a station-age `Dict`.
-    live_labels = Union{Nothing, PassengerFreeAssignmentPricingLabel}[]
-    n_live_labels = 0
-    dominance_buckets = Dict{Int, PassengerFreeAssignmentDominanceBucket}()
-    # Concretely typed: the signature is the label's reward-layer set, and an
-    # `Any`-keyed `Dict` boxed it and dispatched dynamically on every pop.
-    best_by_signature = Dict{RewardLayerBitset, PassengerFreeAssignmentPricingLabel}()
-
     n_nodes = length(pricing_data.nodes)
     search_index = _build_passenger_free_assignment_search_index(pricing_data)
     bound_workspace = _create_passenger_free_assignment_bound_workspace(n_nodes)
-    # Reused across every bucket insertion: indices of the entries the incoming
-    # label dominates, in ascending order.
-    dominated_scratch = Int[]
     # Built once per search: the dominance switches live in the type, so the scan
     # compiles down to only the conditions this configuration actually uses.
     dominance_rules = _passenger_free_assignment_dominance_rules(
@@ -201,174 +221,103 @@ function _enumerate_passenger_free_assignment_pricing_labels(
         pricing_data.compensated_dominance,
         dominance_census,
     )
-    exhausted = true
-    t_start = time()
-    next_label_id = 1
-    labels_generated = 0
-    labels_rejected_by_dominance = 0
-    labels_removed_by_dominance = 0
-    stale_pops = 0
-    max_frontier_size = 0
-    max_live_labels = 0
-    t_queue = UInt64(0)
-    t_candidates = UInt64(0)
-    t_extension = UInt64(0)
-    t_dominance = UInt64(0)
-    post_w_bound_calls = 0
-    post_w_bound_states = 0
-    t_post_w_bound = 0.0
-
-    remaining_reward_bound(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets) =
-        _passenger_free_assignment_remaining_reward_bound(
-            label, label_bs, pricing_data, search_index, bound_workspace,
-        )
-
-    function label_priority(label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets)
-        if use_post_w_completion_bound && label.time + 1e-9 >= pricing_data.max_wait_time
-            t0 = time()
-            completion, completion_exhausted, completion_stats =
-                passenger_free_assignment_post_w_completion(
-                    label, pricing_data; time_limit=max(1e-3, time_limit - (time() - t_start)),
-                )
-            t_post_w_bound += time() - t0
-            post_w_bound_calls += 1
-            post_w_bound_states += completion_stats.states
-            completion_exhausted && return completion.reduced_cost
-        end
-        return label.reduced_cost - remaining_reward_bound(label, label_bs)
-    end
-
-    for label in initial_passenger_free_assignment_pricing_labels(pricing_data)
-        label_id = next_label_id
-        next_label_id += 1
-        labels_generated += 1
-        push!(live_labels, label)
-        n_live_labels += 1
-        label_bs = _make_passenger_free_assignment_label_bitsets(label, search_index.node_index, n_nodes)
-        bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(label))
-        t0 = profile ? time_ns() : UInt64(0)
-        inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
-            bucket, live_labels, label, label_id, label_bs,
-            pricing_data.layer_weight, dominance_rules, dominated_scratch,
-        )
-        profile && (t_dominance += time_ns() - t0)
-        labels_removed_by_dominance += removed
-        n_live_labels -= removed
-        if inserted
-            t0 = profile ? time_ns() : UInt64(0)
-            push!(frontier, label_id => label_priority(label, label_bs))
-            profile && (t_queue += time_ns() - t0)
-            max_frontier_size = max(max_frontier_size, length(frontier))
-            max_live_labels = max(max_live_labels, n_live_labels)
-            isnothing(label_observer) || label_observer(label)
-        else
-            live_labels[label_id] = nothing
-            n_live_labels -= 1
-            labels_rejected_by_dominance += 1
-        end
-    end
-
-    while !isempty(frontier)
-        if time() - t_start > time_limit
-            exhausted = false
-            break
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        # `popfirst!` hands back the priority the label was enqueued with, which
-        # is exactly `label_priority(label, label_bs)`. Labels are immutable and their
-        # bitsets never change after insertion, so recomputing it here would redo the
-        # `remaining_reward_bound` scan for a value we already have.
-        #
-        # MEASURED: no speedup (~0.05s of a 33s run). The bound is ~0.6% of runtime,
-        # so halving it buys nothing. Kept only because it is strictly less work.
-        label_id, popped_priority = popfirst!(frontier)
-        profile && (t_queue += time_ns() - t0)
-        maybe_label = live_labels[label_id]
-        if isnothing(maybe_label)
-            stale_pops += 1
-            continue
-        end
-        label = maybe_label::PassengerFreeAssignmentPricingLabel
-
-        if !isempty(label.activated_reward_layers)
-            signature = _passenger_free_assignment_layer_signature(label)
-            incumbent = get(best_by_signature, signature, nothing)
-            if isnothing(incumbent) || label.tau < incumbent.tau - 1e-9
-                best_by_signature[signature] = label
-                if stop_if(label)
-                    exhausted = false
-                    break
-                end
-            end
-        end
-
-        label.route_length >= pricing_data.max_stops && continue
-        if use_reduced_cost_pruning
-            popped_priority >= -reduced_cost_tol && continue
-        end
-
-        t0 = profile ? time_ns() : UInt64(0)
-        next_nodes = _passenger_free_assignment_candidate_next_nodes(
-            label,
-            pricing_data;
-            max_visits_per_node=max_visits_per_node,
-        )
-        profile && (t_candidates += time_ns() - t0)
-
-        for next_node in next_nodes
-            t0 = profile ? time_ns() : UInt64(0)
-            # One child per stop, returned directly: see
-            # `_extend_passenger_free_assignment_pricing_label`.
-            child = _extend_passenger_free_assignment_pricing_label(label, next_node, pricing_data)
-            profile && (t_extension += time_ns() - t0)
-
-            child_id = next_label_id
-            next_label_id += 1
-            labels_generated += 1
-            push!(live_labels, child)
-            n_live_labels += 1
-            child_bs = _make_passenger_free_assignment_label_bitsets(child, search_index.node_index, n_nodes)
-            bucket = get!(() -> _create_passenger_free_assignment_dominance_bucket(), dominance_buckets, _passenger_free_assignment_dominance_signature(child))
-            t0 = profile ? time_ns() : UInt64(0)
-            inserted, removed = _add_passenger_free_assignment_label_to_bucket!(
-                bucket, live_labels, child, child_id, child_bs,
-                pricing_data.layer_weight, dominance_rules, dominated_scratch,
-            )
-            profile && (t_dominance += time_ns() - t0)
-            labels_removed_by_dominance += removed
-            n_live_labels -= removed
-            if inserted
-                t0 = profile ? time_ns() : UInt64(0)
-                push!(frontier, child_id => label_priority(child, child_bs))
-                profile && (t_queue += time_ns() - t0)
-                max_frontier_size = max(max_frontier_size, length(frontier))
-                max_live_labels = max(max_live_labels, n_live_labels)
-                isnothing(label_observer) || label_observer(child)
-            else
-                live_labels[child_id] = nothing
-                n_live_labels -= 1
-                labels_rejected_by_dominance += 1
-            end
-        end
-    end
-
-    stats = (
-        labels_generated=labels_generated,
-        labels_rejected_by_dominance=labels_rejected_by_dominance,
-        labels_removed_by_dominance=labels_removed_by_dominance,
-        stale_pops=stale_pops,
-        max_frontier_size=max_frontier_size,
-        max_live_labels=max_live_labels,
-        t_queue_sec=t_queue * 1e-9,
-        t_candidates_sec=t_candidates * 1e-9,
-        t_extension_sec=t_extension * 1e-9,
-        t_dominance_sec=t_dominance * 1e-9,
-        post_w_bound_calls=post_w_bound_calls,
-        post_w_bound_states=post_w_bound_states,
-        t_post_w_bound_sec=t_post_w_bound,
+    dominates(x::PricingBucketEntry, y::PricingBucketEntry) = _pricing_dominates_in_bucket(
+        x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.layer_weight, dominance_rules,
     )
-    return collect(values(best_by_signature)), exhausted, stats
+    return PassengerFreeAssignmentSearchContext(
+        pricing_data, max_visits_per_node, use_post_w_completion_bound, dominates,
+        search_index, bound_workspace, n_nodes, label_observer,
+        Ref(0.0), Ref(0.0), Ref(0), Ref(0), Ref(0.0),
+    )
+end
+
+_pricing_initial_labels(ctx::PassengerFreeAssignmentSearchContext) =
+    initial_passenger_free_assignment_pricing_labels(ctx.pricing_data)
+
+_pricing_make_bitsets(ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel) =
+    _make_passenger_free_assignment_label_bitsets(label, ctx.search_index.node_index, ctx.n_nodes)
+
+_pricing_bucket_signature(::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel, ::PassengerFreeAssignmentLabelBitsets) =
+    _passenger_free_assignment_dominance_signature(label)
+
+function _pricing_label_priority(
+    ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel, label_bs::PassengerFreeAssignmentLabelBitsets,
+)::Float64
+    if ctx.use_post_w_completion_bound && label.time + 1e-9 >= ctx.pricing_data.max_wait_time
+        t0 = time()
+        completion, completion_exhausted, completion_stats =
+            passenger_free_assignment_post_w_completion(
+                label, ctx.pricing_data; time_limit=max(1e-3, ctx.time_limit[] - (time() - ctx.t_start[])),
+            )
+        ctx.t_post_w_bound[] += time() - t0
+        ctx.post_w_bound_calls[] += 1
+        ctx.post_w_bound_states[] += completion_stats.states
+        completion_exhausted && return completion.reduced_cost
+    end
+    return label.reduced_cost -
+        _passenger_free_assignment_remaining_reward_bound(label, label_bs, ctx.pricing_data, ctx.search_index, ctx.bound_workspace)
+end
+
+_pricing_best_signature(::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel) =
+    isempty(label.activated_reward_layers) ? nothing : _passenger_free_assignment_layer_signature(label)
+
+_pricing_route_length(::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel) = label.route_length
+
+_pricing_max_route_length(ctx::PassengerFreeAssignmentSearchContext) = ctx.pricing_data.max_stops
+
+_pricing_candidate_next_nodes(ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel) =
+    _passenger_free_assignment_candidate_next_nodes(label, ctx.pricing_data; max_visits_per_node=ctx.max_visits_per_node)
+
+# One child per stop, returned directly: see `_extend_passenger_free_assignment_pricing_label`.
+_pricing_extend_label(ctx::PassengerFreeAssignmentSearchContext, label::PassengerFreeAssignmentPricingLabel, next_node::Int) =
+    _extend_passenger_free_assignment_pricing_label(label, next_node, ctx.pricing_data)
+
+_pricing_dominates_fn(ctx::PassengerFreeAssignmentSearchContext) = ctx.dominates
+
+function _pricing_search_started!(ctx::PassengerFreeAssignmentSearchContext, t_start::Float64, time_limit::Float64)
+    ctx.t_start[] = t_start
+    ctx.time_limit[] = time_limit
+    return nothing
+end
+
+function _pricing_on_label_inserted(ctx::PassengerFreeAssignmentSearchContext, label)
+    isnothing(ctx.label_observer) || ctx.label_observer(label)
+    return nothing
+end
+
+function _enumerate_passenger_free_assignment_pricing_labels(
+    pricing_data::PassengerFreeAssignmentPricingData;
+    time_limit::Float64,
+    reduced_cost_tol::Float64,
+    max_visits_per_node::Int,
+    use_reduced_cost_pruning::Bool=true,
+    use_post_w_completion_bound::Bool=false,
+    profile::Bool=false,
+    dominance_census::Bool=false,
+    stop_if=label -> false,
+    label_observer=nothing,
+)
+    ctx = PassengerFreeAssignmentSearchContext(
+        pricing_data;
+        max_visits_per_node=max_visits_per_node,
+        use_post_w_completion_bound=use_post_w_completion_bound,
+        dominance_census=dominance_census,
+        label_observer=label_observer,
+    )
+    labels, exhausted, stats = _run_pricing_label_search(
+        ctx;
+        time_limit=time_limit,
+        reduced_cost_tol=reduced_cost_tol,
+        use_reduced_cost_pruning=use_reduced_cost_pruning,
+        profile=profile,
+        stop_if=stop_if,
+    )
+    stats = merge(stats, (
+        post_w_bound_calls=ctx.post_w_bound_calls[],
+        post_w_bound_states=ctx.post_w_bound_states[],
+        t_post_w_bound_sec=ctx.t_post_w_bound[],
+    ))
+    return labels, exhausted, stats
 end
 
 """

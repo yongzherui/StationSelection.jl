@@ -10,6 +10,8 @@ export BendersSolver
 export BranchAndBendersSolver
 export BranchBendersCut
 export HeuristicEnumerationSolver
+export AggregateODRouteCG
+export PassengerFreeAssignmentCG
 
 abstract type AbstractBendersDecomposition end
 
@@ -604,5 +606,169 @@ struct HeuristicEnumerationSolver <: AbstractStationSelectionSolver
                 throw(ArgumentError("candidate_open_stations entries must not contain duplicate station ids"))
         end
         new(config, candidate_open_stations, cg_solver)
+    end
+end
+
+"""
+    AggregateODRouteCG
+
+Column-generation algorithm over the aggregate station-pair-per-request formulation (one
+assignment variable per `(scenario, origin, destination)` request) -- `run_aggregate_od_route_column_generation`'s
+algorithm. The knobs shared with [`PassengerFreeAssignmentCG`](@ref) under matching semantics
+(`n_candidates`, `reduced_cost_tol`, `pricing_time_limit_sec`, `max_columns_per_iteration`,
+`final_ip_time_limit_sec`, `max_iterations`) live on `ColumnGenerationSolver`, exactly as before.
+
+The remaining fields exist only because `run_aggregate_od_route_column_generation` (the public,
+still-independently-callable function this algorithm's hooks were extracted from -- see
+`pricing/generic_runner.jl`) has its own kwarg surface, used by direct callers
+(`_solve_fixed_route_covering_by_cg`, tests, scripts) that predate `ColumnGenerationSolver`
+entirely: per-call log file paths, and pricing knobs with dynamic (`model`/solver-dependent)
+defaults that can't be resolved until a hook actually runs against a concrete `model`/`solver`
+pair, hence the `Union{Nothing, _}` sentinels (resolved in `_cg_build_master`). Every field
+defaults to a placeholder here since a default-constructed `AggregateODRouteCG()` is also what
+`pricing/dispatch.jl`'s `_default_cg_algorithm` returns purely for its `isa` mismatch check --
+`run_aggregate_od_route_column_generation`'s own wrapper always constructs its own instance with
+real values from its own kwargs.
+"""
+struct AggregateODRouteCG <: AbstractColumnGenerationAlgorithm
+    max_visits_per_node::Union{Nothing, Int}
+    pricing_initial_sec::Union{Nothing, Float64}
+    pricing_ramp_factor::Float64
+    use_station_simple::Union{Nothing, Bool}
+    profile_pricing::Bool
+    verbose::Bool
+    cg_log_path::Union{Nothing, String}
+    column_log_path::Union{Nothing, String}
+    dual_log_path::Union{Nothing, String}
+
+    function AggregateODRouteCG(;
+        max_visits_per_node::Union{Int, Nothing}=nothing,
+        pricing_initial_sec::Union{Number, Nothing}=nothing,
+        pricing_ramp_factor::Number=1.0,
+        use_station_simple::Union{Bool, Nothing}=nothing,
+        profile_pricing::Bool=false,
+        verbose::Bool=true,
+        cg_log_path::Union{AbstractString, Nothing}=nothing,
+        column_log_path::Union{AbstractString, Nothing}=nothing,
+        dual_log_path::Union{AbstractString, Nothing}=nothing,
+    )
+        isnothing(max_visits_per_node) || max_visits_per_node > 0 ||
+            throw(ArgumentError("max_visits_per_node must be positive"))
+        isnothing(pricing_initial_sec) || pricing_initial_sec > 0 ||
+            throw(ArgumentError("pricing_initial_sec must be positive"))
+        pricing_ramp_factor > 0 || throw(ArgumentError("pricing_ramp_factor must be positive"))
+        new(
+            max_visits_per_node,
+            isnothing(pricing_initial_sec) ? nothing : Float64(pricing_initial_sec),
+            Float64(pricing_ramp_factor),
+            use_station_simple,
+            profile_pricing,
+            verbose,
+            isnothing(cg_log_path) ? nothing : String(cg_log_path),
+            isnothing(column_log_path) ? nothing : String(column_log_path),
+            isnothing(dual_log_path) ? nothing : String(dual_log_path),
+        )
+    end
+end
+
+"""
+    PassengerFreeAssignmentCG
+
+Column-generation algorithm over the passenger-level free-assignment formulation (one
+assignment variable per passenger, station budget enforced separately) with a DSSR label-setting
+pricer -- `run_passenger_free_assignment_column_generation`'s algorithm. Only supported for
+`AggregateODRouteModel`'s `FreeAggregateODAssignmentPolicy`.
+
+Carries every knob that is meaningful only to this algorithm (mirroring the existing
+`MultiCut(dimension)` precedent for algorithm-specific config living on the dispatch singleton
+rather than on the shared solver struct). Knobs shared with `AggregateODRouteCG` under matching
+semantics -- including `max_new_columns` (as `max_columns_per_iteration`) -- stay on
+`ColumnGenerationSolver`: `n_candidates`, `reduced_cost_tol`, `pricing_time_limit_sec`,
+`max_columns_per_iteration`, `final_ip_time_limit_sec`, `max_iterations`.
+"""
+struct PassengerFreeAssignmentCG <: AbstractColumnGenerationAlgorithm
+    exhaustive_pricing_each_iteration::Bool
+    theta_rho_core_size::Int
+    theta_rho_n_outsiders::Int
+    certification_time_limit_sec::Float64
+    total_time_limit_sec::Float64
+    seed_two_stop_routes::Bool
+    parallel_scenarios::Bool
+    station_budget_cap::Bool
+    compensated_dominance::Bool
+    use_station_simple::Bool
+    station_simple_warm_start::Bool
+    reward_coarsening_levels::Int
+    use_station_reduced_cost_filter::Bool
+    station_reduced_cost_filter_mode::Symbol
+    use_adaptive_cluster_certification::Bool
+    cluster_initial_num_clusters::Union{Nothing, Int}
+    cluster_max_num_clusters::Union{Nothing, Int}
+    cluster_max_size::Union{Nothing, Int}
+    cluster_time_limit_sec::Float64
+    unserved_penalty::Union{Nothing, Float64}
+    verify_reduced_costs::Bool
+    verbose::Bool
+    iteration_log_path::Union{Nothing, String}
+    column_log_path::Union{Nothing, String}
+
+    function PassengerFreeAssignmentCG(;
+        exhaustive_pricing_each_iteration::Bool=false,
+        theta_rho_core_size::Int=0,
+        theta_rho_n_outsiders::Int=1,
+        certification_time_limit_sec::Number=600.0,
+        total_time_limit_sec::Number=Inf,
+        seed_two_stop_routes::Bool=true,
+        parallel_scenarios::Bool=true,
+        station_budget_cap::Bool=false,
+        compensated_dominance::Bool=true,
+        use_station_simple::Bool=false,
+        station_simple_warm_start::Bool=true,
+        reward_coarsening_levels::Int=0,
+        use_station_reduced_cost_filter::Bool=false,
+        station_reduced_cost_filter_mode::Symbol=:none,
+        use_adaptive_cluster_certification::Bool=false,
+        cluster_initial_num_clusters::Union{Int, Nothing}=nothing,
+        cluster_max_num_clusters::Union{Int, Nothing}=nothing,
+        cluster_max_size::Union{Int, Nothing}=nothing,
+        cluster_time_limit_sec::Number=60.0,
+        unserved_penalty::Union{Number, Nothing}=nothing,
+        verify_reduced_costs::Bool=true,
+        verbose::Bool=true,
+        iteration_log_path::Union{AbstractString, Nothing}=nothing,
+        column_log_path::Union{AbstractString, Nothing}=nothing,
+    )
+        certification_time_limit_sec > 0 ||
+            throw(ArgumentError("certification_time_limit_sec must be positive"))
+        total_time_limit_sec > 0 || throw(ArgumentError("total_time_limit_sec must be positive"))
+        reward_coarsening_levels >= 0 ||
+            throw(ArgumentError("reward_coarsening_levels must be nonnegative"))
+        reward_coarsening_levels > 0 && (use_station_simple || station_simple_warm_start) &&
+            throw(ArgumentError(
+                "reward-coarsened and station-simple harvesting are alternative modes; " *
+                "enable only one per run",
+            ))
+        theta_rho_core_size >= 0 || throw(ArgumentError("theta_rho_core_size must be nonnegative"))
+        theta_rho_n_outsiders >= 0 ||
+            throw(ArgumentError("theta_rho_n_outsiders must be nonnegative"))
+        cluster_time_limit_sec > 0 || throw(ArgumentError("cluster_time_limit_sec must be positive"))
+        resolved_filter_mode = _normal_station_reduced_cost_filter_mode(
+            use_station_reduced_cost_filter && station_reduced_cost_filter_mode == :none ?
+                :closed_form : station_reduced_cost_filter_mode,
+        )
+        new(
+            exhaustive_pricing_each_iteration, theta_rho_core_size,
+            theta_rho_n_outsiders, Float64(certification_time_limit_sec),
+            Float64(total_time_limit_sec), seed_two_stop_routes, parallel_scenarios,
+            station_budget_cap, compensated_dominance, use_station_simple,
+            station_simple_warm_start, reward_coarsening_levels, use_station_reduced_cost_filter,
+            resolved_filter_mode, use_adaptive_cluster_certification, cluster_initial_num_clusters,
+            cluster_max_num_clusters, cluster_max_size, Float64(cluster_time_limit_sec),
+            isnothing(unserved_penalty) ? nothing : Float64(unserved_penalty),
+            verify_reduced_costs,
+            verbose,
+            isnothing(iteration_log_path) ? nothing : String(iteration_log_path),
+            isnothing(column_log_path) ? nothing : String(column_log_path),
+        )
     end
 end

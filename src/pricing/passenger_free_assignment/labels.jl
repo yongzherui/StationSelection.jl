@@ -64,7 +64,7 @@ winning route. What it changed was the cost of the scan:
 
   - conditions reordered cheapest-and-likeliest-first, with a `UInt64` live-clock
     support mask added in front of the station-age merge walk
-    (`_dominates_passenger_free_assignment_in_bucket`);
+    (`_pricing_dominates_in_bucket`);
   - the reward-layer compensation fused into one word-wise pass instead of
     `issubset` followed by an element walk (`_passenger_free_assignment_compensation`);
   - the scalar dominance state inlined into the bucket entry so a rejected entry
@@ -352,7 +352,6 @@ function _passenger_free_assignment_label_order_key(
     )
 end
 
-_create_passenger_free_assignment_dominance_bucket() = PassengerFreeAssignmentDominanceBucket()
 
 """
 Build the hot-path mirror of `label`'s pruning state.
@@ -486,7 +485,7 @@ overtake the first.
 Requiring `A_a ⊆ A_b` (the previous rule) is the special case `w(A_a ∖ A_b) = 0`,
 so this only ever adds dominations. It never weakens the `rc_a <= rc_b`
 precondition either, since the compensation is non-negative -- which is what
-keeps `_add_passenger_free_assignment_label_to_bucket!`'s reduced-cost-ordered
+keeps the shared `_add_pricing_label_to_bucket!`'s reduced-cost-ordered
 scan valid.
 
 MEASURED: **the single biggest win in this pricer, 2.5-3.9x.** `max_live` roughly
@@ -540,7 +539,7 @@ function _dominates_passenger_free_assignment_label(
     compensated_dominance::Bool=true,
 )::Bool
     _passenger_free_assignment_dominance_signature(a) == _passenger_free_assignment_dominance_signature(b) || return false
-    return _dominates_passenger_free_assignment_in_bucket(
+    return _pricing_dominates_in_bucket(
         PassengerFreeAssignmentDominanceFilters(a, abs), abs,
         PassengerFreeAssignmentDominanceFilters(b, bbs), bbs,
         layer_weight,
@@ -551,7 +550,7 @@ function _dominates_passenger_free_assignment_label(
 end
 
 """
-Rejection census for `_dominates_passenger_free_assignment_in_bucket`, one counter
+Rejection census for `_pricing_dominates_in_bucket` (passenger method), one counter
 per condition plus one for "dominates".
 
 Only written when the dominance rules carry `Instrumented = true`, which the
@@ -568,11 +567,11 @@ const PFA_DOMINANCE_CONDITIONS = (
 const PFA_DOMINANCE_REJECTIONS = zeros(Int, length(PFA_DOMINANCE_CONDITIONS))
 
 """
-    _dominates_passenger_free_assignment_in_bucket(a..., b..., layer_weight, rules)
+    _pricing_dominates_in_bucket(a..., b..., layer_weight, rules)
 
 The dominance predicate as the bucket scan calls it: `a` dominates `b`, so `b` can
 be discarded. Scalar state is passed by value (the caller reads it straight out of
-`PassengerFreeAssignmentBucketEntry`, avoiding a chase into the label) and only the
+`PricingBucketEntry`, avoiding a chase into the label) and only the
 two `Bitsets` mirrors are passed by reference.
 
 The **signature check is absent on purpose**: buckets are keyed by exactly that
@@ -636,7 +635,7 @@ exactly that comparison, so it is already guaranteed when this is reached. It is
 kept as a one-instruction guard for the non-bucket caller and because the
 compensation's early bail is defined against a non-negative budget.
 """
-@inline function _dominates_passenger_free_assignment_in_bucket(
+@inline function _pricing_dominates_in_bucket(
     af::PassengerFreeAssignmentDominanceFilters, abs::PassengerFreeAssignmentLabelBitsets,
     bf::PassengerFreeAssignmentDominanceFilters, bbs::PassengerFreeAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
@@ -699,83 +698,6 @@ function passenger_free_assignment_dominance_rejections(; reset::Bool=true)
     return counts
 end
 
-"""
-Insert `label` into its dominance bucket, unless an incumbent dominates it, and
-evict the incumbents it dominates.
-
-The bucket is ordered by `(reduced_cost, time, route_length, id)`, and domination
-in either direction requires `rc_dominator <= rc_dominated` -- true of the
-compensated rule too, since the compensation is non-negative. So the walk splits
-at the new label's reduced cost: below it only an incumbent can dominate the new
-label (and finding one ends the walk), above it only the new label can dominate
-incumbents.
-
-Dominated entries are collected as bucket *indices*, which the walk produces in
-ascending order, so eviction is a single `deleteat!` and nothing is mutated while
-the bucket is being scanned.
-
-Both directions are resolved in this **single walk**, never two: for entries below
-the new label's reduced cost only an incumbent can dominate (and the first one
-that does ends the walk), and for entries above it only the new label can
-dominate. Every scanned entry is therefore tested exactly once, in whichever
-direction is the only one that can possibly hold.
-
-The scalar state each test needs is read off the entry itself
-(`PassengerFreeAssignmentBucketEntry`), not off `entry.label`, so a rejected entry
-never dereferences the label it stands for.
-"""
-function _add_passenger_free_assignment_label_to_bucket!(
-    bucket::PassengerFreeAssignmentDominanceBucket,
-    live_labels::Vector{Union{Nothing, PassengerFreeAssignmentPricingLabel}},
-    label::PassengerFreeAssignmentPricingLabel,
-    label_id::Int,
-    label_bs::PassengerFreeAssignmentLabelBitsets,
-    layer_weight::Vector{Float64},
-    rules::PassengerFreeAssignmentDominanceRules,
-    dominated::Vector{Int},
-)
-    inserted = true
-    empty!(dominated)
-    switched = false
-
-    # Hoisted out of the loop: the scan compares against these on every entry.
-    label_filters = PassengerFreeAssignmentDominanceFilters(label, label_bs)
-    label_rc = label_filters.reduced_cost
-
-    @inbounds for i in eachindex(bucket)
-        entry = bucket[i]
-        entry_filters = entry.filters
-
-        if !switched && label_rc > entry_filters.reduced_cost + 1e-9
-            if _dominates_passenger_free_assignment_in_bucket(
-                    entry_filters, entry.bitsets, label_filters, label_bs, layer_weight, rules)
-                inserted = false
-                break
-            end
-            continue
-        end
-
-        switched = true
-        if _dominates_passenger_free_assignment_in_bucket(
-                label_filters, label_bs, entry_filters, entry.bitsets, layer_weight, rules)
-            push!(dominated, i)
-        end
-    end
-
-    n_dominated = length(dominated)
-    if inserted
-        @inbounds for i in dominated
-            live_labels[bucket[i].id] = nothing
-        end
-        deleteat!(bucket, dominated)
-        new_entry = PassengerFreeAssignmentBucketEntry(label_id, label, label_bs)
-        # The search value must be an entry, not a bare key: `searchsortedfirst`
-        # applies `by` to it as well as to the elements.
-        pos = searchsortedfirst(bucket, new_entry; by=_passenger_free_assignment_entry_order_key)
-        insert!(bucket, pos, new_entry)
-    end
-    return inserted, n_dominated
-end
 
 function _passenger_free_assignment_column_signature(assignments)::Tuple{Vararg{Tuple{Int, Int, Int}}}
     return Tuple(sort!(collect(assignments)))

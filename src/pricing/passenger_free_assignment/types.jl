@@ -170,7 +170,9 @@ end
 
 """
 Everything the dominance scan needs about one live label, stored *in* the
-dominance bucket.
+dominance bucket -- `PricingBucketEntry{PassengerFreeAssignmentDominanceFilters,
+PassengerFreeAssignmentPricingLabel, PassengerFreeAssignmentLabelBitsets}`
+(`pricing/types.jl`).
 
 The scan is the hot loop of the whole search -- measured at ~90% of the
 revisit-tolerant pricer's wall time -- and it visits every entry of the bucket on
@@ -181,8 +183,7 @@ them makes the scan a straight walk over the sorted container.
 
 MEASURED: 1.1-1.15x, with labels and `max_live` bit-identical (it is a pure
 data-layout change). Less than the two-hash-probe estimate predicted, and that
-shortfall is what pointed at the container itself -- see
-`PassengerFreeAssignmentDominanceBucket` below.
+shortfall is what pointed at the container itself.
 
 # Why the scalar fields are duplicated out of the label
 
@@ -199,36 +200,16 @@ over contiguous memory; only entries that survive every scalar filter dereferenc
 `bitsets` (for the station-age values and the reward-layer compensation), and
 `label` is never touched on the scan path at all. The entry grows from 24 to 64
 bytes -- one cache line, and cheaper than the two chases it removes.
-"""
-struct PassengerFreeAssignmentBucketEntry
-    # Inline: every scanned entry reads these.
-    filters::PassengerFreeAssignmentDominanceFilters
-    # Pointers: only entries that survive every scalar filter follow them.
-    id::PassengerFreeAssignmentLabelId
-    label::PassengerFreeAssignmentPricingLabel
-    bitsets::PassengerFreeAssignmentLabelBitsets
-end
 
-function PassengerFreeAssignmentBucketEntry(
-    id::PassengerFreeAssignmentLabelId,
-    label::PassengerFreeAssignmentPricingLabel,
-    bitsets::PassengerFreeAssignmentLabelBitsets,
-)
-    return PassengerFreeAssignmentBucketEntry(
-        PassengerFreeAssignmentDominanceFilters(label, bitsets), id, label, bitsets,
-    )
-end
+# The bucket container
 
-"""
-A dominance bucket: entries kept sorted by
-`(reduced_cost, time, route_length, id)`.
-
-A **`Vector`, not a `SortedDict`**. The scan visits every entry of the bucket on
-every insertion, and buckets run to a few thousand entries, so this loop is the
-hot path of the search. A balanced search tree makes each step a pointer chase
-into unrelated cache lines; measured cost was ~76ns per entry, far more than the
-mostly-short-circuiting comparisons in the dominance predicate could account for.
-A sorted `Vector` walks contiguous memory instead.
+A dominance bucket (`PricingDominanceBucket{...}`, same three type parameters)
+is a **`Vector`, not a `SortedDict`**, kept sorted by
+`(reduced_cost, time, route_length, id)` -- see `_pricing_entry_order_key`. A
+balanced search tree makes each step a pointer chase into unrelated cache
+lines; measured cost was ~76ns per entry, far more than the
+mostly-short-circuiting comparisons in the dominance predicate could account
+for. A sorted `Vector` walks contiguous memory instead.
 
 The trade is that insertion and eviction become `O(bucket)` memmoves rather than
 `O(log bucket)` tree surgery -- but there is exactly one insertion per label
@@ -238,10 +219,11 @@ memory bandwidth, so it is not close.
 MEASURED: 1.3-1.5x, again with labels and `max_live` bit-identical. See
 `notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
 """
-const PassengerFreeAssignmentDominanceBucket = Vector{PassengerFreeAssignmentBucketEntry}
-
-_passenger_free_assignment_entry_order_key(entry::PassengerFreeAssignmentBucketEntry) =
-    (entry.filters.reduced_cost, entry.filters.time, entry.filters.route_length, entry.id)
+PricingBucketEntry(
+    id::PassengerFreeAssignmentLabelId,
+    label::PassengerFreeAssignmentPricingLabel,
+    bitsets::PassengerFreeAssignmentLabelBitsets,
+) = PricingBucketEntry(PassengerFreeAssignmentDominanceFilters(label, bitsets), id, label, bitsets)
 
 """
     PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented}
@@ -256,11 +238,12 @@ skip the code it guards. Encoding them as type parameters lets the compiler
 delete the disabled conditions outright and specialize the reward-layer
 compensation on `Compensated`.
 
-The cost is one dynamic dispatch where the rules object reaches
-`_add_passenger_free_assignment_label_to_bucket!` -- once per *label insertion*,
-against a bucket scan that is hundreds to thousands of entries long, so it is not
-measurable. Do not push the object any deeper (e.g. per scanned entry) expecting
-the same to hold.
+The cost is one dynamic dispatch where the rules object reaches the `dominates`
+closure each search builds once and hands to the shared
+`_add_pricing_label_to_bucket!` (`pricing/types.jl`) -- once per *label
+insertion*, against a bucket scan that is hundreds to thousands of entries long,
+so it is not measurable. Do not push the object any deeper (e.g. per scanned
+entry) expecting the same to hold.
 """
 struct PassengerFreeAssignmentDominanceRules{BoundedStops, BoundedStations, Compensated, Instrumented} <: AbstractPricingDominanceRules end
 
