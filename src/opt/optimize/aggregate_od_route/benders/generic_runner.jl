@@ -65,6 +65,36 @@ term. `BendersYZ` overrides to read `value(master[:route_lb_exprs][cut_id])` whe
 _benders_residual_lower_bound_value(::Model, ::D, ::Int) where {D <: AbstractBendersDecomposition} = 0.0
 
 """
+    _benders_tighten_subproblem_value(data, subproblem_model, decomposition, solver, cg_result,
+        group_requests, feasible_pairs, assignments, v_hat) -> (v_hat, certification_kwargs::NamedTuple)
+
+Only called when `_benders_uses_certified_cut_derivation` is true. Tightens `v_hat` using
+CG's own already-certified duals from `cg_result` (this iteration's priming solve, already
+proven `cg_stop_reason==:optimality_proven`) rather than trusting the subproblem LP's own
+pool completeness, and returns a `NamedTuple` of keyword arguments to splat into
+`_benders_add_optimality_cut!` so the (expensive) certification isn't recomputed there --
+each decomposition's cut-attach method accepts whatever shape its own certification takes
+(`BendersY`/`BendersYZ`: `certified`/`Q_bar`, matching `_certified_qbar`'s return; `BendersYZH`:
+a single `zc_result`, since `_zero_completion_yzh_rho` bundles a differently-adjusted `Q_bar`
+or which `_certified_qbar` alone would double-count `h`'s walking cost -- see that function's
+docstring). Default (`BendersY`/`BendersYZ`) uses `_certified_qbar` directly.
+"""
+function _benders_tighten_subproblem_value(
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    ::D,
+    solver::BendersSolver,
+    cg_result,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    v_hat::Float64,
+) where {D <: AbstractBendersDecomposition}
+    certified, qbar = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments)
+    return min(v_hat, qbar), (certified=certified, Q_bar=qbar)
+end
+
+"""
     _benders_hat_point(master::Model, decomposition) -> NamedTuple
 
 Rounded fixed-decision point read off a solved master -- `(y_hat=...,)` for `BendersY`,
@@ -171,7 +201,8 @@ function _benders_add_optimality_cut!(
     core_point::Union{Nothing, AggregateODRouteYCorePoint},
     optimizer_env,
     v_hat::Float64,
-    sub_duals::Dict;
+    sub_duals::Dict,
+    cg_result;
     certified=nothing,
     Q_bar=nothing,
     certification_already_failed::Bool=false,
@@ -259,7 +290,8 @@ function _benders_add_optimality_cut!(
     core_point,
     optimizer_env,
     v_hat::Float64,
-    sub_duals::Dict;
+    sub_duals::Dict,
+    cg_result;
     certified=nothing,
     Q_bar=nothing,
     certification_already_failed::Bool=false,
@@ -375,7 +407,8 @@ function _benders_add_optimality_cut!(
     core_point::Union{Nothing, AggregateODRouteYZCorePoint},
     optimizer_env,
     v_hat::Float64,
-    sub_duals::AbstractDict;
+    sub_duals::AbstractDict,
+    cg_result;
     certified=nothing,
     Q_bar=nothing,
     certification_already_failed::Bool=false,
@@ -389,6 +422,159 @@ function _benders_add_optimality_cut!(
         hat.z_hat, assignments, open_stations, z_core, optimizer_env, v_hat, sub_duals;
         route_lb_expr=route_lb_expr, certified=certified, Q_bar=Q_bar,
         certification_already_failed=certification_already_failed,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# BendersYZH hooks: master fixes y, z (via h's zp/zd linking), and h itself
+# (scenario-compressed per physical OD pair), leaving only theta to the
+# subproblem. No lifted_walking_objective variant exists (h already carries
+# walking cost directly, unlike x/z), no core point (no free dual block left
+# once h is fixed, so :restricted_mw_fixed_pi is rejected at construction),
+# and :zero_completion is a plain certified-dual sum
+# (_zero_completion_yzh_rho), not a completion LP -- so, uniquely among the
+# four decompositions, BendersYZH needs neither a BendersCorePointProblem nor
+# a BendersCompletionProblem method at all.
+# ---------------------------------------------------------------------------
+
+_benders_needs_core_point(::BendersYZH, ::BendersSolver) = false
+
+"""
+    _yzh_feasible_pairs_by_p(feasible_pairs, requests) -> Dict{Tuple{Int,Int},Vector{Tuple{Int,Int}}}
+
+`_build_yzh_route_subproblem_lp`/`_zero_completion_yzh_rho`/the master `h`-builder all key
+feasible pairs by *physical* OD pair `(o,d)`, not by the flat `(s,o,d)` request `feasible_pairs`
+uses -- safe to derive one from the other since feasible pairs never depend on scenario, only
+on the physical endpoints (mirrors `_zero_completion_yzh_rho`'s own identical derivation the
+other way).
+"""
+function _yzh_feasible_pairs_by_p(
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    requests,
+)::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
+    return Dict((request[2], request[3]) => feasible_pairs[request] for request in requests)
+end
+
+function _benders_hat_point(master::Model, ::BendersYZH)
+    n = length(master[:y])
+    y_hat = [round(value(master[:y][j])) for j in 1:n]
+    h_hat = Dict(key => round(value(var)) for (key, var) in master[:h])
+    return (y_hat=y_hat, h_hat=h_hat)
+end
+
+function _benders_priming_assignments(
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    ::BendersYZH,
+    requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+)
+    mapping = create_map(model, data)
+    physical_pairs, occurrences, feasible_pairs_by_p = _aggregate_od_route_benders_physical_pairs(mapping)
+    assignments = _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, hat.h_hat)
+    return assignments, _open_station_values(hat.y_hat)
+end
+
+"""
+    _benders_solve_subproblem(..., decomposition::BendersYZH, ...)
+
+`h` is fixed fully in the subproblem (like `BendersXY`'s `x`), so CG-priming is structurally
+exhaustive for exactly this LP -- but `solver.reprice_subproblem` is still fully wired here
+(unlike `BendersXY`, which has no repricing companion at all) as an empirical soundness check
+against the route-covering LP's own potential dual degeneracy; see `BendersYZH`'s module
+docstring for the 2026-07-21 correction explaining why repricing is not actually a structural
+non-issue here despite `h` being fully fixed.
+"""
+function _benders_solve_subproblem(
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    mapping::AggregateODRouteMap,
+    decomposition::BendersYZH,
+    hat,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    columns::Vector{AggregateODRouteColumn},
+    solver::BendersSolver,
+    optimizer_env,
+    silent::Bool,
+)
+    feasible_pairs_by_p = _yzh_feasible_pairs_by_p(feasible_pairs, group_requests)
+    if solver.reprice_subproblem
+        v_hat, rho, pool, n_new, _rounds, exhausted, _delta = _solve_yzh_route_subproblem_lp_with_repricing(
+            data, subproblem_model, mapping, group_requests, feasible_pairs_by_p, columns, hat.h_hat,
+            optimizer_env, silent; max_reprice_rounds=solver.max_reprice_rounds,
+        )
+        return v_hat, rho, pool, n_new, exhausted
+    end
+    sub_problem = BendersSubproblemModel(subproblem_model, hat.h_hat, group_requests, feasible_pairs, columns, decomposition)
+    sub_result = run_opt(data, sub_problem, DirectSolver(config=SolverConfig(optimizer_env=optimizer_env, silent=silent)))
+    sub_result.termination_status == MOI.OPTIMAL ||
+        throw(ArgumentError("BendersYZH subproblem failed with status $(sub_result.termination_status)"))
+    return sub_result.objective_value, sub_result.duals, columns, 0, true
+end
+
+"""
+    _benders_tighten_subproblem_value(..., decomposition::BendersYZH, ...)
+
+Uses `_zero_completion_yzh_rho` (a certified-dual sum, not `_certified_qbar` directly) --
+its `Q_bar` is already adjusted to remove the walking-cost double-count `_certified_qbar`
+alone would introduce (`h`'s walking cost is priced once, in the master; see
+`_zero_completion_yzh_rho`'s docstring). Payload is a single `zc_result` (a
+`(Q_bar, rho, certified)` triple), not `certified`/`Q_bar` separately, matching
+`_add_aggregate_od_route_benders_yzh_optimality_cut!`'s own kwarg.
+"""
+function _benders_tighten_subproblem_value(
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    ::BendersYZH,
+    solver::BendersSolver,
+    cg_result,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    v_hat::Float64,
+)
+    feasible_pairs_by_p = _yzh_feasible_pairs_by_p(feasible_pairs, group_requests)
+    zc_result = _zero_completion_yzh_rho(data, subproblem_model, cg_result, group_requests, feasible_pairs_by_p, assignments)
+    return min(v_hat, zc_result[1]), (zc_result=zc_result,)
+end
+
+"""
+    _benders_add_optimality_cut!(..., decomposition::BendersYZH, ...)
+
+Delegates to the existing, unmodified `_add_aggregate_od_route_benders_yzh_optimality_cut!`.
+Its own `cg_result` parameter is only used internally when `zc_result` is `nothing` (i.e.
+`solver.cut_derivation == :standard`, where `_benders_tighten_subproblem_value` never runs and
+`zc_result` is never pre-supplied) -- passed through here rather than re-derived.
+"""
+function _benders_add_optimality_cut!(
+    master::Model,
+    decomposition::BendersYZH,
+    cut_id::Int,
+    data::StationSelectionData,
+    base::AggregateODRouteModel,
+    solver::BendersSolver,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+    core_point,
+    optimizer_env,
+    v_hat::Float64,
+    sub_duals::AbstractDict,
+    cg_result;
+    zc_result=nothing,
+    certification_already_failed::Bool=false,
+)
+    feasible_pairs_by_p = _yzh_feasible_pairs_by_p(feasible_pairs, group_requests)
+    h = master[:h]
+    theta = master[:theta]
+    return _add_aggregate_od_route_benders_yzh_optimality_cut!(
+        master, h, theta, cut_id, data, base, solver, group_requests, feasible_pairs_by_p,
+        hat.h_hat, assignments, cg_result, v_hat, sub_duals;
+        zc_result=zc_result, certification_already_failed=certification_already_failed,
     )
 end
 
@@ -554,11 +740,12 @@ function _run_benders_decomposition(
                 @warn "$decomposition_name subproblem repricing hit max_reprice_rounds without pricing exhaustion" iteration cut_id
             subproblem_lp_seconds += time() - lp_start
 
-            certified_for_cut = nothing
-            qbar_for_cut = nothing
+            certification_kwargs = NamedTuple()
             if _benders_uses_certified_cut_derivation(decomposition, solver)
-                certified_for_cut, qbar_for_cut = _certified_qbar(data, subproblem_model, cg_result, group_requests, assignments)
-                v_hat = min(v_hat, qbar_for_cut)
+                v_hat, certification_kwargs = _benders_tighten_subproblem_value(
+                    data, subproblem_model, decomposition, solver, cg_result, group_requests, feasible_pairs,
+                    assignments, v_hat,
+                )
             end
             iteration_lp_value += v_hat
 
@@ -566,8 +753,8 @@ function _run_benders_decomposition(
             if current_full_lb < v_hat - solver.optimality_tol
                 cut_diag = _benders_add_optimality_cut!(
                     master, decomposition, cut_id, data, subproblem_model, solver, group_requests, feasible_pairs,
-                    hat, assignments, open_stations, core_point, optimizer_env, v_hat, sub_duals;
-                    certified=certified_for_cut, Q_bar=qbar_for_cut,
+                    hat, assignments, open_stations, core_point, optimizer_env, v_hat, sub_duals, cg_result;
+                    certification_kwargs...,
                 )
                 optimality_cuts += 1
                 cuts_added_this_iteration += 1

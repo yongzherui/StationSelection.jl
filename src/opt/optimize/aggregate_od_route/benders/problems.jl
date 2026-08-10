@@ -723,3 +723,115 @@ function run_opt(
         nothing, nothing, nothing, build_result.metadata, rho,
     )
 end
+
+# ---------------------------------------------------------------------------
+# BendersYZH: master = y,z,h (h scenario-compressed per physical OD pair);
+# subproblem = theta only. No core-point/completion LP types needed at all --
+# :zero_completion is a plain certified-dual sum (_zero_completion_yzh_rho,
+# generic_runner.jl), and :restricted_mw_fixed_pi is rejected at
+# BendersSolver construction (no free dual block left once h is fixed).
+# ---------------------------------------------------------------------------
+
+function build_model(
+    model::BendersMasterModel{BendersYZH},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    base = model.base
+    cut_ids = model.cut_ids
+    _is_endpoint_nearest_style(base.assignment_policy.feasibility_cut_style) ||
+        throw(ArgumentError(
+            "BendersYZH requires NearestOpenAggregateODAssignmentPolicy(:big_m_nearest) or " *
+            "(:endpoint_chain); got :$(base.assignment_policy.feasibility_cut_style) -- :pair_chain has no " *
+            "addressable z separate from x, so there is nothing for BendersYZH's master to lift."
+        ))
+    mapping = create_map(base, data)
+    validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base.allow_walk_only)
+    requests, _demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
+    isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+    physical_pairs, occurrences, feasible_pairs_by_p = _aggregate_od_route_benders_physical_pairs(mapping)
+    occurrence_count = Dict(p => length(occurrences[p]) for p in physical_pairs)
+
+    master = Model(() -> Gurobi.Optimizer(optimizer_env))
+    variable_counts = Dict{String, Int}()
+    constraint_counts = Dict{String, Int}()
+
+    variable_counts["station_selection"] = add_station_selection_variables!(master, data)
+    y = master[:y]
+    variable_counts["benders_cut_placeholder"] = add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    constraint_counts["station_limit"] = add_station_limit_constraint!(master, data, base.l)
+    constraint_counts["endpoint_coverage"] =
+        _add_default_endpoint_coverage_constraints!(master, y, data, base, requests)
+    h = _add_nearest_open_master_h!(
+        master, data, y, physical_pairs, feasible_pairs_by_p, base.max_walking_distance, base.allow_walk_only,
+        base.assignment_policy.feasibility_cut_style,
+    )
+    master[:h] = h
+
+    obj = AffExpr(0.0)
+    for p in physical_pairs, pair in feasible_pairs_by_p[p]
+        o, d = p
+        add_to_expression!(obj, occurrence_count[p] * base.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
+    end
+    for cut_id in cut_ids
+        add_to_expression!(obj, 1.0, theta[cut_id])
+    end
+    @objective(master, Min, obj)
+
+    counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
+    metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)
+    return BuildResult(master, mapping, nothing, counts, metadata)
+end
+
+function build_model(
+    model::BendersSubproblemModel{BendersYZH},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    feasible_pairs_by_p = _yzh_feasible_pairs_by_p(model.feasible_pairs, model.requests)
+    m, fix_cons, cover_cons = _build_yzh_route_subproblem_lp(
+        data, model.base, model.requests, feasible_pairs_by_p, model.columns, model.hat, optimizer_env, false,
+    )
+    mapping = create_map(model.base, data)
+    metadata = Dict{String, Any}("fix_cons" => fix_cons, "cover_cons" => cover_cons)
+    return BuildResult(m, mapping, nothing, nothing, metadata)
+end
+
+"""
+    run_opt(instance, problem::BendersSubproblemModel{BendersYZH}, solver::DirectSolver) -> OptResult
+
+`h` is fixed fully (like `BendersXY`'s `x`), so CG-priming is structurally exhaustive for
+this LP -- callers wanting the extra empirical soundness check against dual-basis degeneracy
+should still route through `_benders_solve_subproblem`'s repricing branch
+(`solver.reprice_subproblem=true`), exactly as with `BendersY`/`BendersYZ`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersSubproblemModel{BendersYZH},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    build_result = build_model(problem, instance; optimizer_env=optimizer_env)
+    m = build_result.model
+    cfg.silent && set_silent(m)
+    optimize!(m)
+    runtime_sec = time() - start
+    term_status = termination_status(m)
+    if primal_status(m) != MOI.FEASIBLE_POINT
+        return OptResult(
+            term_status, nothing, nothing, runtime_sec, m, build_result.mapping,
+            nothing, nothing, nothing, build_result.metadata,
+        )
+    end
+    fix_cons = build_result.metadata["fix_cons"]
+    rho = Dict(key => dual(con) for (key, con) in fix_cons)
+    return OptResult(
+        term_status, objective_value(m), nothing, runtime_sec, m, build_result.mapping,
+        nothing, nothing, nothing, build_result.metadata, rho,
+    )
+end
