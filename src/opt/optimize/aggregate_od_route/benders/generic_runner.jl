@@ -52,6 +52,19 @@ _benders_needs_core_point(::D, solver::BendersSolver) where {D <: AbstractBender
 _benders_needs_core_point(::BendersXY, ::BendersSolver) = false
 
 """
+    _benders_residual_lower_bound_value(master, decomposition, cut_id) -> Float64
+
+Extra, already-live lower-bound term folded into this cut group's `theta`/`eta` at the
+master, used only when deciding whether a cut is needed
+(`theta_hat[cut_id] + this < v_hat - tol`). Default `0.0` for decompositions without such a
+term. `BendersYZ` overrides to read `value(master[:route_lb_exprs][cut_id])` when
+`lifted_routing_lower_bound`/`common_od_mcf_lower_bound` built one (see
+`BendersMasterModel{BendersYZ}`'s `build_model`, which always stashes
+`master[:route_lb_exprs]`, `nothing` when neither feature is active).
+"""
+_benders_residual_lower_bound_value(::Model, ::D, ::Int) where {D <: AbstractBendersDecomposition} = 0.0
+
+"""
     _benders_hat_point(master::Model, decomposition) -> NamedTuple
 
 Rounded fixed-decision point read off a solved master -- `(y_hat=...,)` for `BendersY`,
@@ -259,6 +272,127 @@ function _benders_add_optimality_cut!(
 end
 
 # ---------------------------------------------------------------------------
+# BendersYZ hooks: master fixes y AND the nearest-open endpoint selectors z
+# (via `_add_nearest_open_master_z!`/`_add_nearest_open_master_walking_cost!`,
+# both already populate `master[:nearest_endpoint_chain_cache]`), leaving x/θ
+# to the subproblem -- structurally a hybrid of BendersY's feasibility-cut
+# reasoning (y_hat alone can still admit an infeasible collision) and
+# BendersXY's per-cut-group loop shape. Needs its own core-point/completion
+# LP (yz_mw_cut.jl) and, uniquely among the four decompositions, an optional
+# routing lower-bound term folded into theta/eta via
+# _benders_residual_lower_bound_value.
+# ---------------------------------------------------------------------------
+
+function _benders_hat_point(master::Model, ::BendersYZ)
+    n = length(master[:y])
+    y_hat = [round(value(master[:y][j])) for j in 1:n]
+    z_hat = Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}}(
+        key => round.(value.(vars)) for (key, vars) in master[:nearest_endpoint_chain_cache]
+    )
+    return (y_hat=y_hat, z_hat=z_hat)
+end
+
+"""
+    _benders_priming_assignments(..., decomposition::BendersYZ, ...)
+
+Same derivation as `BendersY`'s: safe to derive CG-priming `assignments` from `y_hat` alone
+via `_fixed_assignments_from_y`, ignoring `z_hat`, since the chain constraints make that a
+deterministic bijection whenever the master is feasible (see `BendersYZ`'s own docstring).
+"""
+function _benders_priming_assignments(
+    data::StationSelectionData,
+    model::AggregateODRouteModel,
+    ::BendersYZ,
+    requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+)
+    assignments, infeasible = _fixed_assignments_from_y(
+        data, requests, feasible_pairs, hat.y_hat;
+        style=model.assignment_policy.feasibility_cut_style,
+        max_walking_distance=model.max_walking_distance,
+        allow_walk_only=model.allow_walk_only, allow_same_station=true,
+    )
+    isempty(infeasible) || throw(ArgumentError(
+        "BendersYZ: y_hat=$(hat.y_hat) left requests infeasible ($(infeasible)); this should be " *
+        "structurally impossible given the master's eager endpoint-coverage constraints"
+    ))
+    return assignments, _open_station_values(hat.y_hat)
+end
+
+function _benders_solve_subproblem(
+    data::StationSelectionData,
+    subproblem_model::AggregateODRouteModel,
+    mapping::AggregateODRouteMap,
+    decomposition::BendersYZ,
+    hat,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    columns::Vector{AggregateODRouteColumn},
+    solver::BendersSolver,
+    optimizer_env,
+    silent::Bool,
+)
+    if solver.reprice_subproblem
+        v_hat, rho, pool, n_new, _rounds, exhausted, _delta = _solve_yz_route_subproblem_lp_with_repricing(
+            data, subproblem_model, mapping, group_requests, feasible_pairs, columns, hat.z_hat,
+            optimizer_env, silent; max_reprice_rounds=solver.max_reprice_rounds,
+        )
+        return v_hat, rho, pool, n_new, exhausted
+    end
+    sub_problem = BendersSubproblemModel(subproblem_model, hat.z_hat, group_requests, feasible_pairs, columns, decomposition)
+    sub_result = run_opt(data, sub_problem, DirectSolver(config=SolverConfig(optimizer_env=optimizer_env, silent=silent)))
+    sub_result.termination_status == MOI.OPTIMAL ||
+        throw(ArgumentError("BendersYZ subproblem failed with status $(sub_result.termination_status)"))
+    return sub_result.objective_value, sub_result.duals, columns, 0, true
+end
+
+function _benders_residual_lower_bound_value(master::Model, ::BendersYZ, cut_id::Int)
+    route_lb_exprs = haskey(master, :route_lb_exprs) ? master[:route_lb_exprs] : nothing
+    isnothing(route_lb_exprs) && return 0.0
+    return value(route_lb_exprs[cut_id])
+end
+
+"""
+    _benders_add_optimality_cut!(..., decomposition::BendersYZ, ...)
+
+Delegates to the existing, unmodified `_add_aggregate_od_route_benders_yz_optimality_cut!`,
+which already handles subtracting the live `route_lb_expr` from the cut RHS when
+`master[:route_lb_exprs]` is present (`nothing` otherwise, a no-op).
+"""
+function _benders_add_optimality_cut!(
+    master::Model,
+    decomposition::BendersYZ,
+    cut_id::Int,
+    data::StationSelectionData,
+    base::AggregateODRouteModel,
+    solver::BendersSolver,
+    group_requests::Vector{NTuple{3, Int}},
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+    hat,
+    assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}},
+    open_stations::Vector{Int},
+    core_point::Union{Nothing, AggregateODRouteYZCorePoint},
+    optimizer_env,
+    v_hat::Float64,
+    sub_duals::AbstractDict;
+    certified=nothing,
+    Q_bar=nothing,
+    certification_already_failed::Bool=false,
+)
+    theta = master[:theta]
+    z_core = isnothing(core_point) ? nothing : core_point.z
+    route_lb_exprs = haskey(master, :route_lb_exprs) ? master[:route_lb_exprs] : nothing
+    route_lb_expr = isnothing(route_lb_exprs) ? nothing : route_lb_exprs[cut_id]
+    return _add_aggregate_od_route_benders_yz_optimality_cut!(
+        master, theta, cut_id, data, base, solver, group_requests, feasible_pairs,
+        hat.z_hat, assignments, open_stations, z_core, optimizer_env, v_hat, sub_duals;
+        route_lb_expr=route_lb_expr, certified=certified, Q_bar=Q_bar,
+        certification_already_failed=certification_already_failed,
+    )
+end
+
+# ---------------------------------------------------------------------------
 # The generic outer loop.
 # ---------------------------------------------------------------------------
 
@@ -428,7 +562,8 @@ function _run_benders_decomposition(
             end
             iteration_lp_value += v_hat
 
-            if theta_hat[cut_id] < v_hat - solver.optimality_tol
+            current_full_lb = theta_hat[cut_id] + _benders_residual_lower_bound_value(master, decomposition, cut_id)
+            if current_full_lb < v_hat - solver.optimality_tol
                 cut_diag = _benders_add_optimality_cut!(
                     master, decomposition, cut_id, data, subproblem_model, solver, group_requests, feasible_pairs,
                     hat, assignments, open_stations, core_point, optimizer_env, v_hat, sub_duals;

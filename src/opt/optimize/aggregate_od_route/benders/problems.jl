@@ -414,12 +414,14 @@ end
 
 Completes a fixed route-covering dual block `pi_full` (from CG certification, an
 outer-loop concern -- see `_certified_qbar`/`_certified_route_covering_pi`) into a full
-Benders cut, either Magnanti-Wong-maximized at `y_core` (`objective_mode=:maximize_core`)
+Benders cut, either Magnanti-Wong-maximized at `core` (`objective_mode=:maximize_core`)
 or the `:zero_completion` baseline (`objective_mode=:zero`), subject to tightness at
-`y_hat`. `build_model` calls `_restricted_mw_completion_lp` (unmodified) for inspection;
-`run_opt` calls the higher-level `_solve_restricted_mw_completion` (which itself calls
-`_restricted_mw_completion_lp` again) rather than reusing `build_model`'s result, so that
-the extensive post-solve diagnostics (IIS dump on infeasibility, tightness verification,
+`hat`. `hat`/`core` are deliberately untyped: `y_hat::Vector{Float64}`/
+`y_core::Vector{Float64}` for `BendersY`, `z_hat::Dict{...}`/`z_core::AbstractDict` for
+`BendersYZ`. `build_model` calls the decomposition's completion-LP builder (unmodified)
+for inspection; `run_opt` calls the higher-level completion solver (which itself calls the
+LP builder again) rather than reusing `build_model`'s result, so that the extensive
+post-solve diagnostics (IIS dump on infeasibility for `BendersY`, tightness verification,
 `cut_constant`/`beta` extraction) stay exactly as they are today -- a minor duplication of
 LP construction traded for zero risk of diverging from that logic.
 """
@@ -427,8 +429,8 @@ struct BendersCompletionProblem{D <: AbstractBendersDecomposition} <: AbstractBe
     base::AggregateODRouteModel
     requests::Vector{NTuple{3, Int}}
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}
-    y_hat::Vector{Float64}
-    y_core::Vector{Float64}
+    hat
+    core
     pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64}
     Q_bar::Float64
     objective_mode::Symbol
@@ -438,8 +440,8 @@ struct BendersCompletionProblem{D <: AbstractBendersDecomposition} <: AbstractBe
         base::AggregateODRouteModel,
         requests::Vector{NTuple{3, Int}},
         feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
-        y_hat::Vector{Float64},
-        y_core::Vector{Float64},
+        hat,
+        core,
         pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},
         Q_bar::Float64,
         objective_mode::Symbol,
@@ -447,7 +449,7 @@ struct BendersCompletionProblem{D <: AbstractBendersDecomposition} <: AbstractBe
     ) where {D <: AbstractBendersDecomposition}
         objective_mode in (:maximize_core, :zero) ||
             throw(ArgumentError("unsupported objective_mode $(objective_mode)"))
-        new{D}(base, requests, feasible_pairs, y_hat, y_core, pi_full, Q_bar, objective_mode, decomposition)
+        new{D}(base, requests, feasible_pairs, hat, core, pi_full, Q_bar, objective_mode, decomposition)
     end
 end
 
@@ -458,7 +460,7 @@ function build_model(
 )::BuildResult
     isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
     built = _restricted_mw_completion_lp(
-        data, problem.base, problem.requests, problem.feasible_pairs, problem.y_hat, problem.y_core,
+        data, problem.base, problem.requests, problem.feasible_pairs, problem.hat, problem.core,
         problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, false,
     )
     return BuildResult(built.model, EmptyStationSelectionMap(), nothing, nothing, Dict{String, Any}("built" => built))
@@ -479,7 +481,7 @@ function run_opt(
     cfg = solver.config
     optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
     completion = _solve_restricted_mw_completion(
-        instance, problem.base, problem.requests, problem.feasible_pairs, problem.y_hat, problem.y_core,
+        instance, problem.base, problem.requests, problem.feasible_pairs, problem.hat, problem.core,
         problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, cfg.silent,
     )
     status = completion.status == :optimal ? MOI.OPTIMAL : MOI.INFEASIBLE
@@ -491,5 +493,233 @@ function run_opt(
             "status" => completion.status,
         ),
         completion.status == :optimal ? completion.beta : nothing,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# BendersYZ: master = y,z; subproblem = x,theta. Needs its own core-point/
+# completion LP (joint (y,z) structural region, no lambda/mu/nu chain block --
+# see yz_mw_cut.jl's module docstring for why it differs from BendersY's), and
+# optionally a routing lower-bound term (lifted_routing_lower_bound/
+# common_od_mcf_lower_bound, YZ-only, forbidden for Y/YZH at construction).
+# ---------------------------------------------------------------------------
+
+"""
+    run_opt(instance, problem::BendersCorePointProblem{BendersYZ}, solver::DirectSolver) -> OptResult
+
+Delegates to `_yz_joint_core_point` unmodified. `OptResult.solution` is
+`(y_core, delta)`; the full `AggregateODRouteYZCorePoint` (with `.z::Dict{Any,Vector{Float64}}`,
+`fixed_zero`/`fixed_one`/row-count diagnostics) is in `metadata["core_point"]`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersCorePointProblem{BendersYZ},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    core_point = _yz_joint_core_point(
+        instance, problem.base, problem.requests, optimizer_env, cfg.silent;
+        affine_hull_tol=problem.affine_hull_tol, core_point_tol=problem.core_point_tol,
+    )
+    runtime_sec = time() - start
+    return OptResult(
+        MOI.OPTIMAL, core_point.delta, (core_point.y, core_point.delta), runtime_sec,
+        Model(), EmptyStationSelectionMap(), nothing, nothing, nothing,
+        Dict{String, Any}(
+            "core_point" => core_point,
+            "fixed_zero" => core_point.fixed_zero,
+            "fixed_one" => core_point.fixed_one,
+            "n_endpoint_rows" => core_point.n_endpoint_rows,
+            "n_always_tight_endpoint_rows" => core_point.n_always_tight_endpoint_rows,
+        ),
+    )
+end
+
+function build_model(
+    problem::BendersCompletionProblem{BendersYZ},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    built = _yz_completion_lp(
+        data, problem.base, problem.requests, problem.feasible_pairs, problem.hat, problem.core,
+        problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, false,
+    )
+    return BuildResult(built.model, EmptyStationSelectionMap(), nothing, nothing, Dict{String, Any}("built" => built))
+end
+
+"""
+    run_opt(instance, problem::BendersCompletionProblem{BendersYZ}, solver::DirectSolver) -> OptResult
+
+Delegates to `_solve_yz_completion` unmodified. `OptResult.objective_value` is
+`cut_constant`; `OptResult.duals` is `beta` (`Dict{Tuple{Any,Int},Float64}`, keyed by
+endpoint-chain `(key, index)` -- `z` is the fixed master variable directly here, unlike
+`BendersY`'s `y`-keyed `beta`).
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersCompletionProblem{BendersYZ},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    completion = _solve_yz_completion(
+        instance, problem.base, problem.requests, problem.feasible_pairs, problem.hat, problem.core,
+        problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, cfg.silent,
+    )
+    status = completion.status == :optimal ? MOI.OPTIMAL : MOI.INFEASIBLE
+    return OptResult(
+        status, completion.cut_constant, nothing, completion.runtime_sec,
+        Model(), EmptyStationSelectionMap(), nothing, nothing, nothing,
+        Dict{String, Any}(
+            "phi_core" => completion.phi_core, "phi_zhat" => completion.phi_zhat,
+            "status" => completion.status,
+        ),
+        completion.status == :optimal ? completion.beta : nothing,
+    )
+end
+
+function build_model(
+    model::BendersMasterModel{BendersYZ},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    base = model.base
+    solver = model.solver
+    cut_ids = model.cut_ids
+    _is_endpoint_nearest_style(base.assignment_policy.feasibility_cut_style) ||
+        throw(ArgumentError(
+            "BendersYZ requires NearestOpenAggregateODAssignmentPolicy(:big_m_nearest) or " *
+            "(:endpoint_chain); got :$(base.assignment_policy.feasibility_cut_style) -- :pair_chain has no " *
+            "addressable z separate from x, so there is nothing for BendersYZ's master to lift."
+        ))
+    mapping = create_map(base, data)
+    validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=base.allow_walk_only)
+    requests, _demand, feasible_pairs = _aggregate_od_route_benders_requests(mapping)
+    isempty(requests) && throw(ArgumentError("AggregateODRouteModel nearest-open Benders requires positive demand"))
+
+    master = Model(() -> Gurobi.Optimizer(optimizer_env))
+    variable_counts = Dict{String, Int}()
+    constraint_counts = Dict{String, Int}()
+
+    variable_counts["station_selection"] = add_station_selection_variables!(master, data)
+    y = master[:y]
+    variable_counts["benders_cut_placeholder"] = add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    constraint_counts["station_limit"] = add_station_limit_constraint!(master, data, base.l)
+    constraint_counts["endpoint_coverage"] =
+        _add_default_endpoint_coverage_constraints!(master, y, data, base, requests)
+
+    beta_schedule = solver.lifted_walking_objective && !isnothing(solver.route_regularization_weight_schedule) ?
+        solver.route_regularization_weight_schedule : [base.route_regularization_weight]
+    isapprox(beta_schedule[end], base.route_regularization_weight; atol=1e-9) || throw(ArgumentError(
+        "route_regularization_weight_schedule must end at base.route_regularization_weight " *
+        "($(base.route_regularization_weight)); got $(beta_schedule[end])"
+    ))
+    current_beta = beta_schedule[1]
+    subproblem_model = solver.lifted_walking_objective ? _unit_weighted_routing_model(base) : base
+
+    route_lb_exprs = nothing
+    if solver.lifted_walking_objective
+        walking_cost_expr, x_by_pair_full = _add_nearest_open_master_walking_cost!(
+            master, data, base, y, requests, feasible_pairs,
+        )
+        # _seed_yz_cuts! reads master[:nearest_endpoint_chain_cache], populated by the call
+        # just above -- must run after it, not before. Matches the original
+        # _run_aggregate_od_route_nearest_open_benders_yz, which likewise only replays seed
+        # cuts in this branch (seed_cuts/direct_enumeration_guide are only ever used together
+        # with lifted_walking_objective=true in practice).
+        isempty(model.seed_cuts) || _seed_yz_cuts!(master, theta, model.seed_cuts)
+        direct_cost_expr = AffExpr(0.0)
+        if !isnothing(model.direct_enumeration_pool)
+            direct_cost_expr = _add_direct_enumeration_guide!(
+                master, data, base, requests, feasible_pairs, x_by_pair_full, model.direct_enumeration_pool;
+                relax_integrality=solver.direct_enumeration_relax_integrality,
+            )
+        end
+        # route_lb_exprs reuses the zp/zd chains _add_nearest_open_master_walking_cost! just
+        # built, so it must be constructed after that call, not before.
+        route_lb_exprs = solver.lifted_routing_lower_bound ?
+            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+            solver.common_od_mcf_lower_bound ?
+                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+                nothing
+        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
+        @objective(master, Min, current_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr)
+        master[:walking_cost_expr] = walking_cost_expr
+        master[:direct_cost_expr] = direct_cost_expr
+    else
+        _add_nearest_open_master_z!(
+            master, data, y, requests, feasible_pairs, base.max_walking_distance, base.allow_walk_only,
+            base.assignment_policy.feasibility_cut_style,
+        )
+        route_lb_exprs = solver.lifted_routing_lower_bound ?
+            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+            solver.common_od_mcf_lower_bound ?
+                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
+                nothing
+        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
+        @objective(master, Min, sum(theta[cid] for cid in cut_ids) + route_lb_term)
+    end
+    master[:route_lb_exprs] = route_lb_exprs
+    master[:benders_beta_schedule] = beta_schedule
+    master[:benders_cut_ids] = cut_ids
+
+    counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
+    metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)
+    return BuildResult(master, mapping, nothing, counts, metadata)
+end
+
+function build_model(
+    model::BendersSubproblemModel{BendersYZ},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    m, fix_cons, cover_cons = _build_yz_route_subproblem_lp(
+        data, model.base, model.requests, model.feasible_pairs, model.columns, model.hat, optimizer_env, false,
+    )
+    mapping = create_map(model.base, data)
+    metadata = Dict{String, Any}("fix_cons" => fix_cons, "cover_cons" => cover_cons)
+    return BuildResult(m, mapping, nothing, nothing, metadata)
+end
+
+"""
+    run_opt(instance, problem::BendersSubproblemModel{BendersYZ}, solver::DirectSolver) -> OptResult
+
+`z` is fixed (via `hat` = `z_hat::Dict{_AggregateODRouteEndpointChainKey,Vector{Float64}}`);
+`x`/`lambda` stay free, so this subproblem has the same structural completeness gap as
+`BendersY`'s -- callers needing a provably optimal result should route through the
+repricing path (`_benders_solve_subproblem`'s `BendersYZ` method) rather than this
+single-solve `run_opt`, exactly as with `BendersY`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersSubproblemModel{BendersYZ},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    build_result = build_model(problem, instance; optimizer_env=optimizer_env)
+    m = build_result.model
+    cfg.silent && set_silent(m)
+    optimize!(m)
+    runtime_sec = time() - start
+    term_status = termination_status(m)
+    if primal_status(m) != MOI.FEASIBLE_POINT
+        return OptResult(
+            term_status, nothing, nothing, runtime_sec, m, build_result.mapping,
+            nothing, nothing, nothing, build_result.metadata,
+        )
+    end
+    fix_cons = build_result.metadata["fix_cons"]
+    rho = Dict(key => dual(con) for (key, con) in fix_cons)
+    return OptResult(
+        term_status, objective_value(m), nothing, runtime_sec, m, build_result.mapping,
+        nothing, nothing, nothing, build_result.metadata, rho,
     )
 end
