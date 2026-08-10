@@ -10,6 +10,9 @@ helpers.
 """
 
 export BendersMasterModel
+export BendersSubproblemModel
+export BendersCorePointProblem
+export BendersCompletionProblem
 
 """
     BendersMasterModel{D<:AbstractBendersDecomposition} <: AbstractODModel
@@ -108,4 +111,268 @@ function build_model(
     counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
     metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)
     return BuildResult(master, mapping, nothing, counts, metadata)
+end
+
+# ---------------------------------------------------------------------------
+# BendersSubproblemModel: fixed-y (or, for other decompositions, fixed-x/z/h)
+# recourse LP -- free assignment + route selection, dual off the fixing rows.
+# ---------------------------------------------------------------------------
+
+"""
+    BendersSubproblemModel{D<:AbstractBendersDecomposition} <: AbstractODModel
+
+`.base::AggregateODRouteModel` is whatever model the caller wants priced against --
+already resolved for `lifted_walking_objective` (the outer loop's unit-weighted
+`_unit_weighted_routing_model` swap when that's active, or the real model otherwise);
+this type is agnostic to that choice. `y_hat` is fixed via an equality constraint on a
+continuous `[0,1]` `y` (not the master's own binary `y`) so its dual is a valid
+subgradient -- mirrors `_build_nearest_open_y_subproblem_lp` exactly. `requests`/
+`feasible_pairs`/`columns` are per-call inputs (one cut group's requests, the current
+shared column pool), not re-derivable from `(base, data)` alone.
+"""
+struct BendersSubproblemModel{D <: AbstractBendersDecomposition} <: AbstractODModel
+    base::AggregateODRouteModel
+    y_hat::Vector{Float64}
+    requests::Vector{NTuple{3, Int}}
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}
+    columns::Vector{AggregateODRouteColumn}
+    decomposition::D
+    lambda_binary::Bool
+
+    function BendersSubproblemModel(
+        base::AggregateODRouteModel,
+        y_hat::Vector{Float64},
+        requests::Vector{NTuple{3, Int}},
+        feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+        columns::Vector{AggregateODRouteColumn},
+        decomposition::D;
+        lambda_binary::Bool=false,
+    ) where {D <: AbstractBendersDecomposition}
+        new{D}(base, y_hat, requests, feasible_pairs, columns, decomposition, lambda_binary)
+    end
+end
+
+function build_model(
+    model::BendersSubproblemModel{BendersY},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    mapping = create_map(model.base, data)
+    m, fix_cons, x, cover_cons = _build_nearest_open_y_subproblem_lp(
+        data, model.base, mapping, model.requests, nothing, model.feasible_pairs,
+        model.columns, model.y_hat, optimizer_env, false;
+        lambda_binary=model.lambda_binary,
+    )
+    metadata = Dict{String, Any}("fix_cons" => fix_cons, "x" => x, "cover_cons" => cover_cons)
+    return BuildResult(m, mapping, nothing, nothing, metadata)
+end
+
+"""
+    run_opt(instance, problem::BendersSubproblemModel{BendersY}, solver::DirectSolver) -> OptResult
+
+Builds and solves the subproblem LP once (no repricing loop here -- that's an outer-loop
+concern: call this repeatedly with a growing `columns` pool, exactly as
+`_solve_nearest_open_y_subproblem_lp_with_repricing` already does by calling
+`_build_nearest_open_y_subproblem_lp` in a loop). `OptResult.objective_value` is `v_hat`;
+`OptResult.duals` is `rho`, the fixing-constraint duals keyed by station id -- the
+subgradient the Benders cut needs. Does not reuse `_run_opt_impl`, since that hardcodes
+`m[:x]`/`m[:y]` solution extraction for the compact model's shape and this subproblem's
+`x` is a local dict, not `m[:x]`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersSubproblemModel{BendersY},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    build_result = build_model(problem, instance; optimizer_env=optimizer_env)
+    m = build_result.model
+    cfg.silent && set_silent(m)
+    optimize!(m)
+    runtime_sec = time() - start
+    term_status = termination_status(m)
+    if primal_status(m) != MOI.FEASIBLE_POINT
+        return OptResult(
+            term_status, nothing, nothing, runtime_sec, m, build_result.mapping,
+            nothing, nothing, nothing, build_result.metadata,
+        )
+    end
+    fix_cons = build_result.metadata["fix_cons"]
+    rho = Dict(j => dual(con) for (j, con) in fix_cons)
+    return OptResult(
+        term_status, objective_value(m), nothing, runtime_sec, m, build_result.mapping,
+        nothing, nothing, nothing, build_result.metadata, rho,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# BendersCorePointProblem / BendersCompletionProblem: cut-derivation LPs over
+# the cut's own dual algebra, not station selection -- AbstractBendersDualProblem.
+# Both delegate their real work to the existing, unmodified `y_mw_cut.jl`
+# functions (`_y_master_core_point`, `_restricted_mw_completion_lp`/
+# `_solve_restricted_mw_completion`) rather than re-deriving that algebra --
+# these are the most numerically delicate LPs in the package (tie-breaking,
+# degenerate-face reasoning extensively documented there), and a from-scratch
+# transcription here would risk exactly the kind of subtle sign/indexing bug
+# that algebra's own docstrings describe fixing in the past.
+# ---------------------------------------------------------------------------
+
+"""
+    BendersCorePointProblem{D<:AbstractBendersDecomposition} <: AbstractBendersDualProblem
+
+A relative-interior point of the Benders master's permanent structural region
+(`Y_LP = {sum(y)==l, 0<=y<=1, endpoint rows}` for `BendersY`), used as the Magnanti-Wong
+target point for `cut_derivation=:restricted_mw_fixed_pi`. `_y_master_core_point`'s
+affine-hull-probe-then-max-min-slack procedure is a multi-`optimize!` computation with no
+clean build/solve boundary, so `build_model` here is a placeholder satisfying the
+`AbstractOptimizationProblem` interface -- the actual computation happens in `run_opt`,
+which delegates to `_y_master_core_point` directly.
+"""
+struct BendersCorePointProblem{D <: AbstractBendersDecomposition} <: AbstractBendersDualProblem
+    base::AggregateODRouteModel
+    requests::Vector{NTuple{3, Int}}
+    decomposition::D
+    affine_hull_tol::Float64
+    core_point_tol::Float64
+
+    function BendersCorePointProblem(
+        base::AggregateODRouteModel,
+        requests::Vector{NTuple{3, Int}},
+        decomposition::D;
+        affine_hull_tol::Float64=1e-7,
+        core_point_tol::Float64=1e-7,
+    ) where {D <: AbstractBendersDecomposition}
+        new{D}(base, requests, decomposition, affine_hull_tol, core_point_tol)
+    end
+end
+
+function build_model(
+    problem::BendersCorePointProblem{BendersY},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    m = Model(() -> Gurobi.Optimizer(optimizer_env))
+    return BuildResult(m, EmptyStationSelectionMap(), nothing, nothing, Dict{String, Any}())
+end
+
+"""
+    run_opt(instance, problem::BendersCorePointProblem{BendersY}, solver::DirectSolver) -> OptResult
+
+Delegates to `_y_master_core_point` unmodified. `OptResult.solution` is
+`(y_core, delta)`; the full `AggregateODRouteYCorePoint` (with `fixed_zero`/`fixed_one`/
+`n_endpoint_rows`/`n_always_tight_endpoint_rows`) is in `metadata["core_point"]`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersCorePointProblem{BendersY},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    start = time()
+    core_point = _y_master_core_point(
+        instance, problem.base, problem.requests, optimizer_env, cfg.silent;
+        affine_hull_tol=problem.affine_hull_tol, core_point_tol=problem.core_point_tol,
+    )
+    runtime_sec = time() - start
+    return OptResult(
+        MOI.OPTIMAL, core_point.delta, (core_point.y, core_point.delta), runtime_sec,
+        Model(), EmptyStationSelectionMap(), nothing, nothing, nothing,
+        Dict{String, Any}(
+            "core_point" => core_point,
+            "fixed_zero" => core_point.fixed_zero,
+            "fixed_one" => core_point.fixed_one,
+            "n_endpoint_rows" => core_point.n_endpoint_rows,
+            "n_always_tight_endpoint_rows" => core_point.n_always_tight_endpoint_rows,
+        ),
+    )
+end
+
+"""
+    BendersCompletionProblem{D<:AbstractBendersDecomposition} <: AbstractBendersDualProblem
+
+Completes a fixed route-covering dual block `pi_full` (from CG certification, an
+outer-loop concern -- see `_certified_qbar`/`_certified_route_covering_pi`) into a full
+Benders cut, either Magnanti-Wong-maximized at `y_core` (`objective_mode=:maximize_core`)
+or the `:zero_completion` baseline (`objective_mode=:zero`), subject to tightness at
+`y_hat`. `build_model` calls `_restricted_mw_completion_lp` (unmodified) for inspection;
+`run_opt` calls the higher-level `_solve_restricted_mw_completion` (which itself calls
+`_restricted_mw_completion_lp` again) rather than reusing `build_model`'s result, so that
+the extensive post-solve diagnostics (IIS dump on infeasibility, tightness verification,
+`cut_constant`/`beta` extraction) stay exactly as they are today -- a minor duplication of
+LP construction traded for zero risk of diverging from that logic.
+"""
+struct BendersCompletionProblem{D <: AbstractBendersDecomposition} <: AbstractBendersDualProblem
+    base::AggregateODRouteModel
+    requests::Vector{NTuple{3, Int}}
+    feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}}
+    y_hat::Vector{Float64}
+    y_core::Vector{Float64}
+    pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64}
+    Q_bar::Float64
+    objective_mode::Symbol
+    decomposition::D
+
+    function BendersCompletionProblem(
+        base::AggregateODRouteModel,
+        requests::Vector{NTuple{3, Int}},
+        feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
+        y_hat::Vector{Float64},
+        y_core::Vector{Float64},
+        pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},
+        Q_bar::Float64,
+        objective_mode::Symbol,
+        decomposition::D,
+    ) where {D <: AbstractBendersDecomposition}
+        objective_mode in (:maximize_core, :zero) ||
+            throw(ArgumentError("unsupported objective_mode $(objective_mode)"))
+        new{D}(base, requests, feasible_pairs, y_hat, y_core, pi_full, Q_bar, objective_mode, decomposition)
+    end
+end
+
+function build_model(
+    problem::BendersCompletionProblem{BendersY},
+    data::StationSelectionData;
+    optimizer_env=nothing,
+)::BuildResult
+    isnothing(optimizer_env) && (optimizer_env = Gurobi.Env())
+    built = _restricted_mw_completion_lp(
+        data, problem.base, problem.requests, problem.feasible_pairs, problem.y_hat, problem.y_core,
+        problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, false,
+    )
+    return BuildResult(built.model, EmptyStationSelectionMap(), nothing, nothing, Dict{String, Any}("built" => built))
+end
+
+"""
+    run_opt(instance, problem::BendersCompletionProblem{BendersY}, solver::DirectSolver) -> OptResult
+
+Delegates to `_solve_restricted_mw_completion` unmodified. `OptResult.objective_value` is
+`cut_constant`; `OptResult.duals` is `beta` (`Dict{Int,Float64}`, keyed by station id --
+`nothing` when `status != :optimal`); `metadata` carries `phi_core`/`phi_ybar`/`status`.
+"""
+function run_opt(
+    instance::StationSelectionData,
+    problem::BendersCompletionProblem{BendersY},
+    solver::DirectSolver,
+)::OptResult
+    cfg = solver.config
+    optimizer_env = isnothing(cfg.optimizer_env) ? Gurobi.Env() : cfg.optimizer_env
+    completion = _solve_restricted_mw_completion(
+        instance, problem.base, problem.requests, problem.feasible_pairs, problem.y_hat, problem.y_core,
+        problem.pi_full, problem.Q_bar, problem.objective_mode, optimizer_env, cfg.silent,
+    )
+    status = completion.status == :optimal ? MOI.OPTIMAL : MOI.INFEASIBLE
+    return OptResult(
+        status, completion.cut_constant, nothing, completion.runtime_sec,
+        Model(), EmptyStationSelectionMap(), nothing, nothing, nothing,
+        Dict{String, Any}(
+            "phi_core" => completion.phi_core, "phi_ybar" => completion.phi_ybar,
+            "status" => completion.status,
+        ),
+        completion.status == :optimal ? completion.beta : nothing,
+    )
 end
