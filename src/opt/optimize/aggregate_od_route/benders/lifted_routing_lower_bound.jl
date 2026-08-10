@@ -111,28 +111,10 @@ function _build_lifted_routing_lower_bound_exprs!(
 
         # Aggregate arc-flow + depot arcs (route start/end -- captures route count and the flat
         # repositioning_time fee, deliberately uncapped).
-        f = Dict{Tuple{Int, Int}, VariableRef}()
-        for j in stations_list, k in stations_list
-            j == k && continue
-            f[(j, k)] = @variable(master, lower_bound = 0.0)
-            @constraint(master, f[(j, k)] <= y[j])
-            @constraint(master, f[(j, k)] <= y[k])
-        end
-        f0 = Dict{Int, VariableRef}()
-        fj0 = Dict{Int, VariableRef}()
-        for j in stations_list
-            f0[j] = @variable(master, lower_bound = 0.0)
-            fj0[j] = @variable(master, lower_bound = 0.0)
-            @constraint(master, f0[j] <= y[j])
-            @constraint(master, fj0[j] <= y[j])
-        end
+        f, f0, fj0 = add_arc_flow_variables!(master, y, stations_list)
 
         # Flow conservation: routes are walks, so in = out at every stop (depot arcs close the loop).
-        for j in stations_list
-            out_flow = sum(f[(j, k)] for k in stations_list if k != j; init = 0.0) + fj0[j]
-            in_flow = sum(f[(k, j)] for k in stations_list if k != j; init = 0.0) + f0[j]
-            @constraint(master, out_flow == in_flow)
-        end
+        add_flow_conservation_constraints!(master, f, f0, fj0, stations_list)
 
         # Per-commodity reachability, one commodity per (s,o,d) demand bucket in this scenario.
         for request in requests_s
@@ -153,29 +135,12 @@ function _build_lifted_routing_lower_bound_exprs!(
                 net_supply[k] = get(net_supply, k, AffExpr(0.0)) - zd[dropoff_rank[k]]
             end
 
-            g = Dict{Tuple{Int, Int}, VariableRef}()
-            for u in stations_list, v in stations_list
-                u == v && continue
-                g[(u, v)] = @variable(master, lower_bound = 0.0)
-                @constraint(master, g[(u, v)] <= f[(u, v)])
-            end
-            for u in stations_list
-                out_flow = sum(g[(u, v)] for v in stations_list if v != u; init = 0.0)
-                in_flow = sum(g[(v, u)] for v in stations_list if v != u; init = 0.0)
-                @constraint(master, out_flow - in_flow == get(net_supply, u, AffExpr(0.0)))
-            end
+            add_commodity_reachability_constraints!(master, f, stations_list, net_supply)
         end
 
         # route_lb_expr: route_regularization_weight * (arc travel time + repositioning fee), in
         # subproblem_model's units (see interaction note above).
-        route_lb_expr = AffExpr(0.0)
-        for ((j, k), var) in f
-            add_to_expression!(route_lb_expr, get_routing_cost(data, j, k), var)
-        end
-        for (_j, var) in fj0
-            add_to_expression!(route_lb_expr, subproblem_model.repositioning_time, var)
-        end
-        route_lb_exprs[cut_id] = subproblem_model.route_regularization_weight * route_lb_expr
+        route_lb_exprs[cut_id] = routing_lower_bound_cost_expr(data, subproblem_model, f, fj0)
     end
     return route_lb_exprs
 end

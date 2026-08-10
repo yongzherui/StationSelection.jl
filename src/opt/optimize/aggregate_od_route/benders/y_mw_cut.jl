@@ -74,11 +74,8 @@ function _y_master_core_point(
 
     lp = Model(() -> Gurobi.Optimizer(optimizer_env))
     silent && set_silent(lp)
-    @variable(lp, 0 <= y[1:n] <= 1)
-    @constraint(lp, sum(y) == base.l)
-    for row in endpoint_rows
-        @constraint(lp, sum(y[j] for j in row) >= 1.0)
-    end
+    y = add_relaxed_station_selection_variables!(lp, n)
+    add_relaxed_station_budget_constraints!(lp, y, base.l, endpoint_rows)
 
     function _max_slack(expr)
         @objective(lp, Max, expr)
@@ -96,16 +93,10 @@ function _y_master_core_point(
     fixed_one = [j for j in 1:n if ub_slack_max[j] <= affine_hull_tol]
     n_always_tight = count(<=(affine_hull_tol), endpoint_slack_max)
 
-    @variable(lp, 0 <= delta <= 1)
-    @objective(lp, Max, delta)
-    for j in 1:n
-        lb_slack_max[j] > affine_hull_tol && @constraint(lp, y[j] >= delta * lb_slack_max[j])
-        ub_slack_max[j] > affine_hull_tol && @constraint(lp, 1.0 - y[j] >= delta * ub_slack_max[j])
-    end
-    for (i, row) in enumerate(endpoint_rows)
-        endpoint_slack_max[i] > affine_hull_tol || continue
-        @constraint(lp, sum(y[j] for j in row) - 1.0 >= delta * endpoint_slack_max[i])
-    end
+    delta = add_core_point_slack_constraints!(
+        lp, y, endpoint_rows, lb_slack_max, ub_slack_max, endpoint_slack_max, affine_hull_tol,
+    )
+    set_core_point_objective!(lp, delta)
     optimize!(lp)
     primal_status(lp) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersY core-point normalized max-min-slack LP failed with status $(termination_status(lp))"))
@@ -409,81 +400,22 @@ function _restricted_mw_completion_lp(
     m = Model(() -> Gurobi.Optimizer(optimizer_env))
     silent && set_silent(m)
 
-    lambda = Dict{Any, VariableRef}(key => @variable(m) for key in keys(chains))
-    mu = Dict{Tuple{Any, Int}, VariableRef}()
-    nu = Dict{Tuple{Any, Int}, VariableRef}()
-    for (key, chain) in chains, idx in eachindex(chain.stations)
-        mu[(key, idx)] = @variable(m, lower_bound = 0.0)
-        nu[(key, idx)] = @variable(m, lower_bound = 0.0)
-    end
-    alpha = Dict(p => @variable(m) for p in requests)
-    rhoO = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    rhoD = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    sigma = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    for p in requests, pair in feasible_pairs[p]
-        is_walk_only_pair(pair) && continue
-        rhoO[(p, pair)] = @variable(m, lower_bound = 0.0)
-        rhoD[(p, pair)] = @variable(m, lower_bound = 0.0)
-        sigma[(p, pair)] = @variable(m, lower_bound = 0.0)
-    end
+    lambda, mu, nu = add_chain_dual_variables!(m, chains)
+    alpha, rhoO, rhoD, sigma = add_x_dual_variables!(m, requests, feasible_pairs)
 
-    # x-dual constraints: alpha[p] - rhoO - rhoD + sigma - pi_full <= c_walk
     # DEBUG: constraint refs captured for IIS cross-referencing (temporary instrumentation).
-    x_dual_cons = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, ConstraintRef}()
-    for p in requests, pair in feasible_pairs[p]
-        is_walk_only_pair(pair) && continue
-        c_walk = _assignment_pair_cost(data, p, pair; weight=base.walk_cost_weight)
-        pi_val = pi_full[(p, pair)]
-        x_dual_cons[(p, pair)] =
-            @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
-    end
-
-    # Precompute, per (chain key, rank), the (request, pair) terms that reference that z index --
-    # avoids an O(chains * candidates * requests * pairs) nested scan.
-    pickup_terms = Dict{Tuple{Any, Int}, Vector{Tuple{NTuple{3, Int}, Tuple{Int, Int}}}}()
-    dropoff_terms = Dict{Tuple{Any, Int}, Vector{Tuple{NTuple{3, Int}, Tuple{Int, Int}}}}()
-    for p in requests, pair in feasible_pairs[p]
-        is_walk_only_pair(pair) && continue
-        j, k = pair
-        push!(get!(pickup_terms, (pk_key_of[p], pk_rank_of[p][j]), Tuple{NTuple{3, Int}, Tuple{Int, Int}}[]), (p, pair))
-        push!(get!(dropoff_terms, (dp_key_of[p], dp_rank_of[p][k]), Tuple{NTuple{3, Int}, Tuple{Int, Int}}[]), (p, pair))
-    end
-
-    # z-dual constraints: lambda - mu - cost*sum(nu over chain) + role-specific (rhoO/rhoD - sigma) <= 0
+    x_dual_cons = add_x_dual_feasibility_constraints!(
+        m, data, base, requests, feasible_pairs, pi_full, alpha, rhoO, rhoD, sigma,
+    )
     # DEBUG: constraint refs captured for IIS cross-referencing (temporary instrumentation).
-    z_dual_cons = Dict{Tuple{Any, Int}, ConstraintRef}()
-    for (key, chain) in chains
-        max_cost = maximum(chain.costs)
-        nu_sum = sum(nu[(key, idx2)] for idx2 in eachindex(chain.stations))
-        for (idx, _station) in enumerate(chain.stations)
-            cost = chain.costs[idx]
-            expr = AffExpr(0.0)
-            add_to_expression!(expr, 1.0, lambda[key])
-            add_to_expression!(expr, -1.0, mu[(key, idx)])
-            add_to_expression!(expr, -cost, nu_sum)
-            terms = chain.side == :pickup ? get(pickup_terms, (key, idx), Tuple{NTuple{3, Int}, Tuple{Int, Int}}[]) :
-                    get(dropoff_terms, (key, idx), Tuple{NTuple{3, Int}, Tuple{Int, Int}}[])
-            for (p, pair) in terms
-                if chain.side == :pickup
-                    add_to_expression!(expr, 1.0, rhoO[(p, pair)])
-                else
-                    add_to_expression!(expr, 1.0, rhoD[(p, pair)])
-                end
-                add_to_expression!(expr, -1.0, sigma[(p, pair)])
-            end
-            z_dual_cons[(key, idx)] = @constraint(m, expr <= 0.0)
-        end
-    end
+    z_dual_cons = add_z_dual_feasibility_constraints!(
+        m, chains, requests, feasible_pairs, pk_key_of, dp_key_of, pk_rank_of, dp_rank_of, lambda, mu, nu, rhoO, rhoD, sigma,
+    )
 
     phi_core_expr = _restricted_mw_phi_expr(y_core, chains, lambda, mu, nu, alpha, sigma, requests, feasible_pairs)
     phi_ybar_expr = _restricted_mw_phi_expr(y_hat, chains, lambda, mu, nu, alpha, sigma, requests, feasible_pairs)
-    tightness_con = @constraint(m, phi_ybar_expr == Q_bar)
-
-    if objective_mode == :maximize_core
-        @objective(m, Max, phi_core_expr)
-    else
-        @objective(m, Max, 0.0)
-    end
+    tightness_con = add_completion_tightness_constraint!(m, phi_ybar_expr, Q_bar)
+    set_completion_objective!(m, phi_core_expr, objective_mode)
 
     return (
         model=m, lambda=lambda, mu=mu, nu=nu, alpha=alpha, rhoO=rhoO, rhoD=rhoD, sigma=sigma,

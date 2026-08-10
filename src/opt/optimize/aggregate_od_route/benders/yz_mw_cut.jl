@@ -79,43 +79,16 @@ function _yz_joint_core_point(
 
     lp = Model(() -> Gurobi.Optimizer(optimizer_env))
     silent && set_silent(lp)
-    @variable(lp, 0 <= y[1:n] <= 1)
-    @constraint(lp, sum(y) == base.l)
-    for row in endpoint_rows
-        @constraint(lp, sum(y[j] for j in row) >= 1.0)
-    end
-
-    z = Dict{Any, Vector{VariableRef}}()
-    # Every non-equality row touching z, as `expr(y,z) >= 0`, so B1/B2 below can treat them
-    # uniformly with y's own bound/endpoint rows.
-    z_slack_exprs = AffExpr[]
-    for (key, chain) in chains
-        n_chain = length(chain.stations)
-        zvar = @variable(lp, [1:n_chain], lower_bound = 0.0, upper_bound = 1.0)
-        z[key] = zvar
-        @constraint(lp, sum(zvar) == 1.0)
-        # Matches `_endpoint_big_m_variable!` (aggregate_od_route.jl) exactly, including its
-        # tie-break perturbation -- this must be the identical row family the real master builds,
-        # not merely an equivalent-looking one, for the resulting core point to mean anything.
-        # `chain.costs` (from `_restricted_mw_chains`/`_sorted_endpoint_chain`) is ALREADY
-        # tie-broken -- do NOT reapply `_big_m_tie_break_costs` here, that would perturb twice.
-        tb_costs = chain.costs
-        max_cost = maximum(tb_costs)
-        selected_cost = sum(tb_costs[idx] * zvar[idx] for idx in 1:n_chain)
-        for (idx, station) in enumerate(chain.stations)
-            big_m = max_cost - tb_costs[idx]
-            @constraint(lp, zvar[idx] <= y[station])
-            @constraint(lp, selected_cost <= tb_costs[idx] + big_m * (1.0 - y[station]))
-            cheaper_sum = sum(y[chain.stations[p]] for p in 1:(idx - 1); init=0.0)
-            @constraint(lp, zvar[idx] >= y[station] - cheaper_sum)
-
-            push!(z_slack_exprs, 1.0 * zvar[idx])                                      # zvar >= 0
-            push!(z_slack_exprs, 1.0 - zvar[idx])                                      # zvar <= 1
-            push!(z_slack_exprs, y[station] - zvar[idx])                               # zvar <= y[station]
-            push!(z_slack_exprs, tb_costs[idx] + big_m * (1.0 - y[station]) - selected_cost)  # Big-M ordering
-            push!(z_slack_exprs, zvar[idx] - y[station] + cheaper_sum)                 # nearest-open lower bound
-        end
-    end
+    y = add_relaxed_station_selection_variables!(lp, n)
+    add_relaxed_station_budget_constraints!(lp, y, base.l, endpoint_rows)
+    # z_slack_exprs: every non-equality row touching z, as `expr(y,z) >= 0`, so B1/B2 below can
+    # treat them uniformly with y's own bound/endpoint rows. Matches `_endpoint_big_m_variable!`
+    # (aggregate_od_route.jl) exactly, including its tie-break perturbation -- this must be the
+    # identical row family the real master builds, not merely an equivalent-looking one, for the
+    # resulting core point to mean anything. `chain.costs` (from `_restricted_mw_chains`/
+    # `_sorted_endpoint_chain`) is ALREADY tie-broken -- add_big_m_chain_variables_and_constraints!
+    # does NOT reapply `_big_m_tie_break_costs`, that would perturb twice.
+    z, z_slack_exprs = add_big_m_chain_variables_and_constraints!(lp, y, chains)
 
     function _max_slack(expr)
         @objective(lp, Max, expr)
@@ -135,20 +108,11 @@ function _yz_joint_core_point(
     n_always_tight_endpoint = count(<=(affine_hull_tol), endpoint_slack_max)
     n_always_tight_z = count(<=(affine_hull_tol), z_slack_max)
 
-    @variable(lp, 0 <= delta <= 1)
-    @objective(lp, Max, delta)
-    for j in 1:n
-        lb_slack_max[j] > affine_hull_tol && @constraint(lp, y[j] >= delta * lb_slack_max[j])
-        ub_slack_max[j] > affine_hull_tol && @constraint(lp, 1.0 - y[j] >= delta * ub_slack_max[j])
-    end
-    for (i, row) in enumerate(endpoint_rows)
-        endpoint_slack_max[i] > affine_hull_tol || continue
-        @constraint(lp, sum(y[j] for j in row) - 1.0 >= delta * endpoint_slack_max[i])
-    end
-    for (i, expr) in enumerate(z_slack_exprs)
-        z_slack_max[i] > affine_hull_tol || continue
-        @constraint(lp, expr >= delta * z_slack_max[i])
-    end
+    delta = add_core_point_slack_constraints!(
+        lp, y, endpoint_rows, lb_slack_max, ub_slack_max, endpoint_slack_max, affine_hull_tol,
+    )
+    add_core_point_z_slack_constraints!(lp, delta, z_slack_exprs, z_slack_max, affine_hull_tol)
+    set_core_point_objective!(lp, delta)
     optimize!(lp)
     primal_status(lp) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("BendersYZ joint core-point normalized max-min-slack LP failed with status $(termination_status(lp))"))
@@ -241,25 +205,11 @@ function _yz_completion_lp(
     m = Model(() -> Gurobi.Optimizer(optimizer_env))
     silent && set_silent(m)
 
-    alpha = Dict{NTuple{3, Int}, VariableRef}(p => @variable(m) for p in requests)
-    rhoO = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    rhoD = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    sigma = Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, VariableRef}()
-    for p in requests, pair in feasible_pairs[p]
-        is_walk_only_pair(pair) && continue
-        rhoO[(p, pair)] = @variable(m, lower_bound = 0.0)
-        rhoD[(p, pair)] = @variable(m, lower_bound = 0.0)
-        sigma[(p, pair)] = @variable(m, lower_bound = 0.0)
-    end
+    alpha, rhoO, rhoD, sigma = add_x_dual_variables!(m, requests, feasible_pairs)
 
     # x-dual constraint: identical algebra to `_restricted_mw_completion_lp`'s (rows 1/4/8 are
     # unaffected by whether z or y is the decomposition's fixed master variable).
-    for p in requests, pair in feasible_pairs[p]
-        is_walk_only_pair(pair) && continue
-        c_walk = _assignment_pair_cost(data, p, pair; weight=base.walk_cost_weight)
-        pi_val = pi_full[(p, pair)]
-        @constraint(m, alpha[p] - rhoO[(p, pair)] - rhoD[(p, pair)] + sigma[(p, pair)] - pi_val <= c_walk)
-    end
+    add_x_dual_feasibility_constraints!(m, data, base, requests, feasible_pairs, pi_full, alpha, rhoO, rhoD, sigma)
 
     z_hat_generic = Dict{Any, Vector{Float64}}(key => vals for (key, vals) in z_hat)
     phi_core_expr = _yz_phi_expr(
@@ -268,13 +218,8 @@ function _yz_completion_lp(
     phi_zhat_expr = _yz_phi_expr(
         z_hat_generic, alpha, rhoO, rhoD, sigma, requests, feasible_pairs, pk_key_of, dp_key_of, pk_rank_of, dp_rank_of,
     )
-    @constraint(m, phi_zhat_expr == Q_bar)
-
-    if objective_mode == :maximize_core
-        @objective(m, Max, phi_core_expr)
-    else
-        @objective(m, Max, 0.0)
-    end
+    add_completion_tightness_constraint!(m, phi_zhat_expr, Q_bar)
+    set_completion_objective!(m, phi_core_expr, objective_mode)
 
     return (
         model=m, alpha=alpha, rhoO=rhoO, rhoD=rhoD, sigma=sigma,
