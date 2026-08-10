@@ -99,11 +99,17 @@ function build_model(
                 relax_integrality=solver.direct_enumeration_relax_integrality,
             )
         end
-        @objective(master, Min, current_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr) + walking_cost_expr)
+        set_benders_lifted_master_objective!(
+            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, AffExpr(0.0), current_beta;
+            lifted_walking_objective=true,
+        )
         master[:walking_cost_expr] = walking_cost_expr
         master[:direct_cost_expr] = direct_cost_expr
     else
-        @objective(master, Min, sum(theta[cid] for cid in cut_ids))
+        set_benders_lifted_master_objective!(
+            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), AffExpr(0.0), current_beta;
+            lifted_walking_objective=false,
+        )
     end
     master[:benders_beta_schedule] = beta_schedule
     master[:benders_cut_ids] = cut_ids
@@ -261,14 +267,7 @@ function build_model(
     end
     master[:x] = x
 
-    obj = AffExpr(0.0)
-    for request in requests, pair in feasible_pairs[request]
-        add_to_expression!(obj, _assignment_pair_cost(data, request, pair; weight=base.walk_cost_weight), x[(request, pair)])
-    end
-    for cut_id in cut_ids
-        add_to_expression!(obj, 1.0, theta[cut_id])
-    end
-    @objective(master, Min, obj)
+    set_benders_xy_master_objective!(master, data, x, theta, cut_ids, requests, feasible_pairs, base.walk_cost_weight)
 
     counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
     metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)
@@ -648,7 +647,10 @@ function build_model(
                 _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
                 nothing
         route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
-        @objective(master, Min, current_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr)
+        set_benders_lifted_master_objective!(
+            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, route_lb_term, current_beta;
+            lifted_walking_objective=true,
+        )
         master[:walking_cost_expr] = walking_cost_expr
         master[:direct_cost_expr] = direct_cost_expr
     else
@@ -662,7 +664,10 @@ function build_model(
                 _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
                 nothing
         route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
-        @objective(master, Min, sum(theta[cid] for cid in cut_ids) + route_lb_term)
+        set_benders_lifted_master_objective!(
+            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), route_lb_term, current_beta;
+            lifted_walking_objective=false,
+        )
     end
     master[:route_lb_exprs] = route_lb_exprs
     master[:benders_beta_schedule] = beta_schedule
@@ -770,15 +775,10 @@ function build_model(
     )
     master[:h] = h
 
-    obj = AffExpr(0.0)
-    for p in physical_pairs, pair in feasible_pairs_by_p[p]
-        o, d = p
-        add_to_expression!(obj, occurrence_count[p] * base.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
-    end
-    for cut_id in cut_ids
-        add_to_expression!(obj, 1.0, theta[cut_id])
-    end
-    @objective(master, Min, obj)
+    walking_expr = physical_pair_walking_cost_expr(
+        data, physical_pairs, feasible_pairs_by_p, occurrence_count, h; weight=base.walk_cost_weight,
+    )
+    set_benders_yzh_master_objective!(master, walking_expr, theta, cut_ids)
 
     counts = ModelCounts(variable_counts, constraint_counts, Dict{String, Int}())
     metadata = Dict{String, Any}("requests" => requests, "feasible_pairs" => feasible_pairs)

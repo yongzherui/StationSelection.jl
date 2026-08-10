@@ -250,7 +250,7 @@ function _add_aggregate_od_route_benders_yzh_optimality_cut!(
     certification_already_failed::Bool=false,
 )
     if solver.cut_derivation == :standard
-        @constraint(master, theta[cut_id] >= v_hat + sum(
+        add_benders_optimality_cut!(master, theta, cut_id, v_hat + sum(
             rho[key] * (h[key] - get(h_hat, key, 0.0)) for key in keys(rho)
         ))
         return (mode=:standard, fallback=false)
@@ -273,7 +273,7 @@ function _add_aggregate_od_route_benders_yzh_optimality_cut!(
     end
 
     Q_bar, zero_rho, _certified = zc_result
-    @constraint(master, theta[cut_id] >= Q_bar + sum(
+    add_benders_optimality_cut!(master, theta, cut_id, Q_bar + sum(
         get(zero_rho, key, 0.0) * (h[key] - get(h_hat, key, 0.0)) for key in keys(zero_rho)
     ))
     return (mode=solver.cut_derivation, fallback=false)

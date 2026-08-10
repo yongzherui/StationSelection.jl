@@ -38,36 +38,11 @@ function _add_direct_enumeration_guide!(
     relax_integrality::Bool=false,
 )::AffExpr
     S = n_scenarios(data)
-    pair_to_columns = Dict{Tuple{Int, Int}, Vector{Int}}()
-    for (idx, column) in enumerate(full_pool), pair in column.od_pairs
-        push!(get!(pair_to_columns, pair, Int[]), idx)
-    end
-
-    theta_direct = relax_integrality ?
-        @variable(master, [1:length(full_pool), 1:S], lower_bound = 0.0, upper_bound = 1.0) :
-        @variable(master, [1:length(full_pool), 1:S], Bin)
+    theta_direct = add_direct_enumeration_guide_variables!(master, full_pool, S; relax_integrality=relax_integrality)
     master[:theta_direct] = theta_direct
-    for request in requests
-        s, _o, _d = request
-        for pair in feasible_pairs[request]
-            requires_no_vehicle_route(pair) && continue
-            covering = get(pair_to_columns, pair, Int[])
-            @constraint(
-                master,
-                sum(theta_direct[idx, s] for idx in covering; init=0.0) >= x_by_pair_full[(request, pair)]
-            )
-        end
-    end
+    add_direct_enumeration_guide_coverage_constraints!(master, theta_direct, requests, feasible_pairs, full_pool, x_by_pair_full)
 
-    direct_cost = AffExpr(0.0)
-    for (idx, column) in enumerate(full_pool), s in 1:S
-        add_to_expression!(
-            direct_cost,
-            aggregate_od_route_column_objective_coefficient(1.0, model.repositioning_time, column),
-            theta_direct[idx, s],
-        )
-    end
-    return direct_cost
+    return benders_route_regularization_cost_expr(_unit_weighted_routing_model(model), full_pool, theta_direct, S)
 end
 
 """
@@ -80,7 +55,8 @@ exactly this affine shape (`y_mw_cut.jl`), so no re-derivation is needed to repl
 """
 function _seed_y_cuts!(master::Model, y, theta, seed_cuts::Vector{<:NamedTuple})::Nothing
     for c in seed_cuts
-        @constraint(master, theta[c.cut_id] >= c.cut_constant + sum(c.coeffs[j] * y[j] for j in keys(c.coeffs); init=0.0))
+        rhs_expr = c.cut_constant + sum(c.coeffs[j] * y[j] for j in keys(c.coeffs); init=0.0)
+        add_benders_optimality_cut!(master, theta, c.cut_id, rhs_expr)
     end
     return nothing
 end
@@ -96,10 +72,8 @@ cut (`yz_mw_cut.jl`) already reduces to. Requires the walking-cost/chain-cache m
 function _seed_yz_cuts!(master::Model, theta, seed_cuts::Vector{<:NamedTuple})::Nothing
     chain_cache = master[:nearest_endpoint_chain_cache]
     for c in seed_cuts
-        @constraint(
-            master,
-            theta[c.cut_id] >= c.cut_constant + sum(c.coeffs[k] * chain_cache[k[1]][k[2]] for k in keys(c.coeffs); init=0.0)
-        )
+        rhs_expr = c.cut_constant + sum(c.coeffs[k] * chain_cache[k[1]][k[2]] for k in keys(c.coeffs); init=0.0)
+        add_benders_optimality_cut!(master, theta, c.cut_id, rhs_expr)
     end
     return nothing
 end

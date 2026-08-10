@@ -30,6 +30,28 @@ function assignment_walking_cost_expr(
 end
 
 """
+    physical_pair_walking_cost_expr(data, physical_pairs, feasible_pairs_by_p, occurrence_count, h; weight) -> AffExpr
+
+`BendersYZH`'s master walking cost: one term per `(physical_pair, pair)`, weighted by how many
+scenarios that physical pair occurs in (`occurrence_count`) since `h` is scenario-compressed.
+"""
+function physical_pair_walking_cost_expr(
+    data::StationSelectionData,
+    physical_pairs::Vector{Tuple{Int, Int}},
+    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
+    occurrence_count::Dict{Tuple{Int, Int}, Int},
+    h::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, VariableRef};
+    weight::Float64,
+)
+    expr = AffExpr(0.0)
+    for p in physical_pairs, pair in feasible_pairs_by_p[p]
+        o, d = p
+        add_to_expression!(expr, occurrence_count[p] * weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
+    end
+    return expr
+end
+
+"""
     benders_route_regularization_cost_expr(model, columns, lambda, n_scenarios) -> AffExpr
 
 Sum of `aggregate_od_route_column_objective_coefficient` weighted by each column's `lambda`

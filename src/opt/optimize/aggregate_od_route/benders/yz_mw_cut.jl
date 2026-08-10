@@ -423,7 +423,7 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     # Q_bar: that would freeze an incumbent-specific shift into a globally active cut.
     residual_shift = isnothing(route_lb_expr) ? AffExpr(0.0) : route_lb_expr
     if solver.cut_derivation == :standard
-        @constraint(master, theta[cut_id] >= v_hat + sum(
+        add_benders_optimality_cut!(master, theta, cut_id, v_hat + sum(
             rho[(key, i)] * (chain_cache[key][i] - z_hat[key][i]) for (key, i) in keys(rho)
         ) - residual_shift)
         standard_cut_constant = v_hat - sum(rho[(key, i)] * z_hat[key][i] for (key, i) in keys(rho); init=0.0)
@@ -458,7 +458,7 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
 
     cut_constant = yz_result.cut_constant
     beta = yz_result.beta
-    @constraint(master, theta[cut_id] >= cut_constant + sum(
+    add_benders_optimality_cut!(master, theta, cut_id, cut_constant + sum(
         beta[key] * chain_cache[key[1]][key[2]] for key in keys(beta)
     ) - residual_shift)
     return (

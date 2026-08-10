@@ -871,7 +871,7 @@ function _add_aggregate_od_route_benders_y_optimality_cut!(
     n = data.n_stations
     if solver.cut_derivation == :standard
         alpha = v_hat - sum(rho[j] * y_hat[j] for j in 1:n)
-        @constraint(master, theta[cut_id] >= alpha + sum(rho[j] * y[j] for j in 1:n))
+        add_benders_optimality_cut!(master, theta, cut_id, alpha + sum(rho[j] * y[j] for j in 1:n))
         return (
             mode=:standard, mw_status=:not_attempted, Q_bar=v_hat, phi_core=NaN,
             phi_core_baseline=NaN, completion_runtime_sec=0.0, n_routes=0,
@@ -903,7 +903,7 @@ function _add_aggregate_od_route_benders_y_optimality_cut!(
 
     cut_constant = mw_result.cut_constant
     beta = mw_result.beta
-    @constraint(master, theta[cut_id] >= cut_constant + sum(get(beta, j, 0.0) * y[j] for j in 1:n))
+    add_benders_optimality_cut!(master, theta, cut_id, cut_constant + sum(get(beta, j, 0.0) * y[j] for j in 1:n))
     return (
         mode=solver.cut_derivation, mw_status=:ok, Q_bar=mw_result.Q_bar, phi_core=mw_result.phi_core,
         phi_core_baseline=isnothing(mw_result.phi_core_baseline) ? NaN : mw_result.phi_core_baseline,

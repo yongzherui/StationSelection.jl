@@ -298,7 +298,10 @@ function _benders_add_optimality_cut!(
 )
     x = master[:x]
     x_hat = hat.x_hat
-    @constraint(master, master[:theta][cut_id] >= v_hat + sum(sub_duals[key] * (x[key] - get(x_hat, key, 0.0)) for key in keys(sub_duals)))
+    add_benders_optimality_cut!(
+        master, master[:theta], cut_id,
+        v_hat + sum(sub_duals[key] * (x[key] - get(x_hat, key, 0.0)) for key in keys(sub_duals)),
+    )
     cut_constant = v_hat - sum(sub_duals[key] * get(x_hat, key, 0.0) for key in keys(sub_duals); init=0.0)
     return (cut_constant=cut_constant, coeffs=sub_duals)
 end
@@ -811,7 +814,13 @@ function _run_benders_decomposition(
             if solver.lifted_walking_objective
                 walking_cost_expr = master[:walking_cost_expr]
                 direct_cost_expr = master[:direct_cost_expr]
-                @objective(master, Min, next_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr) + walking_cost_expr)
+                # route_lb_term is intentionally omitted here (AffExpr(0.0)), matching this
+                # re-set's pre-existing behavior even under BendersYZ -- not fixed here, since
+                # that would be a behavior change out of scope for this extraction.
+                set_benders_lifted_master_objective!(
+                    master, theta, cut_ids, walking_cost_expr, direct_cost_expr, AffExpr(0.0), next_beta;
+                    lifted_walking_objective=true,
+                )
             end
             # An incumbent optimal for the previous stage's beta is not comparable once beta
             # changes (same y_hat, different weighted total) -- only the master (with its
