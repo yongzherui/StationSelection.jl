@@ -18,7 +18,7 @@ enough to live directly in `yzh.jl`). `dispatch.jl` holds the top-level
 `run_opt` dispatch that routes to whichever of those a `BendersSolver`'s
 `decomposition` field selects.
 
-`_add_default_endpoint_coverage_constraints!` (`src/opt/constraints/aggregate_od_route.jl`) /
+`_add_default_endpoint_coverage_constraints!` (`src/opt/constraints/aggregate_od_route/core.jl`) /
 `_check_aggregate_od_route_endpoint_feasibility!` below, together with `allow_same_station=true`
 always being in effect (`create_map`), make the
 subproblem provably always feasible: every physical endpoint any request touches has some open

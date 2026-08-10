@@ -9,7 +9,7 @@ collisions, invalid same-station data, LP integrality under fixed `y`, and a
 compact-model-vs-procedural-enumeration comparison.
 
 Direct walking reuses the existing `WALK_ONLY_PAIR = (0,0)` sentinel slot in
-`x` as `w_p` (see `src/opt/constraints/aggregate_od_route.jl`,
+`x` as `w_p` (see `src/opt/constraints/aggregate_od_route/core.jl`,
 `_add_nearest_open_endpoint_linked_x!`) rather than introducing a new
 variable type.
 """

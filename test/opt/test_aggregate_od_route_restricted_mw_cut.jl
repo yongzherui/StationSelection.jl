@@ -274,7 +274,7 @@
         # Regression test for a 2026-07-24 bug: `_sorted_endpoint_chain` (this file's dual
         # derivation) built its endpoint-chain "key" from raw, un-perturbed sorted costs, while
         # the real primal's Big-M row (`_endpoint_big_m_variable!` in
-        # src/opt/constraints/aggregate_od_route.jl) is built from TIE-BROKEN costs
+        # src/opt/constraints/aggregate_od_route/core.jl) is built from TIE-BROKEN costs
         # (`_big_m_tie_break_costs`). The two silently disagreed whenever an endpoint had many
         # candidate stations at (or near) the same walking cost -- exactly what happens once
         # `max_walking_distance` is wide enough that every station is a candidate for every
