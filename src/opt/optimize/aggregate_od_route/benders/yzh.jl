@@ -26,47 +26,6 @@ the whole thing needed for the cut, computed by a plain sum rather than a comple
 """
 
 """
-    _add_nearest_open_master_h!(master, data, y, physical_pairs, feasible_pairs_by_p, max_walking_distance, allow_walk_only, selector_style)
-
-BendersYZH's master `h`-builder: one continuous `[0,1]` `h[(p,pair)]` per
-physical OD pair `p` (not per `(scenario,o,d)`, unlike BendersXY's `x`),
-linked to `zp`/`zd` via `_add_nearest_open_endpoint_linked_x!` exactly as
-BendersXY's `x` is -- `h` plays the identical collision-blocking role `x`
-plays there (`sum(h over pairs)==1` with no diagonal entry unless
-walk-only), so BendersYZH's master, like BendersXY's, needs no separate
-feasibility-cut branch. Iterating `physical_pairs` (not the flat
-per-scenario `requests`) already touches every endpoint any request would,
-so this alone populates/reuses `master[:nearest_endpoint_chain_cache]` --
-no separate `_add_nearest_open_master_z!` call is needed before this one.
-"""
-function _add_nearest_open_master_h!(
-    master::Model,
-    data::StationSelectionData,
-    y,
-    physical_pairs::Vector{Tuple{Int, Int}},
-    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
-    max_walking_distance::Float64,
-    allow_walk_only::Bool,
-    selector_style::Symbol,
-)
-    h = Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, VariableRef}()
-    for p in physical_pairs
-        o, d = p
-        pairs = feasible_pairs_by_p[p]
-        for pair in pairs
-            h[(p, pair)] = @variable(master, lower_bound = 0.0, upper_bound = 1.0)
-        end
-        @constraint(master, sum(h[(p, pair)] for pair in pairs; init=0.0) == 1.0)
-        h_by_pair = Dict(pair => h[(p, pair)] for pair in pairs)
-        _add_nearest_open_endpoint_linked_x!(
-            master, data, y, o, d, pairs, h_by_pair, max_walking_distance;
-            binary=false, allow_walk_only=allow_walk_only, selector_style=selector_style,
-        )
-    end
-    return h
-end
-
-"""
     _selected_assignments_from_h(physical_pairs, occurrences, feasible_pairs_by_p, h_hat)
 
 Expands a rounded, scenario-compressed `h_hat` back into the flat
@@ -478,9 +437,11 @@ function _run_aggregate_od_route_nearest_open_benders_yzh(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     h = _add_nearest_open_master_h!(
         master, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,

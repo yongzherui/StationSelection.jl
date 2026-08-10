@@ -375,9 +375,11 @@ function _run_aggregate_od_route_nearest_open_benders_y(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     if _is_endpoint_nearest_style(model.assignment_policy.feasibility_cut_style)
         validate_big_m_nearest_aggregate_od_route!(data, mapping; allow_walk_only=model.allow_walk_only)

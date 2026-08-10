@@ -195,8 +195,9 @@ function solve_benders_yzh_master(
 
     m = Model(() -> Gurobi.Optimizer(env))
     silent && set_silent(m)
-    @variable(m, y[1:data.n_stations], Bin)
-    @constraint(m, sum(y) == model.l)
+    add_station_selection_variables!(m, data)
+    y = m[:y]
+    add_station_limit_constraint!(m, data, model.l)
     _add_default_endpoint_coverage_constraints!(m, y, data, model, requests)
     h = _add_nearest_open_master_h!(
         m, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,

@@ -306,9 +306,11 @@ function _run_aggregate_od_route_nearest_open_benders_yz(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     direct_cost_expr = AffExpr(0.0)
     if solver.lifted_walking_objective

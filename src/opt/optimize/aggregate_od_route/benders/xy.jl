@@ -215,9 +215,11 @@ function _run_aggregate_od_route_nearest_open_benders_xy(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     x = _add_nearest_open_master_x!(master, data, model, y, requests, feasible_pairs)
 
@@ -362,9 +364,11 @@ function _run_aggregate_od_route_free_benders_xy(
 
     master = Model(() -> Gurobi.Optimizer(optimizer_env))
     cfg.silent && set_silent(master)
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     x = _add_unrestricted_master_x!(master, y, requests, feasible_pairs)
 

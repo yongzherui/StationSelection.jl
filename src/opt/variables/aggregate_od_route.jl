@@ -3,6 +3,24 @@ Variables for AggregateODRouteModel.
 """
 
 export add_aggregate_od_route_theta_variables!
+export add_benders_cut_placeholder_variables!
+
+"""
+    add_benders_cut_placeholder_variables!(m::Model, cut_ids) -> Int
+
+Adds the Benders master's cut-placeholder variable `theta[cut_ids] >= 0.0`
+(registered as `m[:theta]`) -- shared across every `AggregateODRouteModel`
+Benders decomposition (`BendersY`/`BendersXY`/`BendersYZ`/`BendersYZH`/
+`BranchAndBendersSolver`), which otherwise each declare this identical
+variable inline. Distinct from `theta_compat`
+([`add_aggregate_od_route_theta_variables!`](@ref)), the compact model's
+per-route-column variable -- no key collision.
+"""
+function add_benders_cut_placeholder_variables!(m::Model, cut_ids)::Int
+    before = JuMP.num_variables(m)
+    @variable(m, theta[cut_ids] >= 0.0)
+    return JuMP.num_variables(m) - before
+end
 
 function add_aggregate_od_route_theta_variables!(
     m::Model,

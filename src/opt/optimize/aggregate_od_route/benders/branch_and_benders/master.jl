@@ -331,9 +331,11 @@ function _build_branch_benders_master(
     master_mip_gap = isnothing(cfg.mip_gap) ? 0.01 : cfg.mip_gap
     set_optimizer_attribute(master, "MIPGap", master_mip_gap)
 
-    @variable(master, y[1:data.n_stations], Bin)
-    @variable(master, theta[cut_ids] >= 0.0)
-    @constraint(master, sum(y) == model.l)
+    add_station_selection_variables!(master, data)
+    y = master[:y]
+    add_benders_cut_placeholder_variables!(master, cut_ids)
+    theta = master[:theta]
+    add_station_limit_constraint!(master, data, model.l)
     _add_default_endpoint_coverage_constraints!(master, y, data, model, requests)
     walking_cost_expr, _ = _add_nearest_open_master_walking_cost!(
         master, data, model, y, requests, feasible_pairs,
