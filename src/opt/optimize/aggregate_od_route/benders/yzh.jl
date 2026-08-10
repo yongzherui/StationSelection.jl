@@ -141,29 +141,10 @@ function _build_yzh_route_subproblem_lp(
     return m, fix_cons, cover_cons
 end
 
-function _solve_yzh_route_subproblem_lp(
-    data::StationSelectionData,
-    model::AnyAggregateODRouteModel,
-    group_requests,
-    feasible_pairs_by_p::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
-    columns::Vector{AggregateODRouteColumn},
-    h_hat::Dict{Tuple{Tuple{Int, Int}, Tuple{Int, Int}}, Float64},
-    optimizer_env,
-    silent::Bool,
-)
-    m, fix_cons, _cover_cons = _build_yzh_route_subproblem_lp(
-        data, model, group_requests, feasible_pairs_by_p, columns, h_hat, optimizer_env, silent
-    )
-    optimize!(m)
-    primal_status(m) == MOI.FEASIBLE_POINT ||
-        throw(ArgumentError("BendersYZH route LP subproblem failed with status $(termination_status(m))"))
-    return objective_value(m), Dict(key => dual(con) for (key, con) in fix_cons)
-end
-
 """
     _solve_yzh_route_subproblem_lp_with_repricing(data, model, mapping, group_requests, feasible_pairs_by_p, columns, h_hat, optimizer_env, silent; max_reprice_rounds)
 
-Diagnostic/soundness-check companion to [`_solve_yzh_route_subproblem_lp`](@ref), mirroring
+Diagnostic/soundness-check companion to `_build_yzh_route_subproblem_lp`, mirroring
 `_solve_yz_route_subproblem_lp_with_repricing` exactly: after each LP solve, extracts the
 covering-constraint duals (via `_extract_nearest_open_y_subproblem_coverage_duals`, reused
 unmodified since `cover_cons` has the identical `(request, pair) => ConstraintRef` shape) and

@@ -109,25 +109,6 @@ function _build_yz_route_subproblem_lp(
     return m, fix_cons, cover_cons
 end
 
-function _solve_yz_route_subproblem_lp(
-    data::StationSelectionData,
-    model::AnyAggregateODRouteModel,
-    requests,
-    feasible_pairs,
-    columns::Vector{AggregateODRouteColumn},
-    z_hat::Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}},
-    optimizer_env,
-    silent::Bool,
-)
-    m, fix_cons, _cover_cons = _build_yz_route_subproblem_lp(
-        data, model, requests, feasible_pairs, columns, z_hat, optimizer_env, silent
-    )
-    optimize!(m)
-    primal_status(m) == MOI.FEASIBLE_POINT ||
-        throw(ArgumentError("BendersYZ route LP subproblem failed with status $(termination_status(m))"))
-    return objective_value(m), Dict(key => dual(con) for (key, con) in fix_cons)
-end
-
 """
     _solve_yz_route_subproblem_lp_with_repricing(...)
 
@@ -137,8 +118,8 @@ so a column pool proven exhaustive by `_solve_fixed_route_covering_by_cg` for
 just the one nearest-open assignment at `y_hat` is not necessarily complete
 for *this* LP's own, more general dual structure -- the same completeness gap
 `_solve_nearest_open_y_subproblem_lp_with_repricing`'s docstring describes for
-BendersY (confirmed empirically: the plain, non-repricing
-`_solve_yz_route_subproblem_lp` converges BendersYZ to a genuinely
+BendersY (confirmed empirically: a single plain, non-repricing LP solve on
+`_build_yz_route_subproblem_lp` converges BendersYZ to a genuinely
 suboptimal-but-correctly-costed `y` on the real-data alignment fixture).
 Reuses `_extract_nearest_open_y_subproblem_coverage_duals` unchanged since
 `cover_cons` has the identical `(request, pair) => ConstraintRef` shape. Like

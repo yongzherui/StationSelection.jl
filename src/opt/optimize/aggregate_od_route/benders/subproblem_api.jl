@@ -80,18 +80,30 @@ function solve_benders_y_subproblem(
         objective_value = v_hat
         rho_out = Dict{Any, Float64}(j => v for (j, v) in rho)
     else
-        objective_value, rho = _solve_nearest_open_y_subproblem_lp(
-            data, model, mapping, requests, demand, feasible_pairs, columns, y_hat_f, env, silent,
+        # Plugs into the same run_opt/BendersSubproblemModel path the generic Benders runner
+        # itself uses for the non-repricing case (generic_runner.jl's _benders_solve_subproblem),
+        # rather than a separate hand-rolled single-solve wrapper.
+        sub_result = run_opt(
+            data,
+            BendersSubproblemModel(model, y_hat_f, requests, feasible_pairs, columns, BendersY()),
+            DirectSolver(config=SolverConfig(optimizer_env=env, silent=silent)),
         )
-        rho_out = Dict{Any, Float64}(j => v for (j, v) in rho)
+        sub_result.termination_status == MOI.OPTIMAL ||
+            throw(ArgumentError("BendersY full LP subproblem failed with status $(sub_result.termination_status)"))
+        objective_value = sub_result.objective_value
+        rho_out = Dict{Any, Float64}(j => v for (j, v) in sub_result.duals)
     end
-    # Re-solve once more to read x off a live model (the functions above only
-    # return the objective/duals) -- cheap relative to the LP solve itself, and
-    # keeps this API's result self-contained rather than requiring a second call.
+    # Re-solve once more to read x off a live model (run_opt/the repricing loop above only
+    # return the objective/duals) -- cheap relative to the LP solve itself, and keeps this
+    # API's result self-contained rather than requiring a second call. Also re-verifies the
+    # deeper correctness checks the production non-repricing path doesn't bother with (this is
+    # a testing/debugging API, not the hot loop).
     m, _fix_cons, x, _cover_cons = _build_nearest_open_y_subproblem_lp(
         data, model, mapping, requests, demand, feasible_pairs, columns, y_hat_f, env, silent,
     )
     optimize!(m)
+    _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat_f, model)
+    assert_endpoint_chain_near_binary(m)
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in x)
     return BendersSubproblemResult(
         :y, objective_value, assignment, rho_out, termination_status(m), metadata,
@@ -155,15 +167,23 @@ function solve_benders_yz_subproblem(
         objective_value = v_hat
         rho_out = Dict{Any, Float64}(key => v for (key, v) in rho)
     else
-        objective_value, rho = _solve_yz_route_subproblem_lp(
-            data, model, requests, feasible_pairs, columns, z_hat, env, silent,
+        # Plugs into the same run_opt/BendersSubproblemModel path the generic Benders runner
+        # itself uses for the non-repricing case.
+        sub_result = run_opt(
+            data,
+            BendersSubproblemModel(model, z_hat, requests, feasible_pairs, columns, BendersYZ()),
+            DirectSolver(config=SolverConfig(optimizer_env=env, silent=silent)),
         )
-        rho_out = Dict{Any, Float64}(key => v for (key, v) in rho)
+        sub_result.termination_status == MOI.OPTIMAL ||
+            throw(ArgumentError("BendersYZ route LP subproblem failed with status $(sub_result.termination_status)"))
+        objective_value = sub_result.objective_value
+        rho_out = Dict{Any, Float64}(key => v for (key, v) in sub_result.duals)
     end
     m, _fix_cons, _cover_cons = _build_yz_route_subproblem_lp(
         data, model, requests, feasible_pairs, columns, z_hat, env, silent,
     )
     optimize!(m)
+    assert_endpoint_chain_near_binary(m)
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in m[:x])
     return BendersSubproblemResult(
         :yz, objective_value, assignment, rho_out, termination_status(m), metadata,
@@ -188,33 +208,24 @@ function solve_benders_yzh_master(
     optimizer_env=nothing,
     silent::Bool=true,
 )::BendersSubproblemResult
-    mapping, requests, demand, feasible_pairs = _benders_subproblem_api_setup(data, model)
-    physical_pairs, occurrences, feasible_pairs_by_p = _aggregate_od_route_benders_physical_pairs(mapping)
-    occurrence_count = Dict(p => length(occurrences[p]) for p in physical_pairs)
     env = isnothing(optimizer_env) ? Gurobi.Env() : optimizer_env
-
-    m = Model(() -> Gurobi.Optimizer(env))
-    silent && set_silent(m)
-    add_station_selection_variables!(m, data)
-    y = m[:y]
-    add_station_limit_constraint!(m, data, model.l)
-    _add_default_endpoint_coverage_constraints!(m, y, data, model, requests)
-    h = _add_nearest_open_master_h!(
-        m, data, y, physical_pairs, feasible_pairs_by_p, model.max_walking_distance, model.allow_walk_only,
-        model.assignment_policy.feasibility_cut_style,
+    # No cut group exists yet (this solves the master alone, with no theta/cut machinery) --
+    # cut_ids=Int[] gives BendersMasterModel's build_model an empty theta[] and an objective
+    # with nothing to add for it, exactly matching the hand-built master this replaces.
+    dummy_solver = BendersSolver(
+        config=SolverConfig(optimizer_env=env, silent=silent), decomposition=BendersYZH(),
+        inner_solver=DirectSolver(config=SolverConfig(optimizer_env=env, silent=silent)),
     )
-
-    obj = AffExpr(0.0)
-    for p in physical_pairs, pair in feasible_pairs_by_p[p]
-        o, d = p
-        add_to_expression!(obj, occurrence_count[p] * model.walk_cost_weight * od_pair_walking_cost(data, o, d, pair), h[(p, pair)])
-    end
-    @objective(m, Min, obj)
+    build_result = build_model(BendersMasterModel(model, dummy_solver, Int[]), data; optimizer_env=env)
+    m = build_result.model
+    silent && set_silent(m)
     optimize!(m)
     primal_status(m) == MOI.FEASIBLE_POINT ||
         throw(ArgumentError("solve_benders_yzh_master failed with status $(termination_status(m))"))
     assert_endpoint_chain_near_binary(m)
 
+    y = m[:y]
+    h = m[:h]
     assignment = Dict{Any, Float64}(key => value(var) for (key, var) in h)
     return BendersSubproblemResult(
         :yzh_master, objective_value(m), assignment, Dict{Any, Float64}(), termination_status(m),

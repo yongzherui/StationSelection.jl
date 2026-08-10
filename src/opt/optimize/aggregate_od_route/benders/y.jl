@@ -154,75 +154,15 @@ function _assert_x_matches_nearest_open(
     return nothing
 end
 
-function _solve_nearest_open_y_subproblem_lp(
-    data::StationSelectionData,
-    model::AnyAggregateODRouteModel,
-    mapping::AggregateODRouteMap,
-    requests,
-    demand,
-    feasible_pairs,
-    columns::Vector{AggregateODRouteColumn},
-    y_hat::Vector{Float64},
-    optimizer_env,
-    silent::Bool,
-)
-    m, fix_cons, x, _cover_cons = _build_nearest_open_y_subproblem_lp(
-        data, model, mapping, requests, demand, feasible_pairs, columns, y_hat, optimizer_env, silent
-    )
-    optimize!(m)
-    primal_status(m) == MOI.FEASIBLE_POINT ||
-        throw(ArgumentError("BendersY full LP subproblem failed with status $(termination_status(m))"))
-    _assert_x_matches_nearest_open(x, data, requests, feasible_pairs, y_hat, model)
-    # No-op unless an endpoint nearest-open style built zp/zd indicators above.
-    assert_endpoint_chain_near_binary(m)
-    return objective_value(m), Dict(j => dual(con) for (j, con) in fix_cons)
-end
-
-"""
-    _solve_nearest_open_y_subproblem_ip(...)
-
-Diagnostic-only companion to [`_solve_nearest_open_y_subproblem_lp`](@ref): solves the
-*same* nearest-open subproblem (`y` fixed to `y_hat`, same column pool) but with `lambda`
-(route/column selection) restricted to `Bin` instead of relaxed to `[0,1]`, to directly
-measure whether the LP relaxation used for BendersY's optimality cuts has an integrality
-gap at the point it's derived from. `x`/`zp`/`zd` are left as in the LP build (already
-forced near-binary by the nearest-open cost structure and chain constraints, per
-`_assert_x_matches_nearest_open`/`assert_endpoint_chain_near_binary`), so only the
-covering-type `lambda` variables -- the ones with no such forcing structure -- are
-tightened. Gated behind `BendersSolver.check_lp_ip_gap` since it's an extra MIP solve
-on top of the LP every iteration; see notes/2026-07-15_bendersy_stale_cut_soundness.md.
-"""
-function _solve_nearest_open_y_subproblem_ip(
-    data::StationSelectionData,
-    model::AnyAggregateODRouteModel,
-    mapping::AggregateODRouteMap,
-    requests,
-    demand,
-    feasible_pairs,
-    columns::Vector{AggregateODRouteColumn},
-    y_hat::Vector{Float64},
-    optimizer_env,
-    silent::Bool,
-)::Float64
-    m, _fix_cons, _x, _cover_cons = _build_nearest_open_y_subproblem_lp(
-        data, model, mapping, requests, demand, feasible_pairs, columns, y_hat, optimizer_env, silent;
-        lambda_binary=true,
-    )
-    optimize!(m)
-    primal_status(m) == MOI.FEASIBLE_POINT ||
-        throw(ArgumentError("BendersY LP/IP gap check: IP subproblem failed with status $(termination_status(m))"))
-    return objective_value(m)
-end
-
 """
     _solve_nearest_open_y_subproblem_lp_with_repricing(...)
 
-Diagnostic-only companion to [`_solve_nearest_open_y_subproblem_lp`](@ref) that guarantees
-`v_hat`/`rho` are valid against the *full* route universe, not just whatever `columns`
-(the shared pool) happens to contain. The plain LP solve trusts `columns` outright --
-sound only if the pool is already complete for *this* subproblem's own dual structure,
-which is a different, more general LP (free `x` over every globally feasible pair, all
-`data.n_stations` as potential route nodes) than the restricted, fixed-assignment problem
+Guarantees `v_hat`/`rho` are valid against the *full* route universe, not just whatever
+`columns` (the shared pool) happens to contain. Trusting `columns` outright (a single LP
+solve on `_build_nearest_open_y_subproblem_lp`, no repricing) is sound only if the pool is
+already complete for *this* subproblem's own dual structure, which is a different, more
+general LP (free `x` over every globally feasible pair, all `data.n_stations` as potential
+route nodes) than the restricted, fixed-assignment problem
 `_solve_fixed_route_covering_by_cg`'s priming CG actually proved complete for. This
 function closes that gap directly: after each LP solve, it extracts the covering-constraint
 duals (see `_extract_nearest_open_y_subproblem_coverage_duals`) and runs genuine
