@@ -216,25 +216,6 @@ iterations and the cuts they find remain useful once `β` is ramped up, so this 
 `β_T` result with less total work than solving at `β_T` directly. Defaults to `nothing`
 (single implicit stage at `model.route_regularization_weight`, i.e. today's behavior).
 
-# `lifted_routing_lower_bound`
-
-Only supported for `decomposition isa BendersYZ` with `cut_mode isa MultiCut` (checked here). When
-`true`, a multicommodity arc-flow relaxation of the routing subproblem is built once in the
-master (reusing the same `zp`/`zd` nearest-open endpoint selectors the master already carries --
-see `benders/lifted_routing_lower_bound.jl` for the full derivation and validity argument), added
-directly as an objective term (`route_lb_expr[s]`) rather than a floor constraint on `theta`.
-`theta[s]` then represents the nonnegative residual. The routing subproblem and completion LP
-remain in full-recourse units; every full cut `alpha + b'z` is installed as
-`theta[s] >= alpha + b'z - route_lb_expr[s]`, subtracting the live expression rather than an
-incumbent snapshot. Thus `theta[s] + route_lb_expr[s]` globally bounds the full routing cut.
-Works identically for all three `cut_derivation` values. `route_lb_expr` itself can never
-cause an unsound result either way: it is a provably valid lower bound (it drops vehicle capacity,
-exact wait/detour timing, and route/vehicle identity -- all valid relaxation directions).
-Composes with `lifted_walking_objective` (both independently togglable) -- when both are `true`,
-`route_lb_expr` is computed in `subproblem_model`'s (unit-weighted) units and scaled by
-`current_beta` in the objective, matching how `theta` is already denominated and scaled under
-`lifted_walking_objective=true`. Defaults to `false`, reproducing prior behavior exactly.
-
 # `direct_enumeration_guide`
 
 Only supported for `decomposition isa Union{BendersY, BendersYZ}` with
@@ -307,8 +288,6 @@ struct BendersSolver <: AbstractStationSelectionSolver
     outer_gap_warning_tol::Float64
     lifted_walking_objective::Bool
     route_regularization_weight_schedule::Union{Nothing, Vector{Float64}}
-    lifted_routing_lower_bound::Bool
-    common_od_mcf_lower_bound::Bool
     direct_enumeration_guide::Bool
     direct_enumeration_max_routes::Int
     direct_enumeration_time_limit_sec::Float64
@@ -336,8 +315,6 @@ struct BendersSolver <: AbstractStationSelectionSolver
         outer_gap_warning_tol::Number=0.03,
         lifted_walking_objective::Union{Bool, Nothing}=nothing,
         route_regularization_weight_schedule::Union{AbstractVector{<:Number}, Nothing}=nothing,
-        lifted_routing_lower_bound::Bool=false,
-        common_od_mcf_lower_bound::Bool=false,
         direct_enumeration_guide::Bool=false,
         direct_enumeration_max_routes::Int=10_000,
         direct_enumeration_time_limit_sec::Number=30.0,
@@ -364,25 +341,6 @@ struct BendersSolver <: AbstractStationSelectionSolver
         direct_enumeration_guide && !(decomposition isa Union{BendersY, BendersYZ}) && throw(ArgumentError(
             "direct_enumeration_guide is only supported for decomposition isa Union{BendersY, BendersYZ}; " *
             "got $(typeof(decomposition))"
-        ))
-        lifted_routing_lower_bound && !(decomposition isa BendersYZ) && throw(ArgumentError(
-            "lifted_routing_lower_bound is only supported for decomposition isa BendersYZ; " *
-            "got $(typeof(decomposition)) -- BendersY's master has no zp/zd endpoint selectors " *
-            "for the arc-flow relaxation to reuse (z stays in the subproblem there)"
-        ))
-        lifted_routing_lower_bound && !(cut_mode isa MultiCut) && throw(ArgumentError(
-            "lifted_routing_lower_bound is only supported for cut_mode isa MultiCut -- theta is " *
-            "indexed one-per-scenario there, matching the arc-flow relaxation computed one-per-scenario; " *
-            "got $(typeof(cut_mode))"
-        ))
-        common_od_mcf_lower_bound && !(decomposition isa BendersYZ) && throw(ArgumentError(
-            "common_od_mcf_lower_bound is only supported for decomposition isa BendersYZ"
-        ))
-        common_od_mcf_lower_bound && !(cut_mode isa MultiCut) && throw(ArgumentError(
-            "common_od_mcf_lower_bound is only supported for cut_mode isa MultiCut"
-        ))
-        common_od_mcf_lower_bound && lifted_routing_lower_bound && throw(ArgumentError(
-            "choose either common_od_mcf_lower_bound or lifted_routing_lower_bound, not both"
         ))
         direct_enumeration_guide && !resolved_lifted_walking && throw(ArgumentError(
             "direct_enumeration_guide requires lifted_walking_objective=true -- the exact enumerated " *
@@ -448,8 +406,6 @@ struct BendersSolver <: AbstractStationSelectionSolver
             resolved_outer_gap_warning_tol,
             resolved_lifted_walking,
             resolved_schedule,
-            lifted_routing_lower_bound,
-            common_od_mcf_lower_bound,
             direct_enumeration_guide,
             direct_enumeration_max_routes,
             Float64(direct_enumeration_time_limit_sec),
@@ -488,7 +444,7 @@ function BranchBendersCut(
     )
 end
 
-"""Single-tree branch-and-Benders solver, optionally strengthened by an MCF routing bound."""
+"""Single-tree branch-and-Benders solver."""
 struct BranchAndBendersSolver <: AbstractStationSelectionSolver
     config::SolverConfig
     decomposition::Union{BendersY, BendersYZ}
@@ -502,11 +458,6 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
     dual_feasibility_tolerance::Float64
     pricing_tolerance::Float64
     max_reprice_rounds::Int
-    mcf_lower_bound_mode::Symbol
-    mcf_scenario_id::Union{Nothing, Int}
-    projected_mcf_user_cuts::Bool
-    projected_mcf_max_separations::Int
-    projected_mcf_tolerance::Float64
     log_dir::Union{Nothing, String}
 
     function BranchAndBendersSolver(;
@@ -522,11 +473,6 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
         dual_feasibility_tolerance::Number=1e-7,
         pricing_tolerance::Number=1e-7,
         max_reprice_rounds::Int=10_000,
-        mcf_lower_bound_mode::Symbol=:all_scenarios,
-        mcf_scenario_id::Union{Nothing, Int}=nothing,
-        projected_mcf_user_cuts::Bool=false,
-        projected_mcf_max_separations::Int=8,
-        projected_mcf_tolerance::Number=1e-6,
         log_dir::Union{Nothing, AbstractString}=nothing,
     )
         initial_benders_cut_rounds >= 0 || throw(ArgumentError("initial_benders_cut_rounds must be non-negative"))
@@ -539,21 +485,6 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
                  "BranchAndBendersSolver restricted MW integration currently supports BendersYZ only"),
             ],
         )
-        mcf_lower_bound_mode in (:none, :all_scenarios, :single_scenario, :common_od_scaled) ||
-            throw(ArgumentError(
-                "mcf_lower_bound_mode must be :none, :all_scenarios, :single_scenario, or :common_od_scaled",
-            ))
-        mcf_lower_bound_mode == :none && projected_mcf_user_cuts && throw(ArgumentError(
-            "projected_mcf_user_cuts requires an MCF lower-bound mode; use projected_mcf_user_cuts=false with mcf_lower_bound_mode=:none",
-        ))
-        !isnothing(mcf_scenario_id) && mcf_scenario_id <= 0 &&
-            throw(ArgumentError("mcf_scenario_id must be positive"))
-        projected_mcf_max_separations >= 0 || throw(ArgumentError(
-            "projected_mcf_max_separations must be non-negative",
-        ))
-        projected_mcf_tolerance >= 0 || throw(ArgumentError(
-            "projected_mcf_tolerance must be non-negative",
-        ))
         tolerances = (
             integrality_tolerance, lazy_cut_tolerance, cut_tightness_tolerance,
             dual_feasibility_tolerance, pricing_tolerance,
@@ -568,9 +499,6 @@ struct BranchAndBendersSolver <: AbstractStationSelectionSolver
             Float64(integrality_tolerance), Float64(lazy_cut_tolerance),
             Float64(cut_tightness_tolerance), Float64(dual_feasibility_tolerance),
             Float64(pricing_tolerance), max_reprice_rounds,
-            mcf_lower_bound_mode, mcf_scenario_id,
-            projected_mcf_user_cuts, projected_mcf_max_separations,
-            Float64(projected_mcf_tolerance),
             isnothing(log_dir) ? nothing : String(log_dir),
         )
     end
@@ -631,7 +559,6 @@ defaults to a placeholder here since a default-constructed `AggregateODRouteCG()
 real values from its own kwargs.
 """
 struct AggregateODRouteCG <: AbstractColumnGenerationAlgorithm
-    max_visits_per_node::Union{Nothing, Int}
     pricing_initial_sec::Union{Nothing, Float64}
     pricing_ramp_factor::Float64
     use_station_simple::Union{Nothing, Bool}
@@ -642,7 +569,6 @@ struct AggregateODRouteCG <: AbstractColumnGenerationAlgorithm
     dual_log_path::Union{Nothing, String}
 
     function AggregateODRouteCG(;
-        max_visits_per_node::Union{Int, Nothing}=nothing,
         pricing_initial_sec::Union{Number, Nothing}=nothing,
         pricing_ramp_factor::Number=1.0,
         use_station_simple::Union{Bool, Nothing}=nothing,
@@ -652,13 +578,10 @@ struct AggregateODRouteCG <: AbstractColumnGenerationAlgorithm
         column_log_path::Union{AbstractString, Nothing}=nothing,
         dual_log_path::Union{AbstractString, Nothing}=nothing,
     )
-        isnothing(max_visits_per_node) || max_visits_per_node > 0 ||
-            throw(ArgumentError("max_visits_per_node must be positive"))
         isnothing(pricing_initial_sec) || pricing_initial_sec > 0 ||
             throw(ArgumentError("pricing_initial_sec must be positive"))
         pricing_ramp_factor > 0 || throw(ArgumentError("pricing_ramp_factor must be positive"))
         new(
-            max_visits_per_node,
             isnothing(pricing_initial_sec) ? nothing : Float64(pricing_initial_sec),
             Float64(pricing_ramp_factor),
             use_station_simple,

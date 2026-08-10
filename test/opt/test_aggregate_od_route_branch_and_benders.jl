@@ -1,4 +1,4 @@
-@testset "AggregateODRouteModel lifted_routing_lower_bound" begin
+@testset "AggregateODRouteModel BranchAndBendersSolver" begin
     gurobi_available = try
         using Gurobi
         true
@@ -6,7 +6,7 @@
         false
     end
     if !gurobi_available
-        @warn "Gurobi not available, skipping lifted_routing_lower_bound tests"
+        @warn "Gurobi not available, skipping BranchAndBendersSolver tests"
         @test true
         return
     end
@@ -57,95 +57,8 @@
 
     data = lifted_lb_fixture()
     model = lifted_lb_model()
-    optimizer_env = Gurobi.Env()
 
-    mapping = StationSelection.create_map(model, data)
-    requests, demand, feasible_pairs = StationSelection._aggregate_od_route_benders_requests(mapping)
-    cut_ids = sort!(collect(keys(mapping.Q_s)))
-
-    ground_truth_solver = BendersSolver(
-        config=SolverConfig(optimizer_env=optimizer_env, silent=true, mip_gap=0.0),
-        decomposition=BendersY(),
-        inner_solver=ColumnGenerationSolver(
-            config=SolverConfig(optimizer_env=optimizer_env, silent=true, mip_gap=0.0),
-            max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
-            final_ip_time_limit_sec=30.0,
-        ),
-    )
-
-    # Every feasible binary y (close exactly one of the five stations); request B pins 2 and 4.
-    all_y = Vector{Float64}[]
-    for closed in 1:5
-        y = ones(5)
-        y[closed] = 0.0
-        push!(all_y, y)
-    end
-
-    @testset "Test A: route_lb_expr is a genuine valid lower bound at fixed y" begin
-        # Build a tiny standalone master with y FIXED, only the new arc-flow variables/objective
-        # (no theta, no Benders cuts at all) -- its optimum is exactly route_lb_expr(y_hat).
-        # Compare against the true certified routing subproblem value (BendersYZ's own
-        # z-derivation + repriced LP, mirroring test_aggregate_od_route_lifted_walking_objective.jl's
-        # pattern).
-        function true_yz_routing_value(y_hat::Vector{Float64}, assignments)
-            zm = Model(() -> Gurobi.Optimizer(optimizer_env))
-            set_silent(zm)
-            @variable(zm, 0 <= y[1:5] <= 1)
-            for j in 1:5
-                fix(y[j], y_hat[j]; force=true)
-            end
-            StationSelection._add_nearest_open_master_z!(
-                zm, data, y, requests, feasible_pairs, model.max_walking_distance,
-                model.allow_walk_only, model.assignment_policy.feasibility_cut_style,
-            )
-            optimize!(zm)
-            primal_status(zm) == MOI.FEASIBLE_POINT || return nothing
-            z_hat = Dict{StationSelection._AggregateODRouteEndpointChainKey, Vector{Float64}}(
-                key => round.(value.(vars)) for (key, vars) in zm[:nearest_endpoint_chain_cache]
-            )
-            open_stations = StationSelection._open_station_values(y_hat)
-            cg_result = StationSelection._solve_fixed_route_covering_by_cg(
-                data, model, assignments, ground_truth_solver, nothing, open_stations,
-            )
-            v_hat, _rho, _pool, _n_new, _rounds, exhausted, _delta =
-                StationSelection._solve_yz_route_subproblem_lp_with_repricing(
-                    data, model, mapping, requests, feasible_pairs,
-                    cg_result.generated_columns, z_hat, optimizer_env, true,
-                )
-            @test exhausted
-            return v_hat
-        end
-
-        function route_lb_value(y_hat::Vector{Float64})
-            m = Model(() -> Gurobi.Optimizer(optimizer_env))
-            set_silent(m)
-            @variable(m, 0 <= y[1:5] <= 1)
-            for j in 1:5
-                fix(y[j], y_hat[j]; force=true)
-            end
-            route_lb_exprs = StationSelection._build_lifted_routing_lower_bound_exprs!(
-                m, data, model, y, cut_ids, requests, feasible_pairs,
-            )
-            @objective(m, Min, sum(route_lb_exprs[cut_id] for cut_id in cut_ids))
-            optimize!(m)
-            @test primal_status(m) == MOI.FEASIBLE_POINT
-            return objective_value(m)
-        end
-
-        for y in all_y
-            assignments, infeasible = StationSelection._fixed_assignments_from_y(
-                data, requests, feasible_pairs, y;
-                style=:big_m_nearest, max_walking_distance=model.max_walking_distance, allow_walk_only=false,
-            )
-            isempty(infeasible) || continue   # infeasible y (closes station 2 or 4)
-            true_value = true_yz_routing_value(y, assignments)
-            lb = route_lb_value(y)
-            # Valid lower bound: never exceeds the true certified routing value (small numerical slack).
-            @test lb <= true_value + 1e-6
-        end
-    end
-
-    @testset "Test B: integrated optimum equivalence (BendersYZ only)" begin
+    @testset "BendersYZ integrated optimum equivalence across cut_derivation/lifted_walking_objective" begin
         ground_truth = run_opt(
             data, model,
             DirectSolver(
@@ -155,12 +68,9 @@
         )
         @test ground_truth.termination_status == MOI.OPTIMAL
 
-        # The full routing subproblem/certified Q_bar is used for all three cut derivations; only
-        # the final master row is transformed to eta >= full_cut - live_C_MCF. Exercise the full
-        # matrix here so both standard and completion-LP cuts are checked.
         for cut_derivation in (:standard, :zero_completion, :restricted_mw_fixed_pi)
             for lifted_walking in (false, true)
-                @testset "cut_derivation=$cut_derivation, lifted_walking_objective=$lifted_walking, lifted_routing_lower_bound=$lifted_lb" for lifted_lb in (false, true)
+                @testset "cut_derivation=$cut_derivation, lifted_walking_objective=$lifted_walking" begin
                     result = run_opt(
                         data, model,
                         BendersSolver(
@@ -175,7 +85,6 @@
                             reprice_subproblem=true,
                             cut_derivation=cut_derivation,
                             lifted_walking_objective=lifted_walking,
-                            lifted_routing_lower_bound=lifted_lb,
                         ),
                     )
                     @test result.termination_status == MOI.OPTIMAL
@@ -185,20 +94,12 @@
         end
     end
 
-    @testset "unsupported configurations throw" begin
-        @test_throws ArgumentError BendersSolver(decomposition=BendersY(), lifted_routing_lower_bound=true)
-        @test_throws ArgumentError BendersSolver(decomposition=BendersYZH(), lifted_routing_lower_bound=true)
-        @test_throws ArgumentError BendersSolver(
-            decomposition=BendersYZ(), cut_mode=SingleCut(), lifted_routing_lower_bound=true,
-        )
-    end
-
     @testset "BranchAndBendersSolver certified Y/YZ callback modes" begin
         @test BranchAndBendersSolver().decomposition isa BendersYZ
 
         function branch_solver(
             decomposition; initial_cuts=BranchBendersCut[], initial_rounds=0,
-            cut_derivation=:standard, mcf_mode=:all_scenarios, projected_mcf=false,
+            cut_derivation=:standard,
         )
             return BranchAndBendersSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
@@ -211,9 +112,6 @@
                 ),
                 initial_cuts=initial_cuts,
                 initial_benders_cut_rounds=initial_rounds,
-                mcf_lower_bound_mode=mcf_mode,
-                projected_mcf_user_cuts=projected_mcf,
-                projected_mcf_max_separations=3,
             )
         end
 
@@ -223,74 +121,16 @@
             data, model,
             branch_solver(BendersYZ(); cut_derivation=:restricted_mw_fixed_pi),
         )
-        no_mcf_log_dir = mktempdir()
-        result_yz_mw_no_mcf = run_opt(
-            data, model,
-            BranchAndBendersSolver(
-                config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0),
-                decomposition=BendersYZ(), cut_derivation=:restricted_mw_fixed_pi,
-                inner_solver=ColumnGenerationSolver(
-                    config=SolverConfig(silent=true, mip_gap=0.0),
-                    max_iterations=200, max_columns_per_iteration=20, n_candidates=20,
-                    final_ip_time_limit_sec=30.0,
-                ),
-                mcf_lower_bound_mode=:none, projected_mcf_user_cuts=false,
-                log_dir=no_mcf_log_dir,
-            ),
-        )
-        result_yz_single_mcf = run_opt(
-            data, model,
-            branch_solver(BendersYZ(); mcf_mode=:single_scenario),
-        )
-        result_yz_common_mcf = run_opt(
-            data, model,
-            branch_solver(BendersYZ(); mcf_mode=:common_od_scaled),
-        )
-        result_yz_projected_mcf = run_opt(
-            data, model,
-            branch_solver(
-                BendersYZ(); mcf_mode=:common_od_scaled, projected_mcf=true,
-            ),
-        )
         @test result_y.termination_status == MOI.OPTIMAL
         @test result_yz.termination_status == MOI.OPTIMAL
         @test result_yz_mw.termination_status == MOI.OPTIMAL
         @test isapprox(result_y.objective_value, result_yz.objective_value; atol=1e-6)
         @test isapprox(result_yz_mw.objective_value, result_yz.objective_value; atol=1e-6)
-        @test isapprox(result_yz_mw_no_mcf.objective_value, result_yz.objective_value; atol=1e-6)
-        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_lower_bound_mode"] == "none"
-        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_selected_scenario_id"] === nothing
-        @test result_yz_mw_no_mcf.metadata["branch_benders_mcf_common_od_count"] == 0
-        @test result_yz_mw_no_mcf.metadata["branch_benders_projected_mcf_cuts"] == 0
-        @test isfile(joinpath(no_mcf_log_dir, "aggregate_od_route_branch_benders_summary.csv"))
-        no_mcf_summary = CSV.read(
-            joinpath(no_mcf_log_dir, "aggregate_od_route_branch_benders_summary.csv"), DataFrame,
-        )
-        @test ismissing(no_mcf_summary.mcf_selected_scenario_id[1])
-        @test isapprox(result_yz_single_mcf.objective_value, result_yz.objective_value; atol=1e-6)
-        @test isapprox(result_yz_common_mcf.objective_value, result_yz.objective_value; atol=1e-6)
-        @test isapprox(result_yz_projected_mcf.objective_value, result_yz.objective_value; atol=1e-6)
-        @test result_yz_single_mcf.metadata["branch_benders_mcf_lower_bound_mode"] ==
-              "single_scenario"
-        @test result_yz_common_mcf.metadata["branch_benders_mcf_lower_bound_mode"] ==
-              "common_od_scaled"
-        @test result_yz_projected_mcf.metadata["branch_benders_projected_mcf_user_cuts"]
-        @test result_yz_projected_mcf.metadata["branch_benders_projected_mcf_separations"] <= 3
-        # The permanent MCF formulation supplies the root bound. Dynamic MCF MW cuts are
-        # deliberately separated only below the root. The callback count itself may be zero
-        # when presolve makes the root integral, so test the classification independently.
-        @test StationSelection._is_root_mipnode(0.0)
-        @test !StationSelection._is_root_mipnode(1.0)
-        @test result_yz_projected_mcf.metadata["branch_benders_projected_mcf_root_skips"] >= 0
         @test result_yz_mw.metadata["branch_benders_cut_derivation"] ==
               "restricted_mw_fixed_pi"
         @test result_yz_mw.metadata["branch_benders_mw_completion_seconds"] >= 0.0
         @test_throws ArgumentError BranchAndBendersSolver(
             decomposition=BendersY(), cut_derivation=:restricted_mw_fixed_pi,
-        )
-        @test_throws ArgumentError BranchAndBendersSolver(mcf_lower_bound_mode=:unknown)
-        @test_throws ArgumentError BranchAndBendersSolver(
-            mcf_lower_bound_mode=:none, projected_mcf_user_cuts=true,
         )
         @test result_y.metadata["branch_benders_open_stations"] ==
               result_yz.metadata["branch_benders_open_stations"]
@@ -303,9 +143,7 @@
         @test result_yz.metadata["branch_benders_unique_y"] >= 1
         @test result_yz.metadata["branch_benders_cuts_submitted"] >= 1
 
-        # Every stored cut is tight at the binary station set whose oracle result generated it;
-        # the integrated solve's exact objective also confirms theta is full recourse rather than
-        # an additive MCF-plus-full-recourse double count.
+        # Every stored cut is tight at the binary station set whose oracle result generated it.
         generated_yz = result_yz.metadata["branch_benders_generated_cuts"]
         @test !isempty(generated_yz)
         @test all(cut -> cut.decomposition == :yz, generated_yz)

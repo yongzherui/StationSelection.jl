@@ -52,28 +52,6 @@ function physical_pair_walking_cost_expr(
 end
 
 """
-    routing_lower_bound_cost_expr(data, subproblem_model, f, fj0) -> AffExpr
-
-`BendersYZ`'s `lifted_routing_lower_bound` relaxation cost: `route_regularization_weight *
-(arc travel time + repositioning fee)`, in `subproblem_model`'s units.
-"""
-function routing_lower_bound_cost_expr(
-    data::StationSelectionData,
-    subproblem_model::AggregateODRouteModel,
-    f,
-    fj0,
-)
-    route_lb_expr = AffExpr(0.0)
-    for ((j, k), var) in f
-        add_to_expression!(route_lb_expr, get_routing_cost(data, j, k), var)
-    end
-    for (_j, var) in fj0
-        add_to_expression!(route_lb_expr, subproblem_model.repositioning_time, var)
-    end
-    return subproblem_model.route_regularization_weight * route_lb_expr
-end
-
-"""
     benders_route_regularization_cost_expr(model, columns, lambda, n_scenarios) -> AffExpr
 
 Sum of `aggregate_od_route_column_objective_coefficient` weighted by each column's `lambda`

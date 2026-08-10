@@ -59,20 +59,15 @@ struct MethodSpec
     reprice::Bool                 # benders only
     max_stops_mode::Symbol        # :ms4 | :ms3 | :uncapped
     use_station_simple::Bool      # benders/cg inner pricer: elementary-route label search vs default
-    common_od_mcf_lower_bound::Bool # classical Benders common-OD master strengthening
     lifted_walking_objective::Bool # move exact walking cost into the Benders master
 end
 
 # Backward-compatible 6-arg constructor for every pre-existing MethodSpec(...) call site --
 # use_station_simple defaults to false (the revisit-tolerant station-age pricer, unchanged).
 MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode) =
-    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, false, false, false)
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, false, false)
 MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, use_station_simple) =
-    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, use_station_simple, false, false)
-MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode,
-           use_station_simple, common_od_mcf_lower_bound) =
-    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode,
-               use_station_simple, common_od_mcf_lower_bound, false)
+    MethodSpec(label, kind, decomposition, cut_derivation, reprice, max_stops_mode, use_station_simple, false)
 
 function _benders_variants(label_prefix::String, decomposition; include_mw::Bool)
     # std_noreprice (cut_derivation=:standard, reprice=false) dropped: it only ever
@@ -133,10 +128,8 @@ const METHODS = MethodSpec[
     # `_benders_variants` to avoid adding an ms5 variant for every other cut derivation too.
     MethodSpec("bendersYZ_mw_ms5",    :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, false),
     MethodSpec("bendersYZ_mw_ms5_ss", :benders, StationSelection.BendersYZ(), :restricted_mw_fixed_pi, false, :ms5, true),
-    MethodSpec("bendersYZ_mw_common_od_ms5", :benders, StationSelection.BendersYZ(),
-               :restricted_mw_fixed_pi, false, :ms5, false, true),
     MethodSpec("bendersYZ_mw_lifted_walking_ms5", :benders, StationSelection.BendersYZ(),
-               :restricted_mw_fixed_pi, false, :ms5, false, false, true),
+               :restricted_mw_fixed_pi, false, :ms5, false, true),
 ]
 
 method_by_label(label::AbstractString) = only(filter(m -> m.label == label, METHODS))

@@ -356,21 +356,15 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     optimizer_env,
     v_hat::Float64,
     rho::AbstractDict;
-    route_lb_expr::Union{Nothing, AffExpr}=nothing,
     certified::Union{Nothing, AggregateODRouteCertifiedRouteCoveringDuals}=nothing,
     Q_bar::Union{Nothing, Float64}=nothing,
     certification_already_failed::Bool=false,
 )
     chain_cache = master[:nearest_endpoint_chain_cache]
-    # The subproblem and every cut below remain in full routing-recourse units.  When the
-    # multicommodity lower bound is enabled, theta is the residual eta, so subtract the *live*
-    # master expression from the full cut.  Never subtract value(route_lb_expr) from v_hat or
-    # Q_bar: that would freeze an incumbent-specific shift into a globally active cut.
-    residual_shift = isnothing(route_lb_expr) ? AffExpr(0.0) : route_lb_expr
     if solver.cut_derivation == :standard
         add_benders_optimality_cut!(master, theta, cut_id, v_hat + sum(
             rho[(key, i)] * (chain_cache[key][i] - z_hat[key][i]) for (key, i) in keys(rho)
-        ) - residual_shift)
+        ))
         standard_cut_constant = v_hat - sum(rho[(key, i)] * z_hat[key][i] for (key, i) in keys(rho); init=0.0)
         return (
             mode=:standard, mw_status=:not_attempted, Q_bar=v_hat, phi_core=NaN,
@@ -405,7 +399,7 @@ function _add_aggregate_od_route_benders_yz_optimality_cut!(
     beta = yz_result.beta
     add_benders_optimality_cut!(master, theta, cut_id, cut_constant + sum(
         beta[key] * chain_cache[key[1]][key[2]] for key in keys(beta)
-    ) - residual_shift)
+    ))
     return (
         mode=solver.cut_derivation, mw_status=:ok, Q_bar=yz_result.Q_bar, phi_core=yz_result.phi_core,
         phi_core_baseline=isnothing(yz_result.phi_core_baseline) ? NaN : yz_result.phi_core_baseline,

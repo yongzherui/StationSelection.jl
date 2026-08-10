@@ -1,10 +1,10 @@
 """
 Single-tree branch-and-Benders for nearest-open AggregateODRouteModel.
 
-The master contains exact walking cost, binary station decisions, one full-routing recourse
-variable per scenario, and the multicommodity-flow relaxation as `theta[s] >= C_MCF[s]`.
-Certified standard Benders cuts are separated only at integer callback solutions. BendersY cuts
-are affine in `y`; BendersYZ cuts are affine in the endpoint-chain selectors `z`.
+The master contains exact walking cost, binary station decisions, and one full-routing recourse
+variable per scenario. Certified standard Benders cuts are separated only at integer callback
+solutions. BendersY cuts are affine in `y`; BendersYZ cuts are affine in the endpoint-chain
+selectors `z`.
 """
 
 mutable struct _BranchBendersStats
@@ -325,7 +325,7 @@ function run_opt(
     end
 
     artifacts, master_mip_gap = _build_branch_benders_master(
-        data, model, solver, subproblem_model, requests, feasible_pairs, cut_ids, master_env,
+        data, model, solver, requests, feasible_pairs, cut_ids, master_env,
     )
     master, y, theta, chain_cache =
         artifacts.model, artifacts.y, artifacts.theta, artifacts.chain_cache
@@ -379,106 +379,6 @@ function run_opt(
         added == 0 && break
     end
 
-
-    projected_mcf_calls = Ref(0)
-    projected_mcf_cuts = Ref(0)
-    projected_mcf_seconds = Ref(0.0)
-    projected_mcf_seen = Set{Tuple}()
-    projected_mcf_root_skips = Ref(0)
-    projected_mcf_events = NamedTuple[]
-    projected_mcf_y_core = Ref{Union{Nothing, Vector{Float64}}}(nothing)
-    projected_mcf_z_core = Ref{Any}(nothing)
-
-    function mipnode_count(cb_data)
-        output = Ref{Cdouble}(NaN)
-        ret = Gurobi.GRBcbget(
-            cb_data, cb_data.cb_where, Gurobi.GRB_CB_MIPNODE_NODCNT, output,
-        )
-        ret == 0 || throw(ArgumentError(
-            "unable to read Gurobi MIPNODE_NODCNT while separating an MCF user cut " *
-            "(return code=$ret)",
-        ))
-        return Float64(output[])
-    end
-
-    function fractional_yz_point(cb_data)
-        y_values = Float64[callback_value(cb_data, y[j]) for j in 1:data.n_stations]
-        z_values = Dict{_AggregateODRouteEndpointChainKey, Vector{Float64}}(
-            chain_key => Float64[callback_value(cb_data, var) for var in vars]
-            for (chain_key, vars) in chain_cache
-        )
-        return y_values, z_values
-    end
-
-    function fractional_yz_key(y_values, z_values)
-        return (
-            Tuple(round(v; digits=8) for v in y_values),
-            Tuple(sort(
-                [(chain_key, Tuple(round(v; digits=8) for v in values)) for
-                 (chain_key, values) in z_values]; by=entry -> string(entry[1]),
-            )),
-        )
-    end
-
-    function projected_mcf_user_callback(cb_data)
-        solver.projected_mcf_user_cuts || return
-        callback_node_status(cb_data, master) == MOI.CALLBACK_NODE_STATUS_FRACTIONAL || return
-        # The permanent MCF relaxation already supplies the root routing bound.  Keep
-        # dynamically projected MCF cuts out of the root so their effect and cost are
-        # measured only during branching.
-        if _is_root_mipnode(mipnode_count(cb_data))
-            projected_mcf_root_skips[] += 1
-            return
-        end
-        projected_mcf_calls[] < solver.projected_mcf_max_separations || return
-        y_values, z_values = fractional_yz_point(cb_data)
-        key = fractional_yz_key(y_values, z_values)
-        key in projected_mcf_seen && return
-        push!(projected_mcf_seen, key)
-        projected_mcf_calls[] += 1
-        started = time()
-        violated = Int[]
-        if isnothing(projected_mcf_y_core[])
-            projected_mcf_y_core[] = copy(y_values)
-            projected_mcf_z_core[] = deepcopy(z_values)
-        end
-        y_core = projected_mcf_y_core[]::Vector{Float64}
-        z_core = projected_mcf_z_core[]
-        for cut_id in cut_ids
-            cut = _solve_mcf_mw_yz_cut(
-                data, subproblem_model, requests, feasible_pairs, cut_id,
-                y_values, z_values, y_core, z_core, oracle_env;
-                tightness_tolerance=solver.cut_tightness_tolerance,
-            )
-            theta_value = callback_value(cb_data, theta[cut_id])
-            rhs = _evaluate_mcf_mw_cut(cut, y_values, z_values)
-            theta_value < rhs - solver.projected_mcf_tolerance || continue
-            MOI.submit(
-                master, MOI.UserCut(cb_data),
-                _mcf_mw_yz_cut_constraint(cut, theta, y, chain_cache),
-            )
-            projected_mcf_cuts[] += 1
-            push!(violated, cut_id)
-        end
-        elapsed = time() - started
-        projected_mcf_seconds[] += elapsed
-        core_weight = 0.9
-        projected_mcf_y_core[] = core_weight .* y_core .+ (1.0 - core_weight) .* y_values
-        for (chain_key, values) in z_values
-            z_core[chain_key] = core_weight .* z_core[chain_key] .+ (1.0 - core_weight) .* values
-        end
-        event = (
-            separation=projected_mcf_calls[], elapsed_sec=elapsed,
-            cumulative_seconds=projected_mcf_seconds[],
-            violated_blocks=join(violated, ";"), cuts_submitted=projected_mcf_cuts[],
-        )
-        push!(projected_mcf_events, event)
-        @info "BranchAndBenders fractional projected-MCF separation" separation=event.separation elapsed_sec=event.elapsed_sec violated_blocks=event.violated_blocks cuts_submitted=event.cuts_submitted
-        return
-    end
-    if solver.projected_mcf_user_cuts && solver.projected_mcf_max_separations > 0
-        MOI.set(master, MOI.UserCutCallback(), projected_mcf_user_callback)
-    end
 
     function lazy_callback(cb_data)
         callback_node_status(cb_data, master) == MOI.CALLBACK_NODE_STATUS_INTEGER || return
@@ -589,17 +489,6 @@ function run_opt(
     metadata = Dict{String, Any}(
         "branch_benders_decomposition" => solver.decomposition isa BendersY ? "BendersY" : "BendersYZ",
         "branch_benders_cut_derivation" => string(solver.cut_derivation),
-        "branch_benders_mcf_lower_bound_mode" => string(solver.mcf_lower_bound_mode),
-        "branch_benders_mcf_scenario_id" => solver.mcf_scenario_id,
-        "branch_benders_mcf_selected_scenario_id" =>
-            master[:branch_benders_mcf_info].scenario_id,
-        "branch_benders_mcf_common_od_count" =>
-            master[:branch_benders_mcf_info].common_od_count,
-        "branch_benders_projected_mcf_user_cuts" => solver.projected_mcf_user_cuts,
-        "branch_benders_projected_mcf_separations" => projected_mcf_calls[],
-        "branch_benders_projected_mcf_cuts" => projected_mcf_cuts[],
-        "branch_benders_projected_mcf_seconds" => projected_mcf_seconds[],
-        "branch_benders_projected_mcf_root_skips" => projected_mcf_root_skips[],
         "branch_benders_open_stations" => collect(best_result.y_key),
         "branch_benders_recourse_by_scenario" => best_result.recourse,
         "branch_benders_walking_cost" => best_result.walking_cost,
@@ -638,17 +527,6 @@ function run_opt(
             DataFrame([(
                 termination_status=string(term), decomposition=metadata["branch_benders_decomposition"],
                 cut_derivation=metadata["branch_benders_cut_derivation"],
-                mcf_lower_bound_mode=metadata["branch_benders_mcf_lower_bound_mode"],
-                mcf_scenario_id=something(
-                    metadata["branch_benders_mcf_scenario_id"], missing,
-                ),
-                mcf_selected_scenario_id=something(
-                    metadata["branch_benders_mcf_selected_scenario_id"], missing,
-                ),
-                mcf_common_od_count=metadata["branch_benders_mcf_common_od_count"],
-                projected_mcf_separations=projected_mcf_calls[],
-                projected_mcf_cuts=projected_mcf_cuts[],
-                projected_mcf_seconds=projected_mcf_seconds[],
                 objective=exact_objective, lower_bound=lower_bound, relative_gap=gap,
                 nodes=metadata["branch_benders_node_count"], unique_y=state.stats.unique_y,
                 callback_count=state.callback_count, cache_hits=state.stats.cache_hits,
@@ -664,12 +542,6 @@ function run_opt(
                 shared_pool_size=length(state.shared_pool),
             )]),
         )
-        if !isempty(projected_mcf_events)
-            CSV.write(
-                joinpath(solver.log_dir, "aggregate_od_route_projected_mcf_cuts.csv"),
-                DataFrame(projected_mcf_events),
-            )
-        end
     end
     solution = (Dict{Any, Float64}(), copy(best_result.y))
     return OptResult(

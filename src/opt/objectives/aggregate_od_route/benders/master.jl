@@ -3,15 +3,11 @@ Master-objective composers for `BendersMasterModel{D}` (`src/opt/optimize/aggreg
 """
 
 """
-    set_benders_lifted_master_objective!(m, theta, cut_ids, walking_cost_expr, direct_cost_expr, route_lb_term, current_beta; lifted_walking_objective)
+    set_benders_lifted_master_objective!(m, theta, cut_ids, walking_cost_expr, direct_cost_expr, current_beta; lifted_walking_objective)
 
 Shared objective composition for `BendersY`/`BendersYZ`'s master. Under
-`lifted_walking_objective=true`: `current_beta * (sum(theta) + direct_cost_expr +
-route_lb_term) + walking_cost_expr`. Otherwise: `sum(theta) + route_lb_term`. `route_lb_term`
-defaults to `AffExpr(0.0)` at the call site for `BendersY` (which has no routing-lower-bound
-option) and for `generic_runner.jl`'s schedule-advance re-set (which has never included it,
-even under `BendersYZ` -- preserved here exactly, not fixed, since changing it would be a
-behavior change out of scope for this extraction).
+`lifted_walking_objective=true`: `current_beta * (sum(theta) + direct_cost_expr) +
+walking_cost_expr`. Otherwise: `sum(theta)`.
 """
 function set_benders_lifted_master_objective!(
     m::JuMP.Model,
@@ -19,17 +15,16 @@ function set_benders_lifted_master_objective!(
     cut_ids,
     walking_cost_expr::AffExpr,
     direct_cost_expr::AffExpr,
-    route_lb_term::AffExpr,
     current_beta::Float64;
     lifted_walking_objective::Bool,
 )
     if lifted_walking_objective
         @objective(
             m, Min,
-            current_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr + route_lb_term) + walking_cost_expr,
+            current_beta * (sum(theta[cid] for cid in cut_ids) + direct_cost_expr) + walking_cost_expr,
         )
     else
-        @objective(m, Min, sum(theta[cid] for cid in cut_ids) + route_lb_term)
+        @objective(m, Min, sum(theta[cid] for cid in cut_ids))
     end
     return nothing
 end

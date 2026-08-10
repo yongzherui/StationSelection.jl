@@ -12,8 +12,7 @@ Usage:
 
 Examples:
     julia --project=. scripts/run_test.jl opt/test_passenger_free_assignment_pricing.jl
-    julia --project=. scripts/run_test.jl opt/test_passenger_mcf_relaxation.jl
-    julia --project=. scripts/run_test.jl opt/test_aggregate_od_route_lifted_routing_lower_bound.jl
+    julia --project=. scripts/run_test.jl opt/test_aggregate_od_route_branch_and_benders.jl
 """
 
 using Test, StationSelection, Random, CSV, DataFrames, Dates, JuMP

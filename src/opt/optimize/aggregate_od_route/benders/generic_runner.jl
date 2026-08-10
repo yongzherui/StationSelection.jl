@@ -56,11 +56,7 @@ _benders_needs_core_point(::BendersXY, ::BendersSolver) = false
 
 Extra, already-live lower-bound term folded into this cut group's `theta`/`eta` at the
 master, used only when deciding whether a cut is needed
-(`theta_hat[cut_id] + this < v_hat - tol`). Default `0.0` for decompositions without such a
-term. `BendersYZ` overrides to read `value(master[:route_lb_exprs][cut_id])` when
-`lifted_routing_lower_bound`/`common_od_mcf_lower_bound` built one (see
-`BendersMasterModel{BendersYZ}`'s `build_model`, which always stashes
-`master[:route_lb_exprs]`, `nothing` when neither feature is active).
+(`theta_hat[cut_id] + this < v_hat - tol`). Default `0.0` for every decomposition.
 """
 _benders_residual_lower_bound_value(::Model, ::D, ::Int) where {D <: AbstractBendersDecomposition} = 0.0
 
@@ -313,9 +309,7 @@ end
 # to the subproblem -- structurally a hybrid of BendersY's feasibility-cut
 # reasoning (y_hat alone can still admit an infeasible collision) and
 # BendersXY's per-cut-group loop shape. Needs its own core-point/completion
-# LP (yz_mw_cut.jl) and, uniquely among the four decompositions, an optional
-# routing lower-bound term folded into theta/eta via
-# _benders_residual_lower_bound_value.
+# LP (yz_mw_cut.jl).
 # ---------------------------------------------------------------------------
 
 function _benders_hat_point(master::Model, ::BendersYZ)
@@ -382,18 +376,10 @@ function _benders_solve_subproblem(
     return sub_result.objective_value, sub_result.duals, columns, 0, true
 end
 
-function _benders_residual_lower_bound_value(master::Model, ::BendersYZ, cut_id::Int)
-    route_lb_exprs = haskey(master, :route_lb_exprs) ? master[:route_lb_exprs] : nothing
-    isnothing(route_lb_exprs) && return 0.0
-    return value(route_lb_exprs[cut_id])
-end
-
 """
     _benders_add_optimality_cut!(..., decomposition::BendersYZ, ...)
 
-Delegates to the existing, unmodified `_add_aggregate_od_route_benders_yz_optimality_cut!`,
-which already handles subtracting the live `route_lb_expr` from the cut RHS when
-`master[:route_lb_exprs]` is present (`nothing` otherwise, a no-op).
+Delegates to the existing, unmodified `_add_aggregate_od_route_benders_yz_optimality_cut!`.
 """
 function _benders_add_optimality_cut!(
     master::Model,
@@ -418,12 +404,10 @@ function _benders_add_optimality_cut!(
 )
     theta = master[:theta]
     z_core = isnothing(core_point) ? nothing : core_point.z
-    route_lb_exprs = haskey(master, :route_lb_exprs) ? master[:route_lb_exprs] : nothing
-    route_lb_expr = isnothing(route_lb_exprs) ? nothing : route_lb_exprs[cut_id]
     return _add_aggregate_od_route_benders_yz_optimality_cut!(
         master, theta, cut_id, data, base, solver, group_requests, feasible_pairs,
         hat.z_hat, assignments, open_stations, z_core, optimizer_env, v_hat, sub_duals;
-        route_lb_expr=route_lb_expr, certified=certified, Q_bar=Q_bar,
+        certified=certified, Q_bar=Q_bar,
         certification_already_failed=certification_already_failed,
     )
 end
@@ -814,11 +798,8 @@ function _run_benders_decomposition(
             if solver.lifted_walking_objective
                 walking_cost_expr = master[:walking_cost_expr]
                 direct_cost_expr = master[:direct_cost_expr]
-                # route_lb_term is intentionally omitted here (AffExpr(0.0)), matching this
-                # re-set's pre-existing behavior even under BendersYZ -- not fixed here, since
-                # that would be a behavior change out of scope for this extraction.
                 set_benders_lifted_master_objective!(
-                    master, theta, cut_ids, walking_cost_expr, direct_cost_expr, AffExpr(0.0), next_beta;
+                    master, theta, cut_ids, walking_cost_expr, direct_cost_expr, next_beta;
                     lifted_walking_objective=true,
                 )
             end

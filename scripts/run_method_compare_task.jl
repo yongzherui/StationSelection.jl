@@ -233,8 +233,6 @@ function build_solver(method::MethodSpec, cfg::NamedTuple, log_dir::String)
             # guidance and lower-bound mechanism explicitly disabled.
             lifted_walking_objective=method.lifted_walking_objective,
             route_regularization_weight_schedule=nothing,
-            lifted_routing_lower_bound=false,
-            common_od_mcf_lower_bound=method.common_od_mcf_lower_bound,
             direct_enumeration_guide=false,
         )
     else
@@ -342,7 +340,6 @@ function main()
         max_stops_mode     = string(method.max_stops_mode),
         max_stops          = max_stops,
         use_station_simple = method.use_station_simple,
-        common_od_mcf_lower_bound = method.common_od_mcf_lower_bound,
         lifted_walking_objective = method.lifted_walking_objective,
         status             = status,
         termination_status = isnothing(result) ? "" : string(result.termination_status),

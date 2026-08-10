@@ -69,7 +69,6 @@ const MOI = JuMP.MOI
         include("opt/test_passenger_free_assignment_station_simple_pricing.jl")
         include("opt/test_passenger_free_assignment_seeding.jl")
         include("opt/test_passenger_reward_coarsening_pricer.jl")
-        include("opt/test_passenger_mcf_relaxation.jl")
         include("opt/test_station_cluster_pricing.jl")
         include("opt/test_aggregate_od_route_heuristic_enumeration.jl")
         include("opt/test_aggregate_od_route_nearest_open_alignment.jl")
@@ -80,7 +79,7 @@ const MOI = JuMP.MOI
         include("opt/test_aggregate_od_route_yzh_zero_completion.jl")
         include("opt/test_aggregate_od_route_same_station_dual_completion.jl")
         include("opt/test_aggregate_od_route_lifted_walking_objective.jl")
-        include("opt/test_aggregate_od_route_lifted_routing_lower_bound.jl")
+        include("opt/test_aggregate_od_route_branch_and_benders.jl")
         include("opt/test_aggregate_od_route_route_weight_schedule.jl")
         include("opt/test_aggregate_od_route_direct_enumeration_guide.jl")
     end

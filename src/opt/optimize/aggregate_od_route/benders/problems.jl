@@ -100,14 +100,14 @@ function build_model(
             )
         end
         set_benders_lifted_master_objective!(
-            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, AffExpr(0.0), current_beta;
+            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, current_beta;
             lifted_walking_objective=true,
         )
         master[:walking_cost_expr] = walking_cost_expr
         master[:direct_cost_expr] = direct_cost_expr
     else
         set_benders_lifted_master_objective!(
-            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), AffExpr(0.0), current_beta;
+            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), current_beta;
             lifted_walking_objective=false,
         )
     end
@@ -498,9 +498,7 @@ end
 # ---------------------------------------------------------------------------
 # BendersYZ: master = y,z; subproblem = x,theta. Needs its own core-point/
 # completion LP (joint (y,z) structural region, no lambda/mu/nu chain block --
-# see yz_mw_cut.jl's module docstring for why it differs from BendersY's), and
-# optionally a routing lower-bound term (lifted_routing_lower_bound/
-# common_od_mcf_lower_bound, YZ-only, forbidden for Y/YZH at construction).
+# see yz_mw_cut.jl's module docstring for why it differs from BendersY's).
 # ---------------------------------------------------------------------------
 
 """
@@ -619,9 +617,7 @@ function build_model(
         "($(base.route_regularization_weight)); got $(beta_schedule[end])"
     ))
     current_beta = beta_schedule[1]
-    subproblem_model = solver.lifted_walking_objective ? _unit_weighted_routing_model(base) : base
 
-    route_lb_exprs = nothing
     if solver.lifted_walking_objective
         walking_cost_expr, x_by_pair_full = _add_nearest_open_master_walking_cost!(
             master, data, base, y, requests, feasible_pairs,
@@ -639,16 +635,8 @@ function build_model(
                 relax_integrality=solver.direct_enumeration_relax_integrality,
             )
         end
-        # route_lb_exprs reuses the zp/zd chains _add_nearest_open_master_walking_cost! just
-        # built, so it must be constructed after that call, not before.
-        route_lb_exprs = solver.lifted_routing_lower_bound ?
-            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-            solver.common_od_mcf_lower_bound ?
-                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-                nothing
-        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
         set_benders_lifted_master_objective!(
-            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, route_lb_term, current_beta;
+            master, theta, cut_ids, walking_cost_expr, direct_cost_expr, current_beta;
             lifted_walking_objective=true,
         )
         master[:walking_cost_expr] = walking_cost_expr
@@ -658,18 +646,11 @@ function build_model(
             master, data, y, requests, feasible_pairs, base.max_walking_distance, base.allow_walk_only,
             base.assignment_policy.feasibility_cut_style,
         )
-        route_lb_exprs = solver.lifted_routing_lower_bound ?
-            _build_lifted_routing_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-            solver.common_od_mcf_lower_bound ?
-                _build_common_od_mcf_lower_bound_exprs!(master, data, subproblem_model, y, cut_ids, requests, feasible_pairs) :
-                nothing
-        route_lb_term = isnothing(route_lb_exprs) ? AffExpr(0.0) : sum(route_lb_exprs[cid] for cid in cut_ids; init=AffExpr(0.0))
         set_benders_lifted_master_objective!(
-            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), route_lb_term, current_beta;
+            master, theta, cut_ids, AffExpr(0.0), AffExpr(0.0), current_beta;
             lifted_walking_objective=false,
         )
     end
-    master[:route_lb_exprs] = route_lb_exprs
     master[:benders_beta_schedule] = beta_schedule
     master[:benders_cut_ids] = cut_ids
 
