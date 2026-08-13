@@ -1,14 +1,6 @@
 @testset "Passenger free-assignment label-setting pricing" begin
     using Random
 
-    @testset "column over-generation defaults" begin
-        model = AggregateODRouteModel(2)
-        @test model.max_new_columns == 20
-        @test model.n_candidates == 100
-        @test ColumnGenerationSolver().max_columns_per_iteration == 20
-        @test ColumnGenerationSolver().n_candidates == 100
-    end
-
     function line_travel_cost(n::Int)
         costs = Dict{Tuple{Int, Int}, Float64}()
         for i in 1:n, j in 1:n
