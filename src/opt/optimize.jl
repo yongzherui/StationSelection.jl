@@ -1,11 +1,15 @@
 include("optimize/iterative_strategy_types.jl")
 # `optimize/aggregate_od_route/solver_types.jl` and `optimize/formulations/aggregate_od_route/*`
 # no longer exist -- superseded by `opt/solvers/*.jl` and `opt/formulations/aggregate_od_route/*.jl`,
-# included directly from `StationSelection.jl`. `AggregateODRouteBendersYXFormulation`
-# (`benders/yx.jl`, wired below at `optimize/aggregate_od_route/benders/yx/`) is the first
-# Benders formulation wired into this layout; the historical `benders/{y,xy,yz,yzh}.jl`
-# (built around a now-removed nearest-open assignment-policy concept) remain unwired --
-# out of scope for now.
+# included directly from `StationSelection.jl`. None of the five Benders formulation
+# marker structs (`benders/{y,xy,yz,yzh,yx}.jl`) are wired into a build_model/Solver here --
+# kept purely as a reminder of the decompositions to (re)build, see those files' own
+# docstrings and `opt/problems/route_covering.jl` (`RouteCoveringProblem`, likewise kept
+# unwired). A first working attempt (`AggregateODRouteBendersYXFormulation` against
+# `AggregateODRouteBaseFormulation`'s free-assignment machinery) was built, verified
+# exact against `DirectMIPSolver`, and then deliberately removed in favor of restarting
+# against `RouteCoveringProblem` + column generation -- see git history
+# ("AggregateODRouteBendersYXFormulation") if useful.
 include("optimize/clustering/build_two_stage_od.jl")
 include("optimize/clustering/build_two_stage.jl")
 include("optimize/clustering/build_single_stage.jl")
@@ -29,20 +33,14 @@ include("label_setting/aggregate_od_route/labels.jl")
 include("label_setting/aggregate_od_route/search.jl")
 include("label_setting/aggregate_od_route/station_simple.jl")
 include("label_setting/aggregate_od_route/logging.jl")
-# generic_runner.jl and column_generation.jl are the AggregateODRouteCG engine's own
-# outer loop/main loop (run_aggregate_od_route_column_generation) -- AnyAggregateODRouteProblem
-# (AggregateODRouteProblem/RouteCoveringProblem)-typed throughout, removed along with
-# AggregateODRouteProblem. Unwired; PassengerFreeAssignmentCG (AggregateODRouteJointRoutingAssignmentFormulation
-# + CGSolver) doesn't use these -- it goes through opt/solvers/cg_solver.jl's generic
-# outer loop with its own joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl
-# hooks instead. See StationSelection.jl's include comments.
-# include("label_setting/aggregate_od_route/generic_runner.jl")
-# include("label_setting/aggregate_od_route/column_generation.jl")
+# generic_runner.jl and column_generation.jl (the AggregateODRouteCG engine's own outer
+# loop/main loop, run_aggregate_od_route_column_generation) were removed along with the
+# rest of the old nearest-open-assignment-policy Benders machinery -- PassengerFreeAssignmentCG
+# (AggregateODRouteJointRoutingAssignmentFormulation + CGSolver) never used these, it goes
+# through opt/solvers/cg_solver.jl's generic outer loop with its own
+# joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl hooks instead.
 include("label_setting/aggregate_od_route/enumeration.jl")
 include("optimize/aggregate_od_route/direct/build_base.jl")
-include("optimize/aggregate_od_route/benders/yx/subproblem.jl")
-include("optimize/aggregate_od_route/benders/yx/build_master.jl")
-include("optimize/aggregate_od_route/benders/yx/hooks.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/types.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/data.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/labels.jl")
@@ -56,17 +54,13 @@ include("optimize/aggregate_od_route/column_generation/build_joint_routing_assig
 # dispatch.jl is the CG-algorithm choke point for the *old* ColumnGenerationSolver
 # (solver.algorithm-based dispatch) -- AggregateODRouteJointRoutingAssignmentFormulation
 # pairs with the new CGSolver directly (no further algorithm dispatch needed) and never
-# goes through here. AnyAggregateODRouteProblem-typed throughout; unwired along with the
-# rest of the AggregateODRouteCG engine.
+# goes through here. Unwired along with the rest of the old AggregateODRouteCG engine.
 # include("label_setting/aggregate_od_route/dispatch.jl")
-# `optimize/aggregate_od_route/heuristic_enumeration.jl` and all of
-# `optimize/aggregate_od_route/benders/*.jl` (except the empty `y/build_{master,subproblem}.jl`
-# stubs, not yet wired) were archived by the same external reorganization noted above --
-# only `archive/` copies remain. This is the pre-refactor Benders/heuristic-enumeration
-# machinery for `AggregateODRouteProblem`; rebuilding it under the new Problem/Formulation/
-# Solver layout is out of scope for this session's work (see `AggregateODRouteBendersYFormulation`
-# etc.'s own "not wired yet" comment near this file's top). Plain exhaustive enumeration
-# (`enumerate_aggregate_od_route_columns`, `AggregateODRouteBaseFormulation`'s `θ` pool) was
-# recovered and adapted -- see `label_setting/aggregate_od_route/enumeration.jl`, included
-# above (it's a degenerate label-setting run: uniform rewards, no dominance pruning, so
-# it lives alongside the search machinery it reuses rather than under `optimize/`).
+# `optimize/aggregate_od_route/heuristic_enumeration.jl` and the old nearest-open-assignment-
+# policy Benders/branch-and-Benders machinery under `optimize/aggregate_od_route/benders/`
+# were removed entirely -- see this file's top comment for what's kept as a reminder
+# instead. Plain exhaustive enumeration (`enumerate_aggregate_od_route_columns`,
+# `AggregateODRouteBaseFormulation`'s `θ` pool) was recovered and adapted -- see
+# `label_setting/aggregate_od_route/enumeration.jl`, included above (it's a degenerate
+# label-setting run: uniform rewards, no dominance pruning, so it lives alongside the
+# search machinery it reuses rather than under `optimize/`).

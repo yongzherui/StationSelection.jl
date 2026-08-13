@@ -16,11 +16,7 @@ include("objectives/aggregate_od_route/core.jl")
 include("objectives/aggregate_od_route/joint_routing_assignment/unserved_penalty.jl")
 include("objectives/aggregate_od_route/joint_routing_assignment/assembly.jl")
 include("objectives/aggregate_od_route/base/assembly.jl")
-# Benders objective files (expressions/aggregate_od_route/benders.jl and
-# aggregate_od_route/benders/{subproblem,master,dual_lp}.jl) referenced
-# AnyAggregateODRouteProblem/RouteCoveringProblem, removed along with
-# AggregateODRouteProblem -- unwired, see StationSelection.jl's include comments.
-# include("objectives/expressions/aggregate_od_route/benders.jl")
-# include("objectives/aggregate_od_route/benders/subproblem.jl")
-# include("objectives/aggregate_od_route/benders/master.jl")
-# include("objectives/aggregate_od_route/benders/dual_lp.jl")
+# The old nearest-open-assignment-policy Benders objective files (expressions/
+# aggregate_od_route/benders.jl, aggregate_od_route/benders/{subproblem,master,dual_lp}.jl)
+# were removed -- see opt/formulations/aggregate_od_route/benders/*.jl for the surviving
+# Formulation marker structs.

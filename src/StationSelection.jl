@@ -64,22 +64,24 @@ include("opt/problems/station_selection.jl")
 # dominant consumer, AggregateODRouteMap.columns) since it's a plain data type, not a
 # Problem. AggregateODRouteBaseFormulation/JointRoutingAssignmentFormulation pair with
 # StationSelectionProblem directly.
-# route_covering.jl (RouteCoveringProblem) is not wired in -- its `.problem` field was
-# typed `AggregateODRouteProblem`, now removed. The AggregateODRouteCG column-generation
-# engine that depended on RouteCoveringProblem is unwired along with it -- see the
-# include exclusions below in this file and in opt/optimize.jl.
-# PassengerFreeAssignmentCG (StationSelectionProblem-based) is unaffected.
-# include("opt/problems/route_covering.jl")
+# route_covering.jl (RouteCoveringProblem) is kept (not wired to any build_model/Solver)
+# as a reminder of the fixed-y/fixed-assignment shape a future Benders subproblem should
+# reuse -- see its own docstring.
+include("opt/problems/route_covering.jl")
 
-# Formulations (AbstractFormulation) -- Benders formulations are not wired in yet, they
-# need AbstractBendersCutMode/SingleCut/MultiCut from optimize/iterative_strategy_types.jl,
-# only reachable after opt/optimize.jl below. The four Clustering formulations are
-# retyped to <: AbstractFormulation but not yet split into a StationSelectionProblem
-# pairing -- they still carry their own l/k and use the old two-arg build_model(formulation,
-# data); a deliberate halfway state, not a bug.
+# Formulations (AbstractFormulation). The four Clustering formulations are retyped to
+# <: AbstractFormulation but not yet split into a StationSelectionProblem pairing --
+# they still carry their own l/k and use the old two-arg build_model(formulation, data);
+# a deliberate halfway state, not a bug. The five Benders formulation marker structs
+# (benders/{y,xy,yz,yzh,yx}.jl) are, likewise, kept but not wired to any build_model/
+# Solver -- see opt/optimize.jl's top comment for why.
 include("opt/formulations/clustering.jl")
 include("opt/formulations/aggregate_od_route/base.jl")
 include("opt/formulations/aggregate_od_route/benders/cut_mode.jl")
+include("opt/formulations/aggregate_od_route/benders/y.jl")
+include("opt/formulations/aggregate_od_route/benders/xy.jl")
+include("opt/formulations/aggregate_od_route/benders/yz.jl")
+include("opt/formulations/aggregate_od_route/benders/yzh.jl")
 include("opt/formulations/aggregate_od_route/benders/yx.jl")
 include("opt/formulations/aggregate_od_route/joint_routing_assignment.jl")
 

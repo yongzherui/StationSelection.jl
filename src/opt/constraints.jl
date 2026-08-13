@@ -22,11 +22,9 @@ include("constraints/aggregate_od_route/joint_routing_assignment/linking.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/routing_and_assignment.jl")
 include("constraints/aggregate_od_route/base/coverage.jl")
 include("constraints/aggregate_od_route/base/linking.jl")
-include("constraints/aggregate_od_route/benders/pair_assignment.jl")
-include("constraints/aggregate_od_route/benders/coverage.jl")
-include("constraints/aggregate_od_route/benders/cuts.jl")
-include("constraints/aggregate_od_route/benders/direct_enumeration.jl")
-include("constraints/aggregate_od_route/benders/core_point.jl")
-# completion.jl referenced RouteCoveringProblem (via AggregateODRouteProblem, now
-# removed) -- unwired along with it, see StationSelection.jl's include comments.
-# include("constraints/aggregate_od_route/benders/completion.jl")
+# The old nearest-open-assignment-policy Benders machinery (constraints/aggregate_od_route/
+# benders/*.jl, constraints/aggregate_od_route/nearest_open/*.jl) was removed -- see
+# opt/formulations/aggregate_od_route/benders/*.jl for the surviving Formulation marker
+# structs (kept as a reminder of the decompositions still to build against the
+# Problem/Formulation/Solver architecture) and opt/problems/route_covering.jl
+# (RouteCoveringProblem, likewise kept).

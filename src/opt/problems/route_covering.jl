@@ -1,24 +1,30 @@
 export RouteCoveringProblem
-export AnyAggregateODRouteProblem
 
 """
     RouteCoveringProblem <: AbstractProblem
 
-Fixed-station, fixed-assignment aggregate OD route-covering problem. The
-assignment map keys are `(scenario, origin_station, destination_station)` and
-values are the assigned `(pickup_station, dropoff_station)` pair. Carries its own
-`problem`/`formulation` pair rather than composing `AggregateODRouteProblem`
-directly, since fixing `open_stations`/`fixed_assignments` is itself a problem-level
-decision layered on top of the base aggregate-OD-route problem.
+Fixed-station, fixed-assignment aggregate OD route-covering problem: the shape of a
+Benders subproblem once both first-stage `y` and the assignment are pinned, leaving
+only route activation (`theta`) free. The assignment map keys are `(scenario,
+origin_station, destination_station)` and values are the assigned `(pickup_station,
+dropoff_station)` pair. Carries its own `problem`/`formulation` pair rather than
+composing `StationSelectionProblem` directly, since fixing
+`open_stations`/`fixed_assignments` is itself a problem-level decision layered on top
+of the base aggregate-OD-route problem.
+
+Not wired to any `build_model`/`Solver` currently -- kept as a reminder of the shape a
+future Benders subproblem should reuse (see `opt/formulations/aggregate_od_route/
+benders/*.jl` for the corresponding master-side Formulation markers) rather than
+reinventing fixed-station/fixed-assignment plumbing from scratch.
 """
 struct RouteCoveringProblem <: AbstractProblem
-    problem::AggregateODRouteProblem
+    problem::StationSelectionProblem
     formulation::AbstractFormulation
     open_stations::Vector{Int}
     fixed_assignments::Dict{NTuple{3, Int}, Tuple{Int, Int}}
 
     function RouteCoveringProblem(
-            problem::AggregateODRouteProblem,
+            problem::StationSelectionProblem,
             formulation::AbstractFormulation,
             open_stations::AbstractVector{<:Integer},
             fixed_assignments::AbstractDict{<:Tuple{Int, Int, Int}, <:Tuple{Int, Int}},
@@ -33,8 +39,3 @@ struct RouteCoveringProblem <: AbstractProblem
         new(problem, formulation, unique_open, assignments)
     end
 end
-
-const AnyAggregateODRouteProblem = Union{
-    AggregateODRouteProblem,
-    RouteCoveringProblem,
-}
