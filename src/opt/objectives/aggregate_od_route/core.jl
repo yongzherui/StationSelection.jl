@@ -1,5 +1,5 @@
 """
-Objective for AggregateODRouteModel.
+Objective for AggregateODRouteProblem.
 """
 
 export set_aggregate_od_route_objective!

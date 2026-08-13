@@ -30,20 +30,6 @@ include("utils/core/logging.jl")
 include("utils/data/scenarios.jl")
 include("utils/data/candidate_stations.jl")
 
-# Route utilities
-include("utils/routes/route_data.jl")
-include("utils/routes/route_evaluation.jl")
-include("utils/routes/route_pool_types.jl")             # includes IterativeRouteGenerationConfig
-include("utils/routes/iterative_route_strategies.jl")   # candidate generation helpers
-include("utils/routes/generate_routes_from_orders.jl")
-include("utils/routes/generate_iterative_routes.jl")
-include("utils/routes/route_generation_dispatch.jl")
-include("utils/routes/route_io.jl")
-include("utils/routes/generate_exact_darp_routes.jl")
-include("utils/routes/route_pool_initialization.jl")
-include("utils/routes/route_pool_iteration.jl")
-include("utils/routes/route_pool_enrichment.jl")
-include("utils/routes/route_pool_export.jl")
 include("data/io/stations.jl")
 include("data/io/requests.jl")
 
@@ -63,23 +49,50 @@ include("generators/test_cases/test6_bidirectional.jl")
 
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
-include("opt/models/clustering.jl")
-include("opt/models/exact_darp_route_model.jl")
-include("opt/models/aggregate_od_route_model.jl")
 
-# Clustering OD map (depends on TwoStageODPolicy)
+# Solvers (AbstractSolver + concrete solvers) -- generic, no Problem/Formulation deps
+include("opt/solvers/utils/abstract.jl")
+include("opt/solvers/utils/common.jl")
+include("opt/solvers/direct_solver.jl")
+include("opt/solvers/cg_solver.jl")
+include("opt/solvers/benders_solver.jl")
+include("opt/solvers/heuristic_solver.jl")
+
+include("opt/problems/station_selection.jl")
+# aggregate_od_route.jl (AggregateODRouteProblem) was removed entirely -- AggregateODRouteColumn,
+# its only piece still needed, now lives in data/maps/aggregate_od_route_map.jl (its
+# dominant consumer, AggregateODRouteMap.columns) since it's a plain data type, not a
+# Problem. AggregateODRouteBaseFormulation/JointRoutingAssignmentFormulation pair with
+# StationSelectionProblem directly.
+# route_covering.jl (RouteCoveringProblem) is not wired in -- its `.problem` field was
+# typed `AggregateODRouteProblem`, now removed. The AggregateODRouteCG column-generation
+# engine that depended on RouteCoveringProblem is unwired along with it -- see the
+# include exclusions below in this file and in opt/optimize.jl.
+# PassengerFreeAssignmentCG (StationSelectionProblem-based) is unaffected.
+# include("opt/problems/route_covering.jl")
+
+# Formulations (AbstractFormulation) -- Benders formulations are not wired in yet, they
+# need AbstractBendersCutMode/SingleCut/MultiCut from optimize/iterative_strategy_types.jl,
+# only reachable after opt/optimize.jl below. The four Clustering formulations are
+# retyped to <: AbstractFormulation but not yet split into a StationSelectionProblem
+# pairing -- they still carry their own l/k and use the old two-arg build_model(formulation,
+# data); a deliberate halfway state, not a bug.
+include("opt/formulations/clustering.jl")
+include("opt/formulations/aggregate_od_route/base.jl")
+include("opt/formulations/aggregate_od_route/benders/cut_mode.jl")
+include("opt/formulations/aggregate_od_route/benders/yx.jl")
+include("opt/formulations/aggregate_od_route/joint_routing_assignment.jl")
+
+# Clustering OD map (depends on AbstractClusteringTwoStageODFormulation)
 include("data/maps/clustering_od_map.jl")
 
-# Clustering station map (depends on TwoStagePolicy)
+# Clustering station map (depends on ClusteringTwoStageFormulation)
 include("data/maps/clustering_two_stage_station_map.jl")
 
-# Clustering base map (depends on SingleStagePolicy)
+# Clustering base map (depends on ClusteringBaseFormulation)
 include("data/maps/clustering_base_map.jl")
 
-# Exact DARP route OD map for ExactDARPRouteModel (depends on RouteData, route_io)
-include("data/maps/exact_darp_route_od_map.jl")
-
-# Aggregate OD route OD map for AggregateODRouteModel
+# Aggregate OD route OD map for AggregateODRouteProblem
 include("data/maps/aggregate_od_route_map.jl")
 
 # Model-to-map dispatch
@@ -90,9 +103,6 @@ include("opt/variables.jl")
 include("opt/constraints.jl")
 include("opt/objective.jl")
 include("opt/optimize.jl")
-
-# Warm start model for ExactDARPRouteModel (depends on opt/optimize.jl)
-include("opt/models/exact_darp_route_warm_start.jl")
 
 # Variable export (depends on OptResult and all mapping types)
 include("utils/analysis/export_variables.jl")
@@ -131,13 +141,11 @@ export StationSelectionData, ScenarioData
 export AbstractStationSelectionMap, AbstractClusteringMap
 export ClusteringTwoStageODMap, ClusteringBaseModelMap
 export ClusteringTwoStageStationMap
-export ExactDARPRouteODMap
 export AggregateODRouteMap
 export create_station_selection_data, create_scenario_data
 export create_clustering_two_stage_od_map
 export create_clustering_two_stage_station_map
 export create_clustering_base_model_map
-export create_exact_darp_route_od_map
 export create_aggregate_od_route_map
 export create_map
 export n_scenarios, get_station_id, get_station_idx
@@ -149,41 +157,27 @@ export compute_time_to_od_count_mapping
 export has_walking_distance_limit, get_valid_jk_pairs
 export get_valid_j_assignments
 
-# Re-export route utilities
-export RouteData, generate_simple_routes
-export IterativeRouteGenerationConfig, generate_iterative_routes
-export RouteIOData, load_routes_and_alpha
-export default_iterative_route_generation_config, generate_routes_for_bucket
-export RoutePoolInitSpec, RoutePoolState, ExactDARPRouteBucketPoolsState, ExactDARPRouteEnrichmentConfig, ExactDARPRouteRunnerConfig, ExactDARPRouteColumnGenerationConfig
-export ExactDARPRouteIterationSummary, ExactDARPRouteRunnerResult, ExactDARPRouteColumnGenerationRunnerResult
-export initialize_route_pool, export_route_pool_state, export_exact_darp_route_bucket_pools_state
-export run_exact_darp_route_iterative, run_exact_darp_route_column_generation
 export AbstractStationSelectionSolver
-export SolverConfig, DirectSolver, ColumnGenerationSolver, BendersSolver, BranchAndBendersSolver, BranchBendersCut, HeuristicSolver
+export SolverConfig, DirectSolver, ColumnGenerationSolver, BendersSolver, BranchAndBendersSolver, BranchBendersCut
 export AbstractBendersDecomposition, BendersY, BendersXY
 export AbstractBendersCutMode, SingleCut, MultiCut
 export AbstractSolveStrategy, AbstractIterativeSolveStrategy
 export IterativeSolveIterationSummary, IterativeSolveResult
-export ExactDARPRouteIterativeStrategy, ExactDARPRouteColumnGenerationStrategy
-export ExactDARPRouteCGDuals, ExactDARPRoutePricedColumn, ExactDARPRoutePricingResult
 
 # Re-export optimization framework types
 export AbstractStationSelectionModel
 export AbstractSingleScenarioModel, AbstractMultiScenarioModel
 export AbstractTwoStageModel, AbstractODModel
-export AbstractClusteringPolicy
-export SingleStagePolicy, TwoStagePolicy, TwoStageODPolicy
-export ClusteringModel
-export ExactDARPRouteWarmStartModel
-export ExactDARPRouteModel
-export AggregateODRouteModel
-export AggregateODRouteEndpointChainKey
-export AbstractAggregateODAssignmentPolicy, FreeAggregateODAssignmentPolicy, NearestOpenAggregateODAssignmentPolicy
-export RouteCoveringProblem, AnyAggregateODRouteModel, AggregateODRouteColumn
+export AbstractClusteringFormulation, AbstractClusteringTwoStageODFormulation
+export ClusteringBaseFormulation, ClusteringTwoStageFormulation
+export ClusteringTwoStageODFormulation, ClusteringTwoStageODFlowRegularizerFormulation
+# AggregateODRouteProblem, AbstractAggregateODAssignmentPolicy/Free/NearestOpen,
+# RouteCoveringProblem, AnyAggregateODRouteProblem, and AggregateODRouteEndpointChainKey
+# (nearest_open/endpoint_chain.jl, already unwired) are gone -- AggregateODRouteColumn is
+# exported from its new home, data/maps/aggregate_od_route_map.jl.
 
 # Re-export optimization functions
 export run_opt, build_model
-export build_exact_darp_route_restricted_master, extract_exact_darp_route_cg_duals, solve_exact_darp_route_pricing
 export add_aggregate_od_route_column!, add_or_update_aggregate_od_route_column!
 export extract_aggregate_od_route_coverage_duals
 export aggregate_od_route_coverage_sigma, generate_aggregate_od_route_columns
@@ -196,51 +190,32 @@ export extend_aggregate_od_route_pricing_label, aggregate_od_route_pricing_by_la
 export AggregateODRouteStationSimpleLabel, aggregate_od_route_pricing_by_station_simple_label_setting
 export RewardLayerBitset
 export PassengerAssignmentCandidate, PassengerAssignmentOpportunity
-export PassengerFreeAssignmentPricingData, PassengerFreeAssignmentPricingLabel
-export PassengerFreeAssignmentRouteColumn
-export create_passenger_free_assignment_pricing_data
-export initial_passenger_free_assignment_pricing_labels
-export extend_passenger_free_assignment_pricing_label
-export passenger_free_assignment_pricing_by_label_setting
-export StationCluster, ClusterArcData, ClusterRewardData, ClusterPricingResult
-export StationClusteringConfig, StationClusterHierarchy, ClusterPricingStopReason
-export CertifiedNonnegative, ReachedMaximumClusters, FoundExactNegativeColumn
-export NoSplittableCluster, TimeLimit
-export initial_station_clustering, build_cluster_pricing_cache
-export solve_cluster_pricer, solve_adaptive_cluster_lower_bound
-export refresh_cluster_rewards!, reset_station_cluster_refinement!
-export assert_cluster_lower_bound_coefficients, assert_cluster_pricing_lower_bound
-export ExactPricingResult, PassengerRewardBoundData, RewardBoundResult, RewardBoundModel
-export PairwiseAssignmentRoutingBounds, build_pairwise_assignment_routing_bounds
-export TripleAssignmentRoutingBounds, build_triple_assignment_routing_bounds
-export StationSubsetPricingSettings, StationSearchNode, StationSubsetPricingCertificate
-export price_exact_on_stations, reward_upper_bound_fixed, reward_upper_bound_all_available
-export solve_reward_bound_lp!, price_by_station_subset_branch_and_bound
-export PassengerFreeAssignmentStationSimpleLabel, passenger_free_assignment_pricing_by_station_simple_label_setting
-export PassengerFreeAssignmentPassenger, PassengerFreeAssignmentMasterData
-export PassengerFreeAssignmentMaster, build_passenger_free_assignment_master
-export create_passenger_free_assignment_master_data
-export add_passenger_free_assignment_column!, passenger_free_assignment_column_cost
-export extract_passenger_free_assignment_duals, passenger_free_assignment_pricing_candidates
-export PassengerFreeAssignmentCGResult, run_passenger_free_assignment_column_generation
-export get_exact_darp_route_warm_start_solution
+export JointRoutingAssignmentPricingData, JointRoutingAssignmentPricingLabel
+export JointRoutingAssignmentRouteColumn
+export create_joint_routing_assignment_pricing_data
+export initial_joint_routing_assignment_pricing_labels
+export extend_joint_routing_assignment_pricing_label
+export joint_routing_assignment_pricing_by_label_setting
+export JointRoutingAssignmentStationSimpleLabel, joint_routing_assignment_pricing_by_station_simple_label_setting
+export add_joint_routing_assignment_column!, joint_routing_assignment_column_cost
+export extract_joint_routing_assignment_duals, joint_routing_assignment_pricing_candidates
+export joint_routing_assignment_two_stop_seed_columns
+export default_joint_routing_assignment_unserved_penalty
+export add_joint_routing_assignment_slack_variables!, add_joint_routing_assignment_same_station_variables!
+export add_joint_routing_assignment_coverage_constraints!, add_joint_routing_assignment_station_linking_constraints!
+export set_joint_routing_assignment_objective!
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!
-export add_theta_r_ts_variables!
 export add_aggregate_od_route_theta_variables!
-export compute_beta_r_jkl
 export add_assignment_constraints!, add_station_limit_constraint!
 export add_scenario_activation_limit_constraints!, add_activation_linking_constraints!
 export add_assignment_to_active_constraints!, add_assignment_to_selected_constraints!
 export add_flow_activation_constraints!
-export add_route_capacity_constraints!
-export add_route_capacity_lazy_constraints!
 export add_aggregate_od_route_coverage_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_clustering_two_stage_station_objective!
-export set_route_od_objective!
 export set_aggregate_od_route_objective!
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments

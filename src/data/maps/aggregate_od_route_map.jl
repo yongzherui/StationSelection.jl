@@ -1,10 +1,43 @@
 """
-OD mapping and initial restricted column pool for AggregateODRouteModel.
+OD mapping and initial restricted column pool for the aggregate-OD-route problem.
 """
 
+export AggregateODRouteColumn
 export AggregateODRouteMap
 export create_aggregate_od_route_map
 export assert_no_walk_only_pairs
+
+"""
+    AggregateODRouteColumn
+
+A route column for the aggregate-OD-route problem: which station pairs it serves and at
+what cost. Lives here (not `opt/problems/` or `opt/formulations/`) because it's a plain
+data/value type -- the item type of `AggregateODRouteMap.columns` below, its dominant
+consumer -- not a `Problem` or `Formulation`. Used as the θ pool for
+`AggregateODRouteBaseFormulation` (built via `enumerate_aggregate_od_route_columns`);
+`AggregateODRouteJointRoutingAssignmentFormulation` uses a different, richer type,
+`JointRoutingAssignmentRouteColumn` (`route`/`assignments`, not just `od_pairs`), for its
+own real θ pool -- the two are not interchangeable despite the similar name.
+"""
+struct AggregateODRouteColumn
+    id::Int
+    od_pairs::Vector{Tuple{Int, Int}}
+    tau::Float64
+    metadata::Dict{String, Any}
+
+    function AggregateODRouteColumn(
+            id::Int,
+            od_pairs::AbstractVector{<:Tuple{Int, Int}},
+            tau::Number;
+            metadata::Dict{String, Any}=Dict{String, Any}()
+        )
+        id > 0 || throw(ArgumentError("column id must be positive"))
+        isempty(od_pairs) && throw(ArgumentError("aggregate OD route column must cover at least one OD pair"))
+        tau >= 0 || throw(ArgumentError("tau must be non-negative"))
+        unique_pairs = unique(Tuple{Int, Int}.(od_pairs))
+        new(id, unique_pairs, Float64(tau), metadata)
+    end
+end
 
 mutable struct AggregateODRouteMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -84,7 +117,7 @@ function _singleton_aggregate_od_route_columns(
     data::StationSelectionData,
 )::Vector{AggregateODRouteColumn}
     has_routing_costs(data) ||
-        throw(ArgumentError("AggregateODRouteModel singleton initialization requires routing_costs"))
+        throw(ArgumentError("AggregateODRouteProblem singleton initialization requires routing_costs"))
 
     all_pairs = Set{Tuple{Int, Int}}()
     for pairs in values(active_jk_s)
@@ -115,11 +148,24 @@ function _singleton_aggregate_od_route_columns(
     return columns
 end
 
+"""
+    create_aggregate_od_route_map(problem::StationSelectionProblem, formulation,
+                                   data::StationSelectionData; initial_columns=nothing)
+        -> AggregateODRouteMap
+
+Build the `AggregateODRouteMap` for `AggregateODRouteBaseFormulation`/
+`AggregateODRouteJointRoutingAssignmentFormulation`, reading `problem.max_walking_distance`
+and `formulation.allow_walk_only`. (`RouteCoveringProblem`'s fixed-assignment variant of
+this, `_apply_route_covering_assignments!`, was removed along with `AggregateODRouteProblem`
+-- `RouteCoveringProblem` is currently unwired, see `StationSelection.jl`'s include
+comments.)
+"""
 function create_aggregate_od_route_map(
-    model::AnyAggregateODRouteModel,
-    data::StationSelectionData,
+    problem::StationSelectionProblem,
+    formulation::AnyAggregateODRouteFormulation,
+    data::StationSelectionData;
+    initial_columns::Union{Nothing, AbstractVector}=nothing,
 )::AggregateODRouteMap
-    base_model = model isa RouteCoveringProblem ? model.base : model
     scenario_label_to_array_idx, array_idx_to_scenario_label =
         create_scenario_label_mappings(data.scenarios)
 
@@ -137,17 +183,14 @@ function create_aggregate_od_route_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        base_model.max_walking_distance;
-        allow_walk_only=base_model.allow_walk_only,
+        problem.max_walking_distance;
+        allow_walk_only=formulation.allow_walk_only,
         allow_same_station=true,
     )
-    if model isa RouteCoveringProblem
-        _apply_route_covering_assignments!(valid_jk_pairs, Q_s, model)
-    end
     active_jk_s = _aggregate_od_route_active_jk_by_s(Q_s, valid_jk_pairs)
-    initial_columns = isnothing(base_model.initial_columns) ?
+    resolved_initial_columns = isnothing(initial_columns) ?
         _singleton_aggregate_od_route_columns(active_jk_s, data) :
-        base_model.initial_columns
+        initial_columns
 
     mapping = AggregateODRouteMap(
         data.station_id_to_array_idx,
@@ -162,35 +205,10 @@ function create_aggregate_od_route_map(
         AggregateODRouteColumn[],
         Set{Int}(),
         Dict{Tuple{Int, Int}, Vector{Int}}(),
-        base_model.max_walking_distance,
+        problem.max_walking_distance,
     )
-    for column in initial_columns
+    for column in resolved_initial_columns
         _register_aggregate_od_route_column_metadata!(mapping, column)
     end
     return mapping
-end
-
-function _apply_route_covering_assignments!(
-    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
-    Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}},
-    model::RouteCoveringProblem,
-)::Nothing
-    open_set = Set(model.open_stations)
-    for (s, q_s) in Q_s
-        for ((o, d), demand) in q_s
-            demand > 0 || continue
-            key = (s, o, d)
-            haskey(model.fixed_assignments, key) ||
-                throw(ArgumentError("missing fixed assignment for scenario/OD $(key)"))
-            assigned = model.fixed_assignments[key]
-            is_walk_only_pair(assigned) ||
-                assigned[1] in open_set && assigned[2] in open_set ||
-                throw(ArgumentError("fixed assignment $(assigned) for $(key) uses a station that is not open"))
-            feasible = get(valid_jk_pairs, (o, d), Tuple{Int, Int}[])
-            assigned in feasible ||
-                throw(ArgumentError("fixed assignment $(assigned) is infeasible for OD $((o, d))"))
-            valid_jk_pairs[(o, d)] = [assigned]
-        end
-    end
-    return nothing
 end

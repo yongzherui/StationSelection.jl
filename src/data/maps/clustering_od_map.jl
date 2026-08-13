@@ -1,5 +1,5 @@
 """
-Clustering OD mapping for TwoStageODPolicy.
+Clustering OD mapping for ClusteringTwoStageODFormulation/ClusteringTwoStageODFlowRegularizerFormulation.
 
 This module provides data structures for mapping scenarios to origin-destination pairs
 for the clustering two-stage optimization (without time dimension).
@@ -198,14 +198,19 @@ end
 
 """
     create_clustering_two_stage_od_map(
-        model::TwoStageODPolicy,
+        problem::StationSelectionProblem,
+        formulation::AbstractClusteringTwoStageODFormulation,
         data::StationSelectionData
     ) -> ClusteringTwoStageODMap
 
-Create a clustering scenario OD map with OD pairs organized by scenario.
+Create a clustering scenario OD map with OD pairs organized by scenario. Shared by both
+`ClusteringTwoStageODFormulation` and `ClusteringTwoStageODFlowRegularizerFormulation` --
+flow regularization doesn't change the OD mapping, only the objective/variable/constraint
+set `_build_clustering!` adds.
 """
 function create_clustering_two_stage_od_map(
-    model::TwoStageODPolicy,
+    problem::StationSelectionProblem,
+    formulation::AbstractClusteringTwoStageODFormulation,
     data::StationSelectionData
 )::ClusteringTwoStageODMap
 
@@ -230,7 +235,7 @@ function create_clustering_two_stage_od_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        model.max_walking_distance
+        problem.max_walking_distance
     )
 
     return ClusteringTwoStageODMap(
@@ -241,7 +246,7 @@ function create_clustering_two_stage_od_map(
         array_idx_to_scenario_label,
         Omega_s,
         Q_s,
-        model.max_walking_distance,
+        problem.max_walking_distance,
         valid_jk_pairs
     )
 end

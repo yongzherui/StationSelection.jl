@@ -1,5 +1,5 @@
 """
-Clustering base mapping for SingleStagePolicy.
+Clustering base mapping for ClusteringBaseFormulation.
 
 This module provides data structures for the basic k-medoids clustering
 model that aggregates all scenarios and counts request origins/destinations.
@@ -106,26 +106,29 @@ end
 
 """
     create_clustering_base_model_map(
-        model::SingleStagePolicy,
+        problem::StationSelectionProblem,
+        formulation::ClusteringBaseFormulation,
         data::StationSelectionData
     ) -> ClusteringBaseModelMap
 
 Create a clustering base map with aggregated request counts.
 
 # Arguments
-- `model::SingleStagePolicy`: The clustering policy
+- `problem::StationSelectionProblem`: `max_walking_distance` lives here
+- `formulation::ClusteringBaseFormulation`: The clustering formulation (no fields)
 - `data::StationSelectionData`: Problem data with stations and scenarios
 
 # Returns
 - `ClusteringBaseModelMap` with station mappings and request counts
 """
 function create_clustering_base_model_map(
-    model::SingleStagePolicy,
+    problem::StationSelectionProblem,
+    formulation::ClusteringBaseFormulation,
     data::StationSelectionData
 )::ClusteringBaseModelMap
 
     request_counts = compute_request_counts(data)
-    valid_j_assignments = compute_base_valid_j_assignments(data, model.max_walking_distance)
+    valid_j_assignments = compute_base_valid_j_assignments(data, problem.max_walking_distance)
     scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)
 
     return ClusteringBaseModelMap(
@@ -135,7 +138,7 @@ function create_clustering_base_model_map(
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
         request_counts,
-        model.max_walking_distance,
+        problem.max_walking_distance,
         valid_j_assignments,
         data.n_stations
     )

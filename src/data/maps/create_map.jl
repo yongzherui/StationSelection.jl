@@ -8,48 +8,27 @@ struct based on the model type.
 export create_map
 
 """
-    create_map(model::ClusteringModel, data::StationSelectionData)
+    create_map(problem::StationSelectionProblem, formulation::AbstractClusteringFormulation,
+               data::StationSelectionData)
 
-Create the appropriate clustering map for `model`, dispatched on `model.policy`.
+Create the appropriate clustering map for `formulation`, dispatched on its concrete type.
+`max_walking_distance` comes from `problem`, not `formulation`.
 """
-function create_map(
-        model::ClusteringModel,
-        data::StationSelectionData
-    )
-    return _create_clustering_map(model.policy, data)
-end
+create_map(
+    problem::StationSelectionProblem, formulation::ClusteringBaseFormulation, data::StationSelectionData,
+)::ClusteringBaseModelMap = create_clustering_base_model_map(problem, formulation, data)
 
-_create_clustering_map(policy::SingleStagePolicy, data::StationSelectionData)::ClusteringBaseModelMap =
-    create_clustering_base_model_map(policy, data)
+create_map(
+    problem::StationSelectionProblem, formulation::ClusteringTwoStageFormulation, data::StationSelectionData,
+)::ClusteringTwoStageStationMap = create_clustering_two_stage_station_map(problem, formulation, data)
 
-_create_clustering_map(policy::TwoStagePolicy, data::StationSelectionData)::ClusteringTwoStageStationMap =
-    create_clustering_two_stage_station_map(policy, data)
+create_map(
+    problem::StationSelectionProblem, formulation::AbstractClusteringTwoStageODFormulation, data::StationSelectionData,
+)::ClusteringTwoStageODMap = create_clustering_two_stage_od_map(problem, formulation, data)
 
-_create_clustering_map(policy::TwoStageODPolicy, data::StationSelectionData)::ClusteringTwoStageODMap =
-    create_clustering_two_stage_od_map(policy, data)
-
-"""
-    create_map(model::ExactDARPRouteModel, data::StationSelectionData)
-
-Create an ExactDARPRouteODMap for ExactDARPRouteModel.
-"""
-function create_map(
-        model::ExactDARPRouteModel,
-        data::StationSelectionData
-    )::ExactDARPRouteODMap
-    return create_exact_darp_route_od_map(model, data)
-end
-
-function create_map(
-        model::AggregateODRouteModel,
-        data::StationSelectionData
-    )::AggregateODRouteMap
-    return create_aggregate_od_route_map(model, data)
-end
-
-function create_map(
-        model::RouteCoveringProblem,
-        data::StationSelectionData
-    )::AggregateODRouteMap
-    return create_aggregate_od_route_map(model, data)
-end
+# No create_map(::AggregateODRouteBase|JointRoutingAssignmentFormulation, ...) here:
+# their build_model calls create_aggregate_od_route_map(problem, formulation, data)
+# directly (it needs both problem and formulation, not this dispatcher's 2-arg shape).
+# The AggregateODRouteProblem/RouteCoveringProblem-based methods that used to live here
+# were removed along with AggregateODRouteProblem -- see StationSelection.jl's include
+# comments.

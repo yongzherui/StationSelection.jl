@@ -85,8 +85,8 @@ end
     # Create Gurobi environment
     env = Gurobi.Env()
 
-    @testset "TwoStageODPolicy annotation" begin
-        model = ClusteringModel(TwoStageODPolicy(3, 4))
+    @testset "ClusteringTwoStageODFormulation annotation" begin
+        model = ClusteringTwoStageODFormulation(3, 4)
 
         result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
 

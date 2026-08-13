@@ -17,20 +17,3 @@ function check_model_feasibility(
     )
     return nothing
 end
-
-"""
-    check_model_feasibility(model::AbstractODModel, data) -> Union{Nothing, String}
-
-Legacy feasibility hook for OD-style models.
-
-This is intentionally disabled for now because `TwoStageODPolicy` is not a
-good proxy for the models we want to run. We will replace this with a dedicated
-`FeasibilityModel` in a follow-up change.
-"""
-function check_model_feasibility(
-        model::AbstractODModel,
-        data::StationSelectionData
-    )
-    @info "check_model_feasibility: disabled" model=typeof(model) note="replace with dedicated FeasibilityModel"
-    return nothing
-end

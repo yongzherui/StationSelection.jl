@@ -3,7 +3,7 @@ Per-request pair-assignment constraint builders shared by Benders master and sub
 builders (`src/opt/optimize/aggregate_od_route/benders/{y,xy}.jl`) for the two non-nearest-open
 resolution styles: `:pair_chain`'s ranked dominance ordering, and `BendersXY`'s fully free
 (unranked, no dominance) master assignment. (The nearest-open styles' pair assignment already
-lives in `_add_nearest_open_pair_assignment!`, `constraints/aggregate_od_route/core.jl`.)
+lives in `_add_nearest_open_pair_assignment!`, `constraints/aggregate_od_route/nearest_open/endpoint_chain.jl`.)
 """
 
 """

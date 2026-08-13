@@ -14,7 +14,7 @@ feasible pair.
 function add_x_dual_feasibility_constraints!(
     m::JuMP.Model,
     data::StationSelectionData,
-    base::AnyAggregateODRouteModel,
+    base::AnyAggregateODRouteProblem,
     requests::Vector{NTuple{3, Int}},
     feasible_pairs::Dict{NTuple{3, Int}, Vector{Tuple{Int, Int}}},
     pi_full::Dict{Tuple{NTuple{3, Int}, Tuple{Int, Int}}, Float64},

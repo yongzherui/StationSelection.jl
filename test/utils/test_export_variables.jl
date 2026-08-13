@@ -82,7 +82,7 @@ end
         data = create_station_selection_data(
             stations, requests, walking_costs; routing_costs=routing_costs,
         )
-        model = ClusteringModel(TwoStageODPolicy(2, 3))
+        model = ClusteringTwoStageODFormulation(2, 3)
 
         result = run_opt(data, model, DirectSolver(optimizer_env=Gurobi.Env(), silent=true))
         @test result.termination_status == MOI.OPTIMAL

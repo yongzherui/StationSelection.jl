@@ -82,7 +82,7 @@ end
 # `algorithm`
 
 Selects which column-generation algorithm to run (mirroring `BendersSolver.decomposition`) --
-`AggregateODRouteCG()` (aggregate station-pair CG) or `PassengerFreeAssignmentCG(...)` (passenger
+`AggregateODRouteCG()` (aggregate station-pair CG) or `JointRoutingAssignmentCG(...)` (passenger
 free-assignment CG). Defaults to `nothing`, stored **unresolved**: unlike `BendersSolver`'s
 nilable-kwarg-resolved-at-construction-time fields, this cannot resolve at construction time
 because the discriminant (`formulation.assignment_policy`) is not visible until

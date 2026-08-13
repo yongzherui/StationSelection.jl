@@ -12,10 +12,15 @@ Uses multiple dispatch for different model/mapping types.
 include("objectives/clustering_od.jl")
 include("objectives/clustering_two_stage_station.jl")
 include("objectives/clustering_base.jl")
-include("objectives/route_od.jl")
 include("objectives/aggregate_od_route/core.jl")
-include("objectives/aggregate_od_route/column_generation/master.jl")
-include("objectives/expressions/aggregate_od_route/benders.jl")
-include("objectives/aggregate_od_route/benders/subproblem.jl")
-include("objectives/aggregate_od_route/benders/master.jl")
-include("objectives/aggregate_od_route/benders/dual_lp.jl")
+include("objectives/aggregate_od_route/joint_routing_assignment/unserved_penalty.jl")
+include("objectives/aggregate_od_route/joint_routing_assignment/assembly.jl")
+include("objectives/aggregate_od_route/base/assembly.jl")
+# Benders objective files (expressions/aggregate_od_route/benders.jl and
+# aggregate_od_route/benders/{subproblem,master,dual_lp}.jl) referenced
+# AnyAggregateODRouteProblem/RouteCoveringProblem, removed along with
+# AggregateODRouteProblem -- unwired, see StationSelection.jl's include comments.
+# include("objectives/expressions/aggregate_od_route/benders.jl")
+# include("objectives/aggregate_od_route/benders/subproblem.jl")
+# include("objectives/aggregate_od_route/benders/master.jl")
+# include("objectives/aggregate_od_route/benders/dual_lp.jl")

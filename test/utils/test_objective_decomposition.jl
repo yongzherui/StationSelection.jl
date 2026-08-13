@@ -302,7 +302,7 @@
     env = Gurobi.Env()
 
     @testset "Integration: ClusteringTwoStageODModel round-trip" begin
-        model = ClusteringModel(TwoStageODPolicy(3, 4))
+        model = ClusteringTwoStageODFormulation(3, 4)
         result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
         @test result.termination_status == JuMP.MOI.OPTIMAL
 

@@ -50,28 +50,6 @@ function add_assignment_constraints!(
     return _total_num_constraints(m) - before
 end
 
-function add_assignment_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::AggregateODRouteMap
-    )
-    before = _total_num_constraints(m)
-    x = m[:x]
-
-    for s in 1:n_scenarios(data)
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            x_od = get(x[s], od_idx, VariableRef[])
-            isempty(x_od) && continue
-            demand = get(mapping.Q_s[s], (o, d), 0)
-            demand > 0 || continue
-            @constraint(m, sum(x_od) == 1.0)
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
-
-
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
@@ -185,85 +163,6 @@ function add_assignment_to_active_constraints!(
             valid_js = get_valid_j_assignments(mapping, i)
             for (j_idx, j) in enumerate(valid_js)
                 @constraint(m, x[s][i_idx][j_idx] <= z[j, s])
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
-
-
-# ============================================================================
-# ExactDARPRouteODMap (ExactDARPRouteModel)
-# ============================================================================
-
-"""
-    add_assignment_constraints!(m, data, mapping::ExactDARPRouteODMap)
-
-All demand for each (OD, time bucket) must be assigned across valid (j,k) pairs.
-    Σ_{(j,k)} x[s][t_id][od_idx] == Q_s_t[s][t_id][(o,d)]  ∀(s, t_id, od_idx)
-
-x is integer-valued; the RHS equals the passenger count for that OD/time/scenario.
-"""
-function add_assignment_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::ExactDARPRouteODMap
-    )
-    before = _total_num_constraints(m)
-    S = n_scenarios(data)
-    x = m[:x]
-
-    for s in 1:S
-        for t_id in _time_ids(mapping, s)
-            od_pairs = _time_od_pairs(mapping, s, t_id)
-            for (od_idx, (o, d)) in enumerate(od_pairs)
-                x_od = get(x[s][t_id], od_idx, VariableRef[])
-                isempty(x_od) && continue
-                demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
-                @constraint(m, sum(x_od) == demand)
-            end
-        end
-    end
-
-    return _total_num_constraints(m) - before
-end
-
-
-"""
-    add_assignment_to_active_constraints!(m, data, mapping::ExactDARPRouteODMap)
-
-Assignments require both pickup and dropoff stations to be active (big-M formulation).
-    x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[j,s]
-    x[s][t_id][od_idx][pair_idx] ≤ Q_s_t[s][t_id][(o,d)] · z[k,s]
-
-The big-M coefficient equals the per-(OD, time bucket, scenario) demand count.
-"""
-function add_assignment_to_active_constraints!(
-        m::Model,
-        data::StationSelectionData,
-        mapping::ExactDARPRouteODMap
-    )
-    before = _total_num_constraints(m)
-    S = n_scenarios(data)
-    z = m[:z]
-    x = m[:x]
-
-    for s in 1:S
-        for t_id in _time_ids(mapping, s)
-            od_pairs = _time_od_pairs(mapping, s, t_id)
-            for (od_idx, (o, d)) in enumerate(od_pairs)
-                demand = get(mapping.Q_s_t[s][t_id], (o, d), 0)
-                demand == 0 && continue
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                x_od = get(x[s][t_id], od_idx, VariableRef[])
-                isempty(x_od) && continue
-                for (pair_idx, pair) in enumerate(valid_pairs)
-                    is_walk_only_pair(pair) && continue
-                    j, k = pair
-                    @constraint(m, x_od[pair_idx] <= demand * z[j, s])
-                    @constraint(m, x_od[pair_idx] <= demand * z[k, s])
-                end
             end
         end
     end

@@ -1176,7 +1176,7 @@
             ColumnGenerationSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
                 max_iterations=20, max_columns_per_iteration=2, n_candidates=2,
-                pricing_time_limit_sec=2.0, algorithm=PassengerFreeAssignmentCG(),
+                pricing_time_limit_sec=2.0, algorithm=JointRoutingAssignmentCG(),
             ),
         )
         @test explicit_free_result.termination_status == MOI.OPTIMAL
@@ -1208,7 +1208,7 @@
             nearest_model,
             ColumnGenerationSolver(
                 config=SolverConfig(optimizer_env=Gurobi.Env(), silent=true),
-                algorithm=PassengerFreeAssignmentCG(),
+                algorithm=JointRoutingAssignmentCG(),
             ),
         )
     end

@@ -49,7 +49,7 @@ end
     dcfg = T5_DEMAND_CONFIGS[1]
 
     # NOTE: the source-suggested sweep for corridor_base (l=3, k=2) was
-    # found INFEASIBLE under ClusteringModel(TwoStageODPolicy) -- with only
+    # found INFEASIBLE under ClusteringTwoStageODFormulation -- with only
     # 2 of the 3 built stations active, the model cannot simultaneously
     # serve the A<->B corridor stream and the zone->B stream (whichever of
     # A/M0/B is left inactive leaves one stream unservable). We use k=3
@@ -57,7 +57,7 @@ end
     # source's own suggested sweep is intentional and documented.
     inst = generate_test5_instance(:corridor_base, 1, dcfg)
     data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-    model = ClusteringModel(TwoStageODPolicy(3, 3; max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0))
+    model = ClusteringTwoStageODFormulation(3, 3; max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0)
     result = run_opt(data, model, solver)
     @test result.termination_status == MOI.OPTIMAL
 
@@ -67,10 +67,10 @@ end
     for case in (:equilateral, :equilateral_with_m1)
         inst = generate_test5_instance(case, 1, dcfg)
         data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringModel(TwoStageODPolicy(
+        model = ClusteringTwoStageODFormulation(
             inst.suggested_k, inst.suggested_l;
             max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
-        ))
+        )
         result = run_opt(data, model, solver)
         @test result.termination_status == MOI.OPTIMAL
     end

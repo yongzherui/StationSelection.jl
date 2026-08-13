@@ -50,10 +50,10 @@ end
         inst = generate_test3_instance(v.case_name, v.zone_h_km, 1)
         mwd_sec = inst.recommended_walk_threshold_km * 1000 / 1.4
         data = create_test3_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringModel(TwoStageODPolicy(
+        model = ClusteringTwoStageODFormulation(
             inst.suggested_k, inst.suggested_l;
             max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
-        ))
+        )
         result = run_opt(data, model, solver)
         @test result.termination_status == MOI.OPTIMAL
     end

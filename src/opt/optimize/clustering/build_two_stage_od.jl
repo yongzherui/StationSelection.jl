@@ -1,68 +1,122 @@
 # =============================================================================
-# ClusteringModel / TwoStageODPolicy
+# ClusteringTwoStageODFormulation / ClusteringTwoStageODFlowRegularizerFormulation
 # =============================================================================
 
-function _build_clustering!(
+"""
+    _build_clustering_two_stage_od_variables!(m, data, mapping, variable_counts, extra_counts)
+
+Variables shared by both `ClusteringTwoStageODFormulation` and
+`ClusteringTwoStageODFlowRegularizerFormulation`'s `build_model` bodies below -- station
+selection, scenario activation, and OD assignment. Not a dispatch point (both callers
+already know their own concrete type); purely to keep the two `build_model` methods from
+duplicating this block verbatim, since `flow_activation`/the objective/the rest of the
+constraints genuinely differ between them.
+"""
+function _build_clustering_two_stage_od_variables!(
         m::Model,
         data::StationSelectionData,
         mapping::ClusteringTwoStageODMap,
-        policy::TwoStageODPolicy,
         variable_counts::Dict{String, Int},
-        constraint_counts::Dict{String, Int},
         extra_counts::Dict{String, Int}
     )
     S = length(data.scenarios)
-
     total_od_pairs = sum(length(mapping.Omega_s[s]) for s in 1:S)
     extra_counts["total_od_pairs"] = total_od_pairs
-
-    # ==========================================================================
-    # Variables (reusing shared functions where possible)
-    # ==========================================================================
 
     variable_counts["station_selection"] = add_station_selection_variables!(m, data)
     variable_counts["scenario_activation"] = add_scenario_activation_variables!(m, data)
     variable_counts["assignment"] = add_assignment_variables!(m, data, mapping)
-    if !isnothing(policy.flow_regularization_weight)
-        variable_counts["flow_activation"] = add_flow_variables!(m, data, mapping)
-    end
+    return nothing
+end
 
-    # ==========================================================================
-    # Objective
-    # ==========================================================================
+"""
+    _build_clustering_two_stage_od_constraints!(m, problem, data, mapping, formulation, constraint_counts)
 
-    if isnothing(policy.flow_regularization_weight)
-        set_clustering_od_objective!(
-            m,
-            data,
-            mapping;
-            in_vehicle_time_weight=policy.in_vehicle_time_weight
-        )
-    else
-        set_clustering_od_flow_regularizer_objective!(
-            m,
-            data,
-            mapping;
-            in_vehicle_time_weight=policy.in_vehicle_time_weight,
-            flow_regularization_weight=policy.flow_regularization_weight
-        )
-    end
-
-    # ==========================================================================
-    # Constraints (reusing shared functions where possible)
-    # ==========================================================================
-
-    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, policy.l; equality=true)
-    constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, policy.k)
-
+Constraints shared by both `ClusteringTwoStageODFormulation` and
+`ClusteringTwoStageODFlowRegularizerFormulation`'s `build_model` bodies. `flow_activation`
+(when present) is added by the caller right after this.
+"""
+function _build_clustering_two_stage_od_constraints!(
+        m::Model,
+        problem::StationSelectionProblem,
+        data::StationSelectionData,
+        mapping::ClusteringTwoStageODMap,
+        formulation::AbstractClusteringTwoStageODFormulation,
+        constraint_counts::Dict{String, Int}
+    )
+    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, problem.l; equality=true)
+    constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, formulation.k)
     constraint_counts["activation_linking"] = add_activation_linking_constraints!(m, data)
-
     constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
     constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(m, data, mapping)
-
-    if !isnothing(policy.flow_regularization_weight)
-        constraint_counts["flow_activation"] = add_flow_activation_constraints!(m, data, mapping)
-    end
-
     return nothing
+end
+
+function build_model(
+        problem::StationSelectionProblem,
+        formulation::ClusteringTwoStageODFormulation,
+        solver::DirectMIPSolver,
+    )::BuildResult
+    formulation.k <= problem.l || throw(ArgumentError(
+        "k=$(formulation.k) exceeds l=$(problem.l)"
+    ))
+
+    data = problem.data
+    mapping = create_map(problem, formulation, data)
+
+    m = Model(() -> Gurobi.Optimizer())
+
+    variable_counts = Dict{String, Int}()
+    constraint_counts = Dict{String, Int}()
+    extra_counts = Dict{String, Int}()
+
+    _build_clustering_two_stage_od_variables!(m, data, mapping, variable_counts, extra_counts)
+
+    set_clustering_od_objective!(
+        m,
+        data,
+        mapping;
+        in_vehicle_time_weight=formulation.in_vehicle_time_weight
+    )
+
+    _build_clustering_two_stage_od_constraints!(m, problem, data, mapping, formulation, constraint_counts)
+
+    counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
+    return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
+end
+
+function build_model(
+        problem::StationSelectionProblem,
+        formulation::ClusteringTwoStageODFlowRegularizerFormulation,
+        solver::DirectMIPSolver,
+    )::BuildResult
+    formulation.k <= problem.l || throw(ArgumentError(
+        "k=$(formulation.k) exceeds l=$(problem.l)"
+    ))
+
+    data = problem.data
+    mapping = create_map(problem, formulation, data)
+
+    m = Model(() -> Gurobi.Optimizer())
+
+    variable_counts = Dict{String, Int}()
+    constraint_counts = Dict{String, Int}()
+    extra_counts = Dict{String, Int}()
+
+    _build_clustering_two_stage_od_variables!(m, data, mapping, variable_counts, extra_counts)
+    variable_counts["flow_activation"] = add_flow_variables!(m, data, mapping)
+
+    set_clustering_od_flow_regularizer_objective!(
+        m,
+        data,
+        mapping;
+        in_vehicle_time_weight=formulation.in_vehicle_time_weight,
+        flow_regularization_weight=formulation.flow_regularization_weight
+    )
+
+    _build_clustering_two_stage_od_constraints!(m, problem, data, mapping, formulation, constraint_counts)
+    constraint_counts["flow_activation"] = add_flow_activation_constraints!(m, data, mapping)
+
+    counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
+    return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
 end

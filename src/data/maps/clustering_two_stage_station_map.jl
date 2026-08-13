@@ -1,5 +1,5 @@
 """
-Clustering map for TwoStagePolicy.
+Clustering map for ClusteringTwoStageFormulation.
 
 This module aggregates scenario demand to endpoint counts q_{is} and enumerates
 admissible i→j assignments for each demand station i.
@@ -64,7 +64,8 @@ function compute_valid_j_assignments(
 end
 
 function create_clustering_two_stage_station_map(
-    model::TwoStagePolicy,
+    problem::StationSelectionProblem,
+    formulation::ClusteringTwoStageFormulation,
     data::StationSelectionData
 )::ClusteringTwoStageStationMap
     scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)
@@ -77,7 +78,7 @@ function create_clustering_two_stage_station_map(
         I_s[scenario_id] = sort([i for (i, q) in counts if q > 0])
     end
 
-    valid_j_assignments = compute_valid_j_assignments(data, model.max_walking_distance)
+    valid_j_assignments = compute_valid_j_assignments(data, problem.max_walking_distance)
 
     return ClusteringTwoStageStationMap(
         data.station_id_to_array_idx,
@@ -87,7 +88,7 @@ function create_clustering_two_stage_station_map(
         array_idx_to_scenario_label,
         I_s,
         q_s,
-        model.max_walking_distance,
+        problem.max_walking_distance,
         valid_j_assignments,
         data.n_stations
     )

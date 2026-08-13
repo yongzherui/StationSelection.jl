@@ -39,13 +39,13 @@ end
 
     # NOTE (open item): the documented hypothesis -- that on-corridor M0
     # becomes more attractive than off-corridor M as backward demand grows
-    # -- did not manifest under ClusteringModel(TwoStageODPolicy) across a
+    # -- did not manifest under ClusteringTwoStageODFormulation across a
     # range of in_vehicle_time_weight values tested during verification
     # (0.5, 1.0, 2.0, 5.0): the model always kept the walk-nearest station
-    # (M) active regardless of demand direction, since ClusteringModel's
+    # (M) active regardless of demand direction, since the formulation's
     # routing-cost term is a static per-(j,k) pairwise cost and does not
     # capture round-trip route consolidation. Exercising this hypothesis
-    # properly likely needs a route-aware model (e.g. ExactDARPRouteModel).
+    # properly likely needs a route-aware model.
     # We assert feasibility only here.
     env = Gurobi.Env()
     solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
@@ -54,10 +54,10 @@ end
     for dcfg in T6_DEMAND_CONFIGS
         inst = generate_test6_instance(dcfg, 1)
         data = create_test6_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringModel(TwoStageODPolicy(
+        model = ClusteringTwoStageODFormulation(
             inst.suggested_k, inst.suggested_l;
             max_walking_distance = mwd_sec, in_vehicle_time_weight = 1.0,
-        ))
+        )
         result = run_opt(data, model, solver)
         @test result.termination_status == MOI.OPTIMAL
     end

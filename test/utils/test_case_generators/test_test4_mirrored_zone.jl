@@ -48,10 +48,10 @@ end
 
     function active_roles(inst)
         data = create_test4_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringModel(TwoStageODPolicy(
+        model = ClusteringTwoStageODFormulation(
             inst.suggested_k, inst.suggested_l;
             max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
-        ))
+        )
         result = run_opt(data, model, solver)
         @test result.termination_status == MOI.OPTIMAL
         z = value.(result.model[:z])

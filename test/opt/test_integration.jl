@@ -56,8 +56,8 @@ end
     # Create Gurobi environment once
     env = Gurobi.Env()
 
-    @testset "TwoStageODPolicy build" begin
-        model = ClusteringModel(TwoStageODPolicy(2, 3))
+    @testset "ClusteringTwoStageODFormulation build" begin
+        model = ClusteringTwoStageODFormulation(2, 3)
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -99,8 +99,8 @@ end
         @test haskey(object_dictionary(m), :x)
     end
 
-    @testset "SingleStagePolicy build" begin
-        model = ClusteringModel(SingleStagePolicy(3))
+    @testset "ClusteringBaseFormulation build" begin
+        model = ClusteringBaseFormulation(3)
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -138,8 +138,8 @@ end
         @test haskey(object_dictionary(m), :x)
     end
 
-    @testset "TwoStagePolicy build" begin
-        model = ClusteringModel(TwoStagePolicy(2, 3))
+    @testset "ClusteringTwoStageFormulation build" begin
+        model = ClusteringTwoStageFormulation(2, 3)
 
         build_result = StationSelection.build_model(
             model, data; optimizer_env=env
@@ -184,8 +184,8 @@ end
     @testset "run_opt without optimization" begin
         # Test run_opt with do_optimize=false for all policies
 
-        @testset "TwoStageODPolicy" begin
-            model = ClusteringModel(TwoStageODPolicy(2, 3))
+        @testset "ClusteringTwoStageODFormulation" begin
+            model = ClusteringTwoStageODFormulation(2, 3)
             result = run_opt(
                 data,
                 model,
@@ -204,8 +204,8 @@ end
             @test !isempty(result.counts.constraints)
         end
 
-        @testset "SingleStagePolicy" begin
-            model = ClusteringModel(SingleStagePolicy(3))
+        @testset "ClusteringBaseFormulation" begin
+            model = ClusteringBaseFormulation(3)
             result = run_opt(
                 data,
                 model,
@@ -224,8 +224,8 @@ end
             @test !isempty(result.counts.constraints)
         end
 
-        @testset "TwoStagePolicy" begin
-            model = ClusteringModel(TwoStagePolicy(2, 3))
+        @testset "ClusteringTwoStageFormulation" begin
+            model = ClusteringTwoStageFormulation(2, 3)
             result = run_opt(
                 data,
                 model,
@@ -247,7 +247,7 @@ end
 
     @testset "Mapping creation" begin
         @testset "ClusteringTwoStageODMap" begin
-            model = ClusteringModel(TwoStageODPolicy(2, 3))
+            model = ClusteringTwoStageODFormulation(2, 3)
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -259,7 +259,7 @@ end
         end
 
         @testset "ClusteringBaseModelMap" begin
-            model = ClusteringModel(SingleStagePolicy(3))
+            model = ClusteringBaseFormulation(3)
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -273,7 +273,7 @@ end
         end
 
         @testset "ClusteringTwoStageStationMap" begin
-            model = ClusteringModel(TwoStagePolicy(2, 3))
+            model = ClusteringTwoStageFormulation(2, 3)
             mapping = StationSelection.create_map(model, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
@@ -286,20 +286,20 @@ end
     end
 
     @testset "Model construction validation" begin
-        @testset "TwoStageODPolicy" begin
-            @test_throws ArgumentError TwoStageODPolicy(0, 5)   # k must be positive
-            @test_throws ArgumentError TwoStageODPolicy(5, 3)   # l must be >= k
-            @test_throws ArgumentError TwoStageODPolicy(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
+        @testset "ClusteringTwoStageODFormulation" begin
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(0, 5)   # k must be positive
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(5, 3)   # l must be >= k
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
         end
 
-        @testset "SingleStagePolicy" begin
-            @test_throws ArgumentError SingleStagePolicy(0)   # k must be positive
-            @test_throws ArgumentError SingleStagePolicy(-1)  # k must be positive
+        @testset "ClusteringBaseFormulation" begin
+            @test_throws ArgumentError ClusteringBaseFormulation(0)   # k must be positive
+            @test_throws ArgumentError ClusteringBaseFormulation(-1)  # k must be positive
         end
 
-        @testset "TwoStagePolicy" begin
-            @test_throws ArgumentError TwoStagePolicy(0, 5)   # k must be positive
-            @test_throws ArgumentError TwoStagePolicy(5, 3)   # l must be >= k
+        @testset "ClusteringTwoStageFormulation" begin
+            @test_throws ArgumentError ClusteringTwoStageFormulation(0, 5)   # k must be positive
+            @test_throws ArgumentError ClusteringTwoStageFormulation(5, 3)   # l must be >= k
         end
     end
 end

@@ -58,7 +58,7 @@ Sum of `aggregate_od_route_column_objective_coefficient` weighted by each column
 activation, across every scenario -- shared by all four subproblem builders.
 """
 function benders_route_regularization_cost_expr(
-    model::AnyAggregateODRouteModel,
+    model::AnyAggregateODRouteProblem,
     columns::Vector{AggregateODRouteColumn},
     lambda,
     n_scenarios::Int,

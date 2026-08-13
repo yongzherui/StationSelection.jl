@@ -16,18 +16,31 @@ export add_scenario_activation_variables!
 
 
 """
-    add_station_selection_variables!(m::Model, data::StationSelectionData)
+    add_station_selection_variables!(m::Model, data::StationSelectionData; relax_integrality=false)
 
-Add binary station selection (build) variables y[j] for j ∈ 1:n.
+Add station selection (build) variables y[j] for j ∈ 1:n.
 
 y[j] = 1 if station j is selected/built (permanent decision).
 
+`relax_integrality=true` declares `y` continuous on `[0,1]` instead of `Bin` -- for LP
+masters (e.g. a column-generation restricted master) that need valid simplex duals off
+this variable, mirroring `add_aggregate_od_route_theta_variables!`'s `relax_integrality`
+kwarg for the same reason.
+
 Used by: All models
 """
-function add_station_selection_variables!(m::Model, data::StationSelectionData)
+function add_station_selection_variables!(
+        m::Model,
+        data::StationSelectionData;
+        relax_integrality::Bool=false,
+    )
     before = JuMP.num_variables(m)
     n = data.n_stations
-    @variable(m, y[1:n], Bin)
+    if relax_integrality
+        @variable(m, 0.0 <= y[1:n] <= 1.0)
+    else
+        @variable(m, y[1:n], Bin)
+    end
     return JuMP.num_variables(m) - before
 end
 

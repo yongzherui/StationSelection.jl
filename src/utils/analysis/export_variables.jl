@@ -401,136 +401,6 @@ function export_model_specific_variables(
 end
 
 
-# =============================================================================
-# ExactDARPRouteODMap exports (ExactDARPRouteModel)
-# =============================================================================
-
-"""
-    export_assignment_variables(m, mapping::ExactDARPRouteODMap, export_dir) -> Int
-
-Export assignment variables for ExactDARPRouteModel.
-"""
-function export_assignment_variables(
-    m::JuMP.Model,
-    mapping::ExactDARPRouteODMap,
-    export_dir::String
-)
-    if !haskey(m.obj_dict, :x)
-        return 0
-    end
-
-    x      = m[:x]
-    id_map = mapping.array_idx_to_station_id
-    rows   = []
-
-    for (s, x_s) in enumerate(x)
-        for (t_id, x_t) in x_s
-            od_pairs = _time_od_pairs(mapping, s, t_id)
-            for (od_idx, x_od) in x_t
-                isempty(x_od) && continue
-                o, d = od_pairs[od_idx]
-                valid_pairs = get_valid_jk_pairs(mapping, o, d)
-                for (pair_idx, (j, k)) in enumerate(valid_pairs)
-                    val = JuMP.value(x_od[pair_idx])
-                    val > 0 || continue
-                    push!(rows, (
-                        scenario   = s,
-                        t_id       = t_id,
-                        od_idx     = od_idx,
-                        origin_id  = id_map[o],
-                        dest_id    = id_map[d],
-                        pickup_id  = _exported_station_id(id_map, j),
-                        dropoff_id = _exported_station_id(id_map, k),
-                        value      = round(Int, val)
-                    ))
-                end
-            end
-        end
-    end
-
-    df = DataFrame(rows)
-    CSV.write(joinpath(export_dir, "assignment_variables.csv"), df)
-    println("    ✓ assignment_variables.csv ($(nrow(df)) assignments)")
-    return nrow(df)
-end
-
-
-"""
-    export_model_specific_variables(result, mapping::ExactDARPRouteODMap, export_dir, metadata)
-
-Export ExactDARPRouteModel-specific variables: theta_r_ts.csv.
-Alpha values are fixed parameters (not variables); the input CSV is the source of record.
-"""
-function export_model_specific_variables(
-    result    :: OptResult,
-    mapping   :: ExactDARPRouteODMap,
-    export_dir :: String,
-    metadata  :: Dict
-)
-    metadata["model_type"] = "ExactDARPRouteModel"
-    metadata["n_routes"]   = sum(
-        sum(length(v) for v in values(rs); init = 0)
-        for rs in values(mapping.routes_s); init = 0
-    )
-
-    n_theta = _arm_export_theta_r_ts(result.model, mapping, export_dir)
-    metadata["n_theta_r_ts_nonzero"] = n_theta
-end
-
-
-"""
-    _arm_export_theta_r_ts(m, mapping::ExactDARPRouteODMap, export_dir) -> Int
-
-Export theta_r_ts variables to `theta_r_ts.csv`.
-Columns: scenario, t_id, route_id, route_idx, n_stops, is_direct, station_ids, travel_time, value.
-Only rows with value > 0.5 are written.
-"""
-function _arm_export_theta_r_ts(
-    m          :: JuMP.Model,
-    mapping    :: ExactDARPRouteODMap,
-    export_dir :: String
-)
-    if !haskey(m.obj_dict, :theta_r_ts)
-        println("    ✓ theta_r_ts.csv (0 deployments — theta_r_ts not present)")
-        return 0
-    end
-
-    rows = []
-    for ((s, t_id, r_idx), var) in m[:theta_r_ts]
-        val = JuMP.value(var)
-        val > 0.5 || continue
-        route = mapping.routes_s[s][t_id][r_idx]
-        n_stops = length(route.station_indices)
-        push!(rows, (
-            scenario    = s,
-            t_id        = t_id,
-            route_id    = route.id,
-            route_idx   = r_idx,
-            n_stops     = n_stops,
-            is_direct   = n_stops == 2,
-            station_ids = join((mapping.array_idx_to_station_id[idx] for idx in route.station_indices), "|"),
-            travel_time = route.travel_time,
-            value       = round(Int, val)
-        ))
-    end
-
-    if isempty(rows)
-        df = DataFrame(scenario=Int[], t_id=Int[], route_id=Int[], route_idx=Int[],
-                       n_stops=Int[], is_direct=Bool[], station_ids=String[],
-                       travel_time=Float64[], value=Int[])
-        CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
-        println("    ✓ theta_r_ts.csv (0 deployments)")
-        return 0
-    end
-
-    df = DataFrame(rows)
-    sort!(df, [:scenario, :t_id, :route_id])
-    CSV.write(joinpath(export_dir, "theta_r_ts.csv"), df)
-    n_direct   = count(r -> r.is_direct,  eachrow(df))
-    n_multileg = count(r -> !r.is_direct, eachrow(df))
-    println("    ✓ theta_r_ts.csv ($(nrow(df)) deployments: $n_direct direct, $n_multileg multi-leg)")
-    return nrow(df)
-end
 """
     export_flow_activation_variables(m, mapping::ClusteringTwoStageODMap, export_dir) -> Int
 
@@ -577,13 +447,13 @@ end
 
 
 # =============================================================================
-# AggregateODRouteMap exports (AggregateODRouteModel, RouteCoveringProblem)
+# AggregateODRouteMap exports (AggregateODRouteProblem, RouteCoveringProblem)
 # =============================================================================
 
 """
     export_assignment_variables(m, mapping::AggregateODRouteMap, export_dir) -> Int
 
-Export assignment variables for AggregateODRouteModel / RouteCoveringProblem.
+Export assignment variables for AggregateODRouteProblem / RouteCoveringProblem.
 Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs (same
 shape as ClusteringTwoStageODMap). Adds a `demand` column from mapping.Q_s.
 """
@@ -706,7 +576,7 @@ end
 """
     export_model_specific_variables(result, mapping::AggregateODRouteMap, export_dir, metadata)
 
-Export AggregateODRouteModel/RouteCoveringProblem-specific variables:
+Export AggregateODRouteProblem/RouteCoveringProblem-specific variables:
 route_columns.csv (static route pool) and route_activations.csv
 (per-scenario theta_compat activations).
 """
@@ -716,7 +586,7 @@ function export_model_specific_variables(
     export_dir::String,
     metadata::Dict
 )
-    metadata["model_type"] = "AggregateODRouteModel"
+    metadata["model_type"] = "AggregateODRouteProblem"
     metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
     metadata["n_route_columns_in_pool"] = length(mapping.columns)
 
