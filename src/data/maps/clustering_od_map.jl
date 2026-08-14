@@ -158,8 +158,8 @@ function compute_valid_jk_pairs(
         # leg). Off by default — real walking costs obey the triangle
         # inequality, so this condition is satisfied almost any time a real
         # 2-hop station pair exists, and callers that don't expect a
-        # station-free option (e.g. NearestOpenAggregateODAssignmentPolicy,
-        # Benders, route-pool generation) must opt in deliberately.
+        # station-free option (e.g. route-pool generation) must opt in
+        # deliberately.
         if walk_only_available
             push!(pairs, WALK_ONLY_PAIR)
         end

@@ -56,7 +56,10 @@ include("opt/solvers/utils/common.jl")
 include("opt/solvers/direct_solver.jl")
 include("opt/solvers/cg_solver.jl")
 include("opt/solvers/benders_solver.jl")
-include("opt/solvers/heuristic_solver.jl")
+# heuristic_solver.jl (HeuristicDispatchSolver) removed -- generic run_heuristic! hook
+# shell with zero implementations and zero callers/tests, unlike BendersSolver (kept
+# despite having no formulation wired to it yet, since it's the Benders-specific
+# reminder scaffold this cleanup pass deliberately preserved).
 
 include("opt/problems/station_selection.jl")
 # aggregate_od_route.jl (AggregateODRouteProblem) was removed entirely -- AggregateODRouteColumn,
@@ -201,7 +204,6 @@ export add_flow_activation_constraints!
 export set_clustering_od_objective!, set_clustering_base_objective!
 export set_clustering_od_flow_regularizer_objective!
 export set_clustering_two_stage_station_objective!
-export set_aggregate_od_route_objective!
 
 export compute_station_pairwise_costs, read_routing_costs_from_segments
 export select_top_used_candidate_stations
