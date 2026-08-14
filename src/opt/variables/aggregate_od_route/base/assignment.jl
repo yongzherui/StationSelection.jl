@@ -10,12 +10,13 @@ assignment directly and there is no separate `x`.
 export add_aggregate_od_route_base_assignment_variables!
 
 """
-    add_aggregate_od_route_base_assignment_variables!(m, data, mapping; scenarios=1:n_scenarios(data), relax_integrality=false) -> Dict{NTuple{5,Int}, VariableRef}
+    add_aggregate_od_route_base_assignment_variables!(m, data, mapping; scenarios=1:n_scenarios(data), relax_integrality=false) -> Dict{NTuple{4,Int}, VariableRef}
 
-Assignment `x[s,o,d,j,k]` for every demand-positive `(s,o,d)` with `s in scenarios` and
-every feasible `(j,k) in get_valid_jk_pairs(mapping,o,d)` that requires a real vehicle
-route (`requires_no_vehicle_route` pairs excluded, matching `θ`'s own domain --
-this formulation doesn't yet support the station-free/same-station option).
+Assignment `x[s,p,j,k]` for every demand group `p` (position within `mapping.Omega_s[s]`,
+i.e. the `(o,d) = mapping.Omega_s[s][p]` pair) with `s in scenarios` and every feasible
+`(j,k) in get_valid_jk_pairs(mapping,o,d)` that requires a real vehicle route
+(`requires_no_vehicle_route` pairs excluded, matching `θ`'s own domain -- this
+formulation doesn't yet support the station-free/same-station option).
 
 `scenarios` restricts variable creation to a subset of scenarios -- used by
 `AggregateODRouteBendersYXFormulation`'s subproblem, which is solved one scenario at a
@@ -30,19 +31,19 @@ function add_aggregate_od_route_base_assignment_variables!(
     mapping::AggregateODRouteMap;
     scenarios::AbstractVector{Int}=1:n_scenarios(data),
     relax_integrality::Bool=false,
-)::Dict{NTuple{5, Int}, VariableRef}
-    x = Dict{NTuple{5, Int}, VariableRef}()
+)::Dict{NTuple{4, Int}, VariableRef}
+    x = Dict{NTuple{4, Int}, VariableRef}()
     for s in scenarios
-        for (o, d) in mapping.Omega_s[s]
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand > 0 || continue
             for pair in get_valid_jk_pairs(mapping, o, d)
                 requires_no_vehicle_route(pair) && continue
                 j, k = pair
                 if relax_integrality
-                    x[(s, o, d, j, k)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0, base_name = "x[$s,$o,$d,$j,$k]")
+                    x[(s, p, j, k)] = @variable(m, lower_bound = 0.0, upper_bound = 1.0, base_name = "x[$s,$p,$j,$k]")
                 else
-                    x[(s, o, d, j, k)] = @variable(m, binary = true, base_name = "x[$s,$o,$d,$j,$k]")
+                    x[(s, p, j, k)] = @variable(m, binary = true, base_name = "x[$s,$p,$j,$k]")
                 end
             end
         end

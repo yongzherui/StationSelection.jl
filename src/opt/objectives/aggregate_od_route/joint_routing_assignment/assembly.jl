@@ -19,8 +19,8 @@ function set_joint_routing_assignment_objective!(
     m::Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    v::Dict{NTuple{3, Int}, VariableRef},
-    x_same::Dict{Tuple{NTuple{3, Int}, Int}, VariableRef},
+    v::Dict{Tuple{Int, Int}, VariableRef},
+    x_same::Dict{Tuple{Tuple{Int, Int}, Int}, VariableRef},
     unserved_penalty::Float64,
 )
     walk_cost_weight = Float64(m[:joint_routing_assignment_walk_cost_weight])
@@ -28,9 +28,10 @@ function set_joint_routing_assignment_objective!(
     for var in values(v)
         add_to_expression!(obj, unserved_penalty, var)
     end
-    for ((s, o, d), j) in keys(x_same)
+    for ((s, p), j) in keys(x_same)
+        o, d = mapping.Omega_s[s][p]
         cost = walk_cost_weight * od_pair_walking_cost(data, o, d, (j, j))
-        add_to_expression!(obj, cost, x_same[((s, o, d), j)])
+        add_to_expression!(obj, cost, x_same[((s, p), j)])
     end
     @objective(m, Min, obj)
     return nothing

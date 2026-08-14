@@ -6,7 +6,7 @@ Every two-stop route `[j, k]` that any demand group can use, one column per
 
 # Why this exists
 
-The `v[(s,o,d)]` slack makes the RMP feasible from an *empty* pool, but an empty pool is
+The `v[(s,p)]` slack makes the RMP feasible from an *empty* pool, but an empty pool is
 not a requirement -- it was just the starting point. Starting empty means the first
 several CG iterations are not improving the routing cost at all, they are hunting for
 enough columns to cover every demand group, and until they succeed the LP objective is
@@ -34,14 +34,14 @@ function joint_routing_assignment_two_stop_seed_columns(
 )::Vector{JointRoutingAssignmentRouteColumn}
     by_route = Dict{Tuple{Int, Int, Int}, Vector{Tuple{Int, Int, Int}}}()
     for s in 1:n_scenarios(data)
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            get(mapping.Q_s[s], (o, d), 0) > 0 || continue
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            mapping.Q_s[s][p] > 0 || continue
             for pair in get_valid_jk_pairs(mapping, o, d)
                 requires_no_vehicle_route(pair) && continue
                 j, k = pair
                 tau = get_routing_cost(data, j, k)
                 isfinite(tau) || continue
-                push!(get!(by_route, (s, j, k), Tuple{Int, Int, Int}[]), (od_idx, j, k))
+                push!(get!(by_route, (s, j, k), Tuple{Int, Int, Int}[]), (p, j, k))
             end
         end
     end

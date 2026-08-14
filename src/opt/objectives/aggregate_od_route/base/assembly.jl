@@ -17,15 +17,16 @@ function set_aggregate_od_route_base_objective!(
     m::Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    x::Dict{NTuple{5, Int}, VariableRef},
+    x::Dict{NTuple{4, Int}, VariableRef},
     theta::Dict{Tuple{Int, Int}, VariableRef},
     walk_cost_weight::Float64,
     route_regularization_weight::Float64,
     repositioning_time::Float64,
 )
     obj = AffExpr(0.0)
-    for ((s, o, d, j, k), var) in x
-        demand = get(mapping.Q_s[s], (o, d), 0)
+    for ((s, p, j, k), var) in x
+        o, d = mapping.Omega_s[s][p]
+        demand = mapping.Q_s[s][p]
         cost = walk_cost_weight * demand * od_pair_walking_cost(data, o, d, (j, k))
         add_to_expression!(obj, cost, var)
     end

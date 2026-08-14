@@ -6,9 +6,9 @@ Coverage constraints for the joint routing+assignment CG master, built directly 
 export add_joint_routing_assignment_coverage_constraints!
 
 """
-    add_joint_routing_assignment_coverage_constraints!(m, data, mapping, v) -> Dict{NTuple{3,Int}, ConstraintRef}
+    add_joint_routing_assignment_coverage_constraints!(m, data, mapping, v) -> Dict{Tuple{Int,Int}, ConstraintRef}
 
-One row per demand-positive `(s,o,d)`, `v[(s,o,d)] >= 1` -- route-column and `x_same`
+One row per demand group `(s,p)`, `v[(s,p)] >= 1` -- route-column and `x_same`
 coefficients are added later, by `add_joint_routing_assignment_same_station_variables!`
 and `add_joint_routing_assignment_column!` respectively.
 """
@@ -16,15 +16,15 @@ function add_joint_routing_assignment_coverage_constraints!(
     m::Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    v::Dict{NTuple{3, Int}, VariableRef},
-)::Dict{NTuple{3, Int}, ConstraintRef}
-    coverage = Dict{NTuple{3, Int}, ConstraintRef}()
+    v::Dict{Tuple{Int, Int}, VariableRef},
+)::Dict{Tuple{Int, Int}, ConstraintRef}
+    coverage = Dict{Tuple{Int, Int}, ConstraintRef}()
     for s in 1:n_scenarios(data)
-        for (o, d) in mapping.Omega_s[s]
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for p in eachindex(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand > 0 || continue
-            key3 = (s, o, d)
-            coverage[key3] = @constraint(m, v[key3] >= 1)
+            key2 = (s, p)
+            coverage[key2] = @constraint(m, v[key2] >= 1)
         end
     end
     return coverage

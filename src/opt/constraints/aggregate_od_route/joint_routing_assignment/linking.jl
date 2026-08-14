@@ -11,7 +11,7 @@ export add_joint_routing_assignment_station_linking_constraints!
     add_joint_routing_assignment_station_linking_constraints!(m, data, mapping, y)
         -> (pickup_link, dropoff_link)
 
-Disaggregated `((s,o,d), j)`/`((s,o,d), k)` linking rows, written as `-y[j] <= 0` (not
+Disaggregated `((s,p), j)`/`((s,p), k)` linking rows, written as `-y[j] <= 0` (not
 `0 <= y[j]`) so the normalized form JuMP stores is unambiguous: a route column's `theta`
 coefficient of `+1.0`, added later via `set_normalized_coefficient`, then yields exactly
 `theta - y[j] <= 0`. `j`/`k` range over the pickup/dropoff sides of every feasible
@@ -24,13 +24,13 @@ function add_joint_routing_assignment_station_linking_constraints!(
     mapping::AggregateODRouteMap,
     y::Vector{VariableRef},
 )
-    pickup_link = Dict{Tuple{NTuple{3, Int}, Int}, ConstraintRef}()
-    dropoff_link = Dict{Tuple{NTuple{3, Int}, Int}, ConstraintRef}()
+    pickup_link = Dict{Tuple{Tuple{Int, Int}, Int}, ConstraintRef}()
+    dropoff_link = Dict{Tuple{Tuple{Int, Int}, Int}, ConstraintRef}()
     for s in 1:n_scenarios(data)
-        for (o, d) in mapping.Omega_s[s]
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand > 0 || continue
-            key3 = (s, o, d)
+            key2 = (s, p)
             pickups = Set{Int}()
             dropoffs = Set{Int}()
             for pair in get_valid_jk_pairs(mapping, o, d)
@@ -40,10 +40,10 @@ function add_joint_routing_assignment_station_linking_constraints!(
                 push!(dropoffs, k)
             end
             for j in pickups
-                pickup_link[(key3, j)] = @constraint(m, -y[j] <= 0.0)
+                pickup_link[(key2, j)] = @constraint(m, -y[j] <= 0.0)
             end
             for k in dropoffs
-                dropoff_link[(key3, k)] = @constraint(m, -y[k] <= 0.0)
+                dropoff_link[(key2, k)] = @constraint(m, -y[k] <= 0.0)
             end
         end
     end

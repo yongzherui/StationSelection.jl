@@ -11,9 +11,9 @@ export add_joint_routing_assignment_same_station_variables!
 
 """
     add_joint_routing_assignment_same_station_variables!(m, data, mapping, coverage, pickup_link, dropoff_link)
-        -> Dict{Tuple{NTuple{3,Int},Int}, VariableRef}
+        -> Dict{Tuple{Tuple{Int,Int},Int}, VariableRef}
 
-Same-station ("no vehicle route") assignment `x_same[(s,o,d),j] >= 0` for every `j` where
+Same-station ("no vehicle route") assignment `x_same[(s,p),j] >= 0` for every `j` where
 `valid_jk_pairs[(o,d)]` contains the real same-station pair `(j,j)`
 (`is_same_station_pair`) -- present whenever `create_aggregate_od_route_map`'s
 `allow_same_station=true` produced one instead of routing that OD through
@@ -30,24 +30,24 @@ function add_joint_routing_assignment_same_station_variables!(
     m::Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    coverage::Dict{NTuple{3, Int}, ConstraintRef},
-    pickup_link::Dict{Tuple{NTuple{3, Int}, Int}, ConstraintRef},
-    dropoff_link::Dict{Tuple{NTuple{3, Int}, Int}, ConstraintRef},
-)::Dict{Tuple{NTuple{3, Int}, Int}, VariableRef}
-    x_same = Dict{Tuple{NTuple{3, Int}, Int}, VariableRef}()
+    coverage::Dict{Tuple{Int, Int}, ConstraintRef},
+    pickup_link::Dict{Tuple{Tuple{Int, Int}, Int}, ConstraintRef},
+    dropoff_link::Dict{Tuple{Tuple{Int, Int}, Int}, ConstraintRef},
+)::Dict{Tuple{Tuple{Int, Int}, Int}, VariableRef}
+    x_same = Dict{Tuple{Tuple{Int, Int}, Int}, VariableRef}()
     for s in 1:n_scenarios(data)
-        for (o, d) in mapping.Omega_s[s]
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand > 0 || continue
-            key3 = (s, o, d)
+            key2 = (s, p)
             for pair in get_valid_jk_pairs(mapping, o, d)
                 is_same_station_pair(pair) || continue
                 j = pair[1]
-                x = @variable(m, lower_bound = 0.0, base_name = "x_same[$s,$o,$d,$j]")
-                x_same[(key3, j)] = x
-                set_normalized_coefficient(coverage[key3], x, 1.0)
-                haskey(pickup_link, (key3, j)) && set_normalized_coefficient(pickup_link[(key3, j)], x, 1.0)
-                haskey(dropoff_link, (key3, j)) && set_normalized_coefficient(dropoff_link[(key3, j)], x, 1.0)
+                x = @variable(m, lower_bound = 0.0, base_name = "x_same[$s,$p,$j]")
+                x_same[(key2, j)] = x
+                set_normalized_coefficient(coverage[key2], x, 1.0)
+                haskey(pickup_link, (key2, j)) && set_normalized_coefficient(pickup_link[(key2, j)], x, 1.0)
+                haskey(dropoff_link, (key2, j)) && set_normalized_coefficient(dropoff_link[(key2, j)], x, 1.0)
             end
         end
     end

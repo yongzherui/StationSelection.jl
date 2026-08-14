@@ -27,7 +27,7 @@ export add_assignment_to_selected_constraints!
     )
 
 All demand for each OD pair must be assigned across valid station pairs.
-    Σⱼₖ x[s][od_idx][j,k] = Q_s[s][(o,d)]  ∀od_idx ∈ Ω_s, s
+    Σⱼₖ x[s][p][j,k] = Q_s[s][p]  ∀p ∈ Ω_s, s
 
 Used by: TwoStageODPolicy
 """
@@ -41,9 +41,9 @@ function add_assignment_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            demand = get(mapping.Q_s[s], (o, d), 0)
-            @constraint(m, sum(x[s][od_idx]) == demand)
+        for p in eachindex(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
+            @constraint(m, sum(x[s][p]) == demand)
         end
     end
 
@@ -110,8 +110,8 @@ end
     )
 
 Assignment requires both stations to be active (TwoStageODPolicy).
-    x[s][od_idx][pair_idx] ≤ Q_s[s][(o,d)] * z[j,s]
-    x[s][od_idx][pair_idx] ≤ Q_s[s][(o,d)] * z[k,s]
+    x[s][p][pair_idx] ≤ Q_s[s][p] * z[j,s]
+    x[s][p][pair_idx] ≤ Q_s[s][p] * z[k,s]
 
 Used by: TwoStageODPolicy
 """
@@ -126,15 +126,15 @@ function add_assignment_to_active_constraints!(
     x = m[:x]
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, pair) in enumerate(valid_pairs)
                 is_walk_only_pair(pair) && continue
                 j, k = pair
-                @constraint(m, x[s][od_idx][idx] <= demand * z[j, s])
-                @constraint(m, x[s][od_idx][idx] <= demand * z[k, s])
+                @constraint(m, x[s][p][idx] <= demand * z[j, s])
+                @constraint(m, x[s][p][idx] <= demand * z[k, s])
             end
         end
     end

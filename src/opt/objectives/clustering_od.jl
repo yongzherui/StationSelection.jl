@@ -22,10 +22,10 @@ export set_clustering_od_flow_regularizer_objective!
 Set the minimization objective for TwoStageODPolicy.
 
 Objective:
-    min Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][od_idx][pair_idx]
+    min Σ_s Σ_{p∈Ω_s} Σ_{j,k} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][p][pair_idx]
 
 Where:
-- x[s][od_idx][pair_idx] = integer assigned demand for that OD and valid station pair
+- x[s][p][pair_idx] = integer assigned demand for that OD and valid station pair
 - d^origin_{oj} = walking cost from origin o to pickup station j
 - d^dest_{dk} = walking cost from dropoff station k to destination d
 - c_{jk} = routing cost from station j to k
@@ -52,9 +52,9 @@ function set_clustering_od_objective!(
             (
                 od_pair_walking_cost(data, o, d, pair) +
                 (is_walk_only_pair(pair) ? 0.0 : in_vehicle_time_weight * get_routing_cost(data, pair[1], pair[2]))
-            ) * x[s][od_idx][idx]
+            ) * x[s][p][idx]
             for s in 1:S
-            for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+            for (p, (o, d)) in enumerate(mapping.Omega_s[s])
             for (idx, pair) in enumerate(get_valid_jk_pairs(mapping, o, d))
         )
     )
@@ -75,7 +75,7 @@ Set the minimization objective for TwoStageODPolicy with flow regularization.
 
 Extends the base clustering-OD objective with a route-activation penalty:
 
-    min  Σ_s Σ_{(o,d)∈Ω_s} Σ_{j,k} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][od_idx][idx]
+    min  Σ_s Σ_{p∈Ω_s} Σ_{j,k} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) · x[s][p][idx]
        + μ Σ_s Σ_{(j,k)} c_{jk} × f_flow[s][(j,k)]
 
 Where μ = flow_regularization_weight penalises distinct (j,k) route segments used per scenario,

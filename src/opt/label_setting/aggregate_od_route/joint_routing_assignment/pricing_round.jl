@@ -3,9 +3,9 @@
         -> Vector{PassengerAssignmentCandidate}
 
 Turn the current RMP duals into `PassengerAssignmentCandidate`s for one scenario,
-directly off `AggregateODRouteMap` -- no `MasterData`. The search's `passenger::Int`
-field is `od_idx`, the position of `(o,d)` within `mapping.Omega_s[scenario]` (matching
-the aggregate model's own `od_idx` convention); it's only ever compared for equality
+directly off `AggregateODRouteMap` -- no `MasterData`. The search's `p::Int` field is
+the demand group's index, the position of `(o,d)` within `mapping.Omega_s[scenario]`
+(matching the aggregate model's own convention); it's only ever compared for equality
 within one scenario's pricing call, so reusing the same small dense range each scenario
 is fine. Same-station (`j==k`) and walk-only pairs are excluded: a route can't certify
 either (see `add_joint_routing_assignment_same_station_variables!`'s docstring). Only
@@ -14,27 +14,27 @@ either (see `add_joint_routing_assignment_same_station_variables!`'s docstring).
 function joint_routing_assignment_pricing_candidates(
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    alpha::Dict{NTuple{3, Int}, Float64},
-    gamma_o::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
-    gamma_d::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
+    alpha::Dict{Tuple{Int, Int}, Float64},
+    gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+    gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     walk_cost_weight::Float64,
     detour_factor::Float64,
     scenario::Int,
 )::Vector{PassengerAssignmentCandidate}
     candidates = PassengerAssignmentCandidate[]
-    for (od_idx, (o, d)) in enumerate(mapping.Omega_s[scenario])
-        get(mapping.Q_s[scenario], (o, d), 0) > 0 || continue
-        key3 = (scenario, o, d)
-        a = get(alpha, key3, 0.0)
+    for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
+        mapping.Q_s[scenario][p] > 0 || continue
+        key2 = (scenario, p)
+        a = get(alpha, key2, 0.0)
         a > 1e-9 || continue
         for pair in get_valid_jk_pairs(mapping, o, d)
             requires_no_vehicle_route(pair) && continue
             j, k = pair
-            rho = a - get(gamma_o, (key3, j), 0.0) - get(gamma_d, (key3, k), 0.0) -
+            rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
             rho > 1e-9 || continue
             ride_limit = detour_factor * get_routing_cost(data, j, k)
-            push!(candidates, PassengerAssignmentCandidate(od_idx, j, k, ride_limit, rho))
+            push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))
         end
     end
     return candidates
@@ -52,9 +52,9 @@ function _price_one_passenger_scenario(
     m::JuMP.Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    alpha::Dict{NTuple{3, Int}, Float64},
-    gamma_o::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
-    gamma_d::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
+    alpha::Dict{Tuple{Int, Int}, Float64},
+    gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+    gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     s::Int,
     base_column_id::Int,
     existing::Vector{JointRoutingAssignmentRouteColumn};
@@ -196,9 +196,9 @@ function _price_passenger_scenarios(
     m::JuMP.Model,
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    alpha::Dict{NTuple{3, Int}, Float64},
-    gamma_o::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
-    gamma_d::Dict{Tuple{NTuple{3, Int}, Int}, Float64},
+    alpha::Dict{Tuple{Int, Int}, Float64},
+    gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+    gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     next_column_id::Int;
     n_candidates::Int,
     max_new_columns::Int,

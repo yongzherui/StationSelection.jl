@@ -130,17 +130,17 @@ regularization -- see `ClusteringTwoStageODFlowRegularizerFormulation` for that)
 # Mathematical Formulation
 First stage: Select l stations to build (y[j] ∈ {0,1})
 Second stage: For each scenario s, activate k stations (z[j,s] ∈ {0,1})
-              and assign OD demand counts to valid station pairs (x[s][od][idx] ∈ Z₊)
+              and assign OD demand counts to valid station pairs (x[s][p][idx] ∈ Z₊)
 
 Objective:
-    min Σ_s Σ_{(o,d)∈Ω_s} Σ_{(j,k)∈A_od} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) x_{od,jk,s}
+    min Σ_s Σ_{p∈Ω_s} Σ_{(j,k)∈A_p} (d^origin_{oj} + d^dest_{dk} + w_ivt·c_{jk}) x_{p,jk,s}
 
 Constraints:
 - Σ_j y[j] = l                              (build exactly l stations)
 - Σ_j z[j,s] = k  ∀s                        (activate k stations per scenario)
 - z[j,s] ≤ y[j]  ∀j,s                       (can only activate built stations)
-- Σ_{(j,k)∈A_od} x[s][od][j,k] = Q_s[s][(o,d)]  ∀s,od
-- x[s][od][j,k] ≤ Q_s[s][(o,d)] * z[j,s], Q_s[s][(o,d)] * z[k,s]  ∀s,od,(j,k)∈A_od
+- Σ_{(j,k)∈A_p} x[s][p][j,k] = Q_s[s][p]  ∀s,p
+- x[s][p][j,k] ≤ Q_s[s][p] * z[j,s], Q_s[s][p] * z[k,s]  ∀s,p,(j,k)∈A_p
 """
 struct ClusteringTwoStageODFormulation <: AbstractClusteringTwoStageODFormulation
     k::Int

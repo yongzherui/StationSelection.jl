@@ -33,8 +33,8 @@ function _default_joint_routing_assignment_unserved_penalty_core(
     end
     max_walk = 0.0
     for s in 1:n_scenarios(data)
-        for (o, d) in mapping.Omega_s[s]
-            get(mapping.Q_s[s], (o, d), 0) > 0 || continue
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            mapping.Q_s[s][p] > 0 || continue
             for pair in get_valid_jk_pairs(mapping, o, d)
                 is_walk_only_pair(pair) && continue
                 max_walk = max(max_walk, od_pair_walking_cost(data, o, d, pair))

@@ -106,7 +106,7 @@
             PassengerAssignmentCandidate(1, 1, 4, 100.0, 12.0),
             PassengerAssignmentCandidate(2, 2, 4, 100.0, 6.0),
         ]
-        reward_lookup = Dict((c.passenger, c.origin, c.destination) => c.reward for c in candidates)
+        reward_lookup = Dict((c.p, c.origin, c.destination) => c.reward for c in candidates)
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
             route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,

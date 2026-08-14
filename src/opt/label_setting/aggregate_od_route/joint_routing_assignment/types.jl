@@ -23,15 +23,16 @@ One global bit per passenger reward layer `(p, h)`. See the module docstring in
 const RewardLayerBitset = BitSet
 
 """
-    PassengerAssignmentCandidate(passenger, origin, destination, ride_limit, reward)
+    PassengerAssignmentCandidate(p, origin, destination, ride_limit, reward)
 
 Raw input to pricing: one feasible passenger assignment `(p, j, k)` with its
 already-computed reward `ρ_pjk = α_p - γ^O_pj - γ^D_pk - w_pjk` and its
-passenger-specific ride-time/detour limit `R_pjk`. Only candidates with
-`reward > 0` matter for pricing (see `_build_passenger_reward_layers`).
+passenger-specific ride-time/detour limit `R_pjk`. `p` is the demand group's
+index -- the position of `(o,d)` within `mapping.Omega_s[scenario]`. Only
+candidates with `reward > 0` matter for pricing (see `_build_passenger_reward_layers`).
 """
 struct PassengerAssignmentCandidate
-    passenger::Int
+    p::Int
     origin::Int
     destination::Int
     ride_limit::Float64
@@ -44,7 +45,7 @@ reward has been folded into `layer_mask`, the prefix of that passenger's reward
 layers activated by certifying this particular `(j, k)`.
 """
 struct PassengerAssignmentOpportunity
-    passenger::Int
+    p::Int
     origin::Int
     destination::Int
     ride_limit::Float64
@@ -248,7 +249,7 @@ end
     JointRoutingAssignmentRouteColumn(id, route, assignments, tau; metadata)
 
 A priced column: a physical station route paired with the concrete per-passenger
-assignments `(passenger, pickup, dropoff)` selected during route replay (see
+assignments `(p, pickup, dropoff)` selected during route replay (see
 `search.jl`). Unlike `activated_reward_layers`, which only records reward levels,
 `assignments` records which stations actually carry the linking coefficients a
 master problem would need.

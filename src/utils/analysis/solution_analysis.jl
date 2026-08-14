@@ -137,8 +137,8 @@ function extract_assignments_clustering(m::JuMP.Model, mapping::ClusteringTwoSta
 
     for (s, x_s) in enumerate(x)
         od_pairs = mapping.Omega_s[s]
-        for (od_idx, x_od) in x_s
-            o, d = od_pairs[od_idx]
+        for (p, x_od) in x_s
+            o, d = od_pairs[p]
 
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             idx = findfirst(i -> JuMP.value(x_od[i]) > 0.5, eachindex(x_od))
@@ -293,8 +293,8 @@ function calculate_vrd_from_assignments_clustering(
 
     for (s, x_s) in enumerate(x)
         od_pairs = mapping.Omega_s[s]
-        for (od_idx, x_od) in x_s
-            o, d = od_pairs[od_idx]
+        for (p, x_od) in x_s
+            o, d = od_pairs[p]
 
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, (j, k)) in enumerate(valid_pairs)

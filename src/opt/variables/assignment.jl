@@ -24,12 +24,13 @@ export add_assignment_variables!
         mapping::ClusteringTwoStageODMap;
     )
 
-Add assignment variables x[s][od_idx][pair_idx] for TwoStageODPolicy.
+Add assignment variables x[s][p][pair_idx] for TwoStageODPolicy.
 
-x[s][od_idx][pair_idx] is the integer passenger count from OD pair od_idx in
-scenario s assigned to the corresponding valid pickup/dropoff pair.
+x[s][p][pair_idx] is the integer passenger count from demand group p (the OD
+pair Omega_s[s][p]) in scenario s assigned to the corresponding valid
+pickup/dropoff pair.
 
-Structure: scenario → OD index → sparse vector over valid (pickup, dropoff) pairs.
+Structure: scenario → demand-group index p → sparse vector over valid (pickup, dropoff) pairs.
 No time dimension - OD pairs are aggregated across time within each scenario.
 """
 function add_assignment_variables!(
@@ -42,15 +43,15 @@ function add_assignment_variables!(
     x = [Dict{Int, Vector{VariableRef}}() for _ in 1:S]
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             n_pairs = length(valid_pairs)
-            demand = get(mapping.Q_s[s], (o, d), 0)
+            demand = mapping.Q_s[s][p]
             if n_pairs > 0 && demand > 0
-                x[s][od_idx] = @variable(m, [1:n_pairs],
+                x[s][p] = @variable(m, [1:n_pairs],
                     integer = true, lower_bound = 0, upper_bound = demand)
             else
-                x[s][od_idx] = VariableRef[]
+                x[s][p] = VariableRef[]
             end
         end
     end

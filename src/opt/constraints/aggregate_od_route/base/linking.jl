@@ -11,18 +11,18 @@ export add_aggregate_od_route_base_route_linking_constraints!
 """
     add_aggregate_od_route_base_station_linking_constraints!(m, x, y) -> (pickup_link, dropoff_link)
 
-`x[s,o,d,j,k] <= y[j]`, `x[s,o,d,j,k] <= y[k]` for every declared `x` -- an assignment
+`x[s,p,j,k] <= y[j]`, `x[s,p,j,k] <= y[k]` for every declared `x` -- an assignment
 can only use a station pair whose both endpoints are built.
 """
 function add_aggregate_od_route_base_station_linking_constraints!(
     m::Model,
-    x::Dict{NTuple{5, Int}, VariableRef},
+    x::Dict{NTuple{4, Int}, VariableRef},
     y::Vector{VariableRef},
 )
-    pickup_link = Dict{NTuple{5, Int}, ConstraintRef}()
-    dropoff_link = Dict{NTuple{5, Int}, ConstraintRef}()
+    pickup_link = Dict{NTuple{4, Int}, ConstraintRef}()
+    dropoff_link = Dict{NTuple{4, Int}, ConstraintRef}()
     for (key, var) in x
-        _, _, _, j, k = key
+        _, _, j, k = key
         pickup_link[key] = @constraint(m, var <= y[j])
         dropoff_link[key] = @constraint(m, var <= y[k])
     end
@@ -30,9 +30,9 @@ function add_aggregate_od_route_base_station_linking_constraints!(
 end
 
 """
-    add_aggregate_od_route_base_route_linking_constraints!(m, mapping, x, theta) -> Dict{NTuple{5,Int}, ConstraintRef}
+    add_aggregate_od_route_base_route_linking_constraints!(m, mapping, x, theta) -> Dict{NTuple{4,Int}, ConstraintRef}
 
-`x[s,o,d,j,k] <= sum(theta[r,s] for r covering (j,k))` -- an assignment can only use a
+`x[s,p,j,k] <= sum(theta[r,s] for r covering (j,k))` -- an assignment can only use a
 station pair some active route in that scenario actually covers. `theta` is keyed
 `(column_id, s)`, matching `add_aggregate_od_route_theta_variables!`'s `m[:theta_compat]`
 convention; `mapping.columns_by_pair[(j,k)]` lists every route id covering `(j,k)`.
@@ -40,12 +40,12 @@ convention; `mapping.columns_by_pair[(j,k)]` lists every route id covering `(j,k
 function add_aggregate_od_route_base_route_linking_constraints!(
     m::Model,
     mapping::AggregateODRouteMap,
-    x::Dict{NTuple{5, Int}, VariableRef},
+    x::Dict{NTuple{4, Int}, VariableRef},
     theta::Dict{Tuple{Int, Int}, VariableRef},
-)::Dict{NTuple{5, Int}, ConstraintRef}
-    route_link = Dict{NTuple{5, Int}, ConstraintRef}()
+)::Dict{NTuple{4, Int}, ConstraintRef}
+    route_link = Dict{NTuple{4, Int}, ConstraintRef}()
     for (key, var) in x
-        s, _, _, j, k = key
+        s, _, j, k = key
         terms = AffExpr(0.0)
         for r in get(mapping.columns_by_pair, (j, k), Int[])
             haskey(theta, (r, s)) && add_to_expression!(terms, theta[(r, s)])

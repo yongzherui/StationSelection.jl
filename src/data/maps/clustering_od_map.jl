@@ -79,8 +79,10 @@ Maps scenarios to origin-destination pairs for clustering optimization.
 - `scenarios::Vector{ScenarioData}`: Reference to scenario data
 - `scenario_label_to_array_idx::Dict{String, Int}`: Scenario label → array index
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label
-- `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD index pairs with positive demand
-- `Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}`: Demand count q_{od,s} per OD index pair per scenario
+- `Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}`: Maps scenario → OD pairs with positive
+  demand; position `p` within `Omega_s[s]` is the demand group's index.
+- `Q_s::Dict{Int, Vector{Int}}`: Demand count `Q_s[s][p]` for demand group `p`, dense and
+  parallel to `Omega_s[s]` (every `p` has positive demand by construction).
 - `max_walking_distance::Float64`: Maximum walking distance constraint
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
@@ -92,11 +94,11 @@ struct ClusteringTwoStageODMap <: AbstractClusteringMap
     scenario_label_to_array_idx::Dict{String, Int}
     array_idx_to_scenario_label::Vector{String}
 
-    # Omega[scenario_id] = [(o1, d1), (o2, d2), ...]
+    # Omega[scenario_id] = [(o1, d1), (o2, d2), ...]; position p -> (o,d)
     Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}
 
-    # Q[scenario_id][(o, d)] = count of requests for OD pair (o,d)
-    Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}
+    # Q[scenario_id][p] = count of requests for OD pair Omega_s[scenario_id][p]
+    Q_s::Dict{Int, Vector{Int}}
 
     # Walking distance constraint
     max_walking_distance::Float64
@@ -219,16 +221,16 @@ function create_clustering_two_stage_od_map(
 
     # Compute Omega_s and Q_s for all scenarios
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
-    Q_s = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
+    Q_s = Dict{Int, Vector{Int}}()
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (scenario_id, scenario_data) in enumerate(data.scenarios)
         # Get OD pair counts (aggregated across all times)
         od_count = compute_scenario_od_count(scenario_data)
 
-        # Store unique OD pairs and counts
+        # Store unique OD pairs (position p -> (o,d)) and their parallel demand counts
         Omega_s[scenario_id] = collect(keys(od_count))
-        Q_s[scenario_id] = od_count
+        Q_s[scenario_id] = [od_count[pair] for pair in Omega_s[scenario_id]]
         union!(all_od_pairs, Omega_s[scenario_id])
     end
 

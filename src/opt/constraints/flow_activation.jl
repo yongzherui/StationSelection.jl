@@ -20,8 +20,8 @@ export add_flow_activation_constraints!
     add_flow_activation_constraints!(m, data, mapping::ClusteringTwoStageODMap) -> Int
 
 Links f_flow to x with both lower and upper bounds:
-    x[s][od_idx][idx] ≤ Q_s[s][(o,d)] * f_flow[s][(j,k)]
-    f_flow[s][(j,k)] ≤ Σ_{od} x[s][od][idx]         (one per (s,j,k))
+    x[s][p][idx] ≤ Q_s[s][p] * f_flow[s][(j,k)]
+    f_flow[s][(j,k)] ≤ Σ_p x[s][p][idx]         (one per (s,j,k))
 
 Used by: TwoStageODPolicy (when flow_regularization_weight is set)
 """
@@ -38,14 +38,14 @@ function add_flow_activation_constraints!(
     x_terms = Dict{Tuple{Int,Int,Int}, Vector{VariableRef}}()
 
     for s in 1:S
-        for (od_idx, (o, d)) in enumerate(mapping.Omega_s[s])
-            demand = get(mapping.Q_s[s], (o, d), 0)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            demand = mapping.Q_s[s][p]
             demand == 0 && continue
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (idx, pair) in enumerate(valid_pairs)
                 is_walk_only_pair(pair) && continue
                 j, k = pair
-                x_var = x[s][od_idx][idx]
+                x_var = x[s][p][idx]
                 @constraint(m, x_var <= demand * f_flow[s][(j, k)])
                 push!(get!(x_terms, (s, j, k), VariableRef[]), x_var)
             end

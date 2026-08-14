@@ -38,6 +38,19 @@ struct AggregateODRouteColumn
     end
 end
 
+"""
+    AggregateODRouteMap
+
+# OD demand-group indexing
+
+`Omega_s[s]::Vector{Tuple{Int,Int}}` maps scenario `s` to its demand-positive
+`(o,d)` pairs; position `p` within `Omega_s[s]` is that demand group's index
+(`p`), used throughout the aggregate-OD-route master/pricer as `(s,p)` instead
+of the raw `(s,o,d)` triple. `Q_s[s]::Vector{Int}` is dense and parallel to
+`Omega_s[s]` (`Q_s[s][p]` = demand for `Omega_s[s][p]`), since every position
+has positive demand by construction. `valid_jk_pairs` stays keyed by the raw
+`(o,d)` tuple -- station-pair feasibility depends on geography, not on `s`/`p`.
+"""
 mutable struct AggregateODRouteMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
     array_idx_to_station_id::Vector{Int}
@@ -45,7 +58,7 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
     scenario_label_to_array_idx::Dict{String, Int}
     array_idx_to_scenario_label::Vector{String}
     Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}
-    Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}}
+    Q_s::Dict{Int, Vector{Int}}
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     active_jk_s::Dict{Int, Vector{Tuple{Int, Int}}}
     columns::Vector{AggregateODRouteColumn}
@@ -60,14 +73,13 @@ get_valid_jk_pairs(mapping::AggregateODRouteMap, o::Int, d::Int) =
     get(mapping.valid_jk_pairs, (o, d), Tuple{Int, Int}[])
 
 function _aggregate_od_route_active_jk_by_s(
-    Q_s::Dict{Int, Dict{Tuple{Int, Int}, Int}},
+    Omega_s::Dict{Int, Vector{Tuple{Int, Int}}},
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
 )::Dict{Int, Vector{Tuple{Int, Int}}}
     active_jk_s = Dict{Int, Vector{Tuple{Int, Int}}}()
-    for s in sort!(collect(keys(Q_s)))
+    for s in sort!(collect(keys(Omega_s)))
         jk_set = Set{Tuple{Int, Int}}()
-        for ((o, d), demand) in Q_s[s]
-            demand > 0 || continue
+        for (o, d) in Omega_s[s]
             union!(jk_set, get(valid_jk_pairs, (o, d), Tuple{Int, Int}[]))
         end
         active_jk_s[s] = sort!(collect(jk_set))
@@ -147,13 +159,13 @@ function create_aggregate_od_route_map(
         create_scenario_label_mappings(data.scenarios)
 
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
-    Q_s = Dict{Int, Dict{Tuple{Int, Int}, Int}}()
+    Q_s = Dict{Int, Vector{Int}}()
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (s, scenario_data) in enumerate(data.scenarios)
         od_count = compute_scenario_od_count(scenario_data)
         Omega_s[s] = sort!(collect(keys(od_count)))
-        Q_s[s] = od_count
+        Q_s[s] = [od_count[pair] for pair in Omega_s[s]]
         union!(all_od_pairs, Omega_s[s])
     end
 
@@ -164,7 +176,7 @@ function create_aggregate_od_route_map(
         allow_walk_only=formulation.allow_walk_only,
         allow_same_station=true,
     )
-    active_jk_s = _aggregate_od_route_active_jk_by_s(Q_s, valid_jk_pairs)
+    active_jk_s = _aggregate_od_route_active_jk_by_s(Omega_s, valid_jk_pairs)
     resolved_initial_columns = isnothing(initial_columns) ?
         _singleton_aggregate_od_route_columns(active_jk_s, data) :
         initial_columns

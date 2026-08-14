@@ -317,10 +317,10 @@ function _replay_joint_routing_assignment_route(
         for opp in get(pricing_data.assignments_by_destination, next_node, PassengerAssignmentOpportunity[])
             origin_age = elapsed_time - get(pickup_time, opp.origin, -Inf)
             origin_age <= opp.ride_limit + 1e-9 || continue
-            current_best = get(best, opp.passenger, nothing)
+            current_best = get(best, opp.p, nothing)
             if isnothing(current_best) || opp.reward > current_best[3] + 1e-9 ||
                     (abs(opp.reward - current_best[3]) <= 1e-9 && (opp.origin, opp.destination) < (current_best[1], current_best[2]))
-                best[opp.passenger] = (opp.origin, opp.destination, opp.reward)
+                best[opp.p] = (opp.origin, opp.destination, opp.reward)
             end
         end
 

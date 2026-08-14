@@ -45,7 +45,7 @@ function coarsen_passenger_assignment_rewards(
     values_by_passenger = Dict{Int, Vector{Float64}}()
     for candidate in candidates
         candidate.reward > tol || continue
-        push!(get!(() -> Float64[], values_by_passenger, candidate.passenger), candidate.reward)
+        push!(get!(() -> Float64[], values_by_passenger, candidate.p), candidate.reward)
     end
     retained_by_passenger = Dict{Int, Vector{Float64}}()
     for (passenger, raw_values) in values_by_passenger
@@ -77,11 +77,11 @@ function coarsen_passenger_assignment_rewards(
             push!(transformed, candidate)
             continue
         end
-        retained = retained_by_passenger[candidate.passenger]
+        retained = retained_by_passenger[candidate.p]
         index = findfirst(value -> value >= candidate.reward - tol, retained)
         rounded = isnothing(index) ? last(retained) : retained[index]
         push!(transformed, PassengerAssignmentCandidate(
-            candidate.passenger, candidate.origin, candidate.destination,
+            candidate.p, candidate.origin, candidate.destination,
             candidate.ride_limit, rounded,
         ))
     end
@@ -127,7 +127,7 @@ function _build_passenger_reward_layers(
 
     rewards_by_passenger = Dict{Int, Vector{Float64}}()
     for c in positive
-        push!(get!(() -> Float64[], rewards_by_passenger, c.passenger), c.reward)
+        push!(get!(() -> Float64[], rewards_by_passenger, c.p), c.reward)
     end
 
     layer_weight = Float64[]
@@ -153,13 +153,13 @@ function _build_passenger_reward_layers(
 
     assignment_layer_mask = Dict{Tuple{Int, Int, Int}, RewardLayerBitset}()
     for c in positive
-        values = passenger_layer_values[c.passenger]
-        ids = passenger_layer_ids[c.passenger]
+        values = passenger_layer_values[c.p]
+        ids = passenger_layer_ids[c.p]
         q = findfirst(v -> abs(v - c.reward) <= tol, values)
         q === nothing && throw(ArgumentError(
-            "internal error: reward $(c.reward) for passenger $(c.passenger) has no matching layer",
+            "internal error: reward $(c.reward) for passenger $(c.p) has no matching layer",
         ))
-        assignment_layer_mask[(c.passenger, c.origin, c.destination)] = RewardLayerBitset(ids[1:q])
+        assignment_layer_mask[(c.p, c.origin, c.destination)] = RewardLayerBitset(ids[1:q])
     end
 
     return layer_weight, assignment_layer_mask, positive
@@ -195,8 +195,8 @@ function create_joint_routing_assignment_pricing_data(
     opportunities = PassengerAssignmentOpportunity[]
 
     for c in positive_candidates
-        mask = assignment_layer_mask[(c.passenger, c.origin, c.destination)]
-        opp = PassengerAssignmentOpportunity(c.passenger, c.origin, c.destination, c.ride_limit, c.reward, mask)
+        mask = assignment_layer_mask[(c.p, c.origin, c.destination)]
+        opp = PassengerAssignmentOpportunity(c.p, c.origin, c.destination, c.ride_limit, c.reward, mask)
         push!(opportunities, opp)
         push!(get!(() -> PassengerAssignmentOpportunity[], assignments_by_destination, c.destination), opp)
         push!(get!(() -> PassengerAssignmentOpportunity[], assignments_by_origin, c.origin), opp)

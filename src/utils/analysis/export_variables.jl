@@ -208,7 +208,7 @@ end
     export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String) -> Int
 
 Export assignment variables for TwoStageODPolicy.
-Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs
+Structure: x[s][p] → Vector over valid (pickup, dropoff) pairs
 """
 function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageODMap, export_dir::String)
     if !haskey(m.obj_dict, :x)
@@ -221,8 +221,8 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
     rows = []
     for (s, x_s) in enumerate(x)
         od_pairs = mapping.Omega_s[s]
-        for (od_idx, x_od) in x_s
-            o, d = od_pairs[od_idx]
+        for (p, x_od) in x_s
+            o, d = od_pairs[p]
             valid_pairs = get_valid_jk_pairs(mapping, o, d)
             for (pair_idx, var) in enumerate(x_od)
                 val = JuMP.value(var)
@@ -230,7 +230,7 @@ function export_assignment_variables(m::JuMP.Model, mapping::ClusteringTwoStageO
                     j, k = valid_pairs[pair_idx]
                     push!(rows, (
                         scenario = s,
-                        od_idx = od_idx,
+                        od_idx = p,
                         origin_id = array_idx_to_station_id[o],
                         dest_id = array_idx_to_station_id[d],
                         pickup_idx = j,
