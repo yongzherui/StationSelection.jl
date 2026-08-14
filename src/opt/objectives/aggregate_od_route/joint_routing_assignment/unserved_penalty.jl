@@ -8,7 +8,7 @@ export default_joint_routing_assignment_unserved_penalty
     default_joint_routing_assignment_unserved_penalty(problem, data, mapping) -> Float64
 
 A penalty strictly worse than serving any single demand group by its most expensive
-possible route, so `v[(s,o,d)] > 0` at the optimum means "genuinely unservable", never
+possible route, so `v[(s,p)] > 0` at the optimum means "genuinely unservable", never
 "cheaper to abandon". Serving one demand group never requires more than a direct
 two-stop route `[j,k]` (the cheapest route certifying `(j,k)`), so
 `route_regularization_weight*(max_travel + repositioning_time)` plus the worst walking

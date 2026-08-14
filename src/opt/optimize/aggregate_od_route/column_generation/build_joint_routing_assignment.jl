@@ -10,7 +10,8 @@ was not that).
 
 Built directly off `AggregateODRouteMap` -- no separate `MasterData`/`Passenger`
 structures, matching every other `AggregateODRouteProblem` build path. Demand groups are
-keyed by `(s, o, d)::NTuple{3,Int}` throughout; `data` and the objective/column-cost
+keyed by `(s, p)::Tuple{Int,Int}` throughout (`p` the position of `(o,d)` within
+`mapping.Omega_s[s]`); `data` and the objective/column-cost
 scalars are stashed on `m[...]` (mirrors `m[:aggregate_od_route_route_regularization_weight]`)
 so the `CGSolver` hooks -- which only ever see `build_result`/`m`, not `problem` -- can
 read them back.
