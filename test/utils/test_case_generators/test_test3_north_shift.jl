@@ -22,19 +22,7 @@
     @test length(all_instances) == length(T3_VARIANTS)
 end
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Test 3 generator — hypothesis" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping Test 3 hypothesis checks"
-        @test true
-        return
-    end
     using JuMP
 
     # The source's own hypothesis language is hedged ("model may still
@@ -43,18 +31,15 @@ end
     # walk-cost minimisation in every variant, confirmed empirically) --
     # we therefore only assert feasibility/optimality here, not a specific
     # station-selection outcome.
-    env = Gurobi.Env()
-    solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
-
     for v in T3_VARIANTS
         inst = generate_test3_instance(v.case_name, v.zone_h_km, 1)
         mwd_sec = inst.recommended_walk_threshold_km * 1000 / 1.4
         data = create_test3_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringTwoStageODFormulation(
-            inst.suggested_k, inst.suggested_l;
-            max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
+        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        formulation = ClusteringTwoStageODFormulation(
+            inst.suggested_l; in_vehicle_time_weight = 0.0,
         )
-        result = run_opt(data, model, solver)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
     end
 end

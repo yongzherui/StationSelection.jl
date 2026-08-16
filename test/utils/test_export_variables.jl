@@ -1,19 +1,6 @@
 using CSV
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "export_variables" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping export_variables tests"
-        @test true
-        return
-    end
-
     @testset "AggregateODRouteMap" begin
         stations = DataFrame(id=[1, 2, 3], lon=[0.0, 1.0, 2.0], lat=[0.0, 0.0, 0.0])
         requests = DataFrame(
@@ -36,16 +23,15 @@ end
                 ("2024-01-01 08:03:00", "2024-01-01 08:10:00"),
             ],
         )
-        model = AggregateODRouteModel(
-            2;
-            max_walking_distance=1.0,
+        problem = StationSelectionProblem(data, 2; max_walking_distance=1.0)
+        formulation = AggregateODRouteBaseFormulation(
             route_regularization_weight=1.0,
             repositioning_time=0.0,
             max_stops=3,
             max_wait_time=100.0,
         )
 
-        result = run_opt(data, model, DirectSolver(optimizer_env=Gurobi.Env(), silent=true))
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
 
         mktempdir() do tmpdir
@@ -82,9 +68,10 @@ end
         data = create_station_selection_data(
             stations, requests, walking_costs; routing_costs=routing_costs,
         )
-        model = ClusteringTwoStageODFormulation(2, 3)
+        problem = StationSelectionProblem(data, 3)
+        formulation = ClusteringTwoStageODFormulation(2)
 
-        result = run_opt(data, model, DirectSolver(optimizer_env=Gurobi.Env(), silent=true))
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
 
         mktempdir() do tmpdir

@@ -44,8 +44,8 @@ function _build_clustering_two_stage_od_constraints!(
         formulation::AbstractClusteringTwoStageODFormulation,
         constraint_counts::Dict{String, Int}
     )
-    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, problem.l; equality=true)
-    constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, formulation.k)
+    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, problem.k; equality=true)
+    constraint_counts["scenario_activation_limit"] = add_scenario_activation_limit_constraints!(m, data, formulation.l)
     constraint_counts["activation_linking"] = add_activation_linking_constraints!(m, data)
     constraint_counts["assignment"] = add_assignment_constraints!(m, data, mapping)
     constraint_counts["assignment_to_active"] = add_assignment_to_active_constraints!(m, data, mapping)
@@ -57,10 +57,11 @@ function build_model(
         formulation::ClusteringTwoStageODFormulation,
         solver::DirectMIPSolver,
     )::BuildResult
-    formulation.k <= problem.l || throw(ArgumentError(
-        "k=$(formulation.k) exceeds l=$(problem.l)"
+    formulation.l <= problem.k || throw(ArgumentError(
+        "l=$(formulation.l) exceeds k=$(problem.k)"
     ))
 
+    # ---- 1. Parameters ----
     data = problem.data
     mapping = create_map(problem, formulation, data)
 
@@ -70,8 +71,10 @@ function build_model(
     constraint_counts = Dict{String, Int}()
     extra_counts = Dict{String, Int}()
 
+    # ---- 2. Variables ----
     _build_clustering_two_stage_od_variables!(m, data, mapping, variable_counts, extra_counts)
 
+    # ---- 3. Objective ----
     set_clustering_od_objective!(
         m,
         data,
@@ -79,6 +82,7 @@ function build_model(
         in_vehicle_time_weight=formulation.in_vehicle_time_weight
     )
 
+    # ---- 4. Constraints ----
     _build_clustering_two_stage_od_constraints!(m, problem, data, mapping, formulation, constraint_counts)
 
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
@@ -90,10 +94,11 @@ function build_model(
         formulation::ClusteringTwoStageODFlowRegularizerFormulation,
         solver::DirectMIPSolver,
     )::BuildResult
-    formulation.k <= problem.l || throw(ArgumentError(
-        "k=$(formulation.k) exceeds l=$(problem.l)"
+    formulation.l <= problem.k || throw(ArgumentError(
+        "l=$(formulation.l) exceeds k=$(problem.k)"
     ))
 
+    # ---- 1. Parameters ----
     data = problem.data
     mapping = create_map(problem, formulation, data)
 
@@ -103,9 +108,11 @@ function build_model(
     constraint_counts = Dict{String, Int}()
     extra_counts = Dict{String, Int}()
 
+    # ---- 2. Variables ----
     _build_clustering_two_stage_od_variables!(m, data, mapping, variable_counts, extra_counts)
     variable_counts["flow_activation"] = add_flow_variables!(m, data, mapping)
 
+    # ---- 3. Objective ----
     set_clustering_od_flow_regularizer_objective!(
         m,
         data,
@@ -114,6 +121,7 @@ function build_model(
         flow_regularization_weight=formulation.flow_regularization_weight
     )
 
+    # ---- 4. Constraints ----
     _build_clustering_two_stage_od_constraints!(m, problem, data, mapping, formulation, constraint_counts)
     constraint_counts["flow_activation"] = add_flow_activation_constraints!(m, data, mapping)
 

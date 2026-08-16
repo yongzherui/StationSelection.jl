@@ -10,13 +10,13 @@ mapping types (ClusteringTwoStageODMap, ClusteringBaseModelMap).
 This file includes:
 1. Base variables (y, z) - from variables/base.jl
 2. Assignment variables (x) - from variables/assignment.jl
-3. Flow variables (f_flow) - from variables/flow.jl
+3. Walk variables (x_walk) - from variables/walk.jl
+4. Flow variables (f_flow) - from variables/flow.jl
+5. Route variables (theta) - from variables/routes.jl
 """
 
 include("variables/base.jl")
 include("variables/assignment.jl")
+include("variables/walk.jl")
 include("variables/flow.jl")
-include("variables/aggregate_od_route/core.jl")
-include("variables/aggregate_od_route/joint_routing_assignment/slack.jl")
-include("variables/aggregate_od_route/joint_routing_assignment/same_station.jl")
-include("variables/aggregate_od_route/base/assignment.jl")
+include("variables/routes.jl")

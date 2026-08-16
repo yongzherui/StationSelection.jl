@@ -69,8 +69,8 @@ struct T1Instance
     vehicle_speed::Float64
     base_profile::String
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     note::String
     extra::Dict{String,Any}
@@ -101,7 +101,7 @@ function generate_test1_instance(
         base.stations, base.segments, base.orders,
         fleet_config.fleet_size, fleet_config.capacity, vehicle_speed,
         base_profile, base.demand_counts,
-        base.suggested_l, base.suggested_k,
+        base.suggested_k, base.suggested_l,
         T1_HYPOTHESIS, note,
         base.extra,
     )

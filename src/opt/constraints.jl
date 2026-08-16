@@ -22,6 +22,7 @@ include("constraints/aggregate_od_route/joint_routing_assignment/linking.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/routing_and_assignment.jl")
 include("constraints/aggregate_od_route/base/coverage.jl")
 include("constraints/aggregate_od_route/base/linking.jl")
+include("constraints/aggregate_od_route/base/route_activation.jl")
 # The old nearest-open-assignment-policy Benders machinery (constraints/aggregate_od_route/
 # benders/*.jl, constraints/aggregate_od_route/nearest_open/*.jl) was removed -- see
 # opt/formulations/aggregate_od_route/benders/*.jl for the surviving Formulation marker

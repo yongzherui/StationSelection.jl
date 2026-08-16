@@ -15,7 +15,6 @@ include("objectives/clustering_base.jl")
 # aggregate_od_route/core.jl (set_aggregate_od_route_objective!, the old combined-model
 # objective, pre-Base/Joint split) was removed -- zero callers, fully superseded by
 # set_aggregate_od_route_base_objective!/set_joint_routing_assignment_objective! below.
-include("objectives/aggregate_od_route/joint_routing_assignment/unserved_penalty.jl")
 include("objectives/aggregate_od_route/joint_routing_assignment/assembly.jl")
 include("objectives/aggregate_od_route/base/assembly.jl")
 # The old nearest-open-assignment-policy Benders objective files (expressions/

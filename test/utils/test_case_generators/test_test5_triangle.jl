@@ -6,7 +6,7 @@
     for case in T5_CASES
         inst = generate_test5_instance(case, 1, dcfg)
         @test nrow(inst.stations) == expected_n_stations[case]
-        @test (inst.suggested_l, inst.suggested_k) == expected_sweep[case]
+        @test (inst.suggested_k, inst.suggested_l) == expected_sweep[case]
         @test inst.demand_counts.n_total == nrow(inst.orders)
     end
 
@@ -28,37 +28,24 @@
     @test length(all_instances) == length(T5_CASES) * length(T5_DEMAND_CONFIGS)
 end
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Test 5 generator — hypothesis" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping Test 5 hypothesis checks"
-        @test true
-        return
-    end
     using JuMP
 
-    env = Gurobi.Env()
-    solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
     mwd_sec = 1800.0 / 1.4
     dcfg = T5_DEMAND_CONFIGS[1]
 
-    # NOTE: the source-suggested sweep for corridor_base (l=3, k=2) was
+    # NOTE: the source-suggested sweep for corridor_base (k=3, l=2) was
     # found INFEASIBLE under ClusteringTwoStageODFormulation -- with only
     # 2 of the 3 built stations active, the model cannot simultaneously
     # serve the A<->B corridor stream and the zone->B stream (whichever of
-    # A/M0/B is left inactive leaves one stream unservable). We use k=3
+    # A/M0/B is left inactive leaves one stream unservable). We use l=3
     # (all built stations active) here instead; this deviation from the
     # source's own suggested sweep is intentional and documented.
     inst = generate_test5_instance(:corridor_base, 1, dcfg)
     data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-    model = ClusteringTwoStageODFormulation(3, 3; max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0)
-    result = run_opt(data, model, solver)
+    problem = StationSelectionProblem(data, 3; max_walking_distance = mwd_sec)
+    formulation = ClusteringTwoStageODFormulation(3; in_vehicle_time_weight = 0.0)
+    result = run_opt(problem, formulation, DirectMIPSolver())
     @test result.termination_status == MOI.OPTIMAL
 
     # equilateral / equilateral_with_m1: the source hypothesis language is
@@ -67,11 +54,11 @@ end
     for case in (:equilateral, :equilateral_with_m1)
         inst = generate_test5_instance(case, 1, dcfg)
         data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringTwoStageODFormulation(
-            inst.suggested_k, inst.suggested_l;
-            max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
+        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        formulation = ClusteringTwoStageODFormulation(
+            inst.suggested_l; in_vehicle_time_weight = 0.0,
         )
-        result = run_opt(data, model, solver)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
     end
 end

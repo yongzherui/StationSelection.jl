@@ -49,8 +49,18 @@ end
 `action` is `:added`, or `:skipped` when an identical assignment signature
 (`_joint_routing_assignment_column_signature`, `pricing/.../labels.jl`, unchanged) is
 already in the pool at no greater `tau`. `theta`/`columns`/`column_signatures` all live
-on `m[...]` (mirrors `add_aggregate_od_route_column!`'s `m[:theta_compat]` convention) --
-no separate master wrapper struct.
+on `m[...]` (mirrors `add_aggregate_od_route_base_column!`'s
+`m[:aggregate_od_route_base_theta]` convention, `constraints/aggregate_od_route/base/route_activation.jl`)
+-- no separate master wrapper struct.
+
+New `theta` variables read `m[:joint_routing_assignment_relax_integrality]` (stashed by
+`_build_joint_routing_assignment_model`, `optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl`)
+rather than taking the flag as an explicit argument: this function is called both from
+that build path's own seeding loop and from `add_columns!` below (a fixed-signature
+`CGSolver` hook mid-CG), so a single build-time flag on `m` is what keeps every column --
+seeded or CG-discovered -- consistent with whichever domain the rest of that master's
+variables were built with (continuous for the LP master, `Bin` for the integer-recovery
+rebuild).
 """
 function add_joint_routing_assignment_column!(
     m::Model,
@@ -73,7 +83,10 @@ function add_joint_routing_assignment_column!(
     pickup_link = m[:joint_routing_assignment_pickup_link]
     dropoff_link = m[:joint_routing_assignment_dropoff_link]
 
-    theta_var = @variable(m, lower_bound = 0.0, base_name = "theta[$(column.id)]")
+    relax_integrality = Bool(m[:joint_routing_assignment_relax_integrality])
+    theta_var = relax_integrality ?
+        @variable(m, lower_bound = 0.0, base_name = "theta[$(column.id)]") :
+        @variable(m, binary = true, base_name = "theta[$(column.id)]")
     theta[column.id] = theta_var
     columns[column.id] = column
     signatures[signature] = column.id
@@ -88,12 +101,14 @@ function add_joint_routing_assignment_column!(
     return theta_var, :added
 end
 
-# CGSolver hook (opt/solvers/cg_solver.jl) -- count excludes :skipped columns.
-# `data` is stashed on `m` at build time (build_joint_routing_assignment.jl); this hook
-# only ever receives `build_result`/`mapping`/`m`, no explicit `data` argument.
-# Dispatches on `mapping::AggregateODRouteMap` so it doesn't collide with the generic
-# fallback stub's identical `(BuildResult, Any, JuMP.Model, Any)` signature.
-function add_columns!(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, columns)::Int
+# CGSolver hook real logic (dispatched from
+# optimize/aggregate_od_route/column_generation/dispatch.jl) -- count excludes :skipped
+# columns. `data` is stashed on `m` at build time (build_joint_routing_assignment.jl); this
+# hook only ever receives `build_result`/`mapping`/`m`, no explicit `data` argument.
+function _aggregate_od_route_add_columns!(
+    ::AggregateODRouteJointRoutingAssignmentFormulation,
+    build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, columns,
+)::Int
     data = m[:joint_routing_assignment_data]
     added_count = 0
     for column in columns

@@ -11,8 +11,6 @@ export ClusteringTwoStageODMap
 export create_clustering_two_stage_od_map
 export WALK_ONLY_PAIR
 export is_walk_only_pair
-export is_same_station_pair
-export requires_no_vehicle_route
 export od_pair_walking_cost
 
 """
@@ -25,30 +23,6 @@ with a real station pair.
 const WALK_ONLY_PAIR = (0, 0)
 
 is_walk_only_pair(pair::Tuple{Int, Int}) = pair == WALK_ONLY_PAIR
-
-"""
-    is_same_station_pair(pair) -> Bool
-
-A real (non-`WALK_ONLY_PAIR`) station pair `(j, j)`: pickup and dropoff both
-resolve to the same open station `j`, so no vehicle trip is needed (the same
-reason `WALK_ONLY_PAIR` needs none), but unlike `WALK_ONLY_PAIR` it still
-requires station `j` itself to be open. Only produced by `compute_valid_jk_pairs`
-when `allow_same_station=true`.
-"""
-is_same_station_pair(pair::Tuple{Int, Int}) = pair[1] == pair[2] && !is_walk_only_pair(pair)
-
-"""
-    requires_no_vehicle_route(pair) -> Bool
-
-Either sentinel that needs no route-covering column: direct walking
-(`WALK_ONLY_PAIR`) or a same-station assignment (`is_same_station_pair`).
-Every call site that currently skips route-coverage/pricing/column logic for
-`is_walk_only_pair` alone must use this combined predicate instead once
-same-station pairs exist, or a same-station `x`/`h` gets forced to 0 by a
-coverage row with no matching route column while the endpoint-chain linking
-simultaneously forces it to 1 — a direct, reachable infeasibility.
-"""
-requires_no_vehicle_route(pair::Tuple{Int, Int}) = is_walk_only_pair(pair) || is_same_station_pair(pair)
 
 """
     od_pair_walking_cost(data, o, d, pair) -> Float64
@@ -114,26 +88,20 @@ end
 For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 (pickup_idx, dropoff_idx) satisfy both walking distance limits.
 
-`allow_same_station` (off by default) includes `j==k` real pairs instead of
-skipping them -- see [`is_same_station_pair`](@ref). Both per-side distance
-checks against `o`/`d` still apply normally with `k=j`. Whenever `WALK_ONLY_PAIR`
-is *also* available for that OD (`allow_walk_only` and `dist(o,d) <= 2 *
-max_walking_distance`), same-station real pairs are omitted even with
-`allow_same_station=true`: by the triangle inequality, any `j` that's a valid
-same-station candidate (within `max_walking_distance` of *both* `o` and `d`)
-implies `dist(o,d) <= 2 * max_walking_distance` is already met, so walk-only
-already covers exactly the same case at equal-or-lower cost and needs no open
-station at all. Offering both as separate, identically-costed real/virtual
-pairs would otherwise make the "nearest-open" chain formulation's LP relax
-into fractional splits between them (see notes on `assert_endpoint_chain_near_binary`)
-instead of resolving deterministically to one.
+`j == k` (same-station) pairs are never produced: boarding and alighting at the
+same station needs no vehicle trip, and by the triangle inequality any `j` within
+`max_walking_distance` of *both* `o` and `d` implies `dist(o,d) <= 2 *
+max_walking_distance` -- exactly `WALK_ONLY_PAIR`'s own availability condition
+below. So whenever a same-station pair would have been valid, `WALK_ONLY_PAIR`
+already covers the same case at equal-or-lower cost and without requiring any
+station to be open at all; same-station pairs would only ever add a
+dominated, identically-costed alternative.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
     max_walking_distance::Float64;
     allow_walk_only::Bool=false,
-    allow_same_station::Bool=false,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
@@ -144,12 +112,12 @@ function compute_valid_jk_pairs(
         for j in 1:n
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
-                # station pairs must be distinct by default: j==k would mean
-                # boarding and alighting at the same station, i.e. no vehicle
-                # trip at all -- handled separately below via WALK_ONLY_PAIR
-                # when it's available for this OD, or (opt-in) as a real
-                # same-station pair here when it isn't.
-                j == k && (!allow_same_station || walk_only_available) && continue
+                # station pairs must be distinct: j==k would mean boarding and
+                # alighting at the same station, i.e. no vehicle trip at all --
+                # handled separately below via WALK_ONLY_PAIR when it's
+                # available for this OD (see this function's docstring for why
+                # a real same-station pair is never needed).
+                j == k && continue
                 get_walking_cost(data, k, d) <= max_walking_distance || continue
                 push!(pairs, (j, k))
             end

@@ -48,6 +48,10 @@ include("label_setting/aggregate_od_route/station_simple.jl")
 # + CGSolver), which goes through opt/solvers/cg_solver.jl's generic outer loop with its own
 # joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl hooks instead.
 include("label_setting/aggregate_od_route/enumeration.jl")
+# Shared by both AggregateODRouteBaseFormulation build_model methods below (DirectMIPSolver
+# and CGSolver) -- see its own module docstring for why theta creation itself stays outside
+# it.
+include("optimize/aggregate_od_route/base_shared.jl")
 include("optimize/aggregate_od_route/direct/build_base.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/types.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/data.jl")
@@ -59,6 +63,16 @@ include("label_setting/aggregate_od_route/joint_routing_assignment/duals.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/seeding.jl")
 include("label_setting/aggregate_od_route/joint_routing_assignment/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
+# AggregateODRouteBaseFormulation + CGSolver: same y/x/theta master DirectMIPSolver's build
+# (above) solves, grown from an empty column pool via add_aggregate_od_route_base_column!
+# (constraints/aggregate_od_route/base/route_activation.jl, part of opt/constraints.jl)
+# instead of DirectMIPSolver's own up-front exhaustive enumeration. dispatch.jl
+# disambiguates its 4 CGSolver hooks from AggregateODRouteJointRoutingAssignmentFormulation's
+# own (both share mapping::AggregateODRouteMap) by formulation type.
+include("label_setting/aggregate_od_route/base/duals.jl")
+include("label_setting/aggregate_od_route/base/pricing_round.jl")
+include("optimize/aggregate_od_route/column_generation/build_base.jl")
+include("optimize/aggregate_od_route/column_generation/dispatch.jl")
 # `optimize/aggregate_od_route/heuristic_enumeration.jl` and the old nearest-open-assignment-
 # policy Benders/branch-and-Benders machinery under `optimize/aggregate_od_route/benders/`
 # were removed entirely -- see this file's top comment for what's kept as a reminder

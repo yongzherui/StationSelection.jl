@@ -51,8 +51,8 @@ const T6_VEHICLE_SPEED    = 25.0
 const T6_SEED_BASE = 42
 
 # Inferred, not transcribed from the source — see module docstring.
-const T6_SUGGESTED_L = 4
-const T6_SUGGESTED_K = 3
+const T6_SUGGESTED_K = 4
+const T6_SUGGESTED_L = 3
 
 const T6_DEMAND_CONFIGS = [
     (label = "fwd100_bwd0", fwd_frac = 1.00, bwd_frac = 0.00),
@@ -97,8 +97,8 @@ struct T6Instance
     vehicle_capacity::Int
     vehicle_speed::Float64
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     extra::Dict{String,Any}
 end
@@ -181,7 +181,7 @@ function generate_test6_instance(demand_cfg::NamedTuple, seed_idx::Int;
         dlabel, seed_idx, seed, fwd_frac, bwd_frac,
         station_df, segment_df, order_df,
         T6_N_VEHICLES, T6_VEHICLE_CAPACITY, T6_VEHICLE_SPEED,
-        demand_counts, T6_SUGGESTED_L, T6_SUGGESTED_K,
+        demand_counts, T6_SUGGESTED_K, T6_SUGGESTED_L,
         T6_HYPOTHESIS, extra,
     )
 end

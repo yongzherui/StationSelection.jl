@@ -42,7 +42,7 @@ AbstractStationSelectionModel
 
 ## Parameters
 
-**Shared:** `k` (active stations/scenario), `l` (stations built), `in_vehicle_time_weight` (λ).
+**Shared:** `k` (stations built), `l` (active stations/scenario), `in_vehicle_time_weight` (λ).
 
 **TwoStageRoute only:** `route_regularization_weight` (μ), `vehicle_capacity` (C),
 `time_window_sec` (discretisation step), `max_route_travel_time` (route filter).
@@ -66,8 +66,8 @@ Clusters are a hard partition; overlap is open research.
 
 | Constraint                   | Formula                                |
 | ---------------------------- | -------------------------------------- |
-| Station limit                | Σⱼ y[j] = l                            |
-| Activation limit             | Σⱼ z[j,s] = k ∀s                       |
+| Station limit                | Σⱼ y[j] = k                            |
+| Activation limit             | Σⱼ z[j,s] = l ∀s                       |
 | Activation linking           | z[j,s] ≤ y[j] ∀j,s                     |
 | Assignment coverage          | Σⱼₖ x[s][od][j,k] = 1 ∀s,od            |
 | Assignment-to-active (tight) | x[j,k,s] ≤ z[j,s], x[j,k,s] ≤ z[k,s]              |

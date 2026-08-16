@@ -28,7 +28,7 @@ function _all_active_aggregate_od_route_pairs(mapping::AggregateODRouteMap)::Vec
     for scenario_pairs in values(mapping.active_jk_s)
         union!(pairs, scenario_pairs)
     end
-    filter!(!requires_no_vehicle_route, pairs)
+    filter!(!is_walk_only_pair, pairs)
     return sort!(collect(pairs))
 end
 

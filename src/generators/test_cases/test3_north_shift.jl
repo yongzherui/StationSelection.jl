@@ -60,8 +60,8 @@ const T3_VEHICLE_SPEED    = 25.0
 
 const T3_SEED_BASE = 42
 
-const T3_SUGGESTED_L = 5
-const T3_SUGGESTED_K = 3
+const T3_SUGGESTED_K = 5
+const T3_SUGGESTED_L = 3
 
 const T3_VARIANTS = [
     (case_name = "north_shift_h",  zone_h_km = T3_H_KM),
@@ -130,8 +130,8 @@ struct T3Instance
     demand_counts::NamedTuple
     n_intermediates::Int
     recommended_walk_threshold_km::Float64
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     note::String
     extra::Dict{String,Any}
@@ -217,7 +217,7 @@ function generate_test3_instance(case_name::String, zone_h_km::Float64, seed_idx
         station_df, segment_df, order_df,
         T3_N_VEHICLES, T3_VEHICLE_CAPACITY, T3_VEHICLE_SPEED,
         demand_counts, n_int, recommended_walk_threshold_km,
-        T3_SUGGESTED_L, T3_SUGGESTED_K,
+        T3_SUGGESTED_K, T3_SUGGESTED_L,
         T3_HYPOTHESIS, _t3_note(zone_h_km, n_int, spacing, intermediates), extra,
     )
 end

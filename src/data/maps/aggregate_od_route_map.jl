@@ -5,6 +5,7 @@ OD mapping and initial restricted column pool for the aggregate-OD-route problem
 export AggregateODRouteColumn
 export AggregateODRouteMap
 export create_aggregate_od_route_map
+export aggregate_od_route_validate_feasible_coverage
 
 """
     AggregateODRouteColumn
@@ -117,7 +118,7 @@ function _singleton_aggregate_od_route_columns(
     columns = AggregateODRouteColumn[]
     next_id = 1
     for (j, k) in sort!(collect(all_pairs))
-        requires_no_vehicle_route((j, k)) && continue
+        is_walk_only_pair((j, k)) && continue
         tau = get_routing_cost(data, j, k)
         if !isfinite(tau)
             push!(missing_pairs, (j, k))
@@ -138,16 +139,81 @@ function _singleton_aggregate_od_route_columns(
 end
 
 """
+    _aggregate_od_route_allow_walk_only(formulation) -> Bool
+
+Resolve the "is direct walking (`WALK_ONLY_PAIR`) available" flag per formulation type.
+`AggregateODRouteBendersYXFormulation` (unwired, see `opt/optimize.jl`'s include
+comments) carries it as a genuine opt-in `allow_walk_only::Bool` field. Both *live*
+aggregate-OD-route formulations -- `AggregateODRouteBaseFormulation` and
+`AggregateODRouteJointRoutingAssignmentFormulation` -- carry no such field: direct
+walking is mandatory for both (see their own docstrings), since
+`compute_valid_jk_pairs` no longer produces same-station pairs at all, making
+`WALK_ONLY_PAIR` the *only* station-free coverage option left, and each formulation's
+build-time feasibility guarantee (`aggregate_od_route_validate_feasible_coverage`)
+assumes it's always on.
+"""
+_aggregate_od_route_allow_walk_only(formulation) = formulation.allow_walk_only
+_aggregate_od_route_allow_walk_only(::AggregateODRouteJointRoutingAssignmentFormulation) = true
+_aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = true
+
+"""
+    aggregate_od_route_validate_feasible_coverage(data, mapping)
+
+Throw `ArgumentError` unless every positive-demand group `(s,p)` has at least one
+coverage option: a real `(j,k)`, `j != k`, pair with finite `get_routing_cost(data,j,k)`,
+or `WALK_ONLY_PAIR`. Shared by both live aggregate-OD-route `build_model` paths --
+`AggregateODRouteBaseFormulation` (`x_walk`/`x`/`θ`, `DirectMIPSolver`) and
+`AggregateODRouteJointRoutingAssignmentFormulation` (`x_walk`/`θ`, `CGSolver`) -- neither
+of which carries an unserved-demand slack, so a demand group with neither option would
+otherwise leave its coverage row permanently infeasible: a genuine data/geometry problem
+(no station in walking range of either endpoint, and direct walking either disabled or
+out of range), not something a slack variable should paper over. Note this is a
+*necessary* condition, not sufficient on its own for `AggregateODRouteBaseFormulation`:
+a finite `get_routing_cost` only proves the pair is walkable-to, not that
+`enumerate_aggregate_od_route_columns` actually emitted a route covering it -- the same
+`detour_factor >= 1.0` two-stop certification argument
+`joint_routing_assignment_two_stop_seed_columns` documents applies to that enumeration
+too, so in practice it does, but this function only checks the necessary part. Called
+once by each `build_model`, right after the map is built and before any JuMP variables
+exist, so the failure is immediate and cheap.
+"""
+function aggregate_od_route_validate_feasible_coverage(
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+)
+    unroutable = Tuple{Int, Int}[]
+    for s in 1:n_scenarios(data)
+        for (p, (o, d)) in enumerate(mapping.Omega_s[s])
+            mapping.Q_s[s][p] > 0 || continue
+            covered = false
+            for pair in get_valid_jk_pairs(mapping, o, d)
+                if is_walk_only_pair(pair) || isfinite(get_routing_cost(data, pair[1], pair[2]))
+                    covered = true
+                    break
+                end
+            end
+            covered || push!(unroutable, (s, p))
+        end
+    end
+    isempty(unroutable) || throw(ArgumentError(
+        "aggregate OD route: no feasible coverage option (no real station pair with " *
+        "finite routing cost, no direct walk) for demand group(s) (scenario,p) = " *
+        "$(unroutable)",
+    ))
+    return nothing
+end
+
+"""
     create_aggregate_od_route_map(problem::StationSelectionProblem, formulation,
                                    data::StationSelectionData; initial_columns=nothing)
         -> AggregateODRouteMap
 
 Build the `AggregateODRouteMap` for `AggregateODRouteBaseFormulation`/
 `AggregateODRouteJointRoutingAssignmentFormulation`, reading `problem.max_walking_distance`
-and `formulation.allow_walk_only`. (`RouteCoveringProblem`'s fixed-assignment variant of
-this, `_apply_route_covering_assignments!`, was removed along with `AggregateODRouteProblem`
--- `RouteCoveringProblem` is currently unwired, see `StationSelection.jl`'s include
-comments.)
+and `_aggregate_od_route_allow_walk_only(formulation)`. (`RouteCoveringProblem`'s
+fixed-assignment variant of this, `_apply_route_covering_assignments!`, was removed along
+with `AggregateODRouteProblem` -- `RouteCoveringProblem` is currently unwired, see
+`StationSelection.jl`'s include comments.)
 """
 function create_aggregate_od_route_map(
     problem::StationSelectionProblem,
@@ -173,8 +239,7 @@ function create_aggregate_od_route_map(
         all_od_pairs,
         data,
         problem.max_walking_distance;
-        allow_walk_only=formulation.allow_walk_only,
-        allow_same_station=true,
+        allow_walk_only=_aggregate_od_route_allow_walk_only(formulation),
     )
     active_jk_s = _aggregate_od_route_active_jk_by_s(Omega_s, valid_jk_pairs)
     resolved_initial_columns = isnothing(initial_columns) ?

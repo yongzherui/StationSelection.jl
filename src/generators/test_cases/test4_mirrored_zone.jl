@@ -109,8 +109,8 @@ struct T4Instance
     vehicle_capacity::Int
     vehicle_speed::Float64
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     note::String
     extra::Dict{String,Any}
@@ -193,8 +193,8 @@ function generate_test4_instance(case_name::String, mirrored::Bool, seed_idx::In
         "but M0 serves both zones without a detour penalty."
     end
 
-    suggested_l = mirrored ? 5 : 4
-    suggested_k = 3
+    suggested_k = mirrored ? 5 : 4
+    suggested_l = 3
 
     extra = Dict{String,Any}(
         "n_zones" => mirrored ? 2 : 1,
@@ -206,7 +206,7 @@ function generate_test4_instance(case_name::String, mirrored::Bool, seed_idx::In
         case_name, seed_idx, seed, mirrored,
         station_df, segment_df, order_df,
         T4_N_VEHICLES, T4_VEHICLE_CAPACITY, T4_VEHICLE_SPEED,
-        demand_counts, suggested_l, suggested_k,
+        demand_counts, suggested_k, suggested_l,
         T4_HYPOTHESIS, note, extra,
     )
 end

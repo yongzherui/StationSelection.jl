@@ -15,8 +15,9 @@ Disaggregated `((s,p), j)`/`((s,p), k)` linking rows, written as `-y[j] <= 0` (n
 `0 <= y[j]`) so the normalized form JuMP stores is unambiguous: a route column's `theta`
 coefficient of `+1.0`, added later via `set_normalized_coefficient`, then yields exactly
 `theta - y[j] <= 0`. `j`/`k` range over the pickup/dropoff sides of every feasible
-`(j,k)` in `valid_jk_pairs[(o,d)]` (`WALK_ONLY_PAIR`, when present, is skipped -- this
-formulation doesn't yet support the station-free option).
+`(j,k)` in `valid_jk_pairs[(o,d)]` (`WALK_ONLY_PAIR`, when present, is skipped: it's
+station-free by construction, linked instead via `add_walk_variables!`,
+which adds no `y`/`z` linking at all).
 """
 function add_joint_routing_assignment_station_linking_constraints!(
     m::Model,

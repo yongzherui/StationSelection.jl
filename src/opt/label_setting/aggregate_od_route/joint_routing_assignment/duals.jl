@@ -26,10 +26,11 @@ function extract_joint_routing_assignment_duals(m::JuMP.Model)
     return alpha, gamma_o, gamma_d
 end
 
-# CGSolver hook (opt/solvers/cg_solver.jl) -- dispatches on mapping::AggregateODRouteMap
-# so it doesn't collide with the generic fallback stub's identical (BuildResult, Any,
-# JuMP.Model) signature.
-extract_duals(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model) =
+# CGSolver hook real logic (dispatched from
+# optimize/aggregate_od_route/column_generation/dispatch.jl, which disambiguates from
+# AggregateODRouteBaseFormulation's own extract_duals by formulation type, since both
+# share mapping::AggregateODRouteMap).
+_aggregate_od_route_extract_duals(::AggregateODRouteJointRoutingAssignmentFormulation, build_result, mapping, m::JuMP.Model) =
     extract_joint_routing_assignment_duals(m)
 
 """

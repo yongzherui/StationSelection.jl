@@ -1,14 +1,15 @@
 """
-The bare structural encoding of the aggregate-OD-route problem's compact joint
-routing+assignment MILP: station-selection `y`, unserved-demand slack `v`,
-same-station assignment `x_same`, and route columns `θ` whose own coefficients
-directly carry OD assignment (no separate assignment variable `x` -- see
-`AggregateODRouteJointRoutingAssignmentFormulation`'s own docstring for why that's
-what makes this "joint"). Exactly the same structural shape as that sibling
-formulation; the two are separate marker types only because they pair with
-different solvers -- this one with `DirectMIPSolver`, against an exhaustively
-enumerated column pool built once at `build_model` time (`y`/`θ` integral, no
-iterative pricing loop), the other with `CGSolver`.
+The bare structural encoding of `AggregateODRouteBaseFormulation`'s MILP:
+station-selection `y`, decoupled assignment `x[s,p,j,k]`, and route columns `θ` linked to
+`x` via `add_aggregate_od_route_base_route_linking_constraints!` -- unlike the sibling
+`AggregateODRouteJointRoutingAssignmentFormulation`, where route columns carry OD
+assignment directly and there is no separate `x` (see that formulation's own docstring
+for what "joint" means there). The two share the same encoding-detail field set
+(`route_regularization_weight`, `walk_cost_weight`, etc. -- see
+`_validate_aggregate_od_route_formulation_fields`) and are separate marker types only
+because they pair with different solvers -- this one with `DirectMIPSolver`, against an
+exhaustively enumerated column pool built once at `build_model` time (`y`/`x`/`θ`
+integral, no iterative pricing loop), the other with `CGSolver`.
 """
 
 export AggregateODRouteBaseFormulation
@@ -51,10 +52,10 @@ end
 """
     AggregateODRouteBaseFormulation <: AbstractFormulation
 
-Encoding-detail knobs for the compact joint routing+assignment MILP's variable
-structure (`y`, `v`, `x_same`, `θ`) -- *how* a `StationSelectionProblem` is served,
-weighted, and staged when solved directly (`DirectMIPSolver`) against an exhaustively
-enumerated column pool. Pairs with `StationSelectionProblem`, which carries only `data`,
+Encoding-detail knobs for the compact `y`/`x`/`θ` MILP's variable structure -- *how* a
+`StationSelectionProblem` is served, weighted, and staged when solved directly
+(`DirectMIPSolver`) against an exhaustively enumerated column pool. Pairs with
+`StationSelectionProblem`, which carries only `data`,
 `l`, and `max_walking_distance` -- everything else that used to live on
 `AggregateODRouteProblem` (still used by the not-yet-migrated Benders/`RouteCoveringProblem`
 paths) belongs here instead, since it's an encoding choice, not a business decision.
@@ -66,11 +67,15 @@ paths) belongs here instead, since it's an encoding choice, not a business decis
 - `max_wait_time`: maximum passenger wait time
 - `detour_factor`: maximum allowed in-vehicle detour ratio
 - `max_stops`: maximum stops per route
-- `allow_walk_only`: if true, an OD pair may be assigned a station-free "walk directly"
-  option whenever the direct walk is within `2 * problem.max_walking_distance`.
 
 No `assignment_policy` field: this formulation's `build_model` only ever supported free
-assignment in practice, so free assignment is simply the only behavior now.
+assignment in practice, so free assignment is simply the only behavior now. No
+`allow_walk_only` field either -- direct walking (`WALK_ONLY_PAIR`, surfaced here as
+`x_walk[(s,p)]`, `add_walk_variables!`) is mandatory, not
+configurable, mirroring `AggregateODRouteJointRoutingAssignmentFormulation` (see its own
+docstring for why). See `_aggregate_od_route_allow_walk_only`
+(`data/maps/aggregate_od_route_map.jl`) for how `create_aggregate_od_route_map` resolves
+this per formulation type instead of reading a uniform field.
 """
 struct AggregateODRouteBaseFormulation <: AbstractFormulation
     route_regularization_weight::Float64
@@ -79,7 +84,6 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
-    allow_walk_only::Bool
 
     function AggregateODRouteBaseFormulation(;
             route_regularization_weight::Number=1.0,
@@ -88,7 +92,6 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
-            allow_walk_only::Bool=false,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
@@ -101,7 +104,6 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
-            allow_walk_only,
         )
     end
 end

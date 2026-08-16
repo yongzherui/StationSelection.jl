@@ -77,9 +77,9 @@ const T5_DEMAND_CONFIGS = [
 ]
 
 const T5_SWEEPS = Dict(
-    :corridor_base       => (l = 3, k = 2),
-    :equilateral         => (l = 4, k = 3),
-    :equilateral_with_m1 => (l = 5, k = 4),
+    :corridor_base       => (k = 3, l = 2),
+    :equilateral         => (k = 4, l = 3),
+    :equilateral_with_m1 => (k = 5, l = 4),
 )
 
 function t5_case_label(case::Symbol)::String
@@ -157,8 +157,8 @@ struct T5Instance
     vehicle_capacity::Int
     vehicle_speed::Float64
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     note::String
     extra::Dict{String,Any}
@@ -255,7 +255,7 @@ function generate_test5_instance(case::Symbol, seed_idx::Int, demand_cfg::NamedT
         label, case, seed_idx, seed, demand_label,
         station_df, segment_df, order_df,
         T5_N_VEHICLES, T5_VEHICLE_CAPACITY, T5_VEHICLE_SPEED,
-        demand_counts, sweep.l, sweep.k,
+        demand_counts, sweep.k, sweep.l,
         T5_HYPOTHESIS, _t5_note(case), extra,
     )
 end

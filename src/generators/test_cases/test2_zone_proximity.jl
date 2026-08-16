@@ -44,8 +44,8 @@ const T2_VEHICLE_SPEED    = 25.0
 
 const T2_SEED_BASE = 42
 
-const T2_SUGGESTED_L = 4
-const T2_SUGGESTED_K = 3
+const T2_SUGGESTED_K = 4
+const T2_SUGGESTED_L = 3
 
 const T2_VARIANTS = [
     (case_name = "far_from_B",            zone_cx_km = T2_ZM_FAR_X_KM),
@@ -124,8 +124,8 @@ struct T2Instance
     vehicle_capacity::Int
     vehicle_speed::Float64
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     note::String
     extra::Dict{String,Any}
@@ -203,7 +203,7 @@ function generate_test2_instance(case_name::String, zone_cx_km::Float64, seed_id
         case_name, seed_idx, seed, zone_cx_km,
         station_df, segment_df, order_df,
         T2_N_VEHICLES, T2_VEHICLE_CAPACITY, T2_VEHICLE_SPEED,
-        demand_counts, T2_SUGGESTED_L, T2_SUGGESTED_K,
+        demand_counts, T2_SUGGESTED_K, T2_SUGGESTED_L,
         T2_HYPOTHESIS, _t2_note(case_name), extra,
     )
 end

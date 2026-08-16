@@ -34,8 +34,10 @@ end
 
 `x[s,p,j,k] <= sum(theta[r,s] for r covering (j,k))` -- an assignment can only use a
 station pair some active route in that scenario actually covers. `theta` is keyed
-`(column_id, s)`, matching `add_aggregate_od_route_theta_variables!`'s `m[:theta_compat]`
-convention; `mapping.columns_by_pair[(j,k)]` lists every route id covering `(j,k)`.
+`(column_id, s)`, matching both `add_route_variables!`'s `m[:route_theta]` convention
+(`DirectMIPSolver`'s build) and `add_aggregate_od_route_base_column!`'s
+`m[:aggregate_od_route_base_theta]` convention (`CGSolver`'s build);
+`mapping.columns_by_pair[(j,k)]` lists every route id covering `(j,k)`.
 """
 function add_aggregate_od_route_base_route_linking_constraints!(
     m::Model,

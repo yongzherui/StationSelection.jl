@@ -18,7 +18,7 @@ Common (all models):
 # Usage
 
 ```julia
-result = run_opt(data, model, DirectSolver(...))
+result = run_opt(problem, formulation, DirectMIPSolver())
 export_variables(result, output_dir)
 ```
 """
@@ -453,9 +453,10 @@ end
 """
     export_assignment_variables(m, mapping::AggregateODRouteMap, export_dir) -> Int
 
-Export assignment variables for AggregateODRouteProblem / RouteCoveringProblem.
-Structure: x[s][od_idx] → Vector over valid (pickup, dropoff) pairs (same
-shape as ClusteringTwoStageODMap). Adds a `demand` column from mapping.Q_s.
+Export assignment variables for `AggregateODRouteBaseFormulation`. Structure: a flat
+`x[(s, p, j, k)]::VariableRef` Dict (see `add_assignment_variables!` in
+`variables/assignment.jl`), unlike `ClusteringTwoStageODMap`'s nested
+`x[s][p]::Vector`. Adds a `demand` column from `mapping.Q_s`.
 """
 function export_assignment_variables(
     m::JuMP.Model,
@@ -470,31 +471,23 @@ function export_assignment_variables(
     array_idx_to_station_id = mapping.array_idx_to_station_id
 
     rows = []
-    for (s, x_s) in enumerate(x)
-        od_pairs = mapping.Omega_s[s]
-        for (od_idx, x_od) in x_s
-            isempty(x_od) && continue
-            o, d = od_pairs[od_idx]
-            valid_pairs = get_valid_jk_pairs(mapping, o, d)
+    for ((s, od_idx, j, k), var) in x
+        val = JuMP.value(var)
+        if val > 0.5
+            o, d = mapping.Omega_s[s][od_idx]
             demand = get(mapping.Q_s[s], (o, d), 0)
-            for (pair_idx, var) in enumerate(x_od)
-                val = JuMP.value(var)
-                if val > 0.5
-                    j, k = valid_pairs[pair_idx]
-                    push!(rows, (
-                        scenario = s,
-                        od_idx = od_idx,
-                        origin_id = array_idx_to_station_id[o],
-                        dest_id = array_idx_to_station_id[d],
-                        pickup_idx = j,
-                        dropoff_idx = k,
-                        pickup_id = _exported_station_id(array_idx_to_station_id, j),
-                        dropoff_id = _exported_station_id(array_idx_to_station_id, k),
-                        demand = demand,
-                        value = round(Int, val)
-                    ))
-                end
-            end
+            push!(rows, (
+                scenario = s,
+                od_idx = od_idx,
+                origin_id = array_idx_to_station_id[o],
+                dest_id = array_idx_to_station_id[d],
+                pickup_idx = j,
+                dropoff_idx = k,
+                pickup_id = _exported_station_id(array_idx_to_station_id, j),
+                dropoff_id = _exported_station_id(array_idx_to_station_id, k),
+                demand = demand,
+                value = round(Int, val)
+            ))
         end
     end
 
@@ -542,9 +535,9 @@ end
 """
     _export_route_activations(m, mapping::AggregateODRouteMap, export_dir) -> Int
 
-Export per-scenario route activation (theta_compat) to `route_activations.csv`.
-Only rows with value > 0.5 (theta_compat is built for every (column, scenario)
-pair regardless of activation — see add_aggregate_od_route_theta_variables!).
+Export per-scenario route activation (route_theta) to `route_activations.csv`.
+Only rows with value > 0.5 (route_theta is built for every (column, scenario)
+pair regardless of activation — see add_route_variables!).
 """
 function _export_route_activations(
     m::JuMP.Model,
@@ -553,14 +546,14 @@ function _export_route_activations(
 )
     empty_df() = DataFrame(scenario=Int[], column_id=Int[], value=Int[])
 
-    if !haskey(m.obj_dict, :theta_compat)
+    if !haskey(m.obj_dict, :route_theta)
         CSV.write(joinpath(export_dir, "route_activations.csv"), empty_df())
-        println("    ✓ route_activations.csv (0 activations — theta_compat not present)")
+        println("    ✓ route_activations.csv (0 activations — route_theta not present)")
         return 0
     end
 
     rows = []
-    for ((column_id, s), var) in m[:theta_compat]
+    for ((column_id, s), var) in m[:route_theta]
         val = JuMP.value(var)
         val > 0.5 || continue
         push!(rows, (scenario = s, column_id = column_id, value = round(Int, val)))
@@ -578,7 +571,7 @@ end
 
 Export AggregateODRouteProblem/RouteCoveringProblem-specific variables:
 route_columns.csv (static route pool) and route_activations.csv
-(per-scenario theta_compat activations).
+(per-scenario route_theta activations).
 """
 function export_model_specific_variables(
     result::OptResult,

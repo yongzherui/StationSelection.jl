@@ -24,7 +24,7 @@ y[j] = 1 if station j is selected/built (permanent decision).
 
 `relax_integrality=true` declares `y` continuous on `[0,1]` instead of `Bin` -- for LP
 masters (e.g. a column-generation restricted master) that need valid simplex duals off
-this variable, mirroring `add_aggregate_od_route_theta_variables!`'s `relax_integrality`
+this variable, mirroring `add_route_variables!`'s `relax_integrality`
 kwarg for the same reason.
 
 Used by: All models

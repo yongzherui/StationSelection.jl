@@ -26,7 +26,7 @@ at each station location, aggregated across all scenarios.
 - `scenario_label_to_array_idx::Dict{String, Int}`: Scenario label → array index mapping
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label mapping
 - `request_counts::Dict{Int, Int}`: Station index → total request count (pickups + dropoffs)
-- `max_walking_distance::Union{Float64, Nothing}`: Optional assignment-radius limit
+- `max_walking_distance::Float64`: Assignment-radius limit
 - `valid_j_assignments::Dict{Int, Vector{Int}}`: Admissible cluster centers for each i
 - `n_stations::Int`: Number of candidate stations
 """
@@ -37,7 +37,7 @@ struct ClusteringBaseModelMap <: AbstractClusteringMap
     scenario_label_to_array_idx::Dict{String, Int}
     array_idx_to_scenario_label::Vector{String}
     request_counts::Dict{Int, Int}
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
     valid_j_assignments::Dict{Int, Vector{Int}}
 
     n_stations::Int
@@ -85,7 +85,7 @@ end
 
 function compute_base_valid_j_assignments(
     data::StationSelectionData,
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
 )::Dict{Int, Vector{Int}}
     valid = Dict{Int, Vector{Int}}()
     n = data.n_stations
@@ -93,7 +93,7 @@ function compute_base_valid_j_assignments(
     for i in 1:n
         js = Int[]
         for j in 1:n
-            if isnothing(max_walking_distance) || get_walking_cost(data, i, j) <= max_walking_distance
+            if get_walking_cost(data, i, j) <= max_walking_distance
                 push!(js, j)
             end
         end
@@ -144,7 +144,7 @@ function create_clustering_base_model_map(
     )
 end
 
-has_walking_distance_limit(mapping::ClusteringBaseModelMap) = !isnothing(mapping.max_walking_distance)
+has_walking_distance_limit(mapping::ClusteringBaseModelMap) = true
 
 function get_valid_j_assignments(mapping::ClusteringBaseModelMap, i::Int)
     return get(mapping.valid_j_assignments, i, Int[])

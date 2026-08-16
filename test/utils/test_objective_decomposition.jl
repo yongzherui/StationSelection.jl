@@ -287,23 +287,11 @@
     # Integration tests: solve a real model, export, then decompose
     # =========================================================================
 
-    gurobi_available = try
-        using Gurobi
-        true
-    catch
-        false
-    end
-
-    if !gurobi_available
-        @warn "Gurobi not available — skipping objective decomposition integration tests"
-        @test true
-    else
-
-    env = Gurobi.Env()
+    problem = StationSelectionProblem(data, 4)
 
     @testset "Integration: ClusteringTwoStageODModel round-trip" begin
-        model = ClusteringTwoStageODFormulation(3, 4)
-        result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
+        formulation = ClusteringTwoStageODFormulation(3)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == JuMP.MOI.OPTIMAL
 
         reported = result.objective_value
@@ -315,7 +303,7 @@
             metrics = Dict(
                 "method" => "ClusteringTwoStageODModel",
                 "model"  => Dict(
-                    "in_vehicle_time_weight" => model.in_vehicle_time_weight
+                    "in_vehicle_time_weight" => formulation.in_vehicle_time_weight
                 ),
                 "solve"  => Dict("objective_value" => reported)
             )
@@ -339,6 +327,4 @@
             println(d)
         end
     end
-
-    end  # gurobi_available
 end

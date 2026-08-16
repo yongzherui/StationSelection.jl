@@ -1,19 +1,5 @@
-# Check if Gurobi is available
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Solution Analysis" begin
     using JuMP
-
-    if !gurobi_available
-        @warn "Gurobi not available, skipping solution analysis tests"
-        @test true
-        return
-    end
 
     """
     Test Setup:
@@ -31,7 +17,7 @@ end
     - Order 2: 1→4 at 08:00:30 (origin station 1, dest station 4)
     - Order 3: 2→4 at 08:01:00 (origin station 2, dest station 4)
 
-    With k=3, l=4 stations (select 3, activate 4):
+    With k=4, l=3 stations (build 4, activate 3 per scenario):
     - The model should select stations that minimize walking + routing costs
 
     Expected behavior:
@@ -82,13 +68,12 @@ end
         scenarios=scenarios
     )
 
-    # Create Gurobi environment
-    env = Gurobi.Env()
+    problem = StationSelectionProblem(data, 4)
 
     @testset "ClusteringTwoStageODFormulation annotation" begin
-        model = ClusteringTwoStageODFormulation(3, 4)
+        formulation = ClusteringTwoStageODFormulation(3)
 
-        result = run_opt(data, model, DirectSolver(optimizer_env=env, silent=true))
+        result = run_opt(problem, formulation, DirectMIPSolver())
 
         @test result.termination_status == MOI.OPTIMAL
 

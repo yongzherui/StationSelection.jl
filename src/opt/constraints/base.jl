@@ -59,23 +59,23 @@ end
 # ============================================================================
 
 """
-    add_scenario_activation_limit_constraints!(m::Model, data::StationSelectionData, k::Int)
+    add_scenario_activation_limit_constraints!(m::Model, data::StationSelectionData, l::Int)
 
 Limit active stations per scenario.
-    Σⱼ z[j,s] = k  ∀s
+    Σⱼ z[j,s] = l  ∀s
 
 Used by: TwoStageSingleDetourModel (with or without walking limits), TwoStageODPolicy
 """
 function add_scenario_activation_limit_constraints!(
     m::Model,
     data::StationSelectionData,
-    k::Int
+    l::Int
 )
     before = _total_num_constraints(m)
     n = data.n_stations
     S = n_scenarios(data)
     z = m[:z]
-    @constraint(m, activation_limit[s=1:S], sum(z[j,s] for j in 1:n) == k)
+    @constraint(m, activation_limit[s=1:S], sum(z[j,s] for j in 1:n) == l)
     return _total_num_constraints(m) - before
 end
 

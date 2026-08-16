@@ -25,19 +25,7 @@
     @test length(all_instances) == length(T2_VARIANTS)
 end
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Test 2 generator — hypothesis" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping Test 2 hypothesis checks"
-        @test true
-        return
-    end
     using JuMP
 
     # NOTE: in the actual generated geometry, M and M0 both shift with the
@@ -50,19 +38,17 @@ end
     # (walkable_to_A, where zone origins can also walk to A directly, costs
     # strictly less than the baseline far_from_B) rather than a hard
     # M-vs-M0 selection claim.
-    env = Gurobi.Env()
-    solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
     mwd_sec = 1000.0 / 1.4
 
     objective_by_case = Dict{String,Float64}()
     for v in T2_VARIANTS
         inst = generate_test2_instance(v.case_name, v.zone_cx_km, 1)
         data = create_test2_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringTwoStageODFormulation(
-            inst.suggested_k, inst.suggested_l;
-            max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
+        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        formulation = ClusteringTwoStageODFormulation(
+            inst.suggested_l; in_vehicle_time_weight = 0.0,
         )
-        result = run_opt(data, model, solver)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
         objective_by_case[v.case_name] = result.objective_value
     end

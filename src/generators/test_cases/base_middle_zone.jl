@@ -57,8 +57,8 @@ const MZB_PROFILES = [
     (name = "ab60_m60", lambda_AB = 60, lambda_MB = 60),
 ]
 
-const MZB_SUGGESTED_L = 4
-const MZB_SUGGESTED_K = 3
+const MZB_SUGGESTED_K = 4
+const MZB_SUGGESTED_L = 3
 
 const MZB_HYPOTHESIS = (
     "Fixed geometry (A, M0, M, B + zone origins p1-p4), varies demand profile " *
@@ -91,8 +91,8 @@ struct MiddleZoneBenchmarkInstance
     vehicle_capacity::Int
     vehicle_speed::Float64
     demand_counts::NamedTuple
-    suggested_l::Int
     suggested_k::Int
+    suggested_l::Int
     hypothesis::String
     extra::Dict{String,Any}
 end
@@ -161,7 +161,7 @@ function generate_middle_zone_benchmark_instance(
         lambda_AB, lambda_MB,
         n_vehicles, vehicle_capacity, vehicle_speed,
         demand_counts,
-        MZB_SUGGESTED_L, MZB_SUGGESTED_K,
+        MZB_SUGGESTED_K, MZB_SUGGESTED_L,
         MZB_HYPOTHESIS,
         extra,
     )

@@ -7,9 +7,9 @@ directly off `AggregateODRouteMap` -- no `MasterData`. The search's `p::Int` fie
 the demand group's index, the position of `(o,d)` within `mapping.Omega_s[scenario]`
 (matching the aggregate model's own convention); it's only ever compared for equality
 within one scenario's pricing call, so reusing the same small dense range each scenario
-is fine. Same-station (`j==k`) and walk-only pairs are excluded: a route can't certify
-either (see `add_joint_routing_assignment_same_station_variables!`'s docstring). Only
-`rho > 0` survives (the pricer's reward-layer preprocessing drops the rest anyway).
+is fine. `WALK_ONLY_PAIR` is excluded: a route can't certify it (see
+`add_walk_variables!`'s docstring). Only `rho > 0` survives
+(the pricer's reward-layer preprocessing drops the rest anyway).
 """
 function joint_routing_assignment_pricing_candidates(
     data::StationSelectionData,
@@ -28,7 +28,7 @@ function joint_routing_assignment_pricing_candidates(
         a = get(alpha, key2, 0.0)
         a > 1e-9 || continue
         for pair in get_valid_jk_pairs(mapping, o, d)
-            requires_no_vehicle_route(pair) && continue
+            is_walk_only_pair(pair) && continue
             j, k = pair
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
@@ -295,17 +295,20 @@ function _price_passenger_scenarios(
 end
 
 """
-    price_columns(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver)
+    _aggregate_od_route_price_columns(::AggregateODRouteJointRoutingAssignmentFormulation,
+        build_result, mapping, m, duals, solver)
 
-`CGSolver` hook (see `opt/solvers/cg_solver.jl`): a direct, single-phase call into
-`_price_passenger_scenarios` -- no early-return/certification split, no adaptive
+`CGSolver` hook real logic (dispatched from
+`optimize/aggregate_od_route/column_generation/dispatch.jl`): a direct, single-phase call
+into `_price_passenger_scenarios` -- no early-return/certification split, no adaptive
 clustering, no reward coarsening (those lived in the old phase-aware runner, deleted
 along with `column_generation.jl`). `n_candidates`/`max_new_columns` are left unbounded
 (`typemax(Int) ÷ 2`) so each call is exhaustive -- correct, not necessarily fast.
-Dispatches on `mapping::AggregateODRouteMap` so it doesn't collide with the generic
-fallback stub's identical `(BuildResult, Any, JuMP.Model, ...)` signature.
 """
-function price_columns(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver)
+function _aggregate_od_route_price_columns(
+    ::AggregateODRouteJointRoutingAssignmentFormulation,
+    build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver,
+)
     data = m[:joint_routing_assignment_data]
     alpha, gamma_o, gamma_d = duals
     next_column_id = maximum(keys(m[:joint_routing_assignment_columns]); init=0) + 1

@@ -1,11 +1,16 @@
 """
 `build_model` for `StationSelectionProblem` paired with `AggregateODRouteBaseFormulation`
 -- the `y`/`x`/`θ` master: `y` (station), `x` (OD-to-station-pair assignment, decoupled
-from routing), `θ` (route activation, from an exhaustively enumerated column pool, `θ`
-reused from the sibling non-joint aggregate-OD-route engine's own
-`add_aggregate_od_route_theta_variables!`/`AggregateODRouteColumn`). Solved directly as
-one MIP (`DirectMIPSolver`), no iterative pricing loop -- see
-`opt/optimize/aggregate_od_route/enumeration.jl` for how the `θ` pool is built up front.
+from routing), `x_walk` (direct-walk, station-free), `θ` (route activation, from an
+exhaustively enumerated column pool, built with the generic, reusable
+`add_route_variables!`/`AggregateODRouteColumn` (`variables/routes.jl`)). No unserved-demand
+slack: `aggregate_od_route_validate_feasible_coverage`
+(`data/maps/aggregate_od_route_map.jl`) proves every demand group has a real coverage
+option before any variable is built. Solved directly as one MIP (`DirectMIPSolver`), no
+iterative pricing loop -- see `opt/optimize/aggregate_od_route/enumeration.jl` for how the
+`θ` pool is built up front. `y`/`x`/`x_walk`/coverage/station-linking/route-link/objective
+wiring is shared with `CGSolver`'s own build for this formulation via
+`_aggregate_od_route_base_master_core!` (`optimize/aggregate_od_route/base_shared.jl`).
 """
 
 """
@@ -21,36 +26,31 @@ function build_model(
         formulation::AggregateODRouteBaseFormulation,
         solver::DirectMIPSolver,
     )::BuildResult
+    # ---- 1. Parameters ----
+    # Column pool and mapping are built up front here (no CGSolver hooks need scalars
+    # stashed on `m` to reconstruct anything later, unlike the joint routing+assignment
+    # master), so unlike that file's own "Parameters" section this is entirely
+    # pre-`m`: the enumerated `θ` pool, the resulting `AggregateODRouteMap`, and the
+    # feasibility check that every demand group has a real coverage option.
     data = problem.data
     columns = enumerate_aggregate_od_route_columns(problem, formulation, data)
     mapping = create_aggregate_od_route_map(problem, formulation, data; initial_columns=columns)
+    aggregate_od_route_validate_feasible_coverage(data, mapping)
 
     m = Model(() -> Gurobi.Optimizer())
 
-    variable_counts = Dict{String, Int}()
-    variable_counts["station_selection"] = add_station_selection_variables!(m, data)
-    y = m[:y]
+    # ---- 2. Variables ----
+    # `theta` is batch-created (not empty) *before* the shared core below, so
+    # `_aggregate_od_route_base_master_core!`'s call into
+    # `add_aggregate_od_route_base_route_linking_constraints!` writes `route_link` closed-form
+    # over the complete pool -- see `optimize/aggregate_od_route/base_shared.jl`'s module
+    # docstring for why theta creation itself isn't part of that shared function.
+    theta_count = add_route_variables!(m, data, mapping)
+    theta = m[:route_theta]
 
-    variable_counts["theta"] = add_aggregate_od_route_theta_variables!(m, data, mapping)
-    theta = m[:theta_compat]
-
-    x = add_aggregate_od_route_base_assignment_variables!(m, data, mapping)
-    variable_counts["x"] = length(x)
-
-    constraint_counts = Dict{String, Int}()
-    coverage = add_aggregate_od_route_base_coverage_constraints!(m, data, mapping, x)
-    constraint_counts["coverage"] = length(coverage)
-    pickup_link, dropoff_link = add_aggregate_od_route_base_station_linking_constraints!(m, x, y)
-    constraint_counts["pickup_link"] = length(pickup_link)
-    constraint_counts["dropoff_link"] = length(dropoff_link)
-    constraint_counts["route_link"] =
-        length(add_aggregate_od_route_base_route_linking_constraints!(m, mapping, x, theta))
-    constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, problem.l; equality = true)
-
-    set_aggregate_od_route_base_objective!(
-        m, data, mapping, x, theta,
-        formulation.walk_cost_weight, formulation.route_regularization_weight, formulation.repositioning_time,
-    )
+    _, _, _, _, variable_counts, constraint_counts =
+        _aggregate_od_route_base_master_core!(m, data, mapping, problem.k, formulation, theta)
+    variable_counts["theta"] = theta_count
 
     extra_counts = Dict{String, Int}("routes_enumerated" => length(columns))
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)

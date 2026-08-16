@@ -30,8 +30,8 @@ struct RouteCoveringProblem <: AbstractProblem
             fixed_assignments::AbstractDict{<:Tuple{Int, Int, Int}, <:Tuple{Int, Int}},
         )
         unique_open = sort!(unique(Int.(open_stations)))
-        length(unique_open) == problem.l ||
-            throw(ArgumentError("open_stations must contain exactly l unique stations"))
+        length(unique_open) == problem.k ||
+            throw(ArgumentError("open_stations must contain exactly k unique stations"))
         assignments = Dict{NTuple{3, Int}, Tuple{Int, Int}}()
         for (key, pair) in fixed_assignments
             assignments[(Int(key[1]), Int(key[2]), Int(key[3]))] = (Int(pair[1]), Int(pair[2]))

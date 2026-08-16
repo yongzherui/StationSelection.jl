@@ -1,5 +1,5 @@
 """
-StationSelectionProblem - the shared "what" of a station-selection problem: choose `l`
+StationSelectionProblem - the shared "what" of a station-selection problem: choose `k`
 stations to build, with a global walking-distance feasibility radius. Everything about
 how demand gets served, weighted, or staged (including whether there even is a second,
 per-scenario activation stage) belongs to the paired `AbstractFormulation`, not here --
@@ -14,7 +14,7 @@ export StationSelectionProblem
 
 # Fields
 - `data`: instance data (stations, requests, costs, scenarios)
-- `l`: number of stations selected in the first stage
+- `k`: number of stations selected in the first stage
 - `max_walking_distance`: walking feasibility radius. Shared across every formulation
   that restricts station-pair assignment by walk distance -- not a formulation-specific
   encoding detail, since it reflects a real passenger constraint independent of how the
@@ -22,17 +22,17 @@ export StationSelectionProblem
 """
 struct StationSelectionProblem <: AbstractProblem
     data::StationSelectionData
-    l::Int
+    k::Int
     max_walking_distance::Float64
 
     function StationSelectionProblem(
             data::StationSelectionData,
-            l::Int;
+            k::Int;
             max_walking_distance::Number=300,
         )
-        l > 0 || throw(ArgumentError("l must be positive"))
-        max_walking_distance >= 0 ||
-            throw(ArgumentError("max_walking_distance must be non-negative"))
-        new(data, l, Float64(max_walking_distance))
+        k > 0 || throw(ArgumentError("k must be positive"))
+        isfinite(max_walking_distance) && max_walking_distance > 0 ||
+            throw(ArgumentError("max_walking_distance must be finite and positive"))
+        new(data, k, Float64(max_walking_distance))
     end
 end

@@ -6,12 +6,14 @@ Every two-stop route `[j, k]` that any demand group can use, one column per
 
 # Why this exists
 
-The `v[(s,p)]` slack makes the RMP feasible from an *empty* pool, but an empty pool is
-not a requirement -- it was just the starting point. Starting empty means the first
-several CG iterations are not improving the routing cost at all, they are hunting for
-enough columns to cover every demand group, and until they succeed the LP objective is
-dominated by `unserved_penalty * sum(v)`. Two-stop routes remove that phase entirely,
-because they are exactly the columns the big-M was standing in for.
+There is no unserved-demand slack in this master (see
+`aggregate_od_route_validate_feasible_coverage`, `data/maps/aggregate_od_route_map.jl`)
+-- RMP feasibility is established once, at build time, by construction: `build_model`
+always calls this function before returning. Without it, CG would start from an empty
+pool and its first several iterations would spend all their effort hunting for *any*
+feasible column per demand group rather than improving routing cost. Two-stop routes
+remove that phase entirely, because they are exactly the columns needed to cover every
+demand group whose `get_valid_jk_pairs` contains a real (non-walk-only) pair.
 
 # Coverage claim
 
@@ -37,7 +39,7 @@ function joint_routing_assignment_two_stop_seed_columns(
         for (p, (o, d)) in enumerate(mapping.Omega_s[s])
             mapping.Q_s[s][p] > 0 || continue
             for pair in get_valid_jk_pairs(mapping, o, d)
-                requires_no_vehicle_route(pair) && continue
+                is_walk_only_pair(pair) && continue
                 j, k = pair
                 tau = get_routing_cost(data, j, k)
                 isfinite(tau) || continue

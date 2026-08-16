@@ -1,19 +1,5 @@
-# Check if Gurobi is available
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Model Integration" begin
     using JuMP
-
-    if !gurobi_available
-        @warn "Gurobi not available, skipping integration tests"
-        @test true  # Placeholder to avoid empty testset
-        return
-    end
 
     # Create test data that works for all models
     stations = DataFrame(
@@ -53,15 +39,16 @@ end
         scenarios=scenarios
     )
 
-    # Create Gurobi environment once
-    env = Gurobi.Env()
+    # k = stations built (first stage), l = stations activated per scenario (second stage)
+    # max_walking_distance is generous (walking costs top out at 400) so every
+    # station pair stays admissible -- these tests exercise variable/constraint
+    # counting, not walking-distance pruning.
+    problem = StationSelectionProblem(data, 3; max_walking_distance = 500)
 
     @testset "ClusteringTwoStageODFormulation build" begin
-        model = ClusteringTwoStageODFormulation(2, 3)
+        formulation = ClusteringTwoStageODFormulation(2)
 
-        build_result = StationSelection.build_model(
-            model, data; optimizer_env=env
-        )
+        build_result = StationSelection.build_model(problem, formulation, DirectMIPSolver())
         m = build_result.model
         var_counts = build_result.counts.variables
         con_counts = build_result.counts.constraints
@@ -100,11 +87,9 @@ end
     end
 
     @testset "ClusteringBaseFormulation build" begin
-        model = ClusteringBaseFormulation(3)
+        formulation = ClusteringBaseFormulation()
 
-        build_result = StationSelection.build_model(
-            model, data; optimizer_env=env
-        )
+        build_result = StationSelection.build_model(problem, formulation, DirectMIPSolver())
         m = build_result.model
         var_counts = build_result.counts.variables
         con_counts = build_result.counts.constraints
@@ -139,11 +124,9 @@ end
     end
 
     @testset "ClusteringTwoStageFormulation build" begin
-        model = ClusteringTwoStageFormulation(2, 3)
+        formulation = ClusteringTwoStageFormulation(2)
 
-        build_result = StationSelection.build_model(
-            model, data; optimizer_env=env
-        )
+        build_result = StationSelection.build_model(problem, formulation, DirectMIPSolver())
         m = build_result.model
         var_counts = build_result.counts.variables
         con_counts = build_result.counts.constraints
@@ -181,64 +164,35 @@ end
         @test haskey(object_dictionary(m), :x)
     end
 
-    @testset "run_opt without optimization" begin
-        # Test run_opt with do_optimize=false for all policies
-
+    @testset "run_opt with DirectMIPSolver" begin
         @testset "ClusteringTwoStageODFormulation" begin
-            model = ClusteringTwoStageODFormulation(2, 3)
-            result = run_opt(
-                data,
-                model,
-                DirectSolver(
-                    optimizer_env=env,
-                    silent=true,
-                    do_optimize=false,
-                )
-            )
+            formulation = ClusteringTwoStageODFormulation(2)
+            result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(result.objective_value)
-            @test isnothing(result.solution)
+            @test result.termination_status == MOI.OPTIMAL
+            @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)
             @test !isempty(result.counts.constraints)
         end
 
         @testset "ClusteringBaseFormulation" begin
-            model = ClusteringBaseFormulation(3)
-            result = run_opt(
-                data,
-                model,
-                DirectSolver(
-                    optimizer_env=env,
-                    silent=true,
-                    do_optimize=false,
-                )
-            )
+            formulation = ClusteringBaseFormulation()
+            result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(result.objective_value)
-            @test isnothing(result.solution)
+            @test result.termination_status == MOI.OPTIMAL
+            @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)
             @test !isempty(result.counts.constraints)
         end
 
         @testset "ClusteringTwoStageFormulation" begin
-            model = ClusteringTwoStageFormulation(2, 3)
-            result = run_opt(
-                data,
-                model,
-                DirectSolver(
-                    optimizer_env=env,
-                    silent=true,
-                    do_optimize=false,
-                )
-            )
+            formulation = ClusteringTwoStageFormulation(2)
+            result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMIZE_NOT_CALLED
-            @test isnothing(result.objective_value)
-            @test isnothing(result.solution)
+            @test result.termination_status == MOI.OPTIMAL
+            @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)
             @test !isempty(result.counts.constraints)
@@ -247,8 +201,8 @@ end
 
     @testset "Mapping creation" begin
         @testset "ClusteringTwoStageODMap" begin
-            model = ClusteringTwoStageODFormulation(2, 3)
-            mapping = StationSelection.create_map(model, data)
+            formulation = ClusteringTwoStageODFormulation(2)
+            mapping = StationSelection.create_map(problem, formulation, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5
@@ -259,8 +213,8 @@ end
         end
 
         @testset "ClusteringBaseModelMap" begin
-            model = ClusteringBaseFormulation(3)
-            mapping = StationSelection.create_map(model, data)
+            formulation = ClusteringBaseFormulation()
+            mapping = StationSelection.create_map(problem, formulation, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5
@@ -273,8 +227,8 @@ end
         end
 
         @testset "ClusteringTwoStageStationMap" begin
-            model = ClusteringTwoStageFormulation(2, 3)
-            mapping = StationSelection.create_map(model, data)
+            formulation = ClusteringTwoStageFormulation(2)
+            mapping = StationSelection.create_map(problem, formulation, data)
 
             @test length(mapping.station_id_to_array_idx) == 5
             @test length(mapping.array_idx_to_station_id) == 5
@@ -287,19 +241,27 @@ end
 
     @testset "Model construction validation" begin
         @testset "ClusteringTwoStageODFormulation" begin
-            @test_throws ArgumentError ClusteringTwoStageODFormulation(0, 5)   # k must be positive
-            @test_throws ArgumentError ClusteringTwoStageODFormulation(5, 3)   # l must be >= k
-            @test_throws ArgumentError ClusteringTwoStageODFormulation(3, 5; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(0)   # l must be positive
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(-1)  # l must be positive
+            @test_throws ArgumentError ClusteringTwoStageODFormulation(3; in_vehicle_time_weight=-1.0)   # in_vehicle_time_weight must be non-negative
+
+            # l <= k (problem.k) can only be checked once problem and formulation meet, at build time
+            over_formulation = ClusteringTwoStageODFormulation(5)
+            @test_throws ArgumentError StationSelection.build_model(problem, over_formulation, DirectMIPSolver())
         end
 
         @testset "ClusteringBaseFormulation" begin
-            @test_throws ArgumentError ClusteringBaseFormulation(0)   # k must be positive
-            @test_throws ArgumentError ClusteringBaseFormulation(-1)  # k must be positive
+            # No l field of its own -- problem.k > 0 is validated by StationSelectionProblem itself
+            @test_throws ArgumentError StationSelectionProblem(data, 0)
+            @test_throws ArgumentError StationSelectionProblem(data, -1)
         end
 
         @testset "ClusteringTwoStageFormulation" begin
-            @test_throws ArgumentError ClusteringTwoStageFormulation(0, 5)   # k must be positive
-            @test_throws ArgumentError ClusteringTwoStageFormulation(5, 3)   # l must be >= k
+            @test_throws ArgumentError ClusteringTwoStageFormulation(0)   # l must be positive
+            @test_throws ArgumentError ClusteringTwoStageFormulation(-1)  # l must be positive
+
+            over_formulation = ClusteringTwoStageFormulation(5)
+            @test_throws ArgumentError StationSelection.build_model(problem, over_formulation, DirectMIPSolver())
         end
     end
 end

@@ -22,7 +22,7 @@ struct ClusteringTwoStageStationMap <: AbstractClusteringMap
     I_s::Dict{Int, Vector{Int}}
     q_s::Dict{Int, Dict{Int, Int}}
 
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
     valid_j_assignments::Dict{Int, Vector{Int}}
 
     n_stations::Int
@@ -45,7 +45,7 @@ end
 
 function compute_valid_j_assignments(
     data::StationSelectionData,
-    max_walking_distance::Union{Float64, Nothing}
+    max_walking_distance::Float64
 )::Dict{Int, Vector{Int}}
     valid = Dict{Int, Vector{Int}}()
     n = data.n_stations
@@ -53,7 +53,7 @@ function compute_valid_j_assignments(
     for i in 1:n
         js = Int[]
         for j in 1:n
-            if isnothing(max_walking_distance) || get_walking_cost(data, i, j) <= max_walking_distance
+            if get_walking_cost(data, i, j) <= max_walking_distance
                 push!(js, j)
             end
         end
@@ -94,7 +94,7 @@ function create_clustering_two_stage_station_map(
     )
 end
 
-has_walking_distance_limit(mapping::ClusteringTwoStageStationMap) = !isnothing(mapping.max_walking_distance)
+has_walking_distance_limit(mapping::ClusteringTwoStageStationMap) = true
 
 function get_valid_j_assignments(mapping::ClusteringTwoStageStationMap, i::Int)
     return get(mapping.valid_j_assignments, i, Int[])

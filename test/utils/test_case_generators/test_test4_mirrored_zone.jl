@@ -27,32 +27,18 @@
     @test length(all_instances) == length(T4_VARIANTS)
 end
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Test 4 generator — hypothesis" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping Test 4 hypothesis checks"
-        @test true
-        return
-    end
     using JuMP
 
-    env = Gurobi.Env()
-    solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
     mwd_sec = 1000.0 / 1.4
 
     function active_roles(inst)
         data = create_test4_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringTwoStageODFormulation(
-            inst.suggested_k, inst.suggested_l;
-            max_walking_distance = mwd_sec, in_vehicle_time_weight = 0.0,
+        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        formulation = ClusteringTwoStageODFormulation(
+            inst.suggested_l; in_vehicle_time_weight = 0.0,
         )
-        result = run_opt(data, model, solver)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
         z = value.(result.model[:z])
         mapping_ids = data.array_idx_to_station_id

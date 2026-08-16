@@ -22,19 +22,7 @@
     @test length(all_instances) == length(T6_DEMAND_CONFIGS)
 end
 
-gurobi_available = try
-    using Gurobi
-    true
-catch
-    false
-end
-
 @testset "Test 6 generator — hypothesis" begin
-    if !gurobi_available
-        @warn "Gurobi not available, skipping Test 6 hypothesis checks"
-        @test true
-        return
-    end
     using JuMP
 
     # NOTE (open item): the documented hypothesis -- that on-corridor M0
@@ -47,18 +35,16 @@ end
     # capture round-trip route consolidation. Exercising this hypothesis
     # properly likely needs a route-aware model.
     # We assert feasibility only here.
-    env = Gurobi.Env()
-    solver = DirectSolver(SolverConfig(; optimizer_env = env, silent = true))
     mwd_sec = 1000.0 / 1.4
 
     for dcfg in T6_DEMAND_CONFIGS
         inst = generate_test6_instance(dcfg, 1)
         data = create_test6_problem_data(inst; max_walking_distance = mwd_sec)
-        model = ClusteringTwoStageODFormulation(
-            inst.suggested_k, inst.suggested_l;
-            max_walking_distance = mwd_sec, in_vehicle_time_weight = 1.0,
+        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        formulation = ClusteringTwoStageODFormulation(
+            inst.suggested_l; in_vehicle_time_weight = 1.0,
         )
-        result = run_opt(data, model, solver)
+        result = run_opt(problem, formulation, DirectMIPSolver())
         @test result.termination_status == MOI.OPTIMAL
     end
 end
