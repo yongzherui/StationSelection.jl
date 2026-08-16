@@ -1,6 +1,6 @@
 """
 Core label-DP primitives for AggregateODRouteProblem pricing: label creation,
-extension, and dominance. `search.jl` orchestrates these into a full pricing
+extension, and dominance. `exact.jl` orchestrates these into a full pricing
 pass; this file is the one to audit for "is the label search correct".
 
 # Operational contract of the column being priced
@@ -222,6 +222,13 @@ function _dominates_aggregate_od_route_label(
     return true
 end
 
+"""
+Bucket-scan-equivalent bitset dominance, expressed by delegating to
+`_pricing_dominates_in_bucket` rather than reimplementing it a third time --
+matching the convention `joint_routing_assignment/labels.jl`'s twin already
+follows. The signature check stays here (label-level, cheap, and outside what
+`_pricing_dominates_in_bucket` tests, since a bucket scan already guarantees
+it for every pair it's called on)."""
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
     b::AggregateODRoutePricingLabel,
@@ -230,13 +237,10 @@ function _dominates_aggregate_od_route_label(
     bounded_max_stops::Bool,
 )::Bool
     _aggregate_od_route_dominance_signature(a) == _aggregate_od_route_dominance_signature(b) || return false
-    (!bounded_max_stops || a.route_length <= b.route_length) || return false
-    a.time <= b.time + 1e-9 || return false
-    a.reduced_cost <= b.reduced_cost + 1e-9 || return false
-    issubset(abs.served_bits, bbs.served_bits) || return false
-    return _sparse_station_ages_dominate(
-        abs.age_idx, abs.age_val, abs.age_mask,
-        bbs.age_idx, bbs.age_val, bbs.age_mask,
+    return _pricing_dominates_in_bucket(
+        AggregateODRouteDominanceFilters(a, abs), abs,
+        AggregateODRouteDominanceFilters(b, bbs), bbs,
+        AggregateODRouteDominanceRules{bounded_max_stops}(),
     )
 end
 

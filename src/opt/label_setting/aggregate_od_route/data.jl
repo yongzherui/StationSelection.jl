@@ -1,7 +1,7 @@
 """
 Builds the per-scenario pricing graph (nodes, travel costs, active station OD
 pairs, and the direct-ride-limit/reduced-cost helpers derived from it) that
-the label search in `labels.jl`/`search.jl` operates over.
+the label search in `labels.jl`/`exact.jl` operates over.
 """
 
 function _aggregate_od_route_travel(pricing_data::AggregateODRoutePricingData, u::Int, v::Int)::Float64
@@ -43,7 +43,7 @@ end
 
 """
 Resolve the route-length ceiling for label-setting pricing. Unlike exhaustive
-enumeration, the labeling search in `search.jl` terminates via label dominance
+enumeration, the labeling search in `exact.jl` terminates via label dominance
 and reduced-cost pruning even with no depth ceiling at all -- `bounded_max_stops`
 already tells the dominance/comparison code to ignore route_length when
 `max_stops` is unbounded (see `labels.jl`), so `route_length >=

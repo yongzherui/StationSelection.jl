@@ -1,7 +1,7 @@
 """
 Station-simple (elementary-route) label-setting pricer for the passenger
 free-assignment subproblem: an alternative to the revisit-tolerant search in
-`labels.jl`/`search.jl` in which a physical route may never revisit a station.
+`labels.jl`/`exact.jl` in which a physical route may never revisit a station.
 
 # What elementarity changes (and what it does not)
 
@@ -56,14 +56,13 @@ Shares `JointRoutingAssignmentPricingData` (no new data struct) and the
 `_joint_routing_assignment_travel`, `_certify_joint_routing_assignment_layers_at_node`,
 `_joint_routing_assignment_age_is_useful`, `_has_useful_live_joint_routing_assignment_origin`,
 `_joint_routing_assignment_compensation`, and `_joint_routing_assignment_remaining_reward_bound`
-primitives from `data.jl`/`labels.jl`/`search.jl`. Emits the same
+primitives from `data.jl`/`labels.jl`/`exact.jl`. Emits the same
 `JointRoutingAssignmentRouteColumn` via the identical route-replay path
 (`_joint_routing_assignment_column_from_route`), since replay is agnostic to how
 the physical route was found and replays an elementary route unchanged.
 """
 
 export JointRoutingAssignmentStationSimpleLabel
-export joint_routing_assignment_pricing_by_station_simple_label_setting
 
 """
 A partial elementary route. Same fields as `JointRoutingAssignmentPricingLabel`
@@ -108,7 +107,7 @@ struct JointRoutingAssignmentStationSimpleAges
 end
 
 """
-Delegates to the shared `_make_sparse_station_ages` (`mechanics.jl`), which runs
+Delegates to the shared `_make_sparse_station_ages` (`utils.jl`), which runs
 the identical insertion sort used by the revisit-tolerant pricer's twin in
 `labels.jl` -- only the return type differs (wrapped here in
 `JointRoutingAssignmentStationSimpleAges`).
@@ -363,14 +362,16 @@ function _extend_joint_routing_assignment_station_simple_label(
 end
 
 """
-Context for the elementary-route `JointRoutingAssignmentCG` search
-(`use_station_simple`/`station_simple_warm_start`): bundles `pricing_data`,
-`dominance_mode` (`:exact` buckets on `(current, visited)`; `:subset` buckets
-on `current` alone, pairing it with a shared `empty_visited` so both modes
-share one concrete bucket-key type), the once-built `dominates` closure, and
-the `search_index`/`bound_workspace` the shared remaining-reward bound needs.
-Plugs into `_run_pricing_label_search` (`pricing/types.jl`); see
-`_enumerate_joint_routing_assignment_station_simple_pricing_labels` below.
+Context for the elementary-route passenger free-assignment search: bundles
+`pricing_data`, `dominance_mode` (`:exact` buckets on `(current, visited)`;
+`:subset` buckets on `current` alone, pairing it with a shared `empty_visited`
+so both modes share one concrete bucket-key type), the once-built `dominates`
+closure, and the `search_index`/`bound_workspace` the shared remaining-reward
+bound needs. Plugs into `_run_pricing_label_search` (`engine.jl`) the same way
+`JointRoutingAssignmentSearchContext` does (`exact.jl`). Not currently
+reachable from `joint_routing_assignment/pricing_round.jl`'s
+`_pricing_build_unit_context` (always builds the revisit-tolerant context
+today) -- kept as a real, independently usable capability.
 """
 struct JointRoutingAssignmentStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
     JointRoutingAssignmentStationSimpleDominanceFilters, JointRoutingAssignmentStationSimpleLabel, JointRoutingAssignmentStationSimpleAges,
@@ -416,7 +417,7 @@ _pricing_bucket_signature(
 
 # The reward bound reads only `current`/`time`/`activated_reward_layers` from the
 # label and `age_idx`/`age_val` from the ages mirror, so the revisit-tolerant
-# pricer's bound (`search.jl`) applies unchanged here.
+# pricer's bound (`exact.jl`) applies unchanged here.
 _pricing_label_priority(
     ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel, label_ages::JointRoutingAssignmentStationSimpleAges,
 ) = label.reduced_cost -
@@ -437,114 +438,39 @@ _pricing_extend_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, lab
 
 _pricing_dominates_fn(ctx::JointRoutingAssignmentStationSimpleSearchContext) = ctx.dominates
 
-function _enumerate_joint_routing_assignment_station_simple_pricing_labels(
-    pricing_data::JointRoutingAssignmentPricingData;
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    use_reduced_cost_pruning::Bool=true,
-    dominance_mode::Symbol=:exact,
-    profile::Bool=false,
-    stop_if=label -> false,
-)
-    ctx = JointRoutingAssignmentStationSimpleSearchContext(pricing_data; dominance_mode=dominance_mode)
-    return _run_pricing_label_search(
-        ctx;
-        time_limit=time_limit,
-        reduced_cost_tol=reduced_cost_tol,
-        use_reduced_cost_pruning=use_reduced_cost_pruning,
-        profile=profile,
-        stop_if=stop_if,
+"""
+Elementary-route counterpart of the revisit-tolerant pricer's
+`_pricing_candidate_from_label` (`exact.jl`): identical route-replay, since
+replay is agnostic to how the physical route was found."""
+function _pricing_candidate_from_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel)
+    assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
+        label.route, ctx.pricing_data; label_reduced_cost=label.reduced_cost,
+    )
+    isempty(assignments) && return nothing
+    return (
+        signature=_joint_routing_assignment_column_signature(assignments),
+        tau=tau, reduced_cost=reduced_cost, payload=(route=label.route, assignments=assignments),
     )
 end
 
-"""
-    joint_routing_assignment_pricing_by_station_simple_label_setting(pricing_data, existing_columns; kwargs...)
+_pricing_pool_signature(::JointRoutingAssignmentStationSimpleSearchContext, existing_column::JointRoutingAssignmentRouteColumn) =
+    _joint_routing_assignment_column_signature(existing_column)
 
-Elementary-route counterpart of `joint_routing_assignment_pricing_by_label_setting`:
-runs the station-simple label search, replays every finished candidate route to
-recover concrete assignments (via the shared
-`_joint_routing_assignment_column_from_route`), and returns up to
-`max_new_columns` improving, pool-novel `JointRoutingAssignmentRouteColumn`s.
-Acceptance/dedup operates on the real assignment signature, exactly as in the
-revisit-tolerant driver.
-"""
-function joint_routing_assignment_pricing_by_station_simple_label_setting(
-    pricing_data::JointRoutingAssignmentPricingData,
-    existing_columns::Vector{JointRoutingAssignmentRouteColumn};
-    next_column_id::Int,
-    reduced_cost_tol::Float64=1e-6,
-    max_new_columns::Int=1,
-    n_candidates::Int=max_new_columns,
-    time_limit::Float64=30.0,
-    dominance_mode::Symbol=:exact,
-    profile::Bool=false,
-)
-    max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
-    n_candidates >= max_new_columns || throw(ArgumentError("n_candidates must be >= max_new_columns"))
-    time_limit > 0 || throw(ArgumentError("time_limit must be positive"))
-
-    best_pool_tau = Dict{Any, Float64}()
-    for column in existing_columns
-        signature = _joint_routing_assignment_column_signature(column)
-        best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
-    end
-
-    scored_by_signature = Dict{Any, NamedTuple}()
-
-    function try_accept_route!(route::Vector{Int}, label_reduced_cost::Float64)::Bool
-        assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
-            route, pricing_data; label_reduced_cost=label_reduced_cost,
-        )
-        isempty(assignments) && return false
-        reduced_cost < -reduced_cost_tol || return false
-        signature = _joint_routing_assignment_column_signature(assignments)
-        tau < get(best_pool_tau, signature, Inf) - 1e-9 || return false
-        current = get(scored_by_signature, signature, nothing)
-        if isnothing(current) ||
-                reduced_cost < current.reduced_cost - 1e-9 ||
-                (abs(reduced_cost - current.reduced_cost) <= 1e-9 && tau < current.tau - 1e-9)
-            scored_by_signature[signature] = (reduced_cost=reduced_cost, route=route, assignments=assignments, tau=tau)
-        end
-        return length(scored_by_signature) >= n_candidates
-    end
-
-    labels, exhausted, stats = _enumerate_joint_routing_assignment_station_simple_pricing_labels(
-        pricing_data;
-        time_limit=time_limit,
-        reduced_cost_tol=reduced_cost_tol,
-        dominance_mode=dominance_mode,
-        profile=profile,
-        stop_if=label -> try_accept_route!(label.route, label.reduced_cost),
+_pricing_make_column(ctx::JointRoutingAssignmentStationSimpleSearchContext, column_id::Int, candidate) =
+    JointRoutingAssignmentRouteColumn(
+        column_id, candidate.payload.route, candidate.payload.assignments, candidate.tau;
+        metadata=Dict{String, Any}(
+            "scenario" => ctx.pricing_data.scenario,
+            "route" => Tuple(candidate.payload.route),
+            "reduced_cost" => candidate.reduced_cost,
+        ),
     )
 
-    for label in labels
-        try_accept_route!(label.route, label.reduced_cost)
-    end
-
-    scored = collect(values(scored_by_signature))
-    # Decorate-sort-undecorate, for the reason given at the twin in `search.jl`:
-    # `by` runs per comparison, so `string(route)` inside it was the single
-    # largest non-GC cost in this pricer's flame graph. Same ordering, one key
-    # construction per column.
-    scored = scored[sortperm([(e.reduced_cost, e.tau, string(e.route)) for e in scored])]
-    scored = scored[1:min(length(scored), n_candidates)]
-    scored = scored[1:min(length(scored), max_new_columns)]
-
-    columns = JointRoutingAssignmentRouteColumn[]
-    column_id = next_column_id
-    for entry in scored
-        push!(columns, JointRoutingAssignmentRouteColumn(
-            column_id,
-            entry.route,
-            entry.assignments,
-            entry.tau;
-            metadata=Dict{String, Any}(
-                "scenario" => pricing_data.scenario,
-                "route" => Tuple(entry.route),
-                "reduced_cost" => entry.reduced_cost,
-            ),
-        ))
-        column_id += 1
-    end
-    return columns, exhausted, stats
+"""Same master reduced-cost cross-check as the revisit-tolerant context's twin
+(`exact.jl`) -- the master doesn't know which route universe a column came
+from, only the assignments it carries."""
+function _pricing_verify_column(::JointRoutingAssignmentStationSimpleSearchContext, column::JointRoutingAssignmentRouteColumn, m::JuMP.Model, mapping, duals)
+    alpha, gamma_o, gamma_d = duals
+    data = m[:joint_routing_assignment_data]
+    return _verify_joint_routing_assignment_master_reduced_cost(column, m, data, mapping, alpha, gamma_o, gamma_d)
 end

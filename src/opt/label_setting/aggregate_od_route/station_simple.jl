@@ -1,6 +1,6 @@
 """
 Station-simple (elementary-route) label-setting pricer for AggregateODRouteProblem:
-an alternative to the revisit-tolerant search in `labels.jl`/`search.jl`. A route
+an alternative to the revisit-tolerant search in `labels.jl`/`exact.jl`. A route
 may never revisit a station, so a certified `(j,k)` pair settles permanently the
 first (and only) time `k` is visited after `j` -- there is no need for a
 `station_age` Dict tracking every past visit, only `live_origin_age` for stations
@@ -23,7 +23,6 @@ label type).
 """
 
 export AggregateODRouteStationSimpleLabel
-export aggregate_od_route_pricing_by_station_simple_label_setting
 
 struct AggregateODRouteStationSimpleLabel
     current::Int
@@ -320,14 +319,17 @@ _aggregate_od_route_column_from_label(
 )
 
 """
-Context for the elementary-route `AggregateODRouteCG` search
-(`use_station_simple=true`): bundles `pricing_data`/`duals`, the once-built
-`dominates` closure, and `node_index` (the only precomputed index this pricer's
-reward bound needs -- unlike the revisit-tolerant twin, it has no travel matrix
-or per-pair arrays to precompute, since `_aggregate_od_route_station_simple_future_reward_bound`
-iterates `active_pairs` directly). Plugs into the shared `_run_pricing_label_search`
-(`pricing/types.jl`); see `_enumerate_aggregate_od_route_station_simple_pricing_labels`
-below for how it is built.
+Context for the elementary-route pricer: bundles `pricing_data`/`duals`, the
+once-built `dominates` closure, and `node_index` (the only precomputed index
+this pricer's reward bound needs -- unlike the revisit-tolerant twin, it has
+no travel matrix or per-pair arrays to precompute, since
+`_aggregate_od_route_station_simple_future_reward_bound` iterates
+`active_pairs` directly). Plugs into the shared `_run_pricing_label_search`
+(`engine.jl`) the same way `AggregateODRouteSearchContext` does (`exact.jl`).
+Not currently reachable from `base/pricing_round.jl`'s `_pricing_build_unit_context`
+(`AggregateODRouteBaseFormulation` always builds the revisit-tolerant context
+today) -- kept as a real, independently usable capability for whoever wants to
+wire station-simple pricing back into the hub.
 """
 struct AggregateODRouteStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
     AggregateODRouteStationSimpleDominanceFilters, AggregateODRouteStationSimpleLabel, AggregateODRouteStationSimpleBitsets,
@@ -377,89 +379,30 @@ _pricing_extend_label(ctx::AggregateODRouteStationSimpleSearchContext, label::Ag
 
 _pricing_dominates_fn(ctx::AggregateODRouteStationSimpleSearchContext) = ctx.dominates
 
-function _enumerate_aggregate_od_route_station_simple_pricing_labels(
-    pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals;
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    profile::Bool=false,
-    stop_if=label -> false,
-)
-    ctx = AggregateODRouteStationSimpleSearchContext(pricing_data, duals)
-    return _run_pricing_label_search(
-        ctx; time_limit=time_limit, reduced_cost_tol=reduced_cost_tol, profile=profile, stop_if=stop_if,
+# ── round-level hooks (engine.jl's `_run_pricing_round`, dispatched on ctx) ──
+
+function _pricing_candidate_from_label(::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel)
+    isempty(label.served_pairs) && return nothing
+    return (
+        signature=_aggregate_od_route_column_signature(label.served_pairs),
+        tau=label.tau, reduced_cost=label.reduced_cost, payload=label,
     )
 end
 
-function aggregate_od_route_pricing_by_station_simple_label_setting(
-    pricing_data::AggregateODRoutePricingData,
-    existing_columns::Vector{AggregateODRouteColumn},
-    duals::AggregateODRoutePricingDuals;
-    next_column_id::Int,
-    reduced_cost_tol::Float64=1e-6,
-    max_new_columns::Int=1,
-    n_candidates::Int=max_new_columns,
-    time_limit::Float64=30.0,
-    profile::Bool=false,
-)
-    max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
-    n_candidates >= max_new_columns || throw(ArgumentError("n_candidates must be >= max_new_columns"))
-    time_limit > 0 || throw(ArgumentError("time_limit must be positive"))
+_pricing_pool_signature(::AggregateODRouteStationSimpleSearchContext, existing_column::AggregateODRouteColumn) =
+    _aggregate_od_route_column_signature(existing_column)
 
-    best_pool_tau = Dict{Any, Float64}()
-    for column in existing_columns
-        signature = _aggregate_od_route_column_signature(column)
-        best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
-    end
+_pricing_make_column(ctx::AggregateODRouteStationSimpleSearchContext, column_id::Int, candidate) =
+    _aggregate_od_route_column_from_label(candidate.payload, column_id, ctx.pricing_data.scenario)
 
-    scored_by_signature = Dict{Any, Tuple{Float64, AggregateODRouteStationSimpleLabel}}()
-
-    function accept_pricing_label!(label::AggregateODRouteStationSimpleLabel)
-        isempty(label.served_pairs) && return false
-        label.reduced_cost < -reduced_cost_tol || return false
-        signature = _aggregate_od_route_column_signature(label.served_pairs)
-        label.tau < get(best_pool_tau, signature, Inf) - 1e-9 || return false
-        current = get(scored_by_signature, signature, nothing)
-        if isnothing(current) ||
-                label.reduced_cost < current[1] - 1e-9 ||
-                (abs(label.reduced_cost - current[1]) <= 1e-9 && label.tau < current[2].tau - 1e-9)
-            scored_by_signature[signature] = (label.reduced_cost, label)
-        end
-        return length(scored_by_signature) >= n_candidates
-    end
-
-    labels, exhausted, stats = _enumerate_aggregate_od_route_station_simple_pricing_labels(
-        pricing_data,
-        duals;
-        time_limit=time_limit,
-        reduced_cost_tol=reduced_cost_tol,
-        profile=profile,
-        stop_if=accept_pricing_label!,
-    )
-
-    for label in labels
-        isempty(label.served_pairs) && continue
-        label.reduced_cost < -reduced_cost_tol || continue
-        signature = _aggregate_od_route_column_signature(label.served_pairs)
-        label.tau < get(best_pool_tau, signature, Inf) - 1e-9 || continue
-        current = get(scored_by_signature, signature, nothing)
-        if isnothing(current) ||
-                label.reduced_cost < current[1] - 1e-9 ||
-                (abs(label.reduced_cost - current[1]) <= 1e-9 && label.tau < current[2].tau - 1e-9)
-            scored_by_signature[signature] = (label.reduced_cost, label)
-        end
-    end
-
-    scored = collect(values(scored_by_signature))
-    sort!(scored, by=entry -> (entry[1], entry[2].tau, string(entry[2].route)))
-    scored = scored[1:min(length(scored), n_candidates)]
-    scored = scored[1:min(length(scored), max_new_columns)]
-
-    columns = AggregateODRouteColumn[]
-    column_id = next_column_id
-    for (_, label) in scored
-        push!(columns, _aggregate_od_route_column_from_label(label, column_id, pricing_data.scenario))
-        column_id += 1
-    end
-    return columns, exhausted, stats
+"""Same reduced-cost cross-check as the revisit-tolerant context's twin
+(`exact.jl`) -- the master doesn't know which route universe a column came
+from, only the pair set it carries."""
+function _pricing_verify_column(ctx::AggregateODRouteStationSimpleSearchContext, column::AggregateODRouteColumn, ::JuMP.Model, mapping, duals; atol::Float64=1e-5)
+    pricer_rc = Float64(get(column.metadata, "reduced_cost", NaN))
+    isnan(pricer_rc) && return true, pricer_rc, NaN
+    master_rc = aggregate_od_route_column_objective_coefficient(
+        ctx.pricing_data.route_regularization_weight, ctx.pricing_data.repositioning_time, column,
+    ) - sum(get(ctx.duals.sigma, pair, 0.0) for pair in column.od_pairs; init=0.0)
+    return isapprox(pricer_rc, master_rc; atol=atol), pricer_rc, master_rc
 end

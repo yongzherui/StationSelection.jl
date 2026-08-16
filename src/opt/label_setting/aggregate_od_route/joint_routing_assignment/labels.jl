@@ -1,6 +1,6 @@
 """
 Core label-DP primitives for passenger free-assignment pricing: label creation,
-extension, and dominance. `search.jl` orchestrates these into a full pricing
+extension, and dominance. `exact.jl` orchestrates these into a full pricing
 pass; this file is the one to audit for "is the label search correct".
 
 # Operational contract of the column being priced
@@ -31,7 +31,7 @@ No onboard-passenger state, capacity resource, or drop-off subset enumeration is
 modeled -- unbounded capacity means certifying `p`'s assignment never prevents
 certifying anyone else's, so there is nothing to branch on beyond the physical
 route itself. The concrete `(j, k)` a passenger is ultimately assigned to is
-reconstructed only for finished, negative-reduced-cost routes (`search.jl`'s
+reconstructed only for finished, negative-reduced-cost routes (`exact.jl`'s
 route replay) -- not tracked while labels are being extended.
 
 # Where the time actually goes (read before optimizing)
@@ -51,8 +51,8 @@ Scoreboard of what was tried, each measured on its own
 | compensated layer dominance (this file) | **2.5-3.9x** -- halves `max_live` |
 | `Vector` dominance buckets (`types.jl`) | **1.3-1.5x** |
 | label inlined into bucket entry (`types.jl`) | **1.1-1.15x** |
-| reuse popped priority (`search.jl`) | no effect; the bound is ~0.6% of runtime |
-| travel-discounted reward bound (`search.jl`) | no effect at cold-start duals |
+| reuse popped priority (`exact.jl`) | no effect; the bound is ~0.6% of runtime |
+| travel-discounted reward bound (`exact.jl`) | no effect at cold-start duals |
 | station-budget cap at `l` (removed 2026-08-10) | measured off by default -- pricing-neutral to 1.7x slower, LP bound identical to 10 decimals at n=10/n=15; removed rather than kept dark |
 | compatibility-component decomposition | not built: the reward graph is one component holding 100% of opportunities |
 
@@ -256,7 +256,7 @@ _joint_routing_assignment_dominance_signature(label::JointRoutingAssignmentPrici
 
 """
 The cheap bookkeeping signature used by the label search itself (dedup within
-`best_by_signature`, see `search.jl`) -- deliberately *not* the final column
+`best_by_signature`, see `exact.jl`) -- deliberately *not* the final column
 signature. Two labels can share this signature (same running per-passenger
 maxima) while representing different physical routes with different concrete
 `(p, j, k)` assignments and therefore different station-linking coefficients;

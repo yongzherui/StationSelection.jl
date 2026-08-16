@@ -1,14 +1,14 @@
 """
-Orchestrates `labels.jl`'s primitives into a full label-setting pricing pass for
-the passenger free-assignment subproblem: a priority-queue search over live
-labels (`_enumerate_joint_routing_assignment_pricing_labels`), route replay to
-turn a finished label's physical route into concrete per-passenger assignments
-(`_joint_routing_assignment_column_from_route`), and the driver that turns
-accepted routes into candidate columns
-(`joint_routing_assignment_pricing_by_label_setting`).
+`JointRoutingAssignmentSearchContext`: the revisit-tolerant passenger
+free-assignment pricer's plug into the shared search loop
+(`_run_pricing_label_search`, `engine.jl`), plus route replay
+(`_joint_routing_assignment_column_from_route`) to turn a finished label's
+physical route into concrete per-passenger assignments -- the only place
+concrete `(j, k)` pairs are recovered, since the label itself only tracks a
+cheap reward-layer proxy during search (section 16). `round.jl`'s
+`_pricing_candidate_from_label` hook is what invokes replay, once per
+surviving label offered to `_run_pricing_round`'s accept/dedupe test.
 """
-
-export joint_routing_assignment_pricing_by_label_setting
 
 """
 Admissible bound on the additional *net* gain (reward minus the route
@@ -251,31 +251,6 @@ function _pricing_on_label_inserted(ctx::JointRoutingAssignmentSearchContext, la
     return nothing
 end
 
-function _enumerate_joint_routing_assignment_pricing_labels(
-    pricing_data::JointRoutingAssignmentPricingData;
-    time_limit::Float64,
-    reduced_cost_tol::Float64,
-    use_reduced_cost_pruning::Bool=true,
-    profile::Bool=false,
-    dominance_census::Bool=false,
-    stop_if=label -> false,
-    label_observer=nothing,
-)
-    ctx = JointRoutingAssignmentSearchContext(
-        pricing_data;
-        dominance_census=dominance_census,
-        label_observer=label_observer,
-    )
-    return _run_pricing_label_search(
-        ctx;
-        time_limit=time_limit,
-        reduced_cost_tol=reduced_cost_tol,
-        use_reduced_cost_pruning=use_reduced_cost_pruning,
-        profile=profile,
-        stop_if=stop_if,
-    )
-end
-
 """
     _replay_joint_routing_assignment_route(route, pricing_data) -> Dict{Int, Tuple{Int,Int,Float64}}
 
@@ -370,96 +345,46 @@ function _joint_routing_assignment_column_from_route(
 end
 
 """
-    joint_routing_assignment_pricing_by_label_setting(pricing_data, existing_columns; kwargs...)
-
-Top-level driver: runs the label search, replays every finished candidate route
-to recover concrete assignments, and returns up to `max_new_columns` improving,
-pool-novel `JointRoutingAssignmentRouteColumn`s. Dedup/acceptance operates on
-the *real* assignment signature (section 13), not the label search's cheap
-reward-layer signature (section 12) -- two different physical routes that
-happen to reach the same running per-passenger maxima are different candidate
-columns here.
+Route-replay is what makes this pricer's `_pricing_candidate_from_label`
+different from the trivial projection every other pricer uses: the label only
+tracks a cheap reward-layer proxy during search (section 16), so the real,
+concrete `(p, j, k)` assignments -- and the real dedup signature over them,
+not the search's proxy signature -- only exist after replaying the finished
+route. `signature`/`tau`/`reduced_cost` below are the *replayed*, exact values;
+`payload` carries what `_pricing_make_column` needs to build the column.
 """
-function joint_routing_assignment_pricing_by_label_setting(
-    pricing_data::JointRoutingAssignmentPricingData,
-    existing_columns::Vector{JointRoutingAssignmentRouteColumn};
-    next_column_id::Int,
-    reduced_cost_tol::Float64=1e-6,
-    max_new_columns::Int=1,
-    n_candidates::Int=max_new_columns,
-    time_limit::Float64=30.0,
-    profile::Bool=false,
-    dominance_census::Bool=false,
-)
-    max_new_columns > 0 || throw(ArgumentError("max_new_columns must be positive"))
-    n_candidates >= max_new_columns || throw(ArgumentError("n_candidates must be >= max_new_columns"))
-    time_limit > 0 || throw(ArgumentError("time_limit must be positive"))
+function _pricing_candidate_from_label(ctx::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel)
+    assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
+        label.route, ctx.pricing_data; label_reduced_cost=label.reduced_cost,
+    )
+    isempty(assignments) && return nothing
+    return (
+        signature=_joint_routing_assignment_column_signature(assignments),
+        tau=tau, reduced_cost=reduced_cost, payload=(route=label.route, assignments=assignments),
+    )
+end
 
-    best_pool_tau = Dict{Any, Float64}()
-    for column in existing_columns
-        signature = _joint_routing_assignment_column_signature(column)
-        best_pool_tau[signature] = min(get(best_pool_tau, signature, Inf), column.tau)
-    end
+_pricing_pool_signature(::JointRoutingAssignmentSearchContext, existing_column::JointRoutingAssignmentRouteColumn) =
+    _joint_routing_assignment_column_signature(existing_column)
 
-    scored_by_signature = Dict{Any, NamedTuple}()
-
-    function try_accept_route!(route::Vector{Int}, label_reduced_cost::Float64)::Bool
-        assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
-            route, pricing_data; label_reduced_cost=label_reduced_cost,
-        )
-        isempty(assignments) && return false
-        reduced_cost < -reduced_cost_tol || return false
-        signature = _joint_routing_assignment_column_signature(assignments)
-        tau < get(best_pool_tau, signature, Inf) - 1e-9 || return false
-        current = get(scored_by_signature, signature, nothing)
-        if isnothing(current) ||
-                reduced_cost < current.reduced_cost - 1e-9 ||
-                (abs(reduced_cost - current.reduced_cost) <= 1e-9 && tau < current.tau - 1e-9)
-            scored_by_signature[signature] = (reduced_cost=reduced_cost, route=route, assignments=assignments, tau=tau)
-        end
-        return length(scored_by_signature) >= n_candidates
-    end
-
-    labels, exhausted, stats = _enumerate_joint_routing_assignment_pricing_labels(
-        pricing_data;
-        time_limit=time_limit,
-        reduced_cost_tol=reduced_cost_tol,
-        profile=profile,
-        dominance_census=dominance_census,
-        stop_if=label -> try_accept_route!(label.route, label.reduced_cost),
+_pricing_make_column(ctx::JointRoutingAssignmentSearchContext, column_id::Int, candidate) =
+    JointRoutingAssignmentRouteColumn(
+        column_id, candidate.payload.route, candidate.payload.assignments, candidate.tau;
+        metadata=Dict{String, Any}(
+            "scenario" => ctx.pricing_data.scenario,
+            "route" => Tuple(candidate.payload.route),
+            "reduced_cost" => candidate.reduced_cost,
+        ),
     )
 
-    for label in labels
-        try_accept_route!(label.route, label.reduced_cost)
-    end
-
-    # Decorate-sort-undecorate. `sort!(...; by=f)` calls `f` inside the comparison,
-    # so building the route's string form there cost one `string(::Vector{Int})`
-    # per *comparison* rather than per column -- roughly 17x more at 10^5 harvested
-    # columns, and measured at ~15% of this pricer's working time (array-show
-    # machinery, `_typeinfo_implicit`, showing up in the flame graph). Each key is
-    # now built exactly once; the ordering is unchanged.
-    scored = collect(values(scored_by_signature))
-    scored = _sort_pricing_results_by_route(scored,
-        entry -> (entry.reduced_cost, entry.tau, string(entry.route)))
-    scored = scored[1:min(length(scored), n_candidates)]
-    scored = scored[1:min(length(scored), max_new_columns)]
-
-    columns = JointRoutingAssignmentRouteColumn[]
-    column_id = next_column_id
-    for entry in scored
-        push!(columns, JointRoutingAssignmentRouteColumn(
-            column_id,
-            entry.route,
-            entry.assignments,
-            entry.tau;
-            metadata=Dict{String, Any}(
-                "scenario" => pricing_data.scenario,
-                "route" => Tuple(entry.route),
-                "reduced_cost" => entry.reduced_cost,
-            ),
-        ))
-        column_id += 1
-    end
-    return columns, exhausted, stats
+"""
+Unlike Base's single-constraint-family check (`aggregate_od_route/exact.jl`),
+Joint's master reduced cost sums the coverage row plus both linking-row
+families per assignment (`_verify_joint_routing_assignment_master_reduced_cost`,
+`duals.jl`) -- so this hook, unlike the aggregate pricers' twins, genuinely
+needs `m`/`mapping`/`duals`, not just `ctx`."""
+function _pricing_verify_column(::JointRoutingAssignmentSearchContext, column::JointRoutingAssignmentRouteColumn, m::JuMP.Model, mapping, duals)
+    alpha, gamma_o, gamma_d = duals
+    data = m[:joint_routing_assignment_data]
+    return _verify_joint_routing_assignment_master_reduced_cost(column, m, data, mapping, alpha, gamma_o, gamma_d)
 end

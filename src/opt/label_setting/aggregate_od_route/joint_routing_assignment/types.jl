@@ -250,7 +250,7 @@ end
 
 A priced column: a physical station route paired with the concrete per-passenger
 assignments `(p, pickup, dropoff)` selected during route replay (see
-`search.jl`). Unlike `activated_reward_layers`, which only records reward levels,
+`exact.jl`). Unlike `activated_reward_layers`, which only records reward levels,
 `assignments` records which stations actually carry the linking coefficients a
 master problem would need.
 """
