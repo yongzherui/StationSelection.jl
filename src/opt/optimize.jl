@@ -32,6 +32,8 @@ include("optimize/clustering/build_single_stage.jl")
 # superseded by `optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl`
 # and `optimize/aggregate_od_route/direct/build_base.jl` (both included below).
 include("optimize/run_opt.jl")
+include("label_setting/utils.jl")
+include("label_setting/types.jl")
 include("label_setting/engine.jl")
 include("label_setting/aggregate_od_route/types.jl")
 include("label_setting/aggregate_od_route/data.jl")
