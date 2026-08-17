@@ -38,6 +38,7 @@ function _pricing_build_unit_context(
         Float64(m[:aggregate_od_route_base_detour_factor]),
         max_stops,
         max_stops != typemax(Int),
+        true,  # compensated_dominance: same default as Joint's CG-style pricing round
     )
 
     columns_by_id = m[:aggregate_od_route_base_columns_by_id]

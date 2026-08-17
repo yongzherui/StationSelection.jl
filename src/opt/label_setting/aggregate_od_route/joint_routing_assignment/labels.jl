@@ -317,32 +317,12 @@ end
 
 # ── reward-layer compensation (dominance sub-test) ───────────────────────────
 """
-Weight of the layers `a` has activated that `b` has not.
-
-This is the "catch-up" term in the dominance rule below: those layers are reward
-`b` can still bank off a suffix the two labels share, while `a`, having already
-banked them, gets nothing more for re-reaching them.
-
-Bails out as soon as the running total exceeds `budget`, because the only use is
-the test `compensation <= budget`. In practice `budget` is a small reduced-cost
-difference while individual layer weights are large, so the common failing case
-exits after one layer.
-
-# One pass, not two
-
-The previous version ran `issubset(a, b)` first (word-wise, allocation-free) and,
-when that failed, restarted with an element-wise walk that re-tested `layer in b`
-one integer at a time -- so the interesting case, where `a` does hold layers `b`
-lacks, traversed the bit data twice and paid a per-element `in` probe on the
-second pass.
-
-Here both are the same walk. `w = a.bits[i] & ~b.bits[j]` is the set difference
-restricted to one 64-bit chunk: all-zero chunks (the subset case, still the most
-common outcome) are skipped at exactly the cost `issubset` used to pay, and a
-non-zero chunk is drained bit by bit with `trailing_zeros`/`w &= w - 1` right
-where it was found, with no second lookup. Chunk `i` of a `BitSet` holds the
-integers `((i - 1 + offset) << 6) .+ (0:63)`, which is what turns a set bit back
-into its layer id.
+Weight of the layers `a` has activated that `b` has not -- the passenger-layer
+instance of the reward-model-independent `_bitset_diff_weight` (`label_setting/
+utils.jl`), which carries the full bit-trick/soundness docstring. Kept as a
+named wrapper here (rather than calling `_bitset_diff_weight` at every call
+site) because `activated_reward_layers`/`layer_weight` read better under this
+pricer's own vocabulary than the shared function's generic one.
 """
 function _joint_routing_assignment_compensation(
     a_layers::RewardLayerBitset,
@@ -351,11 +331,7 @@ function _joint_routing_assignment_compensation(
     budget::Float64,
     compensated::Bool=true,
 )::Float64
-    # Static dispatch on a loop-invariant flag: the specialized method below drops
-    # the branch entirely rather than re-testing it per chunk.
-    return compensated ?
-        _joint_routing_assignment_compensation(a_layers, b_layers, layer_weight, budget, Val(true)) :
-        _joint_routing_assignment_compensation(a_layers, b_layers, layer_weight, budget, Val(false))
+    return _bitset_diff_weight(a_layers, b_layers, layer_weight, budget, compensated)
 end
 
 function _joint_routing_assignment_compensation(
@@ -365,31 +341,7 @@ function _joint_routing_assignment_compensation(
     budget::Float64,
     ::Val{Compensated},
 )::Float64 where {Compensated}
-    a_bits = a_layers.bits
-    b_bits = b_layers.bits
-    # Chunk `i` of `a` lines up with chunk `i - shift` of `b`.
-    shift = b_layers.offset - a_layers.offset
-    n_b = length(b_bits)
-    total = 0.0
-    @inbounds for i in eachindex(a_bits)
-        w = a_bits[i]
-        w == 0 && continue
-        j = i - shift
-        if 1 <= j <= n_b
-            w &= ~b_bits[j]
-            w == 0 && continue
-        end
-        # With compensation off this IS the old rule: a non-subset never dominates,
-        # which `Inf` expresses without duplicating the surrounding predicate.
-        Compensated || return Inf
-        base = (a_layers.offset + i - 1) << 6
-        while w != 0
-            total += layer_weight[base + trailing_zeros(w)]
-            total > budget && return total
-            w &= w - one(UInt64)  # clear the lowest set bit
-        end
-    end
-    return total
+    return _bitset_diff_weight(a_layers, b_layers, layer_weight, budget, Val(Compensated))
 end
 
 # ── dominance predicates ──────────────────────────────────────────────────────

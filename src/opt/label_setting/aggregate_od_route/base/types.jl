@@ -17,6 +17,12 @@ struct AggregateODRoutePricingData
     detour_factor::Float64
     max_stops::Int
     bounded_max_stops::Bool
+    # Whether dominance uses the compensated reward test `rc_a + w(A_a \ A_b) <= rc_b`
+    # or the plain `A_a subseteq A_b`. A toggle for the same reason as Joint's twin
+    # field (`joint_routing_assignment/types.jl`): it trades column diversity per
+    # search for speed, and which side wins for column generation is an end-to-end
+    # question, not a pricing-speed one.
+    compensated_dominance::Bool
 end
 
 struct AggregateODRoutePricingDuals
@@ -61,4 +67,17 @@ struct AggregateODRouteDominanceFilters
     n_live_ages::Int32
 end
 
-struct AggregateODRouteDominanceRules{BoundedStops} <: AbstractPricingDominanceRules end
+"""
+    AggregateODRouteDominanceRules{BoundedStops, Compensated}
+
+The two dominance switches, carried in the *type* rather than as `Bool`
+arguments, for the same reason as Joint's twin
+(`JointRoutingAssignmentDominanceRules`, `joint_routing_assignment/types.jl`):
+they are constant for a whole pricing call, and encoding them as type
+parameters lets the compiler delete a disabled `BoundedStops` branch outright
+and specialize the reward-diff walk on `Compensated`.
+"""
+struct AggregateODRouteDominanceRules{BoundedStops, Compensated} <: AbstractPricingDominanceRules end
+
+_aggregate_od_route_dominance_rules(bounded_max_stops::Bool, compensated_dominance::Bool) =
+    AggregateODRouteDominanceRules{bounded_max_stops, compensated_dominance}()

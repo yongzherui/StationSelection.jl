@@ -130,6 +130,7 @@ function _enumerate_aggregate_od_route_columns_core(
         detour_factor,
         max_stops,
         max_stops_cap != typemax(Int),
+        false,  # compensated_dominance: irrelevant -- this DFS never calls dominance at all
     )
     # Uniform positive rewards make every active pair visible to the shared pricing
     # transitions. They do not prune or rank this DFS.

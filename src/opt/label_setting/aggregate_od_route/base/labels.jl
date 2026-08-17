@@ -208,13 +208,25 @@ PricingLabelEntry(id::Int, label::AggregateODRoutePricingLabel, bs::AggregateODR
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
     b::AggregateODRoutePricingLabel,
-    bounded_max_stops::Bool,
+    bounded_max_stops::Bool;
+    pair_weight::Dict{Tuple{Int, Int}, Float64}=Dict{Tuple{Int, Int}, Float64}(),
+    compensated_dominance::Bool=true,
 )::Bool
     _aggregate_od_route_state(a) == _aggregate_od_route_state(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
-    a.reduced_cost <= b.reduced_cost + 1e-9 || return false
-    issubset(a.served_pairs, b.served_pairs) || return false
+    budget = b.reduced_cost - a.reduced_cost + 1e-9
+    budget >= 0.0 || return false
+    # See `_pricing_dominates_at_state` below for the compensated-vs-plain-subset
+    # soundness argument; this is its `Set`-based counterpart for tests/callers
+    # working straight off labels rather than bitsets.
+    compensation = 0.0
+    for pair in a.served_pairs
+        pair in b.served_pairs && continue
+        compensated_dominance || return false
+        compensation += get(pair_weight, pair, 0.0)
+        compensation > budget && return false
+    end
     all_stations = union(keys(a.station_age), keys(b.station_age), (a.current, b.current))
     for station in all_stations
         get(a.station_age, station, Inf) <= get(b.station_age, station, Inf) + 1e-9 || return false
@@ -234,27 +246,41 @@ function _dominates_aggregate_od_route_label(
     b::AggregateODRoutePricingLabel,
     abs::AggregateODRouteLabelBitsets,
     bbs::AggregateODRouteLabelBitsets,
-    bounded_max_stops::Bool,
+    bounded_max_stops::Bool;
+    weight::Vector{Float64}=Float64[],
+    compensated_dominance::Bool=true,
 )::Bool
     _aggregate_od_route_state(a) == _aggregate_od_route_state(b) || return false
     return _pricing_dominates_at_state(
         AggregateODRouteDominanceFilters(a, abs), abs,
         AggregateODRouteDominanceFilters(b, bbs), bbs,
-        AggregateODRouteDominanceRules{bounded_max_stops}(),
+        weight,
+        AggregateODRouteDominanceRules{bounded_max_stops, compensated_dominance}(),
     )
 end
 
+"""
+    _pricing_dominates_at_state(af, abs, bf, bbs, weight, rules)
+
+The dominance predicate as the state's label-list scan calls it (see
+`joint_routing_assignment/labels.jl`'s twin for the full condition-ordering
+rationale, which applies unchanged here). `weight` is the per-pair reward
+(`AggregateODRouteSearchContext.positive_pair_rewards`, indexed exactly like
+`served_bits`) the reward-diff test in `_bitset_diff_weight`
+(`label_setting/utils.jl`) charges `a` for holding pairs `b` lacks.
+"""
 @inline function _pricing_dominates_at_state(
     af::AggregateODRouteDominanceFilters, abs::AggregateODRouteLabelBitsets,
     bf::AggregateODRouteDominanceFilters, bbs::AggregateODRouteLabelBitsets,
-    ::AggregateODRouteDominanceRules{BoundedStops},
-)::Bool where {BoundedStops}
+    weight::Vector{Float64},
+    ::AggregateODRouteDominanceRules{BoundedStops, Compensated},
+)::Bool where {BoundedStops, Compensated}
     af.time <= bf.time + 1e-9 || return false
     af.n_live_ages >= bf.n_live_ages || return false
     bf.age_mask & ~af.age_mask == 0 || return false
     BoundedStops && af.route_length > bf.route_length && return false
-    af.reduced_cost <= bf.reduced_cost + 1e-9 || return false
-    issubset(abs.served_bits, bbs.served_bits) || return false
+    budget = bf.reduced_cost - af.reduced_cost + 1e-9
+    budget >= 0.0 || return false
     ia = 1
     na = Int(af.n_live_ages)
     @inbounds for ib in Base.OneTo(Int(bf.n_live_ages))
@@ -265,6 +291,7 @@ end
         ia <= na && abs.age_idx[ia] == idx || return false
         abs.age_val[ia] <= bbs.age_val[ib] + 1e-9 || return false
     end
+    _bitset_diff_weight(abs.served_bits, bbs.served_bits, weight, budget, Val(Compensated)) <= budget || return false
     return true
 end
 

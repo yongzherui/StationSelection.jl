@@ -17,6 +17,7 @@
             detour_factor=1.5,
             max_stops=5,
             bounded_max_stops=true,
+            compensated_dominance=true,
         )
         return AggregateODRoutePricingData(
             scenario,
@@ -29,6 +30,7 @@
             detour_factor,
             max_stops,
             bounded_max_stops,
+            compensated_dominance,
         )
     end
 
@@ -174,6 +176,48 @@
         @test !StationSelection._dominates_aggregate_od_route_label(worse, good, worse_bs, good_bs, true)
         @test !StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, true)
         @test StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, false)
+    end
+
+    @testset "compensated dominance allows extra served pairs within reduced-cost budget" begin
+        within_budget = AggregateODRoutePricingLabel(
+            2, [2], 1.0, Dict(2 => 1.0), Set([(1, 3)]), 0.0, -6.0, 1,
+        )
+        over_budget = AggregateODRoutePricingLabel(
+            2, [2], 1.0, Dict(2 => 1.0), Set([(1, 3)]), 0.0, -2.0, 1,
+        )
+        baseline = AggregateODRoutePricingLabel(
+            2, [2], 1.0, Dict(2 => 1.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
+        )
+        pair_weight = Dict((1, 3) => 5.0, (2, 4) => 3.0)
+
+        # plain subset test: the extra pair always blocks domination, regardless of
+        # how favorable the reduced-cost gap is.
+        @test !StationSelection._dominates_aggregate_od_route_label(within_budget, baseline, true; compensated_dominance=false)
+
+        # compensated: dominates iff the reduced-cost gap covers the extra pair's weight
+        @test StationSelection._dominates_aggregate_od_route_label(
+            within_budget, baseline, true; pair_weight=pair_weight, compensated_dominance=true,
+        )
+        @test !StationSelection._dominates_aggregate_od_route_label(
+            over_budget, baseline, true; pair_weight=pair_weight, compensated_dominance=true,
+        )
+
+        pair_index = Dict((1, 3) => 1, (2, 4) => 2)
+        node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
+        weight = [5.0, 3.0]
+        within_bs = StationSelection._make_aggregate_od_route_label_bitsets(within_budget, pair_index, 2, node_index, 4)
+        over_bs = StationSelection._make_aggregate_od_route_label_bitsets(over_budget, pair_index, 2, node_index, 4)
+        baseline_bs = StationSelection._make_aggregate_od_route_label_bitsets(baseline, pair_index, 2, node_index, 4)
+
+        @test StationSelection._dominates_aggregate_od_route_label(
+            within_budget, baseline, within_bs, baseline_bs, true; weight=weight, compensated_dominance=true,
+        )
+        @test !StationSelection._dominates_aggregate_od_route_label(
+            over_budget, baseline, over_bs, baseline_bs, true; weight=weight, compensated_dominance=true,
+        )
+        @test !StationSelection._dominates_aggregate_od_route_label(
+            within_budget, baseline, within_bs, baseline_bs, true; weight=weight, compensated_dominance=false,
+        )
     end
 
     @testset "aggregate OD route station-age bitsets" begin

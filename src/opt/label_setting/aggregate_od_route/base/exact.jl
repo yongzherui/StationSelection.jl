@@ -53,12 +53,12 @@ function AggregateODRouteSearchContext(
         haskey(pricing_data.travel_cost, (u, v)) &&
             (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
     end
-    rules = AggregateODRouteDominanceRules{pricing_data.bounded_max_stops}()
-    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
-        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, rules)
     positive_pair_rewards = Float64[
         max(0.0, get(duals.sigma, pair, 0.0)) for pair in pricing_data.active_pairs
     ]
+    rules = _aggregate_od_route_dominance_rules(pricing_data.bounded_max_stops, pricing_data.compensated_dominance)
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
+        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, positive_pair_rewards, rules)
     return AggregateODRouteSearchContext(
         pricing_data, duals, dominates,
         n_pairs, pair_index, node_index, n_nodes,

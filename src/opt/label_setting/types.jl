@@ -8,7 +8,7 @@ for each pricer's own data/label/filters types that plug into the generics here.
 
 """
 Marker supertype for a pricer's dominance-rule switches, which each concrete
-pricer encodes as its own type parameters (e.g. `AggregateODRouteDominanceRules{BoundedStops}`
+pricer encodes as its own type parameters (e.g. `AggregateODRouteDominanceRules{BoundedStops,Compensated}`
 in `aggregate_od_route/base/types.jl`, `JointRoutingAssignmentDominanceRules{BoundedStops,Compensated,Instrumented}`
 in `joint_routing_assignment/types.jl`) for zero-cost specialization -- see either
 concrete type's own docstring for why. This common supertype does not unify
