@@ -63,7 +63,7 @@ function _make_aggregate_od_route_station_simple_bitsets(
     return AggregateODRouteStationSimpleBitsets(visited_bits, age_idx, age_val, age_mask)
 end
 
-_aggregate_od_route_station_simple_dominance_signature(
+_aggregate_od_route_station_simple_state(
     label::AggregateODRouteStationSimpleLabel,
     bs::AggregateODRouteStationSimpleBitsets,
 ) = (label.current, bs.visited_bits)
@@ -88,12 +88,12 @@ function _dominates_aggregate_od_route_station_simple_label(
 end
 
 """
-Inline scalar fields the bucket scan needs, read straight off the entry rather
-than chasing into `label`/`bitsets` -- same rationale as
+Inline scalar fields the state's label-list scan needs, read straight off the
+entry rather than chasing into `label`/`bitsets` -- same rationale as
 `AggregateODRouteDominanceFilters` (`labels.jl`). `current`/`visited_bits` are
-not carried here because the bucket is keyed by exactly that signature (see
-`_aggregate_od_route_station_simple_dominance_signature`), so every pair the
-bucket scan tests already agrees on them.
+not carried here because the state itself is exactly that key (see
+`_aggregate_od_route_station_simple_state`), so every pair the
+state's label-list scan tests already agrees on them.
 """
 struct AggregateODRouteStationSimpleDominanceFilters
     reduced_cost::Float64
@@ -107,8 +107,8 @@ AggregateODRouteStationSimpleDominanceFilters(
     label.reduced_cost, label.time, Int32(length(label.route)),
 )
 
-PricingBucketEntry(id::Int, label::AggregateODRouteStationSimpleLabel, bs::AggregateODRouteStationSimpleBitsets) =
-    PricingBucketEntry(AggregateODRouteStationSimpleDominanceFilters(label, bs), id, label, bs)
+PricingLabelEntry(id::Int, label::AggregateODRouteStationSimpleLabel, bs::AggregateODRouteStationSimpleBitsets) =
+    PricingLabelEntry(AggregateODRouteStationSimpleDominanceFilters(label, bs), id, label, bs)
 
 """Dominance-rule marker for the station-simple pricer; no switches yet, unlike
 the revisit-tolerant pricer's `BoundedStops` (elementary routes have no
@@ -116,13 +116,14 @@ analogous optional cap to toggle)."""
 struct AggregateODRouteStationSimpleDominanceRules <: AbstractPricingDominanceRules end
 
 """
-Bucket-scan fast path for `_dominates_aggregate_od_route_station_simple_label`:
-identical dominance test, minus the `current`/`visited_bits` signature check,
-which the bucket key already guarantees for every pair this is called on (see
-the 4-argument method's docstring above, and `_dominates_joint_routing_assignment_in_bucket`
-in `passenger/labels.jl` for the same convention on the other pricer).
+State-scan fast path for `_dominates_aggregate_od_route_station_simple_label`:
+identical dominance test, minus the `current`/`visited_bits` check, which the
+state itself already guarantees for every pair this is called on (see the
+4-argument method's docstring above, and `_dominates_joint_routing_assignment_at_state`
+in `joint_routing_assignment/labels.jl` for the same convention on the other
+pricer).
 """
-@inline function _pricing_dominates_in_bucket(
+@inline function _pricing_dominates_at_state(
     af::AggregateODRouteStationSimpleDominanceFilters, abs::AggregateODRouteStationSimpleBitsets,
     bf::AggregateODRouteStationSimpleDominanceFilters, bbs::AggregateODRouteStationSimpleBitsets,
     ::AggregateODRouteStationSimpleDominanceRules,
@@ -345,8 +346,8 @@ function AggregateODRouteStationSimpleSearchContext(
     pricing_data::AggregateODRoutePricingData, duals::AggregateODRoutePricingDuals,
 )
     rules = AggregateODRouteStationSimpleDominanceRules()
-    dominates(x::PricingBucketEntry, y::PricingBucketEntry) =
-        _pricing_dominates_in_bucket(x.filters, x.bitsets, y.filters, y.bitsets, rules)
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
+        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, rules)
     node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
     return AggregateODRouteStationSimpleSearchContext(pricing_data, duals, dominates, node_index)
 end
@@ -357,9 +358,9 @@ _pricing_initial_labels(ctx::AggregateODRouteStationSimpleSearchContext) =
 _pricing_make_bitsets(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel) =
     _make_aggregate_od_route_station_simple_bitsets(label, ctx.node_index)
 
-_pricing_bucket_signature(
+_pricing_state(
     ::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel, label_bs::AggregateODRouteStationSimpleBitsets,
-) = _aggregate_od_route_station_simple_dominance_signature(label, label_bs)
+) = _aggregate_od_route_station_simple_state(label, label_bs)
 
 _pricing_label_priority(ctx::AggregateODRouteStationSimpleSearchContext, label::AggregateODRouteStationSimpleLabel, ::AggregateODRouteStationSimpleBitsets) =
     _aggregate_od_route_station_simple_label_priority(label, ctx.pricing_data, ctx.duals)

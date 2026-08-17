@@ -27,35 +27,6 @@ function _aggregate_od_route_label_reduced_cost(
     return pricing_data.route_regularization_weight * (tau + pricing_data.repositioning_time) - dual_credit
 end
 
-"""
-Resolve the finite route-length ceiling required by exhaustive enumeration.
-Exhaustive enumeration (no dominance, no reduced-cost pruning) has no finite
-DFS depth and cannot terminate without a finite `max_stops` -- that case is a
-hard error here. Label-setting pricing does not share this requirement; see
-`_resolve_aggregate_od_route_pricing_max_stops` below.
-"""
-function _resolve_aggregate_od_route_max_stops(max_stops::Int)::Int
-    max_stops != typemax(Int) && return max_stops
-    throw(ArgumentError(
-        "AggregateODRouteProblem route search requires a finite max_stops",
-    ))
-end
-
-"""
-Resolve the route-length ceiling for label-setting pricing. Unlike exhaustive
-enumeration, the labeling search in `exact.jl` terminates via label dominance
-and reduced-cost pruning even with no depth ceiling at all -- `bounded_max_stops`
-already tells the dominance/comparison code to ignore route_length when
-`max_stops` is unbounded (see `labels.jl`), so `route_length >=
-pricing_data.max_stops` at the top of the search loop only needs to be a
-no-op in that case, not an error. Unbounded `max_stops` is therefore a
-legitimate "run pricing with no artificial route-length cap" configuration,
-not a misconfiguration.
-"""
-function _resolve_aggregate_od_route_pricing_max_stops(max_stops::Int)::Int
-    return max_stops
-end
-
 function _certify_aggregate_od_route_pairs_at_node(
     node::Int,
     station_age::Dict{Int, Float64},

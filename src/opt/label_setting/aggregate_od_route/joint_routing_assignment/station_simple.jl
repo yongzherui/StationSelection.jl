@@ -26,19 +26,19 @@ Two levers:
 1. **Fewer extensions.** Candidate generation drops any already-visited node, so
    the branching factor shrinks as a route grows.
 
-2. **Fine dominance buckets (`dominance_mode = :exact`, the default).** Buckets are
-   keyed on the exact `(current, visited)` pair, so each bucket is tiny and every
-   insertion's dominance scan is short. That is the whole game here: the scan is
-   O(bucket) per insertion and ~85-90% of wall time, so bucket *granularity*
-   dominates. At n=20 this makes the elementary search 1.6-3.5x faster than the
-   revisit-tolerant pricer.
+2. **Fine dominance states (`dominance_mode = :exact`, the default).** The state
+   is the exact `(current, visited)` pair, so each state's label list is tiny and
+   every insertion's dominance scan is short. That is the whole game here: the
+   scan is O(list size) per insertion and ~85-90% of wall time, so state
+   *granularity* dominates. At n=20 this makes the elementary search 1.6-3.5x
+   faster than the revisit-tolerant pricer.
 
-   A `:subset` mode also exists (bucket on `current`, add `U_a ⊆ U_b` to
+   A `:subset` mode also exists (state = `current` alone, add `U_a ⊆ U_b` to
    dominance). It is a strictly stronger dominance and keeps ~2x fewer live labels,
    yet it is **1.4-6.6x slower** than `:exact` because its coarse `current`-only
-   buckets grow to tens of thousands of entries and the per-insertion scan blows
-   up -- fewer labels do not pay for scanning giant buckets. Retained for research
-   only; measured verdict and numbers in
+   states grow label lists to tens of thousands of entries and the per-insertion
+   scan blows up -- fewer labels do not pay for scanning giant lists. Retained for
+   research only; measured verdict and numbers in
    `notes/2026-07-30_passenger_station_simple_pricing.md`.
 
 # Correctness caveat
@@ -121,8 +121,8 @@ function _make_joint_routing_assignment_station_simple_ages(
 end
 
 """
-Scalar dominance state, copied out of the label so the bucket scan rejects the
-common case without dereferencing `label`/`ages` at all -- same rationale as
+Scalar dominance state, copied out of the label so the state's label-list scan
+rejects the common case without dereferencing `label`/`ages` at all -- same rationale as
 `JointRoutingAssignmentDominanceFilters` (`types.jl`). `visited` and
 `activated_reward_layers` are not carried here (unlike the revisit-tolerant
 pricer's filters): both are already `BitSet`s on the label, compared directly,
@@ -142,11 +142,11 @@ JointRoutingAssignmentStationSimpleDominanceFilters(
     label.reduced_cost, label.time, Int32(label.route_length), Int32(length(ages.age_idx)),
 )
 
-PricingBucketEntry(
+PricingLabelEntry(
     id::JointRoutingAssignmentLabelId,
     label::JointRoutingAssignmentStationSimpleLabel,
     ages::JointRoutingAssignmentStationSimpleAges,
-) = PricingBucketEntry(JointRoutingAssignmentStationSimpleDominanceFilters(label, ages), id, label, ages)
+) = PricingLabelEntry(JointRoutingAssignmentStationSimpleDominanceFilters(label, ages), id, label, ages)
 
 """Dominance-rule marker for the passenger station-simple pricer; no switches
 yet, unlike the revisit-tolerant pricer's four (elementary routes have no
@@ -157,14 +157,14 @@ struct JointRoutingAssignmentStationSimpleDominanceRules <: AbstractPricingDomin
     _dominates_joint_routing_assignment_station_simple_label(a, b, abs, bbs, layer_weight)
 
 `a` dominates `b`: every completion of `b` has a counterpart from `a` at least as
-good. Callers only ever compare labels drawn from the same `current` bucket, so
+good. Callers only ever compare labels drawn from the same `current` state, so
 `a.current == b.current` is re-checked only as a cheap guard.
 
 The visited resource is a **subset** test, `U_a ⊆ U_b`, not equality. For an
 elementary route `visited` is the set of forbidden future stations, so if `a` has
 visited a subset of what `b` has, every station `b` may still visit `a` may visit
 too -- hence every completion feasible for `b` is feasible from `a`. This is
-strictly stronger than the exact-`(current, visited)` bucketing it replaced: a
+strictly stronger than the exact `(current, visited)` state it replaced: a
 "lean" label (visited a subset) can now kill a "wandered" one that forbade itself
 extra stations for no gain, which the exact rule structurally could not, and which
 was measured letting the live-label population balloon 3-6x (see the note). Because
@@ -179,10 +179,10 @@ revisit-tolerant pricer's:
   - every live station age in `a` is no larger than `b`'s (sparse merge walk).
 
 Conditions are ordered cheapest-and-likeliest-to-reject first, exactly as in
-`_pricing_dominates_in_bucket` (passenger method): scalars, then the word-wise
+`_pricing_dominates_at_state` (passenger method): scalars, then the word-wise
 `visited` subset, then the `O(#live)` age walk, and only last the reward-layer
 compensation, which is the one test that has to sum weights. `a.current ==
-b.current` is *not* checked -- both bucket signatures (`current` under `:subset`,
+b.current` is *not* checked -- both states (`current` under `:subset`,
 `(current, visited)` under `:exact`) already include it, so it was a
 guaranteed-true compare in the hot loop.
 """
@@ -193,7 +193,7 @@ function _dominates_joint_routing_assignment_station_simple_label(
     b_ages::JointRoutingAssignmentStationSimpleAges,
     layer_weight::Vector{Float64},
 )::Bool
-    return _pricing_dominates_in_bucket(
+    return _pricing_dominates_at_state(
         JointRoutingAssignmentStationSimpleDominanceFilters(a, a_ages), a, a_ages,
         JointRoutingAssignmentStationSimpleDominanceFilters(b, b_ages), b, b_ages,
         layer_weight, JointRoutingAssignmentStationSimpleDominanceRules(),
@@ -201,14 +201,14 @@ function _dominates_joint_routing_assignment_station_simple_label(
 end
 
 """
-The form the bucket scan calls: the scalars come from
+The form the state's label-list scan calls: the scalars come from
 `JointRoutingAssignmentStationSimpleDominanceFilters`, so an entry rejected on
 time, live-clock count or reduced cost is never dereferenced into its label at
 all. `visited`/`activated_reward_layers` are read off `a`/`b` directly (see
 `JointRoutingAssignmentStationSimpleDominanceFilters`'s docstring for why they
 are not mirrored into the filters/ages, unlike the revisit-tolerant pricer).
 """
-@inline function _pricing_dominates_in_bucket(
+@inline function _pricing_dominates_at_state(
     af::JointRoutingAssignmentStationSimpleDominanceFilters,
     a::JointRoutingAssignmentStationSimpleLabel, a_ages::JointRoutingAssignmentStationSimpleAges,
     bf::JointRoutingAssignmentStationSimpleDominanceFilters,
@@ -363,9 +363,9 @@ end
 
 """
 Context for the elementary-route passenger free-assignment search: bundles
-`pricing_data`, `dominance_mode` (`:exact` buckets on `(current, visited)`;
-`:subset` buckets on `current` alone, pairing it with a shared `empty_visited`
-so both modes share one concrete bucket-key type), the once-built `dominates`
+`pricing_data`, `dominance_mode` (`:exact` states on `(current, visited)`;
+`:subset` states on `current` alone, pairing it with a shared `empty_visited`
+so both modes share one concrete state type), the once-built `dominates`
 closure, and the `search_index`/`bound_workspace` the shared remaining-reward
 bound needs. Plugs into `_run_pricing_label_search` (`engine.jl`) the same way
 `JointRoutingAssignmentSearchContext` does (`exact.jl`). Not currently
@@ -392,7 +392,7 @@ function JointRoutingAssignmentStationSimpleSearchContext(
     dominance_mode in (:subset, :exact) ||
         throw(ArgumentError("dominance_mode must be :subset or :exact, got $(dominance_mode)"))
     rules = JointRoutingAssignmentStationSimpleDominanceRules()
-    dominates(x::PricingBucketEntry, y::PricingBucketEntry) = _pricing_dominates_in_bucket(
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
         x.filters, x.label, x.bitsets, y.filters, y.label, y.bitsets, pricing_data.layer_weight, rules,
     )
     n_nodes = length(pricing_data.nodes)
@@ -409,9 +409,9 @@ _pricing_initial_labels(ctx::JointRoutingAssignmentStationSimpleSearchContext) =
 _pricing_make_bitsets(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel) =
     _make_joint_routing_assignment_station_simple_ages(label, ctx.node_index)
 
-# `:subset` buckets on `current` alone; pairing it with the shared `empty_visited`
+# `:subset` states on `current` alone; pairing it with the shared `empty_visited`
 # keeps a single concrete key type for both modes.
-_pricing_bucket_signature(
+_pricing_state(
     ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel, ::JointRoutingAssignmentStationSimpleAges,
 ) = ctx.dominance_mode === :exact ? (label.current, label.visited) : (label.current, ctx.empty_visited)
 

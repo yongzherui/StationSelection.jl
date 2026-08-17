@@ -36,11 +36,11 @@ include("label_setting/utils.jl")
 include("label_setting/types.jl")
 include("label_setting/engine.jl")
 include("label_setting/round.jl")
-include("label_setting/aggregate_od_route/types.jl")
-include("label_setting/aggregate_od_route/data.jl")
-include("label_setting/aggregate_od_route/labels.jl")
-include("label_setting/aggregate_od_route/exact.jl")
-include("label_setting/aggregate_od_route/station_simple.jl")
+include("label_setting/aggregate_od_route/base/types.jl")
+include("label_setting/aggregate_od_route/base/data.jl")
+include("label_setting/aggregate_od_route/base/labels.jl")
+include("label_setting/aggregate_od_route/base/exact.jl")
+include("label_setting/aggregate_od_route/base/station_simple.jl")
 # generic_runner.jl, column_generation.jl, duals.jl, logging.jl, and dispatch.jl (the old
 # AggregateODRouteCG engine's outer loop, master-facing dual extraction, CG logging, and
 # CG-algorithm dispatch choke point) were all removed -- none of them were reachable from
@@ -49,7 +49,7 @@ include("label_setting/aggregate_od_route/station_simple.jl")
 # this) or from PassengerFreeAssignmentCG (AggregateODRouteJointRoutingAssignmentFormulation
 # + CGSolver), which goes through opt/solvers/cg_solver.jl's generic outer loop with its own
 # joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl hooks instead.
-include("label_setting/aggregate_od_route/enumeration.jl")
+include("label_setting/aggregate_od_route/base/enumeration.jl")
 # Shared by both AggregateODRouteBaseFormulation build_model methods below (DirectMIPSolver
 # and CGSolver) -- see its own module docstring for why theta creation itself stays outside
 # it.
@@ -80,6 +80,6 @@ include("optimize/aggregate_od_route/column_generation/dispatch.jl")
 # were removed entirely -- see this file's top comment for what's kept as a reminder
 # instead. Plain exhaustive enumeration (`enumerate_aggregate_od_route_columns`,
 # `AggregateODRouteBaseFormulation`'s `θ` pool) was recovered and adapted -- see
-# `label_setting/aggregate_od_route/enumeration.jl`, included above (it's a degenerate
+# `label_setting/aggregate_od_route/base/enumeration.jl`, included above (it's a degenerate
 # label-setting run: uniform rewards, no dominance pruning, so it lives alongside the
 # search machinery it reuses rather than under `optimize/`).

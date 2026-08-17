@@ -21,6 +21,7 @@ is fine. `WALK_ONLY_PAIR` is excluded: a route can't certify it (see
 `add_walk_variables!`'s docstring). Only `rho > 0` survives
 (the pricer's reward-layer preprocessing drops the rest anyway).
 """
+# ── candidate extraction from RMP duals ─────────────────────────────────────
 function joint_routing_assignment_pricing_candidates(
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
@@ -50,6 +51,7 @@ function joint_routing_assignment_pricing_candidates(
     return candidates
 end
 
+# ── formulation-level hooks (units / threading / column ids / unit context / merge) ──
 _pricing_units(::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, m::JuMP.Model) =
     1:n_scenarios(m[:joint_routing_assignment_data])
 

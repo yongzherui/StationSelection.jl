@@ -134,7 +134,7 @@ end
 
 """
 Every piece of label state the dominance test can check with a scalar comparison,
-in one `isbits` value so it can be *stored inline* in a bucket entry and passed by
+in one `isbits` value so it can be *stored inline* in a label entry and passed by
 value. `Int32` for the two counts is what keeps this at 40 bytes, and the entry
 that embeds it inside one 64-byte cache line.
 """
@@ -158,16 +158,17 @@ end
 
 """
 Everything the dominance scan needs about one live label, stored *in* the
-dominance bucket -- `PricingBucketEntry{JointRoutingAssignmentDominanceFilters,
+state's label list -- `PricingLabelEntry{JointRoutingAssignmentDominanceFilters,
 JointRoutingAssignmentPricingLabel, JointRoutingAssignmentLabelBitsets}`
 (`pricing/types.jl`).
 
 The scan is the hot loop of the whole search -- measured at ~90% of the
-revisit-tolerant pricer's wall time -- and it visits every entry of the bucket on
-every insertion. Keeping only a label id here and looking the label and its
-bitsets up in two side `Dict`s cost two hash probes per entry, which dominated the
-actual dominance predicate (mostly short-circuiting scalar comparisons). Inlining
-them makes the scan a straight walk over the sorted container.
+revisit-tolerant pricer's wall time -- and it visits every entry of the state's
+label list on every insertion. Keeping only a label id here and looking the
+label and its bitsets up in two side `Dict`s cost two hash probes per entry,
+which dominated the actual dominance predicate (mostly short-circuiting scalar
+comparisons). Inlining them makes the scan a straight walk over the sorted
+container.
 
 MEASURED: 1.1-1.15x, with labels and `max_live` bit-identical (it is a pure
 data-layout change). Less than the two-hash-probe estimate predicted, and that
@@ -189,9 +190,9 @@ over contiguous memory; only entries that survive every scalar filter dereferenc
 `label` is never touched on the scan path at all. The entry grows from 24 to 64
 bytes -- one cache line, and cheaper than the two chases it removes.
 
-# The bucket container
+# The per-state label list
 
-A dominance bucket (`PricingDominanceBucket{...}`, same three type parameters)
+A state's label list (`PricingStateLabels{...}`, same three type parameters)
 is a **`Vector`, not a `SortedDict`**, kept sorted by
 `(reduced_cost, time, route_length, id)` -- see `_pricing_entry_order_key`. A
 balanced search tree makes each step a pointer chase into unrelated cache
@@ -199,19 +200,19 @@ lines; measured cost was ~76ns per entry, far more than the
 mostly-short-circuiting comparisons in the dominance predicate could account
 for. A sorted `Vector` walks contiguous memory instead.
 
-The trade is that insertion and eviction become `O(bucket)` memmoves rather than
-`O(log bucket)` tree surgery -- but there is exactly one insertion per label
-against a full-bucket scan, and a memmove of a few thousand small structs runs at
-memory bandwidth, so it is not close.
+The trade is that insertion and eviction become `O(list size)` memmoves rather
+than `O(log list size)` tree surgery -- but there is exactly one insertion per
+label against a full list scan, and a memmove of a few thousand small structs
+runs at memory bandwidth, so it is not close.
 
 MEASURED: 1.3-1.5x, again with labels and `max_live` bit-identical. See
 `notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
 """
-PricingBucketEntry(
+PricingLabelEntry(
     id::JointRoutingAssignmentLabelId,
     label::JointRoutingAssignmentPricingLabel,
     bitsets::JointRoutingAssignmentLabelBitsets,
-) = PricingBucketEntry(JointRoutingAssignmentDominanceFilters(label, bitsets), id, label, bitsets)
+) = PricingLabelEntry(JointRoutingAssignmentDominanceFilters(label, bitsets), id, label, bitsets)
 
 """
     JointRoutingAssignmentDominanceRules{BoundedStops, Compensated, Instrumented}
@@ -220,7 +221,7 @@ The three dominance switches, carried in the *type* rather than as `Bool`
 arguments.
 
 They are constants for a whole pricing call, but as an ordinary argument
-`BoundedStops` costs a branch per scanned bucket entry, and in the default
+`BoundedStops` costs a branch per scanned label entry, and in the default
 configuration it is `false`, so the branch is paid only to skip the code it
 guards. Encoding it as a type parameter lets the compiler delete the disabled
 condition outright and specialize the reward-layer compensation on
@@ -228,10 +229,10 @@ condition outright and specialize the reward-layer compensation on
 
 The cost is one dynamic dispatch where the rules object reaches the `dominates`
 closure each search builds once and hands to the shared
-`_add_pricing_label_to_bucket!` (`pricing/types.jl`) -- once per *label
-insertion*, against a bucket scan that is hundreds to thousands of entries long,
-so it is not measurable. Do not push the object any deeper (e.g. per scanned
-entry) expecting the same to hold.
+`_add_pricing_label_to_state!` (`pricing/types.jl`) -- once per *label
+insertion*, against a label-list scan that is hundreds to thousands of entries
+long, so it is not measurable. Do not push the object any deeper (e.g. per
+scanned entry) expecting the same to hold.
 """
 struct JointRoutingAssignmentDominanceRules{BoundedStops, Compensated, Instrumented} <: AbstractPricingDominanceRules end
 

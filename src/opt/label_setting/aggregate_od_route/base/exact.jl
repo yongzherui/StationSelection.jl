@@ -54,8 +54,8 @@ function AggregateODRouteSearchContext(
             (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
     end
     rules = AggregateODRouteDominanceRules{pricing_data.bounded_max_stops}()
-    dominates(x::PricingBucketEntry, y::PricingBucketEntry) =
-        _pricing_dominates_in_bucket(x.filters, x.bitsets, y.filters, y.bitsets, rules)
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
+        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, rules)
     positive_pair_rewards = Float64[
         max(0.0, get(duals.sigma, pair, 0.0)) for pair in pricing_data.active_pairs
     ]
@@ -72,8 +72,8 @@ _pricing_initial_labels(ctx::AggregateODRouteSearchContext) =
 _pricing_make_bitsets(ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel) =
     _make_aggregate_od_route_label_bitsets(label, ctx.pair_index, ctx.n_pairs, ctx.node_index, ctx.n_nodes)
 
-_pricing_bucket_signature(ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel, ::AggregateODRouteLabelBitsets) =
-    _aggregate_od_route_dominance_signature(label)
+_pricing_state(ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel, ::AggregateODRouteLabelBitsets) =
+    _aggregate_od_route_state(label)
 
 function _pricing_label_priority(
     ctx::AggregateODRouteSearchContext, label::AggregateODRoutePricingLabel, label_bs::AggregateODRouteLabelBitsets,

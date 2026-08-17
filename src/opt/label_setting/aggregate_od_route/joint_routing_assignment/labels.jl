@@ -39,8 +39,8 @@ route replay) -- not tracked while labels are being extended.
 Profiled 2026-07-30: **the dominance scan is ~85-90% of wall time.** Everything
 else -- the remaining-reward bound, candidate generation, label extension, the
 priority queue -- is together under 2%. Optimizations that do not either shrink
-the live-label population or make the bucket walk cheaper have consistently
-measured as no-ops here, however sound they look on paper.
+the live-label population or make the per-state label-list walk cheaper have
+consistently measured as no-ops here, however sound they look on paper.
 
 Scoreboard of what was tried, each measured on its own
 (`scripts/bench_joint_routing_assignment_labels.jl`; full write-up in
@@ -49,8 +49,8 @@ Scoreboard of what was tried, each measured on its own
 | change | result |
 | --- | --- |
 | compensated layer dominance (this file) | **2.5-3.9x** -- halves `max_live` |
-| `Vector` dominance buckets (`types.jl`) | **1.3-1.5x** |
-| label inlined into bucket entry (`types.jl`) | **1.1-1.15x** |
+| `Vector` per-state label lists (`types.jl`) | **1.3-1.5x** |
+| label inlined into label entry (`types.jl`) | **1.1-1.15x** |
 | reuse popped priority (`exact.jl`) | no effect; the bound is ~0.6% of runtime |
 | travel-discounted reward bound (`exact.jl`) | no effect at cold-start duals |
 | station-budget cap at `l` (removed 2026-08-10) | measured off by default -- pricing-neutral to 1.7x slower, LP bound identical to 10 decimals at n=10/n=15; removed rather than kept dark |
@@ -64,10 +64,10 @@ winning route. What it changed was the cost of the scan:
 
   - conditions reordered cheapest-and-likeliest-first, with a `UInt64` live-clock
     support mask added in front of the station-age merge walk
-    (`_pricing_dominates_in_bucket`);
+    (`_pricing_dominates_at_state`);
   - the reward-layer compensation fused into one word-wise pass instead of
     `issubset` followed by an element walk (`_joint_routing_assignment_compensation`);
-  - the scalar dominance state inlined into the bucket entry so a rejected entry
+  - the scalar dominance state inlined into the label entry so a rejected entry
     is never dereferenced (`JointRoutingAssignmentDominanceFilters` in `types.jl`);
   - the dominance switches moved into the type, so disabled conditions compile
     away (`JointRoutingAssignmentDominanceRules`);
@@ -86,6 +86,7 @@ Any exact change must leave the benchmark's `best_rc` bit-identical.
 export initial_joint_routing_assignment_pricing_labels
 export extend_joint_routing_assignment_pricing_label
 
+# ── label seeding ────────────────────────────────────────────────────────────
 function initial_joint_routing_assignment_pricing_labels(
     pricing_data::JointRoutingAssignmentPricingData,
 )::Vector{JointRoutingAssignmentPricingLabel}
@@ -112,6 +113,7 @@ function initial_joint_routing_assignment_pricing_labels(
     return labels
 end
 
+# ── candidate next-nodes ─────────────────────────────────────────────────────
 # `label` is untyped so both the revisit-tolerant and the elementary
 # (`station_simple.jl`) pricers can share this: it reads only `station_age`,
 # `current`, and `activated_reward_layers`, which both label types expose. Julia
@@ -181,6 +183,7 @@ function _joint_routing_assignment_candidate_next_nodes(
     return sort!(collect(candidate_nodes))
 end
 
+# ── label extension ──────────────────────────────────────────────────────────
 """
 Extension always produces exactly one child (an unlimited-capacity route has
 nothing to branch on at a stop), so the search calls
@@ -252,7 +255,8 @@ function _extend_joint_routing_assignment_pricing_label(
     )
 end
 
-_joint_routing_assignment_dominance_signature(label::JointRoutingAssignmentPricingLabel) = label.current
+# ── state key / order key ────────────────────────────────────────────────────
+_joint_routing_assignment_state(label::JointRoutingAssignmentPricingLabel) = label.current
 
 """
 The cheap bookkeeping signature used by the label search itself (dedup within
@@ -278,6 +282,7 @@ function _joint_routing_assignment_label_order_key(
 end
 
 
+# ── bitsets construction (hot-path dominance mirror) ─────────────────────────
 """
 Build the hot-path mirror of `label`'s pruning state.
 
@@ -295,8 +300,9 @@ whole label population. Two things it deliberately does *not* do:
     builds a label's set with the non-mutating `union`/`setdiff`, and the reward
     bound only ever reads it as a `union!` *source* into its own workspace. The
     mirror can therefore alias it. (If a future change makes any label's layer set
-    mutable in place, this alias is the thing that breaks: the bucket would then
-    be dominance-testing against a set that has since changed underneath it.)
+    mutable in place, this alias is the thing that breaks: the state's label
+    list would then be dominance-testing against a set that has since changed
+    underneath it.)
 """
 function _make_joint_routing_assignment_label_bitsets(
     label::JointRoutingAssignmentPricingLabel,
@@ -309,6 +315,7 @@ function _make_joint_routing_assignment_label_bitsets(
     )
 end
 
+# ── reward-layer compensation (dominance sub-test) ───────────────────────────
 """
 Weight of the layers `a` has activated that `b` has not.
 
@@ -385,6 +392,7 @@ function _joint_routing_assignment_compensation(
     return total
 end
 
+# ── dominance predicates ──────────────────────────────────────────────────────
 """
     _dominates_joint_routing_assignment_label(a, b, layer_weight, bounded_max_stops)
 
@@ -410,13 +418,14 @@ overtake the first.
 Requiring `A_a ⊆ A_b` (the previous rule) is the special case `w(A_a ∖ A_b) = 0`,
 so this only ever adds dominations. It never weakens the `rc_a <= rc_b`
 precondition either, since the compensation is non-negative -- which is what
-keeps the shared `_add_pricing_label_to_bucket!`'s reduced-cost-ordered
+keeps the shared `_add_pricing_label_to_state!`'s reduced-cost-ordered
 scan valid.
 
 MEASURED: **the single biggest win in this pricer, 2.5-3.9x.** `max_live` roughly
 halves (58,260 -> 21,917 at n=15/max_stops=6; 117,950 -> 52,461 at n=20), and
-because the dominance scan is linear in bucket size *per insertion*, halving the
-live population quarters the work. The speedup grows with instance size. See
+because the dominance scan is linear in the state's label-list size *per
+insertion*, halving the live population quarters the work. The speedup grows
+with instance size. See
 `notes/2026-07-30_passenger_pricing_label_search_optimizations.md`.
 
 Cost control matters here: the element-wise scan in
@@ -432,7 +441,7 @@ function _dominates_joint_routing_assignment_label(
     bounded_max_stops::Bool,
     compensated_dominance::Bool=true,
 )::Bool
-    _joint_routing_assignment_dominance_signature(a) == _joint_routing_assignment_dominance_signature(b) || return false
+    _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
     budget = b.reduced_cost - a.reduced_cost + 1e-9
@@ -457,8 +466,8 @@ function _dominates_joint_routing_assignment_label(
     bounded_max_stops::Bool,
     compensated_dominance::Bool=true,
 )::Bool
-    _joint_routing_assignment_dominance_signature(a) == _joint_routing_assignment_dominance_signature(b) || return false
-    return _pricing_dominates_in_bucket(
+    _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false
+    return _pricing_dominates_at_state(
         JointRoutingAssignmentDominanceFilters(a, abs), abs,
         JointRoutingAssignmentDominanceFilters(b, bbs), bbs,
         layer_weight,
@@ -468,8 +477,9 @@ function _dominates_joint_routing_assignment_label(
     )
 end
 
+# ── dominance rejection census (diagnostics) ─────────────────────────────────
 """
-Rejection census for `_pricing_dominates_in_bucket` (passenger method), one counter
+Rejection census for `_pricing_dominates_at_state` (passenger method), one counter
 per condition plus one for "dominates".
 
 Only written when the dominance rules carry `Instrumented = true`, which the
@@ -486,18 +496,19 @@ const PFA_DOMINANCE_CONDITIONS = (
 const PFA_DOMINANCE_REJECTIONS = zeros(Int, length(PFA_DOMINANCE_CONDITIONS))
 
 """
-    _pricing_dominates_in_bucket(a..., b..., layer_weight, rules)
+    _pricing_dominates_at_state(a..., b..., layer_weight, rules)
 
-The dominance predicate as the bucket scan calls it: `a` dominates `b`, so `b` can
-be discarded. Scalar state is passed by value (the caller reads it straight out of
-`PricingBucketEntry`, avoiding a chase into the label) and only the
-two `Bitsets` mirrors are passed by reference.
+The dominance predicate as the state's label-list scan calls it: `a` dominates
+`b`, so `b` can be discarded. Scalar state is passed by value (the caller reads
+it straight out of `PricingLabelEntry`, avoiding a chase into the label) and
+only the two `Bitsets` mirrors are passed by reference.
 
-The **signature check is absent on purpose**: buckets are keyed by exactly that
-signature (`label.current`), so every pair the scan ever tests already agrees on
-it, and testing it per entry was a guaranteed-true comparison in the hottest loop
-of the search. The 6-argument method above keeps it, for callers that are not the
-bucket.
+The **state check is absent on purpose**: a state's label list holds only
+labels keyed by exactly that state (`label.current`), so every pair the scan
+ever tests already agrees on it, and testing it per entry was a
+guaranteed-true comparison in the hottest loop of the search. The 6-argument
+method above keeps it, for callers that are not scanning within one state's
+list.
 
 # Condition order
 
@@ -505,8 +516,8 @@ Conditions are ordered by (cost to evaluate) against (how often they reject),
 cheapest-and-likeliest first, so that the expensive tail runs on as few pairs as
 possible:
 
- 1. `time` -- one compare, and a strong discriminator: the bucket is sorted by
-    reduced cost, which correlates only weakly with elapsed time.
+ 1. `time` -- one compare, and a strong discriminator: the state's label list is
+    sorted by reduced cost, which correlates only weakly with elapsed time.
  2. **live-clock support size** -- `|dom(age_a)| >= |dom(age_b)|` is necessary for
     the station-age condition (`dom(age_b) ⊆ dom(age_a)`), and it is two array
     lengths. It used to sit *after* the reward compensation, i.e. the cheapest
@@ -516,12 +527,12 @@ possible:
     it element by element out of two heap arrays (see
     `JointRoutingAssignmentLabelBitsets.age_mask`).
  4. `route_length` -- compiled out entirely unless `max_stops` is bounded.
- 5. `reduced_cost` -- guaranteed non-negative when called from the bucket scan
-    (the walk splits on exactly this), kept because the compensation's early bail
-    is defined in terms of a non-negative budget.
+ 5. `reduced_cost` -- guaranteed non-negative when called from the state's
+    label-list scan (the walk splits on exactly this), kept because the
+    compensation's early bail is defined in terms of a non-negative budget.
  6. **station ages** -- an `O(#live)` merge walk over two sorted `Int32`/`Float64`
     arrays, no allocation, no hashing. Everything above it is scalar and reads
-    only fields the bucket entry carries inline, so a rejected pair never touches
+    only fields the label entry carries inline, so a rejected pair never touches
     the arrays.
  7. **reward-layer compensation** -- the only test that touches the layer bitsets,
     now last. It was previously ahead of the station-age walk, so every pair that
@@ -547,12 +558,12 @@ each condition is the *first* to reject; n=15/ms=6/s=3 and n=20/ms=5/s=3):
 
 So three scalar tests dispose of ~96% of pairs, and the two conditions that touch
 heap data run on under 2%. `reduced_cost` recorded **zero** rejections in 456M
-pairs, because the bucket walk splits on exactly that comparison, so it is
-already guaranteed when this is reached. It is kept as a one-instruction guard
-for the non-bucket caller and because the compensation's early bail is defined
-against a non-negative budget.
+pairs, because the state's label-list walk splits on exactly that comparison,
+so it is already guaranteed when this is reached. It is kept as a
+one-instruction guard for callers outside that walk and because the
+compensation's early bail is defined against a non-negative budget.
 """
-@inline function _pricing_dominates_in_bucket(
+@inline function _pricing_dominates_at_state(
     af::JointRoutingAssignmentDominanceFilters, abs::JointRoutingAssignmentLabelBitsets,
     bf::JointRoutingAssignmentDominanceFilters, bbs::JointRoutingAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
@@ -611,6 +622,7 @@ function joint_routing_assignment_dominance_rejections(; reset::Bool=true)
 end
 
 
+# ── column signature ──────────────────────────────────────────────────────────
 function _joint_routing_assignment_column_signature(assignments)::Tuple{Vararg{Tuple{Int, Int, Int}}}
     return Tuple(sort!(collect(assignments)))
 end

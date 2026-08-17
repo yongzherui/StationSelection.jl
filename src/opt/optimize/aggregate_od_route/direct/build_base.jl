@@ -7,7 +7,7 @@ exhaustively enumerated column pool, built with the generic, reusable
 slack: `aggregate_od_route_validate_feasible_coverage`
 (`data/maps/aggregate_od_route_map.jl`) proves every demand group has a real coverage
 option before any variable is built. Solved directly as one MIP (`DirectMIPSolver`), no
-iterative pricing loop -- see `opt/optimize/aggregate_od_route/enumeration.jl` for how the
+iterative pricing loop -- see `opt/label_setting/aggregate_od_route/base/enumeration.jl` for how the
 `θ` pool is built up front. `y`/`x`/`x_walk`/coverage/station-linking/route-link/objective
 wiring is shared with `CGSolver`'s own build for this formulation via
 `_aggregate_od_route_base_master_core!` (`optimize/aggregate_od_route/base_shared.jl`).

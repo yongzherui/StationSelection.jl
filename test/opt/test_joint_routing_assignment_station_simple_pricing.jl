@@ -264,7 +264,7 @@
     end
 
     @testset "dominance_mode :exact and :subset agree on the priced optimum" begin
-        # Exact-visited buckets more finely and subset-visited prunes more, but both
+        # Exact keys the state more finely and subset prunes more, but both
         # are sound over the same elementary route universe, so the best reduced cost
         # and the set of column signatures must be identical.
         nodes = [1, 2, 3, 4]

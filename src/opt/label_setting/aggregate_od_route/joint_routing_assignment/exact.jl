@@ -10,6 +10,7 @@ cheap reward-layer proxy during search (section 16). `round.jl`'s
 surviving label offered to `_run_pricing_round`'s accept/dedupe test.
 """
 
+# ── remaining-reward bound (drives frontier priority + pop-time pruning) ────
 """
 Admissible bound on the additional *net* gain (reward minus the route
 regularization cost of the travel needed to collect it) still available to
@@ -153,6 +154,7 @@ function _joint_routing_assignment_remaining_reward_bound(
     return best
 end
 
+# ── search context: struct + constructor ────────────────────────────────────
 """
 Context for the revisit-tolerant `JointRoutingAssignmentCG` search: bundles
 `pricing_data`, the once-built `dominates` closure, the precomputed
@@ -202,7 +204,7 @@ function JointRoutingAssignmentSearchContext(
         pricing_data.compensated_dominance,
         dominance_census,
     )
-    dominates(x::PricingBucketEntry, y::PricingBucketEntry) = _pricing_dominates_in_bucket(
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
         x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.layer_weight, dominance_rules,
     )
     return JointRoutingAssignmentSearchContext(
@@ -210,14 +212,15 @@ function JointRoutingAssignmentSearchContext(
     )
 end
 
+# ── context hooks (AbstractPricingSearchContext contract) ───────────────────
 _pricing_initial_labels(ctx::JointRoutingAssignmentSearchContext) =
     initial_joint_routing_assignment_pricing_labels(ctx.pricing_data)
 
 _pricing_make_bitsets(ctx::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel) =
     _make_joint_routing_assignment_label_bitsets(label, ctx.search_index.node_index, ctx.n_nodes)
 
-_pricing_bucket_signature(::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel, ::JointRoutingAssignmentLabelBitsets) =
-    _joint_routing_assignment_dominance_signature(label)
+_pricing_state(::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel, ::JointRoutingAssignmentLabelBitsets) =
+    _joint_routing_assignment_state(label)
 
 function _pricing_label_priority(
     ctx::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel, label_bs::JointRoutingAssignmentLabelBitsets,
@@ -251,6 +254,7 @@ function _pricing_on_label_inserted(ctx::JointRoutingAssignmentSearchContext, la
     return nothing
 end
 
+# ── post-search: route replay → candidate → column → master verification ───
 """
     _replay_joint_routing_assignment_route(route, pricing_data) -> Dict{Int, Tuple{Int,Int,Float64}}
 

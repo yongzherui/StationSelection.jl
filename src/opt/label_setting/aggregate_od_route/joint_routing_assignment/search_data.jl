@@ -6,6 +6,7 @@ this file are implementation details: immutable indexes built once per search
 and mutable scratch buffers reused by the remaining-reward bound.
 """
 
+# ── search index (immutable, built once per search) ─────────────────────────
 struct JointRoutingAssignmentSearchIndex
     node_index::Dict{Int, Int}
     travel_matrix::Matrix{Float64}
@@ -17,6 +18,7 @@ struct JointRoutingAssignmentSearchIndex
     nodes_by_travel::Vector{Vector{Int}}
 end
 
+# ── bound workspace (mutable scratch, reused across the search) ─────────────
 struct JointRoutingAssignmentBoundWorkspace
     layer_scratch::RewardLayerBitset
     node_mask::Vector{RewardLayerBitset}

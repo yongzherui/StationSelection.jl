@@ -34,6 +34,7 @@ they are admitted to the master.
 The retained values are selected at evenly-spaced targets over the passenger's
 observed reward range. `levels == 0` returns a copy without coarsening.
 """
+# ── reward-layer preprocessing: coarsening (optional relaxation) ────────────
 function coarsen_passenger_assignment_rewards(
     candidates::AbstractVector{PassengerAssignmentCandidate},
     levels::Int;
@@ -88,6 +89,7 @@ function coarsen_passenger_assignment_rewards(
     return transformed
 end
 
+# ── small physical-graph / bitset helpers ───────────────────────────────────
 function _joint_routing_assignment_travel(
     pricing_data::JointRoutingAssignmentPricingData, u::Int, v::Int,
 )::Float64
@@ -119,6 +121,7 @@ Reward values are grouped per passenger by tolerance (`1e-9`) rather than exact
 `==`, since two candidates can carry the "same" reward computed along different
 arithmetic paths.
 """
+# ── reward-layer preprocessing: layers from raw candidates ──────────────────
 function _build_passenger_reward_layers(
     candidates::AbstractVector{PassengerAssignmentCandidate};
     tol::Float64=1e-9,
@@ -174,6 +177,7 @@ already folded in the master problem's duals: `ρ_pjk = α_p - γ^O_pj - γ^D_pk
 this constructor's only job is the reward-layer transformation plus grouping
 opportunities by physical endpoint for fast certification.
 """
+# ── pricing-data assembly (build-time, once per scenario) ───────────────────
 function create_joint_routing_assignment_pricing_data(
     scenario::Int,
     nodes::Vector{Int},
@@ -242,6 +246,7 @@ the incremental layers between the label's prior best and the best among
 everything certified here, with no risk of double-crediting the same layer
 under two different opportunities.
 """
+# ── search-time helpers: certify / prune / age-usefulness ───────────────────
 function _certify_joint_routing_assignment_layers_at_node(
     node::Int,
     station_age::Dict{Int, Float64},

@@ -7,7 +7,7 @@ The traversal is deliberately independent of the pricing search orchestration: t
 pricer is optimized for finding negative-reduced-cost columns under a particular dual
 vector, while direct solves need a dual-free route universe. This module does a plain
 bounded depth-first search over the same pricing-label transitions
-(`label_setting/aggregate_od_route/{types,labels}.jl`) -- station-age/wait/detour rules are
+(`label_setting/aggregate_od_route/base/{types,labels}.jl`) -- station-age/wait/detour rules are
 genuine physical feasibility, not reduced-cost pruning -- but applies neither dominance
 nor reduced-cost pruning itself, and uses uniform positive rewards so nothing gets
 pruned. Every label serving at least one active pair is emitted as a candidate column;

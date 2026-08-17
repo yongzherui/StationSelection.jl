@@ -166,7 +166,7 @@ function _extend_aggregate_od_route_pricing_label(
 
 end
 
-_aggregate_od_route_dominance_signature(label::AggregateODRoutePricingLabel) = label.current
+_aggregate_od_route_state(label::AggregateODRoutePricingLabel) = label.current
 
 function _aggregate_od_route_label_order_key(
     label::AggregateODRoutePricingLabel,
@@ -202,15 +202,15 @@ AggregateODRouteDominanceFilters(label::AggregateODRoutePricingLabel, bs::Aggreg
     AggregateODRouteDominanceFilters(label.reduced_cost, label.time, bs.age_mask,
         Int32(label.route_length), Int32(length(bs.age_idx)))
 
-PricingBucketEntry(id::Int, label::AggregateODRoutePricingLabel, bs::AggregateODRouteLabelBitsets) =
-    PricingBucketEntry(AggregateODRouteDominanceFilters(label, bs), id, label, bs)
+PricingLabelEntry(id::Int, label::AggregateODRoutePricingLabel, bs::AggregateODRouteLabelBitsets) =
+    PricingLabelEntry(AggregateODRouteDominanceFilters(label, bs), id, label, bs)
 
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
     b::AggregateODRoutePricingLabel,
     bounded_max_stops::Bool,
 )::Bool
-    _aggregate_od_route_dominance_signature(a) == _aggregate_od_route_dominance_signature(b) || return false
+    _aggregate_od_route_state(a) == _aggregate_od_route_state(b) || return false
     (!bounded_max_stops || a.route_length <= b.route_length) || return false
     a.time <= b.time + 1e-9 || return false
     a.reduced_cost <= b.reduced_cost + 1e-9 || return false
@@ -223,12 +223,12 @@ function _dominates_aggregate_od_route_label(
 end
 
 """
-Bucket-scan-equivalent bitset dominance, expressed by delegating to
-`_pricing_dominates_in_bucket` rather than reimplementing it a third time --
+State-scan-equivalent bitset dominance, expressed by delegating to
+`_pricing_dominates_at_state` rather than reimplementing it a third time --
 matching the convention `joint_routing_assignment/labels.jl`'s twin already
-follows. The signature check stays here (label-level, cheap, and outside what
-`_pricing_dominates_in_bucket` tests, since a bucket scan already guarantees
-it for every pair it's called on)."""
+follows. The state check stays here (label-level, cheap, and outside what
+`_pricing_dominates_at_state` tests, since a state's label-list scan already
+guarantees it for every pair it's called on)."""
 function _dominates_aggregate_od_route_label(
     a::AggregateODRoutePricingLabel,
     b::AggregateODRoutePricingLabel,
@@ -236,15 +236,15 @@ function _dominates_aggregate_od_route_label(
     bbs::AggregateODRouteLabelBitsets,
     bounded_max_stops::Bool,
 )::Bool
-    _aggregate_od_route_dominance_signature(a) == _aggregate_od_route_dominance_signature(b) || return false
-    return _pricing_dominates_in_bucket(
+    _aggregate_od_route_state(a) == _aggregate_od_route_state(b) || return false
+    return _pricing_dominates_at_state(
         AggregateODRouteDominanceFilters(a, abs), abs,
         AggregateODRouteDominanceFilters(b, bbs), bbs,
         AggregateODRouteDominanceRules{bounded_max_stops}(),
     )
 end
 
-@inline function _pricing_dominates_in_bucket(
+@inline function _pricing_dominates_at_state(
     af::AggregateODRouteDominanceFilters, abs::AggregateODRouteLabelBitsets,
     bf::AggregateODRouteDominanceFilters, bbs::AggregateODRouteLabelBitsets,
     ::AggregateODRouteDominanceRules{BoundedStops},
