@@ -1,78 +1,55 @@
 # Optimization Module
 
-This folder contains model definitions, mappings, and the build/run pipeline for
-station selection optimization.
-
-## Models
-
-### TwoStageSingleDetourModel
-
-Two-stage model with optional walking-distance limits.
-
-Constructor:
+This folder implements every station-selection optimization model as a
+**Problem / Formulation / Solver** split (`abstract.jl`):
 
 ```julia
-TwoStageSingleDetourModel(
-    k, l, vehicle_routing_weight, time_window, routing_delay;
-    in_vehicle_time_weight=vehicle_routing_weight,
-    use_walking_distance_limit=false,
-    max_walking_distance=nothing,
-    tight_constraints=true,
-    detour_use_flow_bounds=false
-)
+run_opt(problem::AbstractProblem, formulation::AbstractFormulation, solver::AbstractSolver) =
+    optimize_model(build_model(problem, formulation, solver), solver)
 ```
 
-Behavior:
+- `problems/` — `AbstractProblem` subtypes: instance data + the business decision on top
+  of it. `StationSelectionProblem(data, k; max_walking_distance=300)` is the one live
+  type today.
+- `formulations/` — `AbstractFormulation` subtypes: the mathematical encoding. See
+  "Formulations" below.
+- `solvers/` — `AbstractSolver` subtypes: `DirectMIPSolver`, `CGSolver`, `BendersSolver`
+  (scaffolded, unwired).
+- `optimize/` — the actual `build_model(problem, formulation, solver)` methods, one per
+  combination that's actually supported.
+- `label_setting/` — the pricing/column-enumeration engine the two `AggregateODRoute`
+  formulations sit on (route enumeration for `DirectMIPSolver`, pricing rounds for
+  `CGSolver`).
+- `variables/`, `constraints/`, `objectives/` — shared building-block functions each
+  `build_model` composes.
 
-- If `use_walking_distance_limit=false`, dense assignment variables are created.
-- If `use_walking_distance_limit=true`, a walking limit is enforced and sparse
-  assignment variables are used based on valid (j,k) pairs.
-- `max_walking_distance` is compared against walking costs from
-  `compute_station_pairwise_costs`, so its unit is seconds when those default
-  costs are used.
-- If `tight_constraints=false`, detour constraints use a single combined inequality
-  instead of two tighter edge constraints.
-- If `detour_use_flow_bounds=true`, detour bounds use flow variables `f` instead of
-  summed assignment variables `x` (requires flow upper bounds).
+See `StationSelection.jl/CLAUDE.md` (package root) for the full model/parameter/
+constraint/objective reference. This file only covers the build/run API shape.
 
-### ClusteringTwoStageODModel
+## Formulations
 
-Two-stage clustering model with optional walking limits and variable reduction.
+| Formulation | Pairs with (solver) | Two-stage (y/z)? |
+| --- | --- | --- |
+| `ClusteringBaseFormulation` | `DirectMIPSolver` | No — single stage |
+| `ClusteringTwoStageFormulation` | `DirectMIPSolver` | Yes |
+| `ClusteringTwoStageODFormulation` | `DirectMIPSolver` | Yes |
+| `ClusteringTwoStageODFlowRegularizerFormulation` | `DirectMIPSolver` | Yes |
+| `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | No — build only, no per-scenario activation |
+| `AggregateODRouteJointRoutingAssignmentFormulation` | `CGSolver` | No — build only |
 
-Constructor:
-
-```julia
-ClusteringTwoStageODModel(
-    k, l;
-    in_vehicle_time_weight=1.0,
-    use_walking_distance_limit=false,
-    max_walking_distance=nothing,
-    variable_reduction=true,
-    tight_constraints=true
-)
-```
-
-Behavior:
-
-- When `use_walking_distance_limit=true` and `variable_reduction=true`, sparse
-  assignment variables are used.
-- When `use_walking_distance_limit=true` and `variable_reduction=false`, dense
-  assignment variables are used and walking limits are enforced via constraints.
-- `max_walking_distance` uses the same units as the walking-cost matrix; with the
-  default Haversine-based costs, that means seconds.
-- If `tight_constraints=false`, assignment-to-active uses a single combined inequality
-  instead of two tighter station constraints.
-
-### ClusteringBaseModel
-
-Single-scenario clustering baseline (k-medoids).
+Construct a formulation with its own keyword arguments (e.g.
+`ClusteringTwoStageODFormulation(l; in_vehicle_time_weight=1.0)`,
+`AggregateODRouteBaseFormulation(; route_regularization_weight=1.0, walk_cost_weight=1.0,
+repositioning_time=20.0, max_wait_time=Inf, detour_factor=1.5, max_stops=nothing)`) — see
+each formulation's own docstring in `formulations/` for the authoritative field list and
+defaults.
 
 ## Build/Run API
 
 ### build_model
 
 ```julia
-build_result = build_model(model, data; optimizer_env=nothing)
+build_result = build_model(problem, formulation, solver)
 ```
 
 `BuildResult` fields:
@@ -80,13 +57,13 @@ build_result = build_model(model, data; optimizer_env=nothing)
 - `model`: JuMP.Model
 - `mapping`: AbstractStationSelectionMap
 - `detour_combos`: DetourComboData or `nothing`
-- `counts`: ModelCounts (always populated)
+- `counts`: ModelCounts or `nothing`
 - `metadata`: Dict
 
 ### run_opt
 
 ```julia
-opt_result = run_opt(model, data; silent=true, show_counts=false)
+opt_result = run_opt(problem, formulation, solver)
 ```
 
 `OptResult` fields:
@@ -101,3 +78,4 @@ opt_result = run_opt(model, data; silent=true, show_counts=false)
 - `counts`
 - `warm_start_solution`
 - `metadata`
+- `duals` (`nothing` outside Benders dual-problem results)

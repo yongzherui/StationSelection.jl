@@ -20,10 +20,11 @@ using StationSelection
 
 - **Data Loading**: Read and preprocess candidate stations and customer requests
 - **Coordinate Transformation**: Convert between BD-09, GCJ-02, and WGS84 coordinate systems
-- **Optimization Models**:
-  - Two-stage single detour model (optional walking limit)
-  - Two-stage clustering model with OD assignments (optional walking limit + variable reduction)
-  - Base clustering (k-medoids)
+- **Optimization**: a Problem/Formulation/Solver split (`opt/abstract.jl`) — six live
+  formulations spanning single- and two-stage clustering (k-medoids, OD assignment,
+  optional flow regularization) and aggregate-OD route models (direct MIP or column
+  generation). See `StationSelection.jl/CLAUDE.md` or `src/opt/README.md` for the full
+  reference.
 
 ## Usage
 
@@ -47,17 +48,13 @@ data = create_station_selection_data(
     scenarios=scenarios
 )
 
-# Choose a model
-model = TwoStageSingleDetourModel(
-    5, 10, 1.0, 120.0, 900.0;
-    in_vehicle_time_weight=1.0,
-    use_walking_distance_limit=true,
-    max_walking_distance=800.0,  # seconds
-    detour_use_flow_bounds=false
-)
+# Choose a problem + formulation + solver
+problem = StationSelectionProblem(data, 10; max_walking_distance=800.0)  # k=10 stations, seconds
+formulation = ClusteringTwoStageODFormulation(5; in_vehicle_time_weight=1.0)  # l=5 active/scenario
+solver = DirectMIPSolver(config=SolverOptions(silent=true))
 
 # Run optimization
-result = run_opt(model, data; silent=true, show_counts=true)
+result = run_opt(problem, formulation, solver)
 
 # Access results (OptResult)
 println(result.termination_status)
@@ -69,10 +66,10 @@ export_results(result, "output_dir"; station_df=nothing)
 
 ### Key return types
 
-- `build_model(model, data; ...) -> BuildResult`
-- `run_opt(model, data; ...) -> OptResult`
+- `build_model(problem, formulation, solver) -> BuildResult`
+- `run_opt(problem, formulation, solver) -> OptResult`
 
-See `src/opt/README.md` for details on models and flags.
+See `src/opt/README.md` for details on formulations and flags.
 
 ## Package Structure
 
