@@ -19,7 +19,7 @@
             bounded_max_stops=true,
             compensated_dominance=true,
         )
-        return AggregateODRoutePricingData(
+        return RouteCoveringPricingData(
             scenario,
             [1, 2, 3, 4],
             line_travel_cost(4),
@@ -53,8 +53,8 @@
 
     @testset "initial labels remember pickup station age" begin
         pricing_data = line_pricing_data()
-        duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
-        initial_1 = label_at_current(initial_aggregate_od_route_pricing_labels(pricing_data, duals), 1)
+        duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
+        initial_1 = label_at_current(initial_route_covering_pricing_labels(pricing_data, duals), 1)
 
         @test isempty(initial_1.served_pairs)
         @test initial_1.station_age == Dict(1 => 0.0)
@@ -62,7 +62,7 @@
     end
 
     @testset "pickup eligibility ends at max_wait_time" begin
-        duals = AggregateODRoutePricingDuals(Dict((2, 4) => 10.0))
+        duals = RouteCoveringPricingDuals(Dict((2, 4) => 10.0))
 
         at_cutoff = line_pricing_data(
             active_pairs=[(2, 4)],
@@ -70,13 +70,13 @@
             detour_factor=2.0,
             max_stops=3,
         )
-        initial_1 = AggregateODRoutePricingLabel(
+        initial_1 = RouteCoveringPricingLabel(
             1, [1], 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
         )
-        pickup_at_cutoff = only(extend_aggregate_od_route_pricing_label(initial_1, 2, at_cutoff, duals))
+        pickup_at_cutoff = only(extend_route_covering_pricing_label(initial_1, 2, at_cutoff, duals))
         @test pickup_at_cutoff.time == 1.0
         @test pickup_at_cutoff.station_age[2] == 0.0
-        served_at_cutoff = only(extend_aggregate_od_route_pricing_label(pickup_at_cutoff, 4, at_cutoff, duals))
+        served_at_cutoff = only(extend_route_covering_pricing_label(pickup_at_cutoff, 4, at_cutoff, duals))
         @test (2, 4) in served_at_cutoff.served_pairs
 
         after_cutoff = line_pricing_data(
@@ -85,21 +85,21 @@
             detour_factor=2.0,
             max_stops=3,
         )
-        initial_1_late = AggregateODRoutePricingLabel(
+        initial_1_late = RouteCoveringPricingLabel(
             1, [1], 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
         )
-        late_visit = only(extend_aggregate_od_route_pricing_label(initial_1_late, 2, after_cutoff, duals))
+        late_visit = only(extend_route_covering_pricing_label(initial_1_late, 2, after_cutoff, duals))
         @test late_visit.time == 1.0
         @test !haskey(late_visit.station_age, 2)
-        not_served = only(extend_aggregate_od_route_pricing_label(late_visit, 4, after_cutoff, duals))
+        not_served = only(extend_route_covering_pricing_label(late_visit, 4, after_cutoff, duals))
         @test (2, 4) ∉ not_served.served_pairs
     end
 
     @testset "extension certifies destination visits and updates reduced cost" begin
         pricing_data = line_pricing_data()
-        duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
-        initial_1 = label_at_current(initial_aggregate_od_route_pricing_labels(pricing_data, duals), 1)
-        child_3 = only(extend_aggregate_od_route_pricing_label(initial_1, 3, pricing_data, duals))
+        duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
+        initial_1 = label_at_current(initial_route_covering_pricing_labels(pricing_data, duals), 1)
+        child_3 = only(extend_route_covering_pricing_label(initial_1, 3, pricing_data, duals))
 
         @test child_3.current == 3
         @test child_3.route == [1, 3]
@@ -111,16 +111,16 @@
 
     @testset "expired opportunities are pruned before certification" begin
         pricing_data = line_pricing_data(detour_factor=1.0)
-        duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
-        initial_1 = label_at_current(initial_aggregate_od_route_pricing_labels(pricing_data, duals), 1)
-        expired_child = only(extend_aggregate_od_route_pricing_label(initial_1, 4, pricing_data, duals))
+        duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
+        initial_1 = label_at_current(initial_route_covering_pricing_labels(pricing_data, duals), 1)
+        expired_child = only(extend_route_covering_pricing_label(initial_1, 4, pricing_data, duals))
 
         @test (1, 3) ∉ expired_child.served_pairs
         @test !haskey(expired_child.station_age, 1)
     end
 
     @testset "dominance respects time reduced cost served and station ages" begin
-        good = AggregateODRoutePricingLabel(
+        good = RouteCoveringPricingLabel(
             2,
             [2],
             1.0,
@@ -130,7 +130,7 @@
             1.0,
             1,
         )
-        worse = AggregateODRoutePricingLabel(
+        worse = RouteCoveringPricingLabel(
             2,
             [2],
             2.0,
@@ -140,7 +140,7 @@
             2.0,
             1,
         )
-        different_node = AggregateODRoutePricingLabel(
+        different_node = RouteCoveringPricingLabel(
             3,
             [3],
             2.0,
@@ -150,7 +150,7 @@
             2.0,
             1,
         )
-        longer_but_otherwise_better = AggregateODRoutePricingLabel(
+        longer_but_otherwise_better = RouteCoveringPricingLabel(
             2,
             [1, 2],
             0.5,
@@ -161,67 +161,67 @@
             2,
         )
 
-        @test StationSelection._dominates_aggregate_od_route_label(good, worse, true)
-        @test !StationSelection._dominates_aggregate_od_route_label(worse, good, true)
-        @test !StationSelection._dominates_aggregate_od_route_label(good, different_node, true)
-        @test !StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, true)
-        @test StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, false)
+        @test StationSelection._dominates_route_covering_label(good, worse, true)
+        @test !StationSelection._dominates_route_covering_label(worse, good, true)
+        @test !StationSelection._dominates_route_covering_label(good, different_node, true)
+        @test !StationSelection._dominates_route_covering_label(longer_but_otherwise_better, worse, true)
+        @test StationSelection._dominates_route_covering_label(longer_but_otherwise_better, worse, false)
 
         pair_index = Dict((1, 3) => 1, (2, 4) => 2)
         node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
-        good_bs = StationSelection._make_aggregate_od_route_label_bitsets(good, pair_index, 2, node_index, 4)
-        worse_bs = StationSelection._make_aggregate_od_route_label_bitsets(worse, pair_index, 2, node_index, 4)
-        longer_bs = StationSelection._make_aggregate_od_route_label_bitsets(longer_but_otherwise_better, pair_index, 2, node_index, 4)
-        @test StationSelection._dominates_aggregate_od_route_label(good, worse, good_bs, worse_bs, true)
-        @test !StationSelection._dominates_aggregate_od_route_label(worse, good, worse_bs, good_bs, true)
-        @test !StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, true)
-        @test StationSelection._dominates_aggregate_od_route_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, false)
+        good_bs = StationSelection._make_route_covering_label_bitsets(good, pair_index, 2, node_index, 4)
+        worse_bs = StationSelection._make_route_covering_label_bitsets(worse, pair_index, 2, node_index, 4)
+        longer_bs = StationSelection._make_route_covering_label_bitsets(longer_but_otherwise_better, pair_index, 2, node_index, 4)
+        @test StationSelection._dominates_route_covering_label(good, worse, good_bs, worse_bs, true)
+        @test !StationSelection._dominates_route_covering_label(worse, good, worse_bs, good_bs, true)
+        @test !StationSelection._dominates_route_covering_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, true)
+        @test StationSelection._dominates_route_covering_label(longer_but_otherwise_better, worse, longer_bs, worse_bs, false)
     end
 
     @testset "compensated dominance allows extra served pairs within reduced-cost budget" begin
-        within_budget = AggregateODRoutePricingLabel(
+        within_budget = RouteCoveringPricingLabel(
             2, [2], 1.0, Dict(2 => 1.0), Set([(1, 3)]), 0.0, -6.0, 1,
         )
-        over_budget = AggregateODRoutePricingLabel(
+        over_budget = RouteCoveringPricingLabel(
             2, [2], 1.0, Dict(2 => 1.0), Set([(1, 3)]), 0.0, -2.0, 1,
         )
-        baseline = AggregateODRoutePricingLabel(
+        baseline = RouteCoveringPricingLabel(
             2, [2], 1.0, Dict(2 => 1.0), Set{Tuple{Int, Int}}(), 0.0, 0.0, 1,
         )
         pair_weight = Dict((1, 3) => 5.0, (2, 4) => 3.0)
 
         # plain subset test: the extra pair always blocks domination, regardless of
         # how favorable the reduced-cost gap is.
-        @test !StationSelection._dominates_aggregate_od_route_label(within_budget, baseline, true; compensated_dominance=false)
+        @test !StationSelection._dominates_route_covering_label(within_budget, baseline, true; compensated_dominance=false)
 
         # compensated: dominates iff the reduced-cost gap covers the extra pair's weight
-        @test StationSelection._dominates_aggregate_od_route_label(
+        @test StationSelection._dominates_route_covering_label(
             within_budget, baseline, true; pair_weight=pair_weight, compensated_dominance=true,
         )
-        @test !StationSelection._dominates_aggregate_od_route_label(
+        @test !StationSelection._dominates_route_covering_label(
             over_budget, baseline, true; pair_weight=pair_weight, compensated_dominance=true,
         )
 
         pair_index = Dict((1, 3) => 1, (2, 4) => 2)
         node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
         weight = [5.0, 3.0]
-        within_bs = StationSelection._make_aggregate_od_route_label_bitsets(within_budget, pair_index, 2, node_index, 4)
-        over_bs = StationSelection._make_aggregate_od_route_label_bitsets(over_budget, pair_index, 2, node_index, 4)
-        baseline_bs = StationSelection._make_aggregate_od_route_label_bitsets(baseline, pair_index, 2, node_index, 4)
+        within_bs = StationSelection._make_route_covering_label_bitsets(within_budget, pair_index, 2, node_index, 4)
+        over_bs = StationSelection._make_route_covering_label_bitsets(over_budget, pair_index, 2, node_index, 4)
+        baseline_bs = StationSelection._make_route_covering_label_bitsets(baseline, pair_index, 2, node_index, 4)
 
-        @test StationSelection._dominates_aggregate_od_route_label(
+        @test StationSelection._dominates_route_covering_label(
             within_budget, baseline, within_bs, baseline_bs, true; weight=weight, compensated_dominance=true,
         )
-        @test !StationSelection._dominates_aggregate_od_route_label(
+        @test !StationSelection._dominates_route_covering_label(
             over_budget, baseline, over_bs, baseline_bs, true; weight=weight, compensated_dominance=true,
         )
-        @test !StationSelection._dominates_aggregate_od_route_label(
+        @test !StationSelection._dominates_route_covering_label(
             within_budget, baseline, within_bs, baseline_bs, true; weight=weight, compensated_dominance=false,
         )
     end
 
     @testset "aggregate OD route station-age bitsets" begin
-        label = AggregateODRoutePricingLabel(
+        label = RouteCoveringPricingLabel(
             2,
             [1, 2],
             1.0,
@@ -233,7 +233,7 @@
         )
         pair_index = Dict((1, 3) => 1, (2, 4) => 2)
         node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
-        bs = StationSelection._make_aggregate_od_route_label_bitsets(label, pair_index, 2, node_index, 4)
+        bs = StationSelection._make_route_covering_label_bitsets(label, pair_index, 2, node_index, 4)
         @test 1 in bs.served_bits
         @test bs.age_idx == Int32[node_index[1], node_index[2]]
         @test bs.age_val == [1.0, 0.0]
@@ -247,8 +247,8 @@
             detour_factor=3.0,
             max_stops=4,
         )
-        duals = AggregateODRoutePricingDuals(Dict((3, 4) => 10.0))
-        label = AggregateODRoutePricingLabel(
+        duals = RouteCoveringPricingDuals(Dict((3, 4) => 10.0))
+        label = RouteCoveringPricingLabel(
             2,
             [1, 2],
             1.0,
@@ -259,7 +259,7 @@
             2,
         )
 
-        candidates = StationSelection._aggregate_od_route_candidate_next_nodes(label, pricing_data, duals)
+        candidates = StationSelection._route_covering_candidate_next_nodes(label, pricing_data, duals)
         @test 3 in candidates
     end
 
@@ -270,7 +270,7 @@
             AggregateODRouteColumn(2, [(3, 4)], 1.0),
             AggregateODRouteColumn(3, [(1, 4)], 3.0),
         ]
-        duals = AggregateODRoutePricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
+        duals = RouteCoveringPricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
 
         columns, exhausted, stats = aggregate_od_route_pricing_by_label_setting(
             pricing_data,
@@ -296,7 +296,7 @@
             AggregateODRouteColumn(2, [(3, 4)], 1.0),
             AggregateODRouteColumn(3, [(1, 4)], 3.0),
         ]
-        duals = AggregateODRoutePricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
+        duals = RouteCoveringPricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
 
         columns, exhausted, stats = aggregate_od_route_pricing_by_label_setting(
             pricing_data,
@@ -316,8 +316,8 @@
     @testset "station-simple label-setting pricing" begin
         @testset "initial labels only open positive-dual origins" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3), (2, 4)])
-            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
-            labels = StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals)
+            duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
+            labels = StationSelection._initial_route_covering_station_simple_labels(pricing_data, duals)
 
             label_1 = only(filter(label -> label.current == 1, labels))
             label_2 = only(filter(label -> label.current == 2, labels))
@@ -330,28 +330,28 @@
 
         @testset "extension cannot revisit a station" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3)])
-            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
+            duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
             label = only(
                 filter(
                     label -> label.current == 1,
-                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                    StationSelection._initial_route_covering_station_simple_labels(pricing_data, duals),
                 ),
             )
-            @test_throws ArgumentError StationSelection._extend_aggregate_od_route_station_simple_label(
+            @test_throws ArgumentError StationSelection._extend_route_covering_station_simple_label(
                 label, 1, pricing_data, duals,
             )
         end
 
         @testset "extension certifies destination visits and updates reduced cost" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3), (2, 4)])
-            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
+            duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (2, 4) => 8.0))
             initial_1 = only(
                 filter(
                     label -> label.current == 1,
-                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                    StationSelection._initial_route_covering_station_simple_labels(pricing_data, duals),
                 ),
             )
-            child_3 = StationSelection._extend_aggregate_od_route_station_simple_label(initial_1, 3, pricing_data, duals)
+            child_3 = StationSelection._extend_route_covering_station_simple_label(initial_1, 3, pricing_data, duals)
 
             @test child_3.current == 3
             @test child_3.route == [1, 3]
@@ -364,60 +364,60 @@
 
         @testset "expired opportunities are pruned before certification" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3)], detour_factor=1.0)
-            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0))
+            duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
             initial_1 = only(
                 filter(
                     label -> label.current == 1,
-                    StationSelection._initial_aggregate_od_route_station_simple_labels(pricing_data, duals),
+                    StationSelection._initial_route_covering_station_simple_labels(pricing_data, duals),
                 ),
             )
-            expired_child = StationSelection._extend_aggregate_od_route_station_simple_label(initial_1, 4, pricing_data, duals)
+            expired_child = StationSelection._extend_route_covering_station_simple_label(initial_1, 4, pricing_data, duals)
 
             @test (1, 3) ∉ expired_child.served_pairs
             @test !haskey(expired_child.live_origin_age, 1)
         end
 
         @testset "dominance requires an exact visited match and live-origin domination" begin
-            same_visited_better = AggregateODRouteStationSimpleLabel(
+            same_visited_better = RouteCoveringStationSimpleLabel(
                 2, [1, 2], Set([1, 2]), 1.0, Dict(1 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
             )
-            same_visited_worse = AggregateODRouteStationSimpleLabel(
+            same_visited_worse = RouteCoveringStationSimpleLabel(
                 2, [1, 2], Set([1, 2]), 2.0, Dict(1 => 2.0), Set{Tuple{Int, Int}}(), 1.0, -1.0,
             )
-            different_visited = AggregateODRouteStationSimpleLabel(
+            different_visited = RouteCoveringStationSimpleLabel(
                 2, [3, 2], Set([3, 2]), 1.0, Dict(3 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
             )
-            different_current = AggregateODRouteStationSimpleLabel(
+            different_current = RouteCoveringStationSimpleLabel(
                 3, [1, 3], Set([1, 3]), 1.0, Dict(1 => 1.0), Set{Tuple{Int, Int}}(), 1.0, -2.0,
             )
 
             node_index = Dict(1 => 1, 2 => 2, 3 => 3, 4 => 4)
-            better_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_better, node_index)
-            worse_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(same_visited_worse, node_index)
-            different_visited_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_visited, node_index)
-            different_current_bs = StationSelection._make_aggregate_od_route_station_simple_bitsets(different_current, node_index)
+            better_bs = StationSelection._make_route_covering_station_simple_bitsets(same_visited_better, node_index)
+            worse_bs = StationSelection._make_route_covering_station_simple_bitsets(same_visited_worse, node_index)
+            different_visited_bs = StationSelection._make_route_covering_station_simple_bitsets(different_visited, node_index)
+            different_current_bs = StationSelection._make_route_covering_station_simple_bitsets(different_current, node_index)
 
-            @test StationSelection._dominates_aggregate_od_route_station_simple_label(
+            @test StationSelection._dominates_route_covering_station_simple_label(
                 same_visited_better, same_visited_worse, better_bs, worse_bs,
             )
-            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+            @test !StationSelection._dominates_route_covering_station_simple_label(
                 same_visited_worse, same_visited_better, worse_bs, better_bs,
             )
-            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+            @test !StationSelection._dominates_route_covering_station_simple_label(
                 same_visited_better, different_visited, better_bs, different_visited_bs,
             )
-            @test !StationSelection._dominates_aggregate_od_route_station_simple_label(
+            @test !StationSelection._dominates_route_covering_station_simple_label(
                 same_visited_better, different_current, better_bs, different_current_bs,
             )
         end
 
         @testset "candidate generation never offers a visited station" begin
             pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], detour_factor=3.0, max_wait_time=10.0)
-            duals = AggregateODRoutePricingDuals(Dict((1, 3) => 10.0, (3, 4) => 10.0))
-            label = AggregateODRouteStationSimpleLabel(
+            duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (3, 4) => 10.0))
+            label = RouteCoveringStationSimpleLabel(
                 1, [1], Set([1]), 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0,
             )
-            candidates = StationSelection._aggregate_od_route_station_simple_candidate_next_nodes(label, pricing_data, duals)
+            candidates = StationSelection._route_covering_station_simple_candidate_next_nodes(label, pricing_data, duals)
             @test 1 ∉ candidates
             @test 3 in candidates
         end
@@ -429,7 +429,7 @@
                 AggregateODRouteColumn(2, [(3, 4)], 1.0),
                 AggregateODRouteColumn(3, [(1, 4)], 3.0),
             ]
-            duals = AggregateODRoutePricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
+            duals = RouteCoveringPricingDuals(Dict((1, 4) => 10.0, (1, 3) => 10.0, (3, 4) => 10.0))
 
             columns, exhausted, stats = aggregate_od_route_pricing_by_station_simple_label_setting(
                 pricing_data,

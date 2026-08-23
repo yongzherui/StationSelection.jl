@@ -312,7 +312,7 @@
             isempty(pricing_data.opportunities) && continue
 
             search_index = StationSelection._build_joint_routing_assignment_search_index(pricing_data)
-            bound_workspace = StationSelection._create_joint_routing_assignment_bound_workspace(n_nodes)
+            bound_workspace = StationSelection._create_joint_routing_assignment_bound_workspace()
 
             labels0 = initial_joint_routing_assignment_pricing_labels(pricing_data)
             isempty(labels0) && continue
@@ -330,11 +330,12 @@
                 label, label_bs, pricing_data, search_index, bound_workspace,
             )
 
-            # The bound is on *net* gain (reward minus the route-regularization cost
-            # of the travel that collects it), so the invariant it has to satisfy is
-            # exactly the one the search relies on: `label.rc - bound` never exceeds
-            # the reduced cost of any descendant. Equivalently, `bound` is at least
-            # the best reduction in reduced cost any completion achieves.
+            # The bound is a plain sum of reachable reward (no travel discount --
+            # see `_joint_routing_assignment_remaining_reward_bound`'s docstring), so
+            # it is necessarily >= the actual best *net* gain any completion achieves
+            # (net of the travel cost paid to collect it). The invariant it has to
+            # satisfy is exactly the one the search relies on: `label.rc - bound`
+            # never exceeds the reduced cost of any descendant.
             best_gain = Ref(0.0)
             function dfs!(l, depth)
                 depth <= 0 && return

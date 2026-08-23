@@ -2,15 +2,15 @@
 The per-state label list and the `AbstractPricingSearchContext` hook
 contract shared by every label-setting pricer -- the "what a pricer must
 supply" half of the engine. See `engine.jl` for the loop that actually calls
-these hooks, and `aggregate_od_route/base/types.jl` / `joint_routing_assignment/types.jl`
+these hooks, and `route_covering/types.jl` / `joint_routing_assignment/types.jl`
 for each pricer's own data/label/filters types that plug into the generics here.
 """
 
 """
 Marker supertype for a pricer's dominance-rule switches, which each concrete
-pricer encodes as its own type parameters (e.g. `AggregateODRouteDominanceRules{BoundedStops,Compensated}`
-in `aggregate_od_route/base/types.jl`, `JointRoutingAssignmentDominanceRules{BoundedStops,Compensated,Instrumented}`
-in `joint_routing_assignment/types.jl`) for zero-cost specialization -- see either
+pricer encodes as its own type parameters (e.g. `RouteCoveringDominanceRules{BoundedStops,Compensated}`
+in `route_covering/exact/types.jl`, `JointRoutingAssignmentDominanceRules{BoundedStops,Compensated,Instrumented}`
+in `joint_routing_assignment/exact/types.jl`) for zero-cost specialization -- see either
 concrete type's own docstring for why. This common supertype does not unify
 their field/parameter shapes (those differ for real reasons); it exists so
 future shared dispatch has somewhere to hang.
@@ -23,30 +23,30 @@ Generic per-label entry shared by every label-setting pricer. Two labels can
 only ever dominate one another when they occupy the same search **state**
 (same current node, or, for the elementary-route pricer, the same
 `(current, visited)`) -- outside that, their future extensions diverge and
-comparison is meaningless. `_run_pricing_label_search` (`engine.jl`) therefore
+comparison is meaningless. `_run_label_setting` (`engine.jl`) therefore
 keeps one list of live `PricingLabelEntry`s per state, and every dominance
 check happens within a single such list.
 
 Each concrete pricer parameterizes this entry by its own `XxxDominanceFilters`,
-label, and bitsets types (e.g. `PricingLabelEntry{AggregateODRouteDominanceFilters,
-AggregateODRoutePricingLabel, AggregateODRouteLabelBitsets}`); `filters` is kept
+label, and bitsets types (e.g. `PricingLabelEntry{RouteCoveringDominanceFilters,
+RouteCoveringPricingLabel, RouteCoveringLabelBitsets}`); `filters` is kept
 inline (not behind a `label`/`bitsets` lookup) so a state's label-list scan stays
 cache-friendly. `_pricing_entry_order_key` is the sort key a state's label list
 is kept sorted by (ascending reduced cost, then time, then route length, then id
 as a tiebreaker).
 """
 # ── per-state label list: PricingLabelEntry / PricingStateLabels ───────────
-struct PricingLabelEntry{F, L, B}
-    filters::F
+struct PricingLabelEntry{Filters, Label, Bitsets}
+    filters::Filters
     id::Int
-    label::L
-    bitsets::B
+    label::Label
+    bitsets::Bitsets
 end
 
 """The live labels currently occupying one search state -- kept sorted by
 `_pricing_entry_order_key`. See `PricingLabelEntry`'s docstring for why
 dominance is only ever tested within one of these lists."""
-const PricingStateLabels{F, L, B} = Vector{PricingLabelEntry{F, L, B}}
+const PricingStateLabels{Filters, Label, Bitsets} = Vector{PricingLabelEntry{Filters, Label, Bitsets}}
 
 _pricing_entry_order_key(entry::PricingLabelEntry) =
     (entry.filters.reduced_cost, entry.filters.time, entry.filters.route_length, entry.id)
@@ -73,20 +73,20 @@ compensated budget, with or without a distinct-stations cap, ...) and some
 need extra per-search-constant context (e.g. the passenger pricers' reward
 `layer_weight`) that this walk has no business knowing about. Callers close
 over that context and their own `_pricing_dominates_at_state` method once per
-search and hand the closure to `_run_pricing_label_search` (`engine.jl`) via
+search and hand the closure to `_run_label_setting` (`engine.jl`) via
 the `_pricing_dominates_fn` hook below; see any concrete
 `AbstractPricingSearchContext` subtype's `dominates(...)` definition for the
 pattern.
 """
 function _add_pricing_label_to_state!(
-    state_labels::PricingStateLabels{F, L, B},
-    live_labels::Vector{Union{Nothing, L}},
-    label::L,
+    state_labels::PricingStateLabels{Filters, Label, Bitsets},
+    live_labels::Vector{Union{Nothing, Label}},
+    label::Label,
     label_id::Int,
-    label_bs::B,
+    label_bs::Bitsets,
     dominates::Function,
     dominated::Vector{Int},
-) where {F, L, B}
+) where {Filters, Label, Bitsets}
     inserted = true
     empty!(dominated)
     switched = false
@@ -121,14 +121,15 @@ function _add_pricing_label_to_state!(
 end
 
 """
-    AbstractPricingSearchContext{F, L, B, State, BestSig}
+    AbstractPricingSearchContext{Filters, Label, Bitsets, State, BestSig}
 
 Base type for the per-algorithm context threaded through one label-setting
-priority-queue search (`_run_pricing_label_search`, `engine.jl`). `F`/`L`/`B`
-are the dominance-filters/label/bitsets types (same three parameters
-`PricingLabelEntry` and `PricingStateLabels` take); `State` is the search-state
+priority-queue search (`_run_label_setting`, `engine.jl`). `Filters`/`Label`/
+`Bitsets` are the same three parameters `PricingLabelEntry` and
+`PricingStateLabels` take (a label's dominance-comparison fields, the label
+itself, and its bitset mirror, respectively); `State` is the search-state
 type each label is keyed by (`labels_by_state::Dict{State, ...}`) and `BestSig`
-is the per-request best-column key type (`best_by_signature::Dict{BestSig, L}`)
+is the per-request best-column key type (`best_by_signature::Dict{BestSig, Label}`)
 -- a different notion of "signature": the *served-pairs/route identity* a
 finished label competes on, not the DP state two labels must share to be
 comparable at all. Both are carried as explicit type parameters -- not `Any`
@@ -136,22 +137,22 @@ comparable at all. Both are carried as explicit type parameters -- not `Any`
 `Dict` measurably boxes every key and dispatches its hash dynamically;
 concrete typing here keeps that already-paid-for optimization.
 
-A concrete context (`AggregateODRouteSearchContext`, `AggregateODRouteStationSimpleSearchContext`,
+A concrete context (`RouteCoveringSearchContext`, `RouteCoveringStationSimpleSearchContext`,
 `JointRoutingAssignmentSearchContext`, `JointRoutingAssignmentStationSimpleSearchContext`)
 bundles whatever that algorithm's hooks need -- `pricing_data`, `duals` if
 applicable, dominance rules, precomputed indices for its reward bound -- built
-once by the driver function before calling `_run_pricing_label_search`. Each
+once by the driver function before calling `_run_label_setting`. Each
 hook below has no default method (bar `_pricing_on_label_inserted`, a true
 no-op default): every concrete context must implement all of them.
 """
 # ── AbstractPricingSearchContext: the hook contract ─────────────────────────
-abstract type AbstractPricingSearchContext{F, L, B, State, BestSig} end
+abstract type AbstractPricingSearchContext{Filters, Label, Bitsets, State, BestSig} end
 
 """Initial (depth-1) labels the search seeds the frontier with."""
 _pricing_initial_labels(ctx::AbstractPricingSearchContext) =
     error("_pricing_initial_labels not implemented for $(typeof(ctx))")
 
-"""Build the per-label bitsets mirror (`B`) the dominance test and state key need."""
+"""Build the per-label bitsets mirror (`Bitsets`) the dominance test and state key need."""
 _pricing_make_bitsets(ctx::AbstractPricingSearchContext, label) =
     error("_pricing_make_bitsets not implemented for $(typeof(ctx))")
 

@@ -6,7 +6,7 @@ pass; this file is the one to audit for "is the label search correct".
 # Operational contract of the column being priced
 
 Same unlimited-capacity, synchronized-start physical route as
-`AggregateODRoutePricingLabel` (see that file's module docstring for the shared
+`RouteCoveringPricingLabel` (see that file's module docstring for the shared
 station-age/wait/detour rules) -- this pricer changes only what a route gets
 *credit* for:
 
@@ -90,6 +90,10 @@ export extend_joint_routing_assignment_pricing_label
 function initial_joint_routing_assignment_pricing_labels(
     pricing_data::JointRoutingAssignmentPricingData,
 )::Vector{JointRoutingAssignmentPricingLabel}
+    # Same reasoning as the route-covering pricer's twin: a route can only
+    # ever collect reward through one of an opportunity's two endpoints, so
+    # seeding elsewhere would waste search on routes that can never certify
+    # anything.
     endpoints = Set{Int}()
     for opp in pricing_data.opportunities
         push!(endpoints, opp.origin)
@@ -99,6 +103,11 @@ function initial_joint_routing_assignment_pricing_labels(
     labels = JointRoutingAssignmentPricingLabel[]
     for node in pricing_data.nodes
         node in endpoints || continue
+        # One depth-1 label per relevant node: route so far is `[node]`,
+        # `time = 0`, this node's own pickup clock starts live at age 0, no
+        # reward layers activated yet, and `tau`/`reduced_cost` already carry
+        # the fixed `repositioning_time` cost every route pays regardless of
+        # length.
         push!(labels, JointRoutingAssignmentPricingLabel(
             node,
             [node],
@@ -115,7 +124,7 @@ end
 
 # ── candidate next-nodes ─────────────────────────────────────────────────────
 # `label` is untyped so both the revisit-tolerant and the elementary
-# (`station_simple.jl`) pricers can share this: it reads only `station_age`,
+# (`../station_simple/station_simple.jl`) pricers can share this: it reads only `station_age`,
 # `current`, and `activated_reward_layers`, which both label types expose. Julia
 # specializes per concrete call site, so there is no dispatch or speed cost.
 function _has_useful_live_joint_routing_assignment_origin(
@@ -393,15 +402,17 @@ function _dominates_joint_routing_assignment_label(
     bounded_max_stops::Bool,
     compensated_dominance::Bool=true,
 )::Bool
-    _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false
-    (!bounded_max_stops || a.route_length <= b.route_length) || return false
-    a.time <= b.time + 1e-9 || return false
-    budget = b.reduced_cost - a.reduced_cost + 1e-9
+    _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false  # must share current node
+    (!bounded_max_stops || a.route_length <= b.route_length) || return false                  # a can't have used more stops
+    a.time <= b.time + 1e-9 || return false                                                    # a can't be running later
+    budget = b.reduced_cost - a.reduced_cost + 1e-9  # a's reduced-cost surplus over b, spendable on the compensation test below
     budget >= 0.0 || return false
     _joint_routing_assignment_compensation(
         a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
         compensated_dominance,
     ) <= budget || return false
+    # Every station either label has a live pickup clock for: a's clock can't
+    # be older than b's.
     all_stations = union(keys(a.station_age), keys(b.station_age), (a.current, b.current))
     for station in all_stations
         get(a.station_age, station, Inf) <= get(b.station_age, station, Inf) + 1e-9 || return false

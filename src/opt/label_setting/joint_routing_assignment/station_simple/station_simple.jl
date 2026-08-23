@@ -1,19 +1,19 @@
 """
 Station-simple (elementary-route) label-setting pricer for the passenger
 free-assignment subproblem: an alternative to the revisit-tolerant search in
-`labels.jl`/`exact.jl` in which a physical route may never revisit a station.
+`../exact/labels.jl`/`../exact/exact.jl` in which a physical route may never revisit a station.
 
 # What elementarity changes (and what it does not)
 
 Only the *route universe* changes -- the reward contract is identical to the
-revisit-tolerant pricer (see `labels.jl`'s module docstring): a visit to origin
+revisit-tolerant pricer (see `../exact/labels.jl`'s module docstring): a visit to origin
 `j` within `max_wait_time` opens a live pickup clock; a later visit to `k`
 certifies `(p, j, k)` for passengers whose clock survives the ride limit; and a
 passenger banks only its single best certified reward, tracked incrementally via
 `activated_reward_layers`.
 
 Crucially, the per-passenger *maximum* reward means elementarity does NOT let us
-drop the layer/age bookkeeping the way the aggregate pair-based `station_simple.jl`
+drop the layer/age bookkeeping the way the aggregate pair-based `../../base/station_simple/station_simple.jl`
 drops `station_age` for `live_origin_age`: reaching a strictly better dropoff later
 still activates incremental layers, so a live clock stays useful even after it has
 already certified something. What elementarity removes is clock *resets* -- a
@@ -56,7 +56,7 @@ Shares `JointRoutingAssignmentPricingData` (no new data struct) and the
 `_joint_routing_assignment_travel`, `_certify_joint_routing_assignment_layers_at_node`,
 `_joint_routing_assignment_age_is_useful`, `_has_useful_live_joint_routing_assignment_origin`,
 `_joint_routing_assignment_compensation`, and `_joint_routing_assignment_remaining_reward_bound`
-primitives from `data.jl`/`labels.jl`/`exact.jl`. Emits the same
+primitives from `../data.jl`/`../exact/labels.jl`/`../exact/exact.jl`. Emits the same
 `JointRoutingAssignmentRouteColumn` via the identical route-replay path
 (`_joint_routing_assignment_column_from_route`), since replay is agnostic to how
 the physical route was found and replays an elementary route unchanged.
@@ -109,7 +109,7 @@ end
 """
 Delegates to the shared `_make_sparse_station_ages` (`utils.jl`), which runs
 the identical insertion sort used by the revisit-tolerant pricer's twin in
-`labels.jl` -- only the return type differs (wrapped here in
+`../exact/labels.jl` -- only the return type differs (wrapped here in
 `JointRoutingAssignmentStationSimpleAges`).
 """
 function _make_joint_routing_assignment_station_simple_ages(
@@ -123,7 +123,7 @@ end
 """
 Scalar dominance state, copied out of the label so the state's label-list scan
 rejects the common case without dereferencing `label`/`ages` at all -- same rationale as
-`JointRoutingAssignmentDominanceFilters` (`types.jl`). `visited` and
+`JointRoutingAssignmentDominanceFilters` (`../exact/types.jl`). `visited` and
 `activated_reward_layers` are not carried here (unlike the revisit-tolerant
 pricer's filters): both are already `BitSet`s on the label, compared directly,
 so mirroring them would only add a redundant copy -- see this file's module
@@ -175,7 +175,7 @@ revisit-tolerant pricer's:
   - `time_a <= time_b`;
   - the compensated reward-layer budget `rc_a + w(A_a ∖ A_b) <= rc_b` (see
     `_joint_routing_assignment_compensation` and the dominance docstring in
-    `labels.jl` for why this, not `issubset` on layers, is the sound test);
+    `../exact/labels.jl` for why this, not `issubset` on layers, is the sound test);
   - every live station age in `a` is no larger than `b`'s (sparse merge walk).
 
 Conditions are ordered cheapest-and-likeliest-to-reject first, exactly as in
@@ -245,6 +245,8 @@ end
 function _initial_joint_routing_assignment_station_simple_labels(
     pricing_data::JointRoutingAssignmentPricingData,
 )::Vector{JointRoutingAssignmentStationSimpleLabel}
+    # Same reasoning as the revisit-tolerant twin: only nodes that are some
+    # opportunity's origin or destination can ever collect reward.
     endpoints = Set{Int}()
     for opp in pricing_data.opportunities
         push!(endpoints, opp.origin)
@@ -254,6 +256,11 @@ function _initial_joint_routing_assignment_station_simple_labels(
     labels = JointRoutingAssignmentStationSimpleLabel[]
     for node in pricing_data.nodes
         node in endpoints || continue
+        # One depth-1 label per relevant node: `visited = {node}` (this
+        # pricer's authoritative no-revisit set), pickup clock live at age 0,
+        # no reward layers activated, `tau`/`reduced_cost` carrying the fixed
+        # `repositioning_time` cost -- otherwise identical to the
+        # revisit-tolerant pricer's seeding.
         push!(labels, JointRoutingAssignmentStationSimpleLabel(
             node,
             [node],
@@ -329,6 +336,12 @@ function _extend_joint_routing_assignment_station_simple_label(
     new_visited = copy(label.visited)
     push!(new_visited, next_node)
 
+    # Certify/activate whatever `next_node` newly unlocks (shared with the
+    # revisit-tolerant pricer -- see `data.jl`), then age every existing clock
+    # and open a fresh one at `next_node` if still inside the wait cutoff. No
+    # "re-visited node" branch here (unlike the revisit-tolerant twin): it is
+    # unreachable by construction, since `next_node ∉ visited` always holds
+    # for an elementary extension.
     certified_layers, reward = _certify_joint_routing_assignment_layers_at_node(
         next_node,
         label.station_age,
@@ -356,6 +369,7 @@ function _extend_joint_routing_assignment_station_simple_label(
         aged_station,
         certified_layers,
         new_tau,
+        # Same reduced-cost update rule as the revisit-tolerant pricer.
         label.reduced_cost + pricing_data.route_regularization_weight * travel_time - reward,
         label.route_length + 1,
     )
@@ -367,10 +381,10 @@ Context for the elementary-route passenger free-assignment search: bundles
 `:subset` states on `current` alone, pairing it with a shared `empty_visited`
 so both modes share one concrete state type), the once-built `dominates`
 closure, and the `search_index`/`bound_workspace` the shared remaining-reward
-bound needs. Plugs into `_run_pricing_label_search` (`engine.jl`) the same way
-`JointRoutingAssignmentSearchContext` does (`exact.jl`). Not currently
-reachable from `joint_routing_assignment/pricing_round.jl`'s
-`_pricing_build_unit_context` (always builds the revisit-tolerant context
+bound needs. Plugs into `_run_label_setting` (`engine.jl`) the same way
+`JointRoutingAssignmentSearchContext` does (`../exact/exact.jl`). Not currently
+reachable from `joint_routing_assignment/exact/pricing_round.jl`'s
+`_pricing_build_scenario_context` (always builds the revisit-tolerant context
 today) -- kept as a real, independently usable capability.
 """
 struct JointRoutingAssignmentStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
@@ -395,9 +409,8 @@ function JointRoutingAssignmentStationSimpleSearchContext(
     dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
         x.filters, x.label, x.bitsets, y.filters, y.label, y.bitsets, pricing_data.layer_weight, rules,
     )
-    n_nodes = length(pricing_data.nodes)
     search_index = _build_joint_routing_assignment_search_index(pricing_data)
-    bound_workspace = _create_joint_routing_assignment_bound_workspace(n_nodes)
+    bound_workspace = _create_joint_routing_assignment_bound_workspace()
     return JointRoutingAssignmentStationSimpleSearchContext(
         pricing_data, dominance_mode, dominates, search_index, bound_workspace, search_index.node_index, BitSet(),
     )
@@ -417,7 +430,7 @@ _pricing_state(
 
 # The reward bound reads only `current`/`time`/`activated_reward_layers` from the
 # label and `age_idx`/`age_val` from the ages mirror, so the revisit-tolerant
-# pricer's bound (`exact.jl`) applies unchanged here.
+# pricer's bound (`../exact/exact.jl`) applies unchanged here.
 _pricing_label_priority(
     ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel, label_ages::JointRoutingAssignmentStationSimpleAges,
 ) = label.reduced_cost -
@@ -440,7 +453,7 @@ _pricing_dominates_fn(ctx::JointRoutingAssignmentStationSimpleSearchContext) = c
 
 """
 Elementary-route counterpart of the revisit-tolerant pricer's
-`_pricing_candidate_from_label` (`exact.jl`): identical route-replay, since
+`_pricing_candidate_from_label` (`../exact/exact.jl`): identical route-replay, since
 replay is agnostic to how the physical route was found."""
 function _pricing_candidate_from_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel)
     assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
@@ -467,7 +480,7 @@ _pricing_make_column(ctx::JointRoutingAssignmentStationSimpleSearchContext, colu
     )
 
 """Same master reduced-cost cross-check as the revisit-tolerant context's twin
-(`exact.jl`) -- the master doesn't know which route universe a column came
+(`../exact/exact.jl`) -- the master doesn't know which route universe a column came
 from, only the assignments it carries."""
 function _pricing_verify_column(::JointRoutingAssignmentStationSimpleSearchContext, column::JointRoutingAssignmentRouteColumn, m::JuMP.Model, mapping, duals)
     alpha, gamma_o, gamma_d = duals

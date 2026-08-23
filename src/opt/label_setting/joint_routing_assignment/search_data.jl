@@ -15,14 +15,13 @@ struct JointRoutingAssignmentSearchIndex
     opp_layer_mask::Vector{RewardLayerBitset}
     opps_by_origin_idx::Vector{Vector{Int}}
     origin_union_mask::Vector{RewardLayerBitset}
-    nodes_by_travel::Vector{Vector{Int}}
 end
 
-# ── bound workspace (mutable scratch, reused across the search) ─────────────
+"""Mutable scratch reused across the whole search: `layer_scratch` is where
+`_joint_routing_assignment_remaining_reward_bound` dedups reward layers it has
+already counted, cleared at the start of every call."""
 struct JointRoutingAssignmentBoundWorkspace
     layer_scratch::RewardLayerBitset
-    node_mask::Vector{RewardLayerBitset}
-    touched_nodes::Vector{Int}
 end
 
 function _build_joint_routing_assignment_search_index(
@@ -47,15 +46,11 @@ function _build_joint_routing_assignment_search_index(
         haskey(pricing_data.travel_cost, (u, v)) &&
             (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
     end
-    nodes_by_travel = [sortperm(@view travel_matrix[i, :]) for i in 1:n_nodes]
     return JointRoutingAssignmentSearchIndex(
         node_index, travel_matrix, opp_dest_idx, opp_ride_limit, opp_layer_mask,
-        opps_by_origin_idx, origin_union_mask, nodes_by_travel,
+        opps_by_origin_idx, origin_union_mask,
     )
 end
 
-function _create_joint_routing_assignment_bound_workspace(n_nodes::Int)
-    return JointRoutingAssignmentBoundWorkspace(
-        RewardLayerBitset(), [RewardLayerBitset() for _ in 1:n_nodes], Int[],
-    )
-end
+_create_joint_routing_assignment_bound_workspace() =
+    JointRoutingAssignmentBoundWorkspace(RewardLayerBitset())

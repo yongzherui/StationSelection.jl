@@ -7,7 +7,8 @@ The traversal is deliberately independent of the pricing search orchestration: t
 pricer is optimized for finding negative-reduced-cost columns under a particular dual
 vector, while direct solves need a dual-free route universe. This module does a plain
 bounded depth-first search over the same pricing-label transitions
-(`label_setting/aggregate_od_route/base/{types,labels}.jl`) -- station-age/wait/detour rules are
+(the pricing graph/duals in `../types.jl`, the label type in `types.jl`, and the
+transitions in `labels.jl`) -- station-age/wait/detour rules are
 genuine physical feasibility, not reduced-cost pruning -- but applies neither dominance
 nor reduced-cost pruning itself, and uses uniform positive rewards so nothing gets
 pruned. Every label serving at least one active pair is emitted as a candidate column;
@@ -119,7 +120,7 @@ function _enumerate_aggregate_od_route_columns_core(
     nodes = _od_route_relevant_nodes(active_pairs)
     max_stops = _resolve_aggregate_od_route_max_stops(max_stops_cap)
     travel = _od_route_travel_lookup(data, nodes)
-    pricing_data = AggregateODRoutePricingData(
+    pricing_data = RouteCoveringPricingData(
         0,
         nodes,
         travel,
@@ -134,18 +135,28 @@ function _enumerate_aggregate_od_route_columns_core(
     )
     # Uniform positive rewards make every active pair visible to the shared pricing
     # transitions. They do not prune or rank this DFS.
-    enumeration_duals = AggregateODRoutePricingDuals(Dict(pair => 1.0 for pair in active_pairs))
+    enumeration_duals = RouteCoveringPricingDuals(Dict(pair => 1.0 for pair in active_pairs))
 
     t_start = time()
-    exhausted = true
+    exhausted = true  # flips to false the moment the time budget runs out; every level of the recursion checks and unwinds on it
     columns = AggregateODRouteColumn[]
     next_id = 1
 
-    function visit!(label::AggregateODRoutePricingLabel)
+    # Depth-first visit of every reachable label. Unlike the pricer
+    # (`_run_label_setting`/`engine.jl`), there is no dominance test, no
+    # priority queue, and no reduced-cost pruning here -- every label the
+    # transitions in `labels.jl` say is physically reachable gets visited, in
+    # whatever order the plain recursion produces.
+    function visit!(label::RouteCoveringPricingLabel)
         if time() - t_start > time_limit_sec
             exhausted = false
             return
         end
+        # Any label that has certified at least one pair becomes a column
+        # immediately -- unlike the pricer's `best_by_signature`, nothing here
+        # dedupes across labels sharing a signature as the walk goes; that
+        # cleanup is `_deduplicate_aggregate_od_route_columns`'s job, once,
+        # after the whole DFS finishes (see below).
         if !isempty(label.served_pairs)
             push!(columns, AggregateODRouteColumn(
                 next_id,
@@ -160,17 +171,21 @@ function _enumerate_aggregate_od_route_columns_core(
             length(columns) <= max_routes ||
                 throw(ArgumentError("route enumeration exceeded max_routes=$(max_routes)"))
         end
+        # The only other pruning this DFS does: stop extending once at the
+        # stops cap. Everything else `_route_covering_candidate_next_nodes`
+        # offers (genuine physical feasibility -- wait time, ride limit) is
+        # followed unconditionally.
         label.route_length >= max_stops && return
-        next_nodes = _aggregate_od_route_candidate_next_nodes(label, pricing_data, enumeration_duals)
+        next_nodes = _route_covering_candidate_next_nodes(label, pricing_data, enumeration_duals)
         for next_node in next_nodes
-            for child in extend_aggregate_od_route_pricing_label(label, next_node, pricing_data, enumeration_duals)
+            for child in extend_route_covering_pricing_label(label, next_node, pricing_data, enumeration_duals)
                 visit!(child)
-                exhausted || return
+                exhausted || return  # time ran out somewhere below -- unwind the whole recursion, not just this frame
             end
         end
     end
 
-    for initial_label in initial_aggregate_od_route_pricing_labels(pricing_data, enumeration_duals)
+    for initial_label in initial_route_covering_pricing_labels(pricing_data, enumeration_duals)
         visit!(initial_label)
         exhausted || break
     end

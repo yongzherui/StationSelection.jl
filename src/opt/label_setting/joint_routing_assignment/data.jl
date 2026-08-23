@@ -14,7 +14,7 @@ certified assignment, not the sum. To let a bitset-based label carry that
 OR-ing another assignment's prefix into an already-activated one can only add
 the incremental layers between the old and new levels -- so summing activated
 layer weights across every passenger is exactly `sum(B_p(L) for p)`, never a
-double count. See the module docstring in `labels.jl` for the label-level
+double count. See the module docstring in `exact/labels.jl` for the label-level
 contract this preprocessing feeds.
 """
 
@@ -240,7 +240,7 @@ within its ride limit contributes its full prefix mask to a single batched
 union *before* diffing against `activated` -- batching (rather than folding in
 one opportunity's newly-activated layers at a time) is what makes "several
 different origins certify the same passenger at this destination" collapse to
-"OR their prefix masks", per the design note in `labels.jl`: since masks are
+"OR their prefix masks", per the design note in `exact/labels.jl`: since masks are
 nested prefixes per passenger, unioning first and diffing once yields exactly
 the incremental layers between the label's prior best and the best among
 everything certified here, with no risk of double-crediting the same layer

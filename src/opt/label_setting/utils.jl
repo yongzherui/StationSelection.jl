@@ -74,14 +74,14 @@ end
 Weight of the bits `a_bits` holds that `b_bits` lacks, capped at a running
 early-exit against `budget`. Reward-model-independent: works identically
 whether a bit stands for a passenger reward layer
-(`joint_routing_assignment/labels.jl`'s `activated_reward_layers`) or a
-certified OD pair (`aggregate_od_route/base/labels.jl`'s `served_pairs`) --
+(`joint_routing_assignment/exact/labels.jl`'s `activated_reward_layers`) or a
+certified OD pair (`route_covering/exact/labels.jl`'s `served_pairs`) --
 `weight` is just "cost of holding bit `i` that the other label doesn't".
 
 This is the "catch-up" term in the compensated dominance rule: for label `a`
 to dominate `b` despite holding bits `b` lacks, `a`'s reduced-cost advantage
 must cover the weight of that excess (`rc_a + w(A_a \\ A_b) <= rc_b`; see
-`joint_routing_assignment/labels.jl`'s `_dominates_joint_routing_assignment_label`
+`joint_routing_assignment/exact/labels.jl`'s `_dominates_joint_routing_assignment_label`
 docstring for the full soundness argument, which is generic in what a bit
 means). Requiring `A_a ⊆ A_b` (`compensated = false`) is the special case
 `w(A_a ∖ A_b) = 0`, so this only ever adds dominations relative to the plain
@@ -171,7 +171,7 @@ Exhaustive enumeration (no dominance, no reduced-cost pruning) has no finite
 DFS depth and cannot terminate without a finite `max_stops` -- that case is a
 hard error here. Label-setting pricing does not share this requirement; see
 `_resolve_aggregate_od_route_pricing_max_stops` below. Used by
-`aggregate_od_route/base/enumeration.jl`, the only exhaustive enumerator in
+`route_covering/exact/enumeration.jl`, the only exhaustive enumerator in
 this package.
 """
 function _resolve_aggregate_od_route_max_stops(max_stops::Int)::Int
@@ -190,10 +190,10 @@ unbounded, so `route_length >= pricing_data.max_stops` at the top of the
 search loop only needs to be a no-op in that case, not an error. Unbounded
 `max_stops` is therefore a legitimate "run pricing with no artificial
 route-length cap" configuration, not a misconfiguration. Shared by both
-`aggregate_od_route/base/data.jl` and
-`aggregate_od_route/joint_routing_assignment/data.jl` -- the one piece of
+`route_covering/data.jl` and
+`joint_routing_assignment/data.jl` -- the one piece of
 pricing-data assembly genuinely common to both pricers, unlike everything
-else in `base/`, which has no counterpart Joint reuses.
+else in `route_covering/`, which has no counterpart Joint reuses.
 """
 function _resolve_aggregate_od_route_pricing_max_stops(max_stops::Int)::Int
     return max_stops

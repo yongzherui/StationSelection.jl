@@ -1,11 +1,12 @@
 """
 `AggregateODRouteJointRoutingAssignmentFormulation`'s formulation-level hooks
-into `_run_pricing_round` (`round.jl`): one unit per scenario, threaded
-(scenarios are independent and pricing touches no Gurobi state, so concurrent
-search is safe), a real starting column id (unlike Base, the pricer-assigned
-id *is* the master's real key here), and a cross-scenario merge that sorts
-and imposes one global `max_new_columns` budget so thread completion order
-can't decide which columns enter the RMP.
+into `_run_pricing_round` (`round.jl`): every scenario in the mapping (no
+`_pricing_scenarios` override -- `round.jl`'s default already matches),
+threaded (scenarios are independent and pricing touches no Gurobi state, so
+concurrent search is safe), a real starting column id (unlike Base, the
+pricer-assigned id *is* the master's real key here), and a cross-scenario
+merge that sorts and imposes one global `max_new_columns` budget so thread
+completion order can't decide which columns enter the RMP.
 """
 
 """
@@ -34,13 +35,16 @@ function joint_routing_assignment_pricing_candidates(
 )::Vector{PassengerAssignmentCandidate}
     candidates = PassengerAssignmentCandidate[]
     for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
-        mapping.Q_s[scenario][p] > 0 || continue
+        mapping.Q_s[scenario][p] > 0 || continue     # demand group must actually have positive demand
         key2 = (scenario, p)
-        a = get(alpha, key2, 0.0)
-        a > 1e-9 || continue
+        a = get(alpha, key2, 0.0)                    # this demand group's coverage dual
+        a > 1e-9 || continue                          # zero dual -> no candidate on this group can ever have rho > 0
         for pair in get_valid_jk_pairs(mapping, o, d)
             is_walk_only_pair(pair) && continue
             j, k = pair
+            # rho_pjk = alpha_p - gamma^O_pj - gamma^D_pk - walk_cost_weight * walking_cost:
+            # coverage dual minus both station-linking duals minus the
+            # walking-access cost of this particular (j,k) station pair.
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
             rho > 1e-9 || continue
@@ -51,11 +55,8 @@ function joint_routing_assignment_pricing_candidates(
     return candidates
 end
 
-# ── formulation-level hooks (units / threading / column ids / unit context / merge) ──
-_pricing_units(::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, m::JuMP.Model) =
-    1:n_scenarios(m[:joint_routing_assignment_data])
-
-_pricing_parallel_units(::AggregateODRouteJointRoutingAssignmentFormulation) = true
+# ── formulation-level hooks (threading / column ids / scenario context / merge) ──
+_pricing_parallel_scenarios(::AggregateODRouteJointRoutingAssignmentFormulation) = true
 
 _pricing_next_column_id(::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, m::JuMP.Model) =
     maximum(keys(m[:joint_routing_assignment_columns]); init=0) + 1
@@ -66,7 +67,7 @@ pricing data -> search context, plus the existing column pool restricted to
 this scenario. `nothing` when a scenario has no positive-reward candidates
 (and therefore no opportunities) to price at all.
 """
-function _pricing_build_unit_context(
+function _pricing_build_scenario_context(
     ::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, s::Int,
     m::JuMP.Model, duals,
 )
@@ -98,17 +99,17 @@ end
 """
 Sort by `(reduced_cost, tau, scenario, route)` and truncate to one global
 `max_new_columns` across every scenario -- the one real behavioral difference
-from `AggregateODRouteBaseFormulation`'s `_pricing_merge_units` (`round.jl`'s
+from `AggregateODRouteBaseFormulation`'s `_pricing_merge_scenarios` (`round.jl`'s
 default, unbounded identity): scenarios are threaded here, so without a
 deterministic global order thread completion order would decide which
 columns enter the RMP.
 """
-function _pricing_merge_units(
+function _pricing_merge_scenarios(
     ::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap,
     candidates::AbstractVector, max_new_columns::Int,
 )
     sorted = _sort_pricing_results_by_route(
-        candidates, entry -> (entry.reduced_cost, entry.tau, entry.unit, string(entry.payload.route)),
+        candidates, entry -> (entry.reduced_cost, entry.tau, entry.scenario, string(entry.payload.route)),
     )
     return sorted[1:min(length(sorted), max_new_columns)]
 end

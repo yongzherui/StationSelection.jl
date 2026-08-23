@@ -1,39 +1,39 @@
 """
 Builds the per-scenario pricing graph (nodes, travel costs, active station OD
 pairs, and the direct-ride-limit/reduced-cost helpers derived from it) that
-the label search in `labels.jl`/`exact.jl` operates over.
+the label search in `exact/labels.jl`/`exact/exact.jl` operates over.
 """
 
-function _aggregate_od_route_travel(pricing_data::AggregateODRoutePricingData, u::Int, v::Int)::Float64
+function _route_covering_travel(pricing_data::RouteCoveringPricingData, u::Int, v::Int)::Float64
     cost = get(pricing_data.travel_cost, (u, v), Inf)
     isfinite(cost) || throw(ArgumentError("missing finite routing cost for station arc $((u, v))"))
     return cost
 end
 
 function _direct_ride_limit(
-    pricing_data::AggregateODRoutePricingData,
+    pricing_data::RouteCoveringPricingData,
     pair::Tuple{Int, Int},
 )::Float64
-    return pricing_data.detour_factor * _aggregate_od_route_travel(pricing_data, pair[1], pair[2])
+    return pricing_data.detour_factor * _route_covering_travel(pricing_data, pair[1], pair[2])
 end
 
-function _aggregate_od_route_label_reduced_cost(
+function _route_covering_label_reduced_cost(
     tau::Float64,
     served_pairs,
-    pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals,
+    pricing_data::RouteCoveringPricingData,
+    duals::RouteCoveringPricingDuals,
 )::Float64
     dual_credit = sum(get(duals.sigma, pair, 0.0) for pair in served_pairs; init=0.0)
     return pricing_data.route_regularization_weight * (tau + pricing_data.repositioning_time) - dual_credit
 end
 
-function _certify_aggregate_od_route_pairs_at_node(
+function _certify_route_covering_pairs_at_node(
     node::Int,
     station_age::Dict{Int, Float64},
     travel_time::Float64,
     served_pairs::Set{Tuple{Int, Int}},
-    pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals,
+    pricing_data::RouteCoveringPricingData,
+    duals::RouteCoveringPricingDuals,
 )
     certified_pairs = copy(served_pairs)
     reward = 0.0
@@ -50,11 +50,11 @@ function _certify_aggregate_od_route_pairs_at_node(
     return certified_pairs, reward
 end
 
-function _prune_irrelevant_aggregate_od_route_station_ages(
+function _prune_irrelevant_route_covering_station_ages(
     station_age::Dict{Int, Float64},
     served_pairs::Set{Tuple{Int, Int}},
-    pricing_data::AggregateODRoutePricingData,
-    duals::AggregateODRoutePricingDuals,
+    pricing_data::RouteCoveringPricingData,
+    duals::RouteCoveringPricingDuals,
     current::Int,
 )
     remaining = Dict{Int, Float64}()
@@ -64,7 +64,7 @@ function _prune_irrelevant_aggregate_od_route_station_ages(
             pair[1] == station || continue
             pair ∈ served_pairs && continue
             get(duals.sigma, pair, 0.0) > 1e-9 || continue
-            t_to_dest = pair[2] == current ? 0.0 : _aggregate_od_route_travel(pricing_data, current, pair[2])
+            t_to_dest = pair[2] == current ? 0.0 : _route_covering_travel(pricing_data, current, pair[2])
             age + t_to_dest <= _direct_ride_limit(pricing_data, pair) + 1e-9 || continue
             useful = true
             break

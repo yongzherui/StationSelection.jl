@@ -1,7 +1,7 @@
 """
 `JointRoutingAssignmentSearchContext`: the revisit-tolerant passenger
 free-assignment pricer's plug into the shared search loop
-(`_run_pricing_label_search`, `engine.jl`), plus route replay
+(`_run_label_setting`, `engine.jl`), plus route replay
 (`_joint_routing_assignment_column_from_route`) to turn a finished label's
 physical route into concrete per-passenger assignments -- the only place
 concrete `(j, k)` pairs are recovered, since the label itself only tracks a
@@ -12,11 +12,14 @@ surviving label offered to `_run_pricing_round`'s accept/dedupe test.
 
 # ── remaining-reward bound (drives frontier priority + pop-time pruning) ────
 """
-Admissible bound on the additional *net* gain (reward minus the route
-regularization cost of the travel needed to collect it) still available to
-`label`. `label.reduced_cost - bound` is therefore a lower bound on the reduced
-cost of every completion of `label`, used both to order the frontier and to
-prune at pop time.
+Admissible bound on the additional reward still reachable from `label`: the
+summed dual reward of every not-yet-activated reward layer that could still be
+certified one way or another (the two loops below). `label.reduced_cost -
+bound` is therefore a lower bound on the reduced cost of every completion of
+`label`, used both to order the frontier and to prune at pop time -- future
+travel only ever adds nonnegative cost to reduced cost, so ignoring it here
+can only make the bound *looser*, never wrong (this is exactly the paper's
+`U(ell)`: a plain sum over reachable layers, with no travel discount).
 
 Rewritten once from an `O(|opportunities|)` scan (every opportunity re-tested for
 every label) to `O(#live origins' opportunities + n_nodes)`: `|opportunities| ~
@@ -35,54 +38,34 @@ Two structurally different sources of future reward, handled separately:
     opportunities, but only those whose ride limit survives `age + travel(current, k)`.
     That test needs the actual age, so it stays per-opportunity -- but only over
     opportunities of origins that are *actually live*, which pruning keeps small.
-    Such an opportunity is booked against its *destination* `k`, the node the
-    vehicle must reach to collect it.
 
   - **refreshable origins** -- if still inside the pickup window, any origin
-    reachable before the cutoff could be visited to open a fresh clock. The old
-    code tested this per opportunity but its condition depends only on the
-    *origin*, so the whole origin's union mask (`origin_union_mask`) can be OR'd
-    in at once. Such a mask is booked against the *origin* `j`, the node the
-    vehicle must reach first.
+    reachable before the cutoff could be visited to open a fresh clock. The
+    condition depends only on the *origin*, so the whole origin's union mask
+    (`origin_union_mask`) can be checked at once rather than per-opportunity.
 
-# Why the travel discount is valid
+`workspace.layer_scratch` dedups across both sources (and within each): a
+layer reachable via several opportunities or origins is only ever counted, and
+its weight only ever added, once.
 
-The previous version returned the raw reward `R` of everything still reachable,
-silently pretending it were free. But collecting a layer booked against node `x`
-requires physically reaching `x`, which costs at least `travel(current, x)` --
-the same minimum-additional-time argument `_joint_routing_assignment_age_is_useful`
-already relies on, and which holds because routing costs are shortest-path
-distances and so obey the triangle inequality (detouring only adds more).
-
-So for any completion that collects the layers booked against a node set `S`,
-`travel >= max_{x in S} travel(current, x)`, giving net gain
-`R(S) - beta * max_{x in S} travel(current, x)`. For a fixed travel budget the
-best `S` is "every node within that radius", so scanning nodes in increasing
-distance from `current` and taking the running maximum of
-`R(prefix) - beta * travel(current, node)` maximises over all `S` in one pass --
-no subset enumeration. `max(0.0, ...)` covers "stop here and collect nothing",
-which is always available.
-
-`R(prefix)` is the weight of the *union* of the prefix's masks minus `activated`,
-accumulated incrementally in `acc`, so layers shared between nodes (the same
-passenger certifiable at several destinations) are counted once rather than
-summed -- a sum would still be a valid over-estimate, but a needlessly loose one.
-
-Nodes are walked via `nodes_by_travel[current_idx]`, precomputed once per pricing
-call, so no per-label sorting is needed.
-
-MEASURED: **no effect** -- label counts moved by under 0.2% and wall time was flat.
-At cold-start duals the bound sums 10+ passenger rewards of ~5000 each while one
-hop costs `beta * travel ~ 4000`, so discounting one hop essentially never flips
-the pruning test. Retained because it is exact, strictly tighter, and should bite
-under converged CG duals where most `rho_pjk` are near zero and `beta * travel` is
-comparable to the entire remaining reward -- a regime this benchmark could not
-reproduce. Do not assume it helps without measuring on the target duals.
+A 2026-08 version of this bound additionally discounted each reachable node's
+reward by the regularized travel cost of reaching it (`beta * travel(current,
+x)`), taking a running maximum over nodes visited in increasing distance from
+`current` -- a strictly tighter, still-admissible bound, requiring a
+per-search sorted-nodes-by-distance index and a running-max walk to compute.
+Removed 2026-08-19: its own docstring already measured it as **no effect** --
+under 0.2% label-count movement and flat wall time on the benchmarked
+instances (`scripts/bench_joint_routing_assignment_labels.jl`) -- so the extra
+machinery was paying for a tightness that never showed up in practice, at the
+cost of real complexity. See git history if a future duals regime (per that
+docstring: converged CG duals where most `rho_pjk` are near zero and `beta *
+travel` is comparable to the entire remaining reward) resurrects the need for
+it.
 """
 # `label`/`label_bs` are intentionally untyped: this bound is shared by the
 # revisit-tolerant pricer (`JointRoutingAssignmentPricingLabel` /
 # `JointRoutingAssignmentLabelBitsets`) and the elementary station-simple pricer
-# (`station_simple.jl`), whose label/bitset types differ but expose the same
+# (`../station_simple/station_simple.jl`), whose label/bitset types differ but expose the same
 # `current`/`time`/`activated_reward_layers` and `age_idx`/`age_val` fields the
 # bound reads. Julia still specializes per concrete call site, so there is no
 # dispatch or performance cost to dropping the annotations.
@@ -96,13 +79,12 @@ function _joint_routing_assignment_remaining_reward_bound(
     past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
     current_idx = index.node_index[label.current]
     activated = label.activated_reward_layers
-    beta = pricing_data.route_regularization_weight
     layer_weight = pricing_data.layer_weight
 
-    empty!(workspace.touched_nodes)
+    empty!(workspace.layer_scratch)
+    total = 0.0
 
     # live origins: age-dependent, so still per-opportunity -- but only theirs.
-    # Booked against the destination that would certify them.
     @inbounds for t in eachindex(label_bs.age_idx)
         origin_idx = Int(label_bs.age_idx[t])
         age = label_bs.age_val[t]
@@ -110,48 +92,30 @@ function _joint_routing_assignment_remaining_reward_bound(
             issubset(index.opp_layer_mask[i], activated) && continue
             dest_idx = index.opp_dest_idx[i]
             age + index.travel_matrix[current_idx, dest_idx] <= index.opp_ride_limit[i] + 1e-9 || continue
-            isempty(workspace.node_mask[dest_idx]) && push!(workspace.touched_nodes, dest_idx)
-            union!(workspace.node_mask[dest_idx], index.opp_layer_mask[i])
+            for layer in index.opp_layer_mask[i]
+                (layer in activated || layer in workspace.layer_scratch) && continue
+                push!(workspace.layer_scratch, layer)
+                total += layer_weight[layer]
+            end
         end
     end
 
-    # refreshable origins: condition depends only on the origin, so OR whole masks.
-    # Booked against the origin, which must be reached before any of its
-    # opportunities can even start.
+    # refreshable origins: condition depends only on the origin, so check its
+    # whole union mask at once rather than per opportunity.
     if !past_pickup_cutoff
         @inbounds for origin_idx in eachindex(index.origin_union_mask)
             isempty(index.origin_union_mask[origin_idx]) && continue
             label.time + index.travel_matrix[current_idx, origin_idx] <=
                 pricing_data.max_wait_time + 1e-9 || continue
-            isempty(workspace.node_mask[origin_idx]) && push!(workspace.touched_nodes, origin_idx)
-            union!(workspace.node_mask[origin_idx], index.origin_union_mask[origin_idx])
-        end
-    end
-
-    best = 0.0
-    if !isempty(workspace.touched_nodes)
-        empty!(workspace.layer_scratch)
-        acc_weight = 0.0
-        remaining = length(workspace.touched_nodes)
-        @inbounds for x in index.nodes_by_travel[current_idx]
-            mask = workspace.node_mask[x]
-            isempty(mask) && continue
-            for layer in mask
+            for layer in index.origin_union_mask[origin_idx]
                 (layer in activated || layer in workspace.layer_scratch) && continue
                 push!(workspace.layer_scratch, layer)
-                acc_weight += layer_weight[layer]
+                total += layer_weight[layer]
             end
-            gain = acc_weight - beta * index.travel_matrix[current_idx, x]
-            gain > best && (best = gain)
-            remaining -= 1
-            remaining == 0 && break
         end
     end
 
-    @inbounds for x in workspace.touched_nodes
-        empty!(workspace.node_mask[x])
-    end
-    return best
+    return total
 end
 
 # ── search context: struct + constructor ────────────────────────────────────
@@ -196,7 +160,7 @@ function JointRoutingAssignmentSearchContext(
 )
     n_nodes = length(pricing_data.nodes)
     search_index = _build_joint_routing_assignment_search_index(pricing_data)
-    bound_workspace = _create_joint_routing_assignment_bound_workspace(n_nodes)
+    bound_workspace = _create_joint_routing_assignment_bound_workspace()
     # Built once per search: the dominance switches live in the type, so the scan
     # compiles down to only the conditions this configuration actually uses.
     dominance_rules = _joint_routing_assignment_dominance_rules(
@@ -382,7 +346,7 @@ _pricing_make_column(ctx::JointRoutingAssignmentSearchContext, column_id::Int, c
     )
 
 """
-Unlike Base's single-constraint-family check (`aggregate_od_route/exact.jl`),
+Unlike Base's single-constraint-family check (`route_covering/exact/exact.jl`),
 Joint's master reduced cost sums the coverage row plus both linking-row
 families per assignment (`_verify_joint_routing_assignment_master_reduced_cost`,
 `duals.jl`) -- so this hook, unlike the aggregate pricers' twins, genuinely

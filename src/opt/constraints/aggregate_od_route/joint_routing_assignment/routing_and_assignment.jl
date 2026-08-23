@@ -4,7 +4,7 @@ incremental column-adder, and its `add_columns!` CGSolver hook. Column theta var
 carry routing and assignment jointly (no separate `x`), hence this file's name.
 
 `column`'s type annotation is intentionally omitted below: `JointRoutingAssignmentRouteColumn`
-is defined in `label_setting/aggregate_od_route/joint_routing_assignment/types.jl`, included well
+is defined in `label_setting/joint_routing_assignment/types.jl`, included well
 after `opt/constraints.jl` (see `src/StationSelection.jl`'s include order) -- annotating it
 here would be a forward type reference Julia can't resolve yet.
 """

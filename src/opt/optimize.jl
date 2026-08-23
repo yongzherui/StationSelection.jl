@@ -36,11 +36,12 @@ include("label_setting/utils.jl")
 include("label_setting/types.jl")
 include("label_setting/engine.jl")
 include("label_setting/round.jl")
-include("label_setting/aggregate_od_route/base/types.jl")
-include("label_setting/aggregate_od_route/base/data.jl")
-include("label_setting/aggregate_od_route/base/labels.jl")
-include("label_setting/aggregate_od_route/base/exact.jl")
-include("label_setting/aggregate_od_route/base/station_simple.jl")
+include("label_setting/route_covering/types.jl")
+include("label_setting/route_covering/data.jl")
+include("label_setting/route_covering/exact/types.jl")
+include("label_setting/route_covering/exact/labels.jl")
+include("label_setting/route_covering/exact/exact.jl")
+include("label_setting/route_covering/station_simple/station_simple.jl")
 # generic_runner.jl, column_generation.jl, duals.jl, logging.jl, and dispatch.jl (the old
 # AggregateODRouteCG engine's outer loop, master-facing dual extraction, CG logging, and
 # CG-algorithm dispatch choke point) were all removed -- none of them were reachable from
@@ -49,21 +50,22 @@ include("label_setting/aggregate_od_route/base/station_simple.jl")
 # this) or from PassengerFreeAssignmentCG (AggregateODRouteJointRoutingAssignmentFormulation
 # + CGSolver), which goes through opt/solvers/cg_solver.jl's generic outer loop with its own
 # joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl hooks instead.
-include("label_setting/aggregate_od_route/base/enumeration.jl")
+include("label_setting/route_covering/exact/enumeration.jl")
 # Shared by both AggregateODRouteBaseFormulation build_model methods below (DirectMIPSolver
 # and CGSolver) -- see its own module docstring for why theta creation itself stays outside
 # it.
 include("optimize/aggregate_od_route/base_shared.jl")
 include("optimize/aggregate_od_route/direct/build_base.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/types.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/data.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/labels.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/search_data.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/exact.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/station_simple.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/duals.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/seeding.jl")
-include("label_setting/aggregate_od_route/joint_routing_assignment/pricing_round.jl")
+include("label_setting/joint_routing_assignment/types.jl")
+include("label_setting/joint_routing_assignment/data.jl")
+include("label_setting/joint_routing_assignment/exact/types.jl")
+include("label_setting/joint_routing_assignment/exact/labels.jl")
+include("label_setting/joint_routing_assignment/search_data.jl")
+include("label_setting/joint_routing_assignment/exact/exact.jl")
+include("label_setting/joint_routing_assignment/station_simple/station_simple.jl")
+include("label_setting/joint_routing_assignment/duals.jl")
+include("label_setting/joint_routing_assignment/seeding.jl")
+include("label_setting/joint_routing_assignment/exact/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteBaseFormulation + CGSolver: same y/x/theta master DirectMIPSolver's build
 # (above) solves, grown from an empty column pool via add_aggregate_od_route_base_column!
@@ -71,8 +73,8 @@ include("optimize/aggregate_od_route/column_generation/build_joint_routing_assig
 # instead of DirectMIPSolver's own up-front exhaustive enumeration. dispatch.jl
 # disambiguates its 4 CGSolver hooks from AggregateODRouteJointRoutingAssignmentFormulation's
 # own (both share mapping::AggregateODRouteMap) by formulation type.
-include("label_setting/aggregate_od_route/base/duals.jl")
-include("label_setting/aggregate_od_route/base/pricing_round.jl")
+include("label_setting/route_covering/duals.jl")
+include("label_setting/route_covering/exact/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_base.jl")
 include("optimize/aggregate_od_route/column_generation/dispatch.jl")
 # `optimize/aggregate_od_route/heuristic_enumeration.jl` and the old nearest-open-assignment-
@@ -80,6 +82,6 @@ include("optimize/aggregate_od_route/column_generation/dispatch.jl")
 # were removed entirely -- see this file's top comment for what's kept as a reminder
 # instead. Plain exhaustive enumeration (`enumerate_aggregate_od_route_columns`,
 # `AggregateODRouteBaseFormulation`'s `θ` pool) was recovered and adapted -- see
-# `label_setting/aggregate_od_route/base/enumeration.jl`, included above (it's a degenerate
+# `label_setting/route_covering/exact/enumeration.jl`, included above (it's a degenerate
 # label-setting run: uniform rewards, no dominance pruning, so it lives alongside the
 # search machinery it reuses rather than under `optimize/`).
