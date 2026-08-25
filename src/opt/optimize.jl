@@ -67,20 +67,31 @@ include("label_setting/joint_routing_assignment/exact/exact.jl")
 include("label_setting/joint_routing_assignment/station_simple/types.jl")
 include("label_setting/joint_routing_assignment/station_simple/labels.jl")
 include("label_setting/joint_routing_assignment/station_simple/station_simple.jl")
-# darp/ is a first-commit-crediting alternative to exact/'s running-max
-# passenger crediting, built as a controlled comparison point -- selectable
-# per solve via `AggregateODRouteJointRoutingAssignmentFormulation`'s
-# `pricing_mode` field (`:exact`/`:darp`), branched on in
+# darp_modified/ and darp/ are two controlled comparison points against
+# exact/'s running-max passenger crediting, both selectable per solve via
+# `AggregateODRouteJointRoutingAssignmentFormulation`'s `pricing_mode` field
+# (`:exact`/`:darp_modified`/`:darp`), branched on in
 # `joint_routing_assignment/pricing_round.jl`'s `_pricing_build_scenario_context`
-# (below). Also fully exercisable standalone via
-# `joint_routing_assignment_pricing_by_darp_label_setting` (darp/darp.jl).
-# Needs `joint_routing_assignment/duals.jl` (below) for
-# `_verify_joint_routing_assignment_master_reduced_cost`, so darp/darp.jl is
-# included after it.
+# (below). Both need `joint_routing_assignment/duals.jl` for
+# `_verify_joint_routing_assignment_master_reduced_cost`, so their own context
+# files are included after it.
+#
+# darp_modified/: value-equivalent to exact/ (branches commit-or-skip per
+# passenger instead of running-max), served keyed by passenger with
+# compensated dominance -- see darp_modified/types.jl's module docstring.
+include("label_setting/joint_routing_assignment/darp_modified/types.jl")
+include("label_setting/joint_routing_assignment/darp_modified/data.jl")
+include("label_setting/joint_routing_assignment/darp_modified/labels.jl")
+include("label_setting/joint_routing_assignment/duals.jl")
+include("label_setting/joint_routing_assignment/darp_modified/darp_modified.jl")
+# darp/: literal onboard-bitset DARP-style pricer -- boarding commits to a
+# specific (j,k) pair, served keyed by the full triple with plain (not
+# compensated) dominance, ride-limit violations are hard infeasibility (the
+# whole label is discarded, not just the one commitment) -- see
+# darp/types.jl's module docstring.
 include("label_setting/joint_routing_assignment/darp/types.jl")
 include("label_setting/joint_routing_assignment/darp/data.jl")
 include("label_setting/joint_routing_assignment/darp/labels.jl")
-include("label_setting/joint_routing_assignment/duals.jl")
 include("label_setting/joint_routing_assignment/darp/darp.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")

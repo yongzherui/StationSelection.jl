@@ -30,24 +30,35 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 toggle, same default, applying here to `JointRoutingAssignmentSearchContext`'s
 dominance test instead -- `label_setting/joint_routing_assignment/exact/exact.jl`).
 
-`pricing_mode::Symbol` (`:exact` or `:darp`, default `:exact`) picks which
-label-setting pricer `_pricing_build_scenario_context`
-(`label_setting/joint_routing_assignment/pricing_round.jl`) builds:
+`pricing_mode::Symbol` (`:exact`, `:darp_modified`, or `:darp`, default
+`:exact`) picks which label-setting pricer `_pricing_build_scenario_context`
+(`label_setting/joint_routing_assignment/pricing_round.jl`) builds -- three
+pricers that are all, run to exhaustion, required to reach the *same*
+optimum, differing only in search mechanism and cost:
 - `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/exact.jl`), which
   credits each passenger their single *best* certified `(j,k)` regardless of
   visitation order, via a reward-layer running-max trick.
-- `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/darp.jl`),
-  which computes the *same* optimum by literally branching the search on
-  whether to commit each passenger's candidate as it's reached or leave it
-  open for a possibly-better one later -- closer to how a real dial-a-ride
-  request gets committed, at the cost of a much larger search than `:exact`'s
-  trick needs. Run to exhaustion, `:darp` is required to match `:exact`'s
-  objective exactly, not just approximate it; see `darp/types.jl`'s module
-  docstring for that invariant and the branching that makes it hold, and for
-  the full reward-model and dominance-soundness argument. Both modes share
-  every other field here (including `compensated_dominance`), so switching
-  `pricing_mode` alone isolates the search-mechanism difference, holding the
-  achievable optimum fixed.
+- `:darp_modified` -- `JointRoutingAssignmentDarpModifiedSearchContext`
+  (`darp_modified/darp_modified.jl`), which computes the same optimum by
+  branching the search on whether to commit each passenger's candidate as
+  it's reached or leave it open for a possibly-better one later, tracking
+  only *which passengers* are committed (compensated dominance, an
+  upper-bound weight per passenger).
+- `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/darp.jl`), a
+  literal onboard-bitset DARP-style pricer: boarding commits to a specific
+  `(j,k)` pair (not deferred like `:darp_modified`'s), tracked with plain
+  (uncompensated) dominance over the full triple identity plus an explicit
+  onboard/liability resource, and a ride-limit violation is hard
+  infeasibility (the whole label is discarded) rather than a soft miss.
+  Closest to textbook DARP label-setting, and the most expensive of the
+  three.
+See `darp_modified/types.jl`'s and `darp/types.jl`'s module docstrings for
+the exhaustive-equivalence invariant each is required to satisfy and the
+mechanism that makes it hold. `compensated_dominance` (below) applies to
+`:exact` and `:darp_modified` only -- `:darp` has no such field, since a
+compensated version would be unsound for its triple-indexed served set (see
+`darp/types.jl`). Switching `pricing_mode` alone isolates the
+search-mechanism difference, holding the achievable optimum fixed.
 No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
 assignment is simply the only behavior now. No `allow_walk_only` field either -- unlike
@@ -84,8 +95,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
         )
-        pricing_mode in (:exact, :darp) || throw(ArgumentError(
-            "pricing_mode must be :exact or :darp, got $(repr(pricing_mode))",
+        pricing_mode in (:exact, :darp_modified, :darp) || throw(ArgumentError(
+            "pricing_mode must be :exact, :darp_modified, or :darp, got $(repr(pricing_mode))",
         ))
         new(
             Float64(route_regularization_weight),

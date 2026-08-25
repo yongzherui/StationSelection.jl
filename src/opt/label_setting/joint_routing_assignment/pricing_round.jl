@@ -8,15 +8,17 @@ pricer-assigned id *is* the master's real key here), and a cross-scenario
 merge that sorts and imposes one global `max_new_columns` budget so thread
 completion order can't decide which columns enter the RMP.
 
-Lives at the `joint_routing_assignment/` level, not under `exact/` or
-`darp/`, because `_pricing_build_scenario_context` below is the one place
-that picks *between* those two pricers (`formulation.pricing_mode`, stashed
-as `m[:joint_routing_assignment_pricing_mode]`) -- it isn't exact-specific
-or darp-specific itself, just the formulation-level wiring both plug into.
-Candidate extraction (`joint_routing_assignment_pricing_candidates`) is
-mode-agnostic too: both pricers price the exact same `PassengerAssignmentCandidate`s,
+Lives at the `joint_routing_assignment/` level, not under `exact/`,
+`darp_modified/`, or `darp/`, because `_pricing_build_scenario_context` below
+is the one place that picks *between* those three pricers
+(`formulation.pricing_mode`, stashed as `m[:joint_routing_assignment_pricing_mode]`)
+-- it isn't specific to any one of them, just the formulation-level wiring
+all three plug into. Candidate extraction
+(`joint_routing_assignment_pricing_candidates`) is mode-agnostic too: all
+three pricers price the exact same `PassengerAssignmentCandidate`s,
 differing only in what they do with them once built (running-max reward
-layers vs. first-commit credit -- see `exact/types.jl` vs. `darp/types.jl`).
+layers, retroactive commit-or-skip, or onboard-bitset boarding -- see
+`exact/types.jl` / `darp_modified/types.jl` / `darp/types.jl`).
 """
 
 """
@@ -73,10 +75,10 @@ _pricing_next_column_id(::AggregateODRouteJointRoutingAssignmentFormulation, map
 
 """
 Build one scenario's pricing context: duals -> candidates -> pricing data ->
-search context (`exact/` or `darp/`, per `formulation.pricing_mode`), plus the
-existing column pool restricted to this scenario. `nothing` when a scenario
-has no positive-reward candidates (and therefore, for `exact/`, no
-opportunities) to price at all.
+search context (`exact/`, `darp_modified/`, or `darp/`, per
+`formulation.pricing_mode`), plus the existing column pool restricted to this
+scenario. `nothing` when a scenario has no positive-reward candidates (and
+therefore, for `exact/`, no opportunities) to price at all.
 """
 function _pricing_build_scenario_context(
     ::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, s::Int,
@@ -96,8 +98,9 @@ function _pricing_build_scenario_context(
     ]
 
     pricing_mode = m[:joint_routing_assignment_pricing_mode]::Symbol
-    if pricing_mode === :darp
-        darp_pricing_data = create_joint_routing_assignment_darp_pricing_data(
+
+    if pricing_mode === :darp_modified
+        darp_modified_pricing_data = create_joint_routing_assignment_darp_modified_pricing_data(
             s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
             route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
             max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
@@ -105,12 +108,29 @@ function _pricing_build_scenario_context(
             max_stops=Int(m[:joint_routing_assignment_max_stops]),
             compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
         )
+        isempty(darp_modified_pricing_data.candidates) && return nothing
+        return JointRoutingAssignmentDarpModifiedSearchContext(darp_modified_pricing_data), existing
+    end
+
+    if pricing_mode === :darp
+        # No compensated_dominance kwarg here -- darp/ is unconditionally
+        # plain/exact on both served and onboard (types.jl's module
+        # docstring explains why a compensated version would be unsound for
+        # a triple-indexed served set).
+        darp_pricing_data = create_joint_routing_assignment_darp_pricing_data(
+            s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
+            route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
+            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
+            max_stops=Int(m[:joint_routing_assignment_max_stops]),
+        )
         isempty(darp_pricing_data.candidates) && return nothing
         return JointRoutingAssignmentDarpSearchContext(darp_pricing_data), existing
     end
 
     pricing_mode === :exact || throw(ArgumentError(
-        "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- expected :exact or :darp",
+        "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
+        "expected :exact, :darp_modified, or :darp",
     ))
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;

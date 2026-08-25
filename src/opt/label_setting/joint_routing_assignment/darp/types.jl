@@ -1,91 +1,83 @@
 """
-Label/bitsets/dominance/pricing-data types for `darp/`: a *provably
-value-equivalent* alternative to `exact/`'s running-max crediting, built as a
-controlled comparison point for how much `exact/`'s reward-layer trick is
-worth *computationally* -- not a different, weaker reward model. See
+Label/bitsets/dominance/pricing-data types for `darp/`: a literal onboard-
+bitset DARP-style pricer, built as a comparison point against `darp_modified/`'s
+retroactive commit-or-skip and `exact/`'s reward-layer running-max. See
 `darp.jl`'s module docstring for the search-context wiring; this file is the
-one to read for the reward model and dominance soundness argument.
+one to read for the reward model and dominance argument.
 
-# The equivalence this pricer is required to satisfy
+This is a DARP-style label-setting algorithm adapted to this pricing problem,
+not a general classical DARP solver: starts are synchronized, capacity is
+unlimited, the only pickup time window is the shared `max_wait_time`, and the
+pricing graph uses station-to-station metric-closure arcs rather than separate
+depot/pickup/delivery vertices with service times.
 
-**Run to exhaustion (unbounded `max_stops`, no early `n_candidates`/time-limit
-cutoff), `darp/`'s optimal reduced cost for a scenario must equal `exact/`'s,
-and the two `CGSolver` modes (`AggregateODRouteJointRoutingAssignmentFormulation.pricing_mode
-= :exact` vs. `:darp`) must converge to the same master objective.** This is
-not an empirical tendency, it's the whole point of the pricer: `exact/`'s
-reward-layer running-max is a *computational shortcut* for "the search may
-credit any passenger to whichever of their certifiable candidates is best,
-independent of when each was reached" -- `darp/` computes that same optimum
-the straightforward way, by literally giving the search that choice, rather
-than encoding it away via a bitset trick. If the two ever disagree on a
-finished search, that is a bug in this pricer (most likely in the branching
-below), not an expected difference to shrug off.
+# Reward model: boarding commits to a specific (j,k), dropoff is deterministic
 
-# Reward model: commit-or-skip is a branch, not forced
+Unlike `darp_modified/` (where "claiming" happens retroactively, at whichever
+node ends up being the destination, using whichever origin's clock happens to
+be live), this pricer makes boarding an explicit, committed decision at the
+*origin*: at a station that's some not-yet-resolved passenger's candidate
+origin (including a route's initial station), the search branches over every valid *board selection* -- for each
+such passenger, either skip them here, or commit to exactly one of their
+candidate destinations reachable from this origin (never more than one:
+elementarity). That committed `(j,k)` is now fixed; dropoff, later, at `k` is
+not a further decision -- it's the deterministic resolution of a promise
+already made.
 
-A route's visit to a station where some not-yet-served passenger `p` has a
-certifiable candidate does **not** automatically commit `p` -- committing `p`
-there is one *option*; leaving `p` open (uncommitted, still eligible for a
-possibly-better candidate reached later) is the other, and the search
-branches into both. Forcing automatic commitment (this pricer's first
-implementation) is unsound: it can make `exact/`'s winning assignment set
-physically unrepresentable as *any* `darp/` route, whenever a passenger's
-weaker candidate's station also lies on the cheapest path to their better
-one -- concretely, `exact/` can pass through such a station "for free" (credit
-nothing there, credit the better candidate later), while forced-commit
-`darp/` cannot avoid taking the worse credit, or must pay extra travel to
-route around the station entirely. Branching removes exactly this gap: for
-any physical route and any target assignment achievable along it, the search
-can choose "skip" at every station before the target candidate and "commit"
-at the target itself, so `exact/`'s optimal assignment set is always reachable
-as *one* of `darp/`'s branches. See
-`_joint_routing_assignment_darp_eligible_at_node`/`_joint_routing_assignment_darp_commit_subsets`
-(`data.jl`) and `_joint_routing_assignment_darp_candidate_next_nodes`
-(`labels.jl`) for the mechanics -- `JointRoutingAssignmentDarpAction` below is
-the `(next_node, commit_subset)` pair one branch corresponds to.
+This is why boarding needs its own combinatorial enumeration
+(`_joint_routing_assignment_darp_board_subsets`, `data.jl`) distinct from
+`darp_modified/`'s: choosing between two different destinations *is* a
+consequential decision here (different final targets, different rewards,
+different deadlines), not a free reward-maximization the way picking the best
+of several simultaneously-live options was there.
 
-Each passenger contributes at most one reward regardless of which branch a
-label took, so the label tracks the concrete committed triple directly
-(`served::Dict{Int, Tuple{Int,Int}}`) rather than a running-maximum proxy --
-no reward-layer preprocessing needed. `exact/`'s replay-based reconstruction
-of concrete `(p,j,k)` assignments (`exact/exact.jl`'s
-`_replay_joint_routing_assignment_route`) has no counterpart here: since
-credit is assigned exactly once, at extension time, for whichever candidate a
-given branch actually committed to, a finished label's own `served` field
-already *is* the final answer -- see `darp.jl`'s `_pricing_candidate_from_label`,
-a trivial projection like `route_covering/exact/exact.jl`'s, not a replay.
+# No `station_age`
 
-Still unlimited-capacity, synchronized-start, revisit-tolerant -- same
-physical route contract as `RouteCoveringPricingLabel`/
-`JointRoutingAssignmentPricingLabel` (see either's module docstring). Only
-what a route gets *credit* for, and how that credit is chosen, differs.
+Boarding is decided the instant the vehicle is *at* the candidate origin,
+using `label.time` directly -- there is nothing to remember about a
+not-yet-boarded candidate between visits, so unlike every other pricer in
+this package, this label carries no station-clock resource at all.
 
-# Dominance: subset + compensated, not open-request equality
+# `onboard`: a liability, not an opportunity -- and the resulting dominance shape
 
-Textbook DARP/PDPTW branch-and-price dominance requires *equal* open-request
-sets between two labels, because an open request there is an obligation --
-the vehicle must still detour to it. Nothing here is obligatory: an
-uncommitted passenger is simply left to `x_walk` (or another route) in the
-master, so a label with *fewer* committed passengers than another is not
-missing an obligation, just missing upside -- exactly the reward-collection
-framing `route_covering/exact/`'s `served_pairs` dominance already relies on.
-So dominance here reuses that same subset-with-compensated-budget test
-(`_bitset_diff_weight`, `label_setting/utils.jl`), over a `served`-passenger
-bitset instead of a served-pair bitset.
+`onboard::Dict{Int, Tuple{Int,Int,Float64}}` (`p => (j, k, age since boarding)`)
+tracks passengers currently committed but not yet delivered. It is the direct
+analogue of textbook DARP's open-request set `Ω`, and it inherits `Ω`'s
+subset-direction *reversal* from `station_age`: a station clock is an
+opportunity (more support, fresher values, is better for the label claiming
+to dominate), but an onboard commitment is an obligation still owed (fewer
+commitments, at least as fresh on the ones shared, is better). So dominance
+requires `onboard(a) ⊆ onboard(b)` -- the *opposite* support direction from
+`station_age`'s `_pricing_dominates_at_state` twins elsewhere in this
+package -- with `age_a(p) <= age_b(p)` on every commitment both still share.
+Because the support and value directions don't couple the same way
+`label_setting/utils.jl`'s sparse-age machinery assumes, this pricer has its
+own small merge-walk (`_joint_routing_assignment_darp_onboard_ages_dominate`,
+`labels.jl`) rather than reusing that utility directly.
 
-The one wrinkle: `route_covering`'s per-pair weight (`sigma[(j,k)]`) is a
-single fixed dual value regardless of how a pair got served, so its weight
-vector is exact. Here, a served passenger `p`'s *true* credited reward
-depends on which of `p`'s candidate assignments happened to be first --
-different labels can have credited `p` different amounts. Using the true
-value per label would mean carrying it in the bitset mirror; instead
-`passenger_weight[p]` below is deliberately an *upper bound* (`max` over
-`p`'s positive-reward candidates), which only ever **overcharges** the
-compensated test's budget check. An overcharge can only cause a sound label
-to be wrongly rejected as non-dominant (lost pruning, never lost
-correctness) -- see `_bitset_diff_weight`'s own docstring for why
-`compensation <= budget` is what soundness requires, and note an upper bound
-on `compensation` only ever makes that test harder to pass, not easier.
+Reward is credited immediately at pickup, so an onboard entry is purely a
+future feasibility liability rather than an unbooked economic opportunity.
+`served::Set{Tuple{Int,Int,Int}}` (completed `(p,j,k)` triples whose reward was
+already credited at pickup) uses **plain** subset dominance -- no compensation, no budget, at
+your explicit direction: a triple-indexed compensated charge would need to
+collapse back to passenger identity to stay sound (see the discussion that
+led here), which defeats the point of tracking explicit triples in the first
+place.
+
+# Ride-limit violations are hard infeasibility
+
+If it becomes impossible to honor *any* current commitment -- including ones
+not being resolved at the node just reached -- the whole label is discarded,
+not just that one commitment. This is a deliberate departure from every other
+pricer in this package (which never invalidates a whole label over one
+missed opportunity) and from `darp_modified/`'s recommended alternative
+(prune just the dead entry) -- chosen because it's closer to how textbook
+DARP resource-extension functions actually behave: an infeasible extension
+simply produces no child, full stop. See
+`_joint_routing_assignment_darp_candidate_next_nodes` (`labels.jl`) for where
+this is enforced -- as an action-generation filter, not a per-entry prune,
+since the shared engine's `_pricing_extend_label` hook cannot itself signal
+"no child produced."
 """
 
 export JointRoutingAssignmentDarpPricingData
@@ -100,34 +92,50 @@ struct JointRoutingAssignmentDarpPricingData
     max_wait_time::Float64
     max_stops::Int
     bounded_max_stops::Bool
-    compensated_dominance::Bool
     n_passengers::Int
-    # weight[p] = max positive reward over p's candidates -- an admissible
-    # upper bound used both by the remaining-reward priority bound and by the
-    # compensated-dominance budget charge (see module docstring above).
+    # max positive reward over p's candidates -- an admissible (loose, not
+    # tight) upper bound used only by the remaining-reward priority bound,
+    # never by dominance (which is plain/exact here, no upper-bound weight
+    # needed).
     passenger_weight::Vector{Float64}
-    candidates::Vector{PassengerAssignmentCandidate}
+    candidates::Vector{PassengerAssignmentCandidate}       # dense triple universe
+    candidate_index::Dict{Tuple{Int, Int, Int}, Int}       # (p,j,k) -> dense index into candidates
     candidates_by_origin::Dict{Int, Vector{Int}}
     candidates_by_destination::Dict{Int, Vector{Int}}
     candidates_by_passenger::Vector{Vector{Int}}
 end
 
 """
-A partial unlimited-capacity, synchronized-start route (`current`, `route`,
-`time`, `station_age`, `tau`, `reduced_cost`, `route_length` all carry the
-same meaning as `RouteCoveringPricingLabel`/`JointRoutingAssignmentPricingLabel`).
-`served[p] = (origin, destination)` is the one assignment `p` was committed
-to by this label's particular sequence of commit/skip branch choices --
-unlike `exact/`'s reward-layer proxy, this already is the final answer for a
-finished label; no replay step recovers it after the fact. See this file's
-module docstring for the commit-or-skip branching rule.
+    JointRoutingAssignmentDarpAction
+
+`(next_node, board_subset)`: a physical move to `next_node`, paired with
+which not-yet-resolved passengers newly board *here*, each committed to one
+specific candidate destination (`board_subset::Vector{(p, origin, destination,
+reward)}`). One label-setting engine "action" (`label_setting/types.jl`'s
+`_pricing_candidate_next_nodes`/`_pricing_extend_label` hooks) is one such
+pair -- see `labels.jl`'s module docstring for why branching over board
+selections has to be expressed as multiple actions rather than multiple
+children of one action.
+"""
+const JointRoutingAssignmentDarpAction = Tuple{Int, Vector{Tuple{Int, Int, Int, Float64}}}
+
+"""
+A partial unlimited-capacity, synchronized-start route. `onboard[p] = (j, k,
+age)` is passenger `p`'s committed pair and elapsed time since boarding it;
+`served` is every `(p,j,k)` triple already delivered; reward enters
+`reduced_cost` when the corresponding commitment boards. When an incomplete
+label is harvested early, unfinished onboard commitments are omitted from the
+assignments and their credited rewards are refunded from the projected
+column's reduced cost.
+`reduced_cost`. See this file's module docstring for the boarding/dropoff
+contract and why there is no `station_age` field here.
 """
 struct JointRoutingAssignmentDarpPricingLabel
     current::Int
     route::Vector{Int}
     time::Float64
-    station_age::Dict{Int, Float64}
-    served::Dict{Int, Tuple{Int, Int}}
+    onboard::Dict{Int, Tuple{Int, Int, Float64}}
+    served::Set{Tuple{Int, Int, Int}}
     tau::Float64
     reduced_cost::Float64
     route_length::Int
@@ -137,57 +145,45 @@ const JointRoutingAssignmentDarpLabelId = Int
 const JointRoutingAssignmentDarpLabelOrderKey = Tuple{Float64, Float64, Int, Int}
 
 """
-    JointRoutingAssignmentDarpAction
-
-`(next_node, commit_subset)`: a physical move to `next_node`, paired with
-which subset of the not-yet-served passengers newly eligible there
-(`JointRoutingAssignmentDarpEligibility`, `data.jl`) this particular branch
-commits -- everyone eligible but left out of `commit_subset` stays
-uncommitted. One label-setting engine "action" (`label_setting/types.jl`'s
-`_pricing_candidate_next_nodes`/`_pricing_extend_label` hooks) is one such
-pair, not just a bare node id -- see `labels.jl`'s module docstring for why
-this is how branching is expressed without changing the shared engine.
-"""
-const JointRoutingAssignmentDarpAction = Tuple{Int, Vector{Tuple{Int, Int, Float64}}}
-
-"""
-Hot-path mirror of a `JointRoutingAssignmentDarpPricingLabel`, the same shape
-as `RouteCoveringLabelBitsets` (`route_covering/exact/types.jl`): `served_bits`
-is `keys(label.served)` as a `BitSet` -- passenger indices are already dense
-(see `PassengerAssignmentCandidate`'s docstring, `../types.jl`), so this needs
-no extra reindexing dict, unlike `route_covering`'s pair-index translation.
+Hot-path mirror of a `JointRoutingAssignmentDarpPricingLabel`. `served_bits`/
+`onboard_bits` are `served`/`keys(onboard)` reindexed to the dense candidate
+universe (`JointRoutingAssignmentDarpPricingData.candidate_index`).
+`onboard_age_idx`/`onboard_age_val`/`onboard_age_mask` are `onboard`'s ages as
+the same sparse sorted-array representation `station_age` uses elsewhere in
+this package, just keyed by dense triple index instead of station id.
 """
 struct JointRoutingAssignmentDarpLabelBitsets
     served_bits::BitSet
-    age_idx::Vector{Int32}
-    age_val::Vector{Float64}
-    age_mask::UInt64
+    onboard_bits::BitSet
+    onboard_age_idx::Vector{Int32}
+    onboard_age_val::Vector{Float64}
+    onboard_age_mask::UInt64
 end
 
 """
 Every piece of label state the dominance scan can reject a candidate with
 using only scalar comparisons -- see `PricingLabelEntry`'s docstring
-(`label_setting/types.jl`) for why this is stored inline rather than behind a
-pointer to the label. `n_live_ages` is `length(age_idx)`, i.e. how many
-stations currently have a live pickup clock.
+(`label_setting/types.jl`). `n_onboard` is `length(onboard)`, i.e. how many
+commitments are currently owed.
 """
 struct JointRoutingAssignmentDarpDominanceFilters
     reduced_cost::Float64
     time::Float64
-    age_mask::UInt64
+    onboard_age_mask::UInt64
     route_length::Int32
-    n_live_ages::Int32
+    n_onboard::Int32
 end
 
 """
-    JointRoutingAssignmentDarpDominanceRules{BoundedStops, Compensated}
+    JointRoutingAssignmentDarpDominanceRules{BoundedStops}
 
-The two dominance switches, carried in the *type* rather than as `Bool`
-arguments, for the same zero-cost-specialization reason as
-`RouteCoveringDominanceRules`/`JointRoutingAssignmentDominanceRules` (see
-either's own docstring).
+Only one switch -- unlike every other pricer in this package, there is no
+`Compensated` parameter: dominance here is unconditionally plain/exact on
+both `served` and `onboard` (see this file's module docstring for why a
+triple-indexed compensated charge would be unsound without secretly
+reconstructing passenger-level bookkeeping).
 """
-struct JointRoutingAssignmentDarpDominanceRules{BoundedStops, Compensated} <: AbstractPricingDominanceRules end
+struct JointRoutingAssignmentDarpDominanceRules{BoundedStops} <: AbstractPricingDominanceRules end
 
-_joint_routing_assignment_darp_dominance_rules(bounded_max_stops::Bool, compensated_dominance::Bool) =
-    JointRoutingAssignmentDarpDominanceRules{bounded_max_stops, compensated_dominance}()
+_joint_routing_assignment_darp_dominance_rules(bounded_max_stops::Bool) =
+    JointRoutingAssignmentDarpDominanceRules{bounded_max_stops}()

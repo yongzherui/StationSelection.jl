@@ -4,70 +4,45 @@ search loop (`_run_label_setting`, `engine.jl`) -- the ten inner search hooks
 plus the four round-level hooks (`round.jl`'s `_pricing_candidate_from_label`/
 `_pricing_pool_signature`/`_pricing_make_column`/`_pricing_verify_column`)
 that let `_run_pricing_round` harvest this context's surviving labels into
-`JointRoutingAssignmentRouteColumn`s, exactly like `exact/exact.jl`'s
-context. Built by `_pricing_build_scenario_context`
+`JointRoutingAssignmentRouteColumn`s. Built by `_pricing_build_scenario_context`
 (`joint_routing_assignment/pricing_round.jl`) when
 `AggregateODRouteJointRoutingAssignmentFormulation.pricing_mode === :darp` --
-a controlled comparison point for how much `exact/`'s reward-layer running-max
-trick is worth *computationally*, not a different reward model: run to
-exhaustion, this pricer's optimum is required to equal `exact/`'s (see
-`types.jl`'s module docstring for that invariant and the branching that makes
-it hold), selectable per solve alongside `:exact` (the default). Also
-exercisable standalone, bypassing the CG hub entirely, via
-`joint_routing_assignment_pricing_by_darp_label_setting` below -- the same
-driver shape the now-removed pre-hub driver functions used.
+the literal onboard-bitset DARP-style comparison point, selectable per solve
+alongside `:exact` and `:darp_modified`. Also exercisable standalone via
+`joint_routing_assignment_pricing_by_darp_label_setting` below, bypassing the
+CG hub entirely.
 
-Unlike `exact/exact.jl`, this pricer needs no route-replay step to recover
-concrete `(p,j,k)` assignments: a finished label's `served` field already is
-the exact answer (`types.jl`), so `_pricing_candidate_from_label` below is a
-trivial projection, the same shape as `route_covering/exact/exact.jl`'s.
+Like `darp_modified/`, needs no route-replay step: a label's `served` field is
+already a valid delivered assignment set. If the label still has onboard
+commitments, `_pricing_candidate_from_label` projects them away by refunding
+their pickup-time rewards; the physical route remains valid, and the shared
+round-level `accept!` hook decides whether that projected column is improving.
 """
 
 export joint_routing_assignment_pricing_by_darp_label_setting
 
 # ── remaining-reward bound (drives frontier priority + pop-time pruning) ────
 """
-Admissible bound on the additional reward still reachable from `label`: the
-summed `passenger_weight` upper bound of every not-yet-served passenger who
-still has some live-or-refreshable candidate reaching them. Same two-source
-structure (live origins / refreshable origins) as
-`route_covering/exact/exact.jl`'s and
-`joint_routing_assignment/exact/exact.jl`'s twins, generalized from "per pair"
-to "per passenger, scanning that passenger's own candidates" via
-`candidates_by_passenger` (`data.jl`) -- since a passenger can have several
-candidate pairs with different origins/destinations/ride limits, unlike
-`route_covering`'s one-weight-per-pair simplicity.
+Admissible bound on the additional reward still reachable from `label`.
+Onboard commitments are excluded because their reward was credited at pickup;
+while still within the pickup window, the bound adds the `passenger_weight`
+upper bound of every not-yet-resolved passenger. Looser than
+`darp_modified/`'s twin (no
+reachability check for not-yet-resolved passengers beyond the pickup-window
+gate) -- acceptable here since this pricer's whole point is measuring the
+cost of a less-clever representation, not chasing bound tightness.
 """
 function _joint_routing_assignment_darp_remaining_reward_bound(
     label::JointRoutingAssignmentDarpPricingLabel,
-    label_bs::JointRoutingAssignmentDarpLabelBitsets,
-    ctx,
+    pricing_data::JointRoutingAssignmentDarpPricingData,
 )::Float64
-    pricing_data = ctx.pricing_data
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
-    current_idx = ctx.node_index[label.current]
     ub = 0.0
-    @inbounds for p in 1:pricing_data.n_passengers
-        pricing_data.passenger_weight[p] > 0 || continue    # no reward, no contribution to the bound
-        p in label_bs.served_bits && continue                # already certified, already counted in reduced_cost
-        reachable = false
-        for idx in pricing_data.candidates_by_passenger[p]
-            c = pricing_data.candidates[idx]
-            origin_idx = ctx.node_index[c.origin]
-            pos = searchsortedfirst(label_bs.age_idx, Int32(origin_idx))
-            origin_age = pos <= length(label_bs.age_idx) && label_bs.age_idx[pos] == origin_idx ?
-                label_bs.age_val[pos] : Inf
-            dest_idx = ctx.node_index[c.destination]
-            can_claim_current = isfinite(origin_age) &&
-                origin_age + ctx.travel_matrix[current_idx, dest_idx] <= c.ride_limit + 1e-9
-            can_refresh = !past_pickup_cutoff &&
-                label.time + ctx.travel_matrix[current_idx, origin_idx] <= pricing_data.max_wait_time + 1e-9
-            if can_claim_current || can_refresh
-                reachable = true
-                break
-            end
+    if label.time <= pricing_data.max_wait_time + 1e-9
+        resolved = _joint_routing_assignment_darp_resolved_passengers(label)
+        for p in 1:pricing_data.n_passengers
+            p in resolved && continue
+            ub += pricing_data.passenger_weight[p]
         end
-        reachable && (ub += pricing_data.passenger_weight[p])
     end
     return label.reduced_cost - ub
 end
@@ -79,24 +54,13 @@ struct JointRoutingAssignmentDarpSearchContext{D<:Function} <: AbstractPricingSe
 }
     pricing_data::JointRoutingAssignmentDarpPricingData
     dominates::D
-    node_index::Dict{Int, Int}
-    n_nodes::Int
-    travel_matrix::Matrix{Float64}
 end
 
 function JointRoutingAssignmentDarpSearchContext(pricing_data::JointRoutingAssignmentDarpPricingData)
-    node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
-    n_nodes = length(pricing_data.nodes)
-    travel_matrix = fill(Inf, n_nodes, n_nodes)
-    for (i, u) in enumerate(pricing_data.nodes), (j, v) in enumerate(pricing_data.nodes)
-        i == j && (travel_matrix[i, j] = 0.0; continue)
-        haskey(pricing_data.travel_cost, (u, v)) && (travel_matrix[i, j] = pricing_data.travel_cost[(u, v)])
-    end
-    rules = _joint_routing_assignment_darp_dominance_rules(pricing_data.bounded_max_stops, pricing_data.compensated_dominance)
-    dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
-        x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.passenger_weight, rules,
-    )
-    return JointRoutingAssignmentDarpSearchContext(pricing_data, dominates, node_index, n_nodes, travel_matrix)
+    rules = _joint_routing_assignment_darp_dominance_rules(pricing_data.bounded_max_stops)
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
+        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, rules)
+    return JointRoutingAssignmentDarpSearchContext(pricing_data, dominates)
 end
 
 # ── context hooks (AbstractPricingSearchContext contract) ───────────────────
@@ -104,13 +68,13 @@ _pricing_initial_labels(ctx::JointRoutingAssignmentDarpSearchContext) =
     initial_joint_routing_assignment_darp_pricing_labels(ctx.pricing_data)
 
 _pricing_make_bitsets(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel) =
-    _make_joint_routing_assignment_darp_label_bitsets(label, ctx.node_index, ctx.n_nodes)
+    _make_joint_routing_assignment_darp_label_bitsets(label, ctx.pricing_data)
 
 _pricing_state(::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, ::JointRoutingAssignmentDarpLabelBitsets) =
     _joint_routing_assignment_darp_state(label)
 
-_pricing_label_priority(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, label_bs::JointRoutingAssignmentDarpLabelBitsets)::Float64 =
-    _joint_routing_assignment_darp_remaining_reward_bound(label, label_bs, ctx)
+_pricing_label_priority(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, ::JointRoutingAssignmentDarpLabelBitsets)::Float64 =
+    _joint_routing_assignment_darp_remaining_reward_bound(label, ctx.pricing_data)
 
 _pricing_best_signature(::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel) =
     isempty(label.served) ? nothing : _joint_routing_assignment_darp_column_signature(label.served)
@@ -122,24 +86,36 @@ _pricing_max_route_length(ctx::JointRoutingAssignmentDarpSearchContext) = ctx.pr
 _pricing_candidate_next_nodes(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel) =
     _joint_routing_assignment_darp_candidate_next_nodes(label, ctx.pricing_data)
 
-# `action`, not a bare node id: see `labels.jl`'s module docstring for why
-# commit/skip branching is expressed as one action per branch rather than as
-# multiple children of one action.
 _pricing_extend_label(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, action::JointRoutingAssignmentDarpAction) =
     _extend_joint_routing_assignment_darp_pricing_label(label, action, ctx.pricing_data)
 
 _pricing_dominates_fn(ctx::JointRoutingAssignmentDarpSearchContext) = ctx.dominates
 
 # ── round-level hooks (round.jl's `_run_pricing_round`, dispatched on ctx) ──
-_joint_routing_assignment_darp_column_signature(served::Dict{Int, Tuple{Int, Int}}) =
-    Tuple(sort!([(p, o, k) for (p, (o, k)) in served]))
+_joint_routing_assignment_darp_column_signature(served::Set{Tuple{Int, Int, Int}}) =
+    Tuple(sort!(collect(served)))
 
-function _pricing_candidate_from_label(::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel)
+"""Project any label with delivered passengers into a valid column.
+
+Pickup reward enters `label.reduced_cost` immediately. For an incomplete
+label, the projected column simply declines every still-onboard assignment,
+so their rewards must be refunded. The route itself needs no change: visiting
+a passenger's candidate origin never forces the master column to assign that
+passenger. The existing pricing-round `accept!` closure remains the sole gate
+that admits only sufficiently negative projected reduced costs.
+"""
+function _pricing_candidate_from_label(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel)
     isempty(label.served) && return nothing
-    assignments = Tuple{Int, Int, Int}[(p, o, k) for (p, (o, k)) in label.served]
+    onboard_refund = sum((
+        ctx.pricing_data.candidates[
+            ctx.pricing_data.candidate_index[(p, j, k)]
+        ].reward
+        for (p, (j, k, _age)) in label.onboard
+    ); init=0.0)
+    assignments = Tuple{Int, Int, Int}[t for t in label.served]
     return (
         signature=_joint_routing_assignment_darp_column_signature(label.served),
-        tau=label.tau, reduced_cost=label.reduced_cost,
+        tau=label.tau, reduced_cost=label.reduced_cost + onboard_refund,
         payload=(route=label.route, assignments=assignments),
     )
 end
@@ -157,12 +133,9 @@ _pricing_make_column(ctx::JointRoutingAssignmentDarpSearchContext, column_id::In
         ),
     )
 
-"""
-Reused from `exact/exact.jl` as-is: `JointRoutingAssignmentRouteColumn`
+"""Reused from `exact/exact.jl` as-is: `JointRoutingAssignmentRouteColumn`
 carries the same `assignments`/`tau` shape regardless of which pricer
-produced it, and the master doesn't care how a column was priced, only what
-it contains -- see `_verify_joint_routing_assignment_master_reduced_cost`
-(`../duals.jl`)."""
+produced it."""
 function _pricing_verify_column(::JointRoutingAssignmentDarpSearchContext, column::JointRoutingAssignmentRouteColumn, m::JuMP.Model, mapping, duals)
     alpha, gamma_o, gamma_d = duals
     data = m[:joint_routing_assignment_data]
@@ -176,12 +149,9 @@ end
         time_limit=30.0, reduced_cost_tol=1e-6, profile=false) -> (columns, exhausted, stats)
 
 Run this pricer's label search to completion against one scenario's existing
-column pool and return improving columns -- the accept/dedupe + harvest logic
-`round.jl`'s `_run_pricing_round` applies per scenario, standalone here (no
-master model/duals cross-check, since there is no live master in a bare
-comparison run) so `darp/` can be benchmarked against `exact/` directly, the
-same shape the pre-hub driver functions (`aggregate_od_route_pricing_by_label_setting`
-and friends) used.
+column pool and return improving columns -- same accept/dedupe + harvest
+shape as `darp_modified/darp_modified.jl`'s twin, standalone (no master
+model/duals cross-check).
 """
 function joint_routing_assignment_pricing_by_darp_label_setting(
     pricing_data::JointRoutingAssignmentDarpPricingData,

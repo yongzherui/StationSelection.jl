@@ -20,14 +20,16 @@ for `CGSolver`.
   actually wired into production; `station_simple/` is an elementary-route
   alternative, not currently reachable from any `build_model`.
 - `joint_routing_assignment/` — the passenger free-assignment pricer
-  (`AggregateODRouteJointRoutingAssignmentFormulation`). `exact/` and `darp/`
-  are both wired into production, selectable per solve via the formulation's
-  `pricing_mode` field (`:exact`, the default, or `:darp`) --
+  (`AggregateODRouteJointRoutingAssignmentFormulation`). `exact/`,
+  `darp_modified/`, and `darp/` are wired into production, selectable per solve
+  via the formulation's `pricing_mode` field (`:exact`, the default,
+  `:darp_modified`, or `:darp`) --
   `pricing_round.jl` (this directory's own, not either subdirectory's) is
-  where `_pricing_build_scenario_context` branches between them. `darp/` is
-  a *provably value-equivalent* alternative to `exact/`, not a weaker one --
-  run to exhaustion, the two are required to reach the same optimum (see
-  `darp/types.jl`'s module docstring); it exists to measure how much
+  where `_pricing_build_scenario_context` branches between them. `darp/` is a
+  DARP-style adaptation with explicit pickup commitment, onboard liabilities,
+  pickup-time reward credit, and compulsory feasible delivery. Run to
+  exhaustion it is required to reach the same optimum as `exact/`; randomized
+  small-instance regression tests enforce that invariant. It exists to measure how much
   `exact/`'s reward-layer running-max trick is worth computationally against
   a search that makes the same choice explicit via branching instead.
   `station_simple/` is the same elementary-route alternative as
