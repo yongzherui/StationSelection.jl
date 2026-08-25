@@ -1,7 +1,7 @@
 """
 `analyze.jl` -- aggregates Study 5's per-cell, per-method result rows (written by
 `run_benchmark.jl`) into a curated two-tier summary under
-`../../results/<date>_study5_scaling_vs_enumeration/`, following the convention in
+`../results/<date>_study5_scaling_vs_enumeration/`, following the convention in
 `results/theta_rho_comparison_2026-08-04/` plus the OOM/timeout censoring bookkeeping
 convention from `notes/2026-08-05_free_assignment_cg_direct_ms5_comparison.md`'s
 "Memory and censoring protocol":

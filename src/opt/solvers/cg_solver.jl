@@ -57,6 +57,35 @@ pre-recovery LP objective is preserved in `OptResult.metadata` under
 `"cg_lp_objective_value"` as a lower bound for judging that gap; `"cg_converged"` records
 whether pricing actually exhausted (vs. hit `max_iterations`), since only the converged
 case makes that LP value a valid bound on the true (unrestricted) optimum.
+
+## Per-iteration log (`metadata["cg_iteration_log"]`)
+
+One `NamedTuple` per CG iteration, in order:
+
+| field | meaning |
+| --- | --- |
+| `iteration` | 1-based iteration index |
+| `master_sec` | wall time in this iteration's master `optimize!` |
+| `pricing_sec` | wall time in `price_columns` |
+| `add_columns_sec` | wall time in `add_columns!` |
+| `columns_added` | how many columns pricing returned this iteration |
+| `cumulative_columns_added` | running total, excluding seed columns |
+| `master_objective` | master LP objective, or `missing` if not `OPTIMAL` |
+| `master_status` | this iteration's master termination status |
+
+The final iteration is always logged, including the one that breaks the loop (on
+convergence, on a non-`OPTIMAL` master, or on the last `max_iterations` pass), so
+`length(log) == metadata["cg_iterations"]`.
+
+Splitting the wall time three ways is what makes a master-bound run distinguishable
+from a pricing-bound one without re-running under a profiler. Note this is separate
+from `"cg_pricing_stats"`, which is a flat per-(iteration x scenario) list of *label
+search* counters carrying no iteration index, and whose own `t_*_sec` timers are only
+populated when the label-setting round is called with `profile=true`.
+
+`"cg_lp_loop_sec"` is the CG loop alone and `"cg_integer_recovery_sec"` the recovery
+solve (`0.0` when recovery is off), so the two can be reported separately even though
+`OptResult.runtime_sec` covers both.
 """
 struct CGSolver <: AbstractSolver
     config::SolverOptions
@@ -92,14 +121,38 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     start_time = time()
     iterations_run = 0
     converged = false
+    # One row per CG iteration, exposed as metadata["cg_iteration_log"]. Wall time is
+    # split into the master LP solve, the pricing call, and column insertion, so a run
+    # that is master-bound can be told apart from one that is pricing-bound without
+    # re-running under a profiler. `columns_added` is what pricing actually returned
+    # this iteration (the pool grows by that much); `cumulative_columns_added` excludes
+    # any seed columns the model was built with.
+    iteration_log = NamedTuple[]
+    cumulative_columns_added = 0
     for iteration in 1:solver.max_iterations
         iterations_run = iteration
-        optimize!(m)
 
-        JuMP.termination_status(m) == MOI.OPTIMAL || break
+        t0 = time()
+        optimize!(m)
+        master_sec = time() - t0
+        status = JuMP.termination_status(m)
+
+        if status != MOI.OPTIMAL
+            push!(iteration_log, (
+                iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
+                add_columns_sec=0.0, columns_added=0,
+                cumulative_columns_added=cumulative_columns_added,
+                master_objective=missing, master_status=string(status),
+            ))
+            break
+        end
+        master_objective = JuMP.objective_value(m)
 
         duals = extract_duals(build_result, mapping, m)
+        t0 = time()
         new_columns = price_columns(build_result, mapping, m, duals, solver)
+        pricing_sec = time() - t0
+
         if isnothing(new_columns) || isempty(new_columns)
             # An empty result certifies convergence only when every underlying
             # label search exhausted its frontier. A time-limited pricing pass
@@ -107,26 +160,48 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             # turns a pricing timeout into a false optimality certificate.
             key = :label_setting_pricing_exhausted
             converged = !haskey(JuMP.object_dictionary(m), key) || Bool(m[key])
+            push!(iteration_log, (
+                iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
+                add_columns_sec=0.0, columns_added=0,
+                cumulative_columns_added=cumulative_columns_added,
+                master_objective=master_objective, master_status=string(status),
+            ))
             break
         end
 
+        t0 = time()
         add_columns!(build_result, mapping, m, new_columns)
+        add_columns_sec = time() - t0
+        cumulative_columns_added += length(new_columns)
+        push!(iteration_log, (
+            iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
+            add_columns_sec=add_columns_sec, columns_added=length(new_columns),
+            cumulative_columns_added=cumulative_columns_added,
+            master_objective=master_objective, master_status=string(status),
+        ))
     end
+    lp_loop_sec = time() - start_time
 
     metadata = Dict{String, Any}(
         "cg_iterations" => iterations_run,
         "cg_converged" => converged,
         "cg_pricing_exhausted" => converged,
         "cg_integer_recovery" => solver.recover_integer_solution,
+        "cg_iteration_log" => iteration_log,
+        # Excludes integer recovery, unlike OptResult.runtime_sec.
+        "cg_lp_loop_sec" => lp_loop_sec,
+        "cg_integer_recovery_sec" => 0.0,
         "cg_pricing_stats" => copy(get(JuMP.object_dictionary(m),
             :label_setting_pricing_stats, Any[])),
     )
     if solver.recover_integer_solution && JuMP.termination_status(m) == MOI.OPTIMAL
         metadata["cg_lp_objective_value"] = JuMP.objective_value(m)
+        t0 = time()
         build_result = integer_recovery_build(build_result, mapping, m)
         m = build_result.model
         _apply_solver_config!(m, solver.config)
         optimize!(m)
+        metadata["cg_integer_recovery_sec"] = time() - t0
     end
     runtime_sec = time() - start_time
 

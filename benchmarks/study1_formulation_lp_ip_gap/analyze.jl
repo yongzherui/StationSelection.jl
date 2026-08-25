@@ -13,7 +13,7 @@ using Statistics
 raw_dir = abspath(ARGS[1])
 project_root = normpath(joinpath(@__DIR__, "..", ".."))
 results_dir = length(ARGS) == 2 ? abspath(ARGS[2]) :
-    joinpath(project_root, "results", "$(Dates.today())_study1_formulation_lp_ip_gap")
+    joinpath(project_root, "benchmarks", "results", "$(Dates.today())_study1_formulation_lp_ip_gap")
 comparison_names = ("formulation", "max_stops", "max_wait_time", "detour_factor")
 jobs_files = [joinpath(@__DIR__, "config", "$(name)_jobs.tsv") for name in comparison_names]
 

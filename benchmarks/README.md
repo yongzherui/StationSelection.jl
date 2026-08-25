@@ -7,16 +7,15 @@ them touch the simulator, so none of them use the top-level project's
 `experiments/`/`scripts/create_study.jl` selection→simulation pipeline (that pipeline is
 untouched, and still targets a different, older model API — see its own `CLAUDE.md`).
 
-This directory holds **code only**. Output flows into the package-root directories that
-already hold this kind of pricing-benchmark work, dated when a study is actually run:
+Benchmark code and output now live together under this directory. Generated directories
+are dated when a study is actually run:
 
-- `../experiments/<date>_studyN_<name>/` — raw per-run CSVs (gitignored).
-- `../results/<date>_studyN_<name>/` — curated case-level + variant-summary CSVs
+- `experiments/<date>_studyN_<name>/` — raw per-run CSVs (gitignored).
+- `results/<date>_studyN_<name>/` — curated case-level + variant-summary CSVs
   (git-tracked), plus a `slides_results.tex` of `\newcommand{\RowName}{col & col & ...}`
   macros ready to `\input` into the manuscript, following
   `../experiments/2026-07-15_restricted_pricing_report/slides_results.tex`'s convention.
-- `../notes/<date>_studyN_<name>_results.md` — write-up, same convention as every other
-  file in `../notes/`.
+- `notes/<date>_studyN_<name>_results.md` — benchmark write-ups.
 
 Instance generation reuses `../scripts/generate_zhuzhou_instance.jl`'s
 `generate_zhuzhou_data` (current, unmodified) via relative `include`, and each
@@ -33,8 +32,8 @@ label-search metrics. Per-search label statistics are retained in
 | # | Directory | Objective | Status |
 | - | --- | --- | --- |
 | 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint and operating-condition LP/IP gaps | implemented — four sub-studies, 110 Zhuzhou jobs |
-| 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 20-job Zhuzhou baseline grid |
-| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 20-job n=20, p=16 grid |
+| 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 60-job Zhuzhou grid, n ∈ {15, 20, 25} at p=8 |
+| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 60-job grid, n ∈ {15, 20, 25} at p=16 |
 | 4 | `study4_heuristic_local_search/` | Heuristic pricing frontier (provisional name `local_search`) | placeholder — no design yet, see study README |
 | 5 | `study5_scaling_vs_enumeration/` | Runtime vs. `\|P\|`/`\|J\|`/`\|S\|`: CG pricing, `darp/`, raw enumeration | scaffolded, TODO — blocked on a new `enumerate_joint_routing_assignment_columns` (see study README) |
 

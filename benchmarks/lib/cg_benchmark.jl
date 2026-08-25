@@ -2,6 +2,7 @@
 
 using StationSelection
 using Dates
+using Statistics
 
 include(joinpath(@__DIR__, "..", "..", "scripts", "generate_zhuzhou_instance.jl"))
 
@@ -38,7 +39,8 @@ end
 function benchmark_output_dir(study_dir::AbstractString, env_prefix::AbstractString,
         study_slug::AbstractString)
     project_root = normpath(joinpath(study_dir, "..", ".."))
-    default_output = joinpath(project_root, "experiments", "$(Dates.today())_$(study_slug)")
+    benchmarks_root = joinpath(project_root, "benchmarks")
+    default_output = joinpath(benchmarks_root, "experiments", "$(Dates.today())_$(study_slug)")
     output_dir = get(ENV, "$(env_prefix)_OUTPUT_DIR", default_output)
     mkpath(output_dir)
     return output_dir
@@ -51,6 +53,95 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         recover_integer_solution=recover_integer_solution,
     )
 end
+
+"""
+    gap_ratio(z_lp, z_ip) -> Float64 or missing
+
+Relative LP/IP gap `(z_ip - z_lp) / |z_ip|`. `missing` if either bound is absent or
+`z_ip` is numerically zero.
+"""
+gap_ratio(z_lp, z_ip) = ismissing(z_lp) || ismissing(z_ip) || abs(z_ip) <= 1e-12 ? missing :
+    (z_ip - z_lp) / abs(z_ip)
+
+"""
+    benchmark_lp_ip(result) -> (; z_lp, z_ip, gap, lp_termination_status)
+
+Split a `recover_integer_solution=true` CG result into its pre-recovery LP bound and its
+post-recovery integer objective.
+
+`z_lp` is the LP value the CG loop converged to (`"cg_lp_objective_value"`), and is a
+valid lower bound on the true optimum *only when pricing actually exhausted* -- check
+`cg_converged`/`cg_pricing_exhausted` before treating it as one.
+
+`z_ip` is the restricted-master heuristic's objective (see `CGSolver`'s docstring): a
+feasible solution and a valid upper bound, but optimal only over the column pool CG
+happened to generate. Two arms that are both exact can therefore certify the *same*
+`z_lp` and still report *different* `z_ip`, because they discovered different pools.
+Compare arms for equivalence on `z_lp`; treat `z_ip` and `gap` as measured outcomes.
+"""
+function benchmark_lp_ip(result)
+    has_lp = haskey(result.metadata, "cg_lp_objective_value")
+    z_lp = has_lp ? Float64(result.metadata["cg_lp_objective_value"]) : missing
+    z_ip = something(result.objective_value, missing)
+    return (z_lp=z_lp, z_ip=z_ip, gap=gap_ratio(z_lp, z_ip),
+        lp_termination_status=has_lp ? "OPTIMAL" : "NOT_RECORDED")
+end
+
+"""
+    benchmark_iteration_metrics(result) -> NamedTuple
+
+Scalar per-iteration summaries derived from `metadata["cg_iteration_log"]` (see
+`CGSolver`'s docstring for the log's own schema): how many columns each CG iteration
+contributed, how long each took, and how that wall time split across the master LP
+solve, pricing, and column insertion.
+
+`lp_loop_sec` and `integer_recovery_sec` come straight from metadata and let the CG
+loop be reported separately from the recovery MIP, which `OptResult.runtime_sec`
+lumps together. Returns `missing` for every average when the log is empty.
+"""
+function benchmark_iteration_metrics(result)
+    log = get(result.metadata, "cg_iteration_log", NamedTuple[])
+    lp_loop_sec = Float64(get(result.metadata, "cg_lp_loop_sec", NaN))
+    recovery_sec = Float64(get(result.metadata, "cg_integer_recovery_sec", NaN))
+    if isempty(log)
+        return (
+            n_logged_iterations=0, total_columns_added=0,
+            mean_columns_per_iteration=missing, median_columns_per_iteration=missing,
+            max_columns_in_iteration=missing, mean_iteration_sec=missing,
+            median_iteration_sec=missing, max_iteration_sec=missing,
+            total_master_sec=missing, total_pricing_sec=missing,
+            total_add_columns_sec=missing, pricing_share_of_loop=missing,
+            lp_loop_sec=lp_loop_sec, integer_recovery_sec=recovery_sec,
+        )
+    end
+    added = [Int(r.columns_added) for r in log]
+    per_iter = [Float64(r.master_sec + r.pricing_sec + r.add_columns_sec) for r in log]
+    total_master = sum(Float64(r.master_sec) for r in log)
+    total_pricing = sum(Float64(r.pricing_sec) for r in log)
+    total_add = sum(Float64(r.add_columns_sec) for r in log)
+    accounted = total_master + total_pricing + total_add
+    return (
+        n_logged_iterations=length(log), total_columns_added=sum(added),
+        mean_columns_per_iteration=mean(added),
+        median_columns_per_iteration=median(added),
+        max_columns_in_iteration=maximum(added),
+        mean_iteration_sec=mean(per_iter), median_iteration_sec=median(per_iter),
+        max_iteration_sec=maximum(per_iter), total_master_sec=total_master,
+        total_pricing_sec=total_pricing, total_add_columns_sec=total_add,
+        pricing_share_of_loop=accounted <= 0 ? missing : total_pricing / accounted,
+        lp_loop_sec=lp_loop_sec, integer_recovery_sec=recovery_sec,
+    )
+end
+
+"""
+    benchmark_iteration_rows(result, identity::NamedTuple) -> Vector{NamedTuple}
+
+The per-iteration log as tidy rows, each prefixed with `identity` (job/instance/arm
+keys) so a study's per-iteration CSVs concatenate into one long-format frame.
+"""
+benchmark_iteration_rows(result, identity::NamedTuple) = NamedTuple[
+    (; identity..., row...) for row in get(result.metadata, "cg_iteration_log", NamedTuple[])
+]
 
 function benchmark_cg_metrics(result, columns_key::Symbol)
     metadata = result.metadata

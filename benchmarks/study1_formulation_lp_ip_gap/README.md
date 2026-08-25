@@ -109,7 +109,7 @@ sbatch --job-name=study1_detour --array=1-30 \
 
 ```bash
 julia --project=. benchmarks/study1_formulation_lp_ip_gap/analyze.jl \
-    experiments/YYYY-MM-DD_study1_formulation_lp_ip_gap
+    benchmarks/experiments/YYYY-MM-DD_study1_formulation_lp_ip_gap
 ```
 
 Outputs are `case_results.csv`, `variant_summary.csv`, four `comparison_*.csv` files,

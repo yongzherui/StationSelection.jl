@@ -2,7 +2,7 @@
 `run_benchmark.jl <job_line>` -- one Study 5 cell: build an instance at the job's
 `(|P|, |J|, |S|, max_stops)` point, run three methods against it under a wall-clock time
 limit, and write one row per method to this job's output under
-`../../experiments/<date>_study5_scaling_vs_enumeration/` (see `../README.md`).
+`../experiments/<date>_study5_scaling_vs_enumeration/` (see `../README.md`).
 
 Instance generation (current, reused as-is via relative `include`):
 

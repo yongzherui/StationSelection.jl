@@ -4,9 +4,14 @@ Usage: `julia --project=. benchmarks/study2_passenger_max_ablation/generate_jobs
 
 Every row is one `(instance, pricing_mode)` job, so exact and DARP never share
 a Julia process or its JIT/cache state.
+
+`N_PAIRS` is held fixed while `N_STATIONS` sweeps, so the size axis isolates the
+candidate-station count `|J|` rather than moving demand and stations together.
+Note that `k = max(2, ceil(n/2))` (see `../lib/cg_benchmark.jl`) still tracks `n`,
+so the larger cells build more stations for the same 8 OD pairs.
 """
 
-const N_STATIONS = [10]
+const N_STATIONS = [15, 20, 25]
 const N_PAIRS = [8]
 const SEEDS = collect(42:51)
 const MAX_STOPS = [10]

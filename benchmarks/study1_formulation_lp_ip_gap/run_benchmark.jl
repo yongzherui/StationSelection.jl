@@ -6,9 +6,6 @@ using CSV
 using DataFrames
 include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
 
-gap_ratio(z_lp, z_ip) = ismissing(z_lp) || ismissing(z_ip) || abs(z_ip) <= 1e-12 ? missing :
-    (z_ip - z_lp) / abs(z_ip)
-
 length(ARGS) == 1 || error("usage: run_benchmark.jl '<tab-separated jobs.tsv row>'")
 fields = split(strip(ARGS[1]), '\t')
 length(fields) == 13 || error("expected 13 tab-separated fields, got $(length(fields))")
