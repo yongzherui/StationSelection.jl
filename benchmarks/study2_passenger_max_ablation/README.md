@@ -1,47 +1,85 @@
-# Study 2 -- Passenger-wise-maximum ablation
+# Study 2 — DARP-style versus specialized exact pricing
 
-## Objective
+## Question
 
-Compare `exact/`'s running-max reward encoding (each passenger contributes the best
-`(j,k)` certified anywhere on the route, regardless of order) against `darp/`'s
-first-commit explicit assignment (each passenger contributes whichever `(j,k)` is first
-certified, in route-visitation order) -- the two pricers already implement both arms of
-this comparison on the same `JointRoutingAssignmentPricingData`. See
-`../../src/opt/label_setting/joint_routing_assignment/darp/types.jl`'s module docstring
-for the precise difference and the soundness argument for `darp/`'s dominance rule.
+How much does the explicit DARP-style label representation cost relative to
+the specialized exact running-maximum representation for the uncapacitated
+joint-routing-assignment problem?
 
-## Prerequisite -- blocks this study
+- `pricing_mode=:darp` explicitly boards `(p,j,k)` commitments, carries an
+  onboard/open-request set and ride clocks, and must discharge those requests.
+- `pricing_mode=:exact` certifies assignment opportunities from route visits
+  and retains each passenger's best reward through reward layers.
 
-**`exact/`'s standalone comparison driver does not exist.** `darp/darp.jl` has one
-(`joint_routing_assignment_pricing_by_darp_label_setting`, ~lines 164-222 --
-"comparison/benchmark entrypoint, not wired into the CG hub"), built for exactly this
-purpose. `exact/exact.jl` has no counterpart -- it ends at `_pricing_verify_column`.
-Before `run_benchmark.jl` can be filled in, add `exact/`'s standalone driver, mirroring
-`darp/darp.jl`'s block. (Note: current `src/` docstrings in `exact/exact.jl`/`labels.jl`
-already reference a `scripts/bench_joint_routing_assignment_labels.jl` that doesn't
-exist either -- that script is the stale `scripts/bench_passenger_free_assignment_labels.jl`
-awaiting a rename/port; not this study's job to fix, but worth knowing it's the same gap
-noticed from a different angle.)
+Both are exact for the same master problem when pricing exhausts. This is a
+representation/search comparison, not a capacity ablation: both modes are
+uncapacitated.
 
-## Method
+## Independent-job design
 
-Once the prerequisite lands: build one scenario's `JointRoutingAssignmentPricingData`,
-call both drivers with `profile=true` against the identical input, compare.
+Every `(generated instance, pricing_mode)` pair is a separate row in
+`config/jobs.tsv` and therefore a separate SLURM job and Julia process. Exact
+and DARP never run sequentially in one process. This prevents one mode from
+benefiting from the other's JIT compilation, caches, or memory state.
 
-## Metrics
+The initial baseline grid in `generate_jobs.jl` is:
 
-Both drivers already return `(columns, exhausted, stats)` where `stats` is
-`_run_label_setting`'s profiling `NamedTuple` (`labels_generated`,
-`labels_rejected_by_dominance`, `labels_removed_by_dominance`, `max_frontier_size`,
-`max_live_labels`, `t_queue_sec`/`t_candidates_sec`/`t_extension_sec`/`t_dominance_sec`)
--- no new instrumentation needed. Plus a correctness check: minimum reduced cost across
-`columns` should agree between the two drivers (they optimize different reward-crediting
-rules, so exact numeric agreement isn't guaranteed -- this study's real question is
-whether it holds in practice, and by how much it diverges when it doesn't).
+- Zhuzhou top 10 stations;
+- 8 OD pairs, one scenario;
+- seeds 42–51;
+- `max_stops=10`;
+- modes `exact` and `darp`;
+- 900-second limit for each scenario's label search.
 
-## Files
+This produces 20 jobs. Edit the constants in `generate_jobs.jl` to expand the
+grid after the baseline is established.
 
-- `run_benchmark.jl` -- one instance's comparison: build `pricing_data`, call both
-  drivers, write both `stats` + the reduced-cost comparison.
-- `analyze.jl` -- aggregate across instances/sizes.
-- `submit_benchmark.sh` -- SLURM array submission.
+Both modes use the production `CGSolver`, normal two-stop seed columns, and
+the same formulation parameters: `k=ceil(n/2)`, 600-second walking cap,
+route/walk weights 10.0/0.1, 20-second repositioning, 900-second pickup
+horizon, and detour factor 2.0.
+
+## Runtime definition
+
+The benchmark's `runtime_sec` is **only** `OptResult.runtime_sec` returned by:
+
+```julia
+result = run_opt(problem, formulation, solver)
+runtime_sec = result.runtime_sec
+```
+
+It does not use `@elapsed`, `time()`, scheduler duration, data-generation
+time, or model-build time. Under `CGSolver`, this measures the repeated RMP
+optimization, pricing, and column-addition loop implemented by `run_opt`.
+
+## Running
+
+Generate and submit the grid:
+
+```bash
+julia --project=. benchmarks/study2_passenger_max_ablation/generate_jobs.jl
+mkdir -p benchmarks/study2_passenger_max_ablation/slurm_logs
+sbatch --array=1-20 benchmarks/study2_passenger_max_ablation/submit_benchmark.sh
+```
+
+`STUDY2_DATA_DIR` and `STUDY2_OUTPUT_DIR` override the default data and raw
+output locations. Aggregate completed jobs with:
+
+```bash
+julia --project=. benchmarks/study2_passenger_max_ablation/analyze.jl \
+    experiments/YYYY-MM-DD_study2_passenger_max_ablation
+```
+
+## Outputs and interpretation
+
+Each job writes one CSV containing its mode, instance parameters,
+termination status, objective, `run_opt` runtime, CG iterations, convergence,
+pricing exhaustion, column count, and seed-column count.
+
+`analyze.jl` produces `case_results.csv`, `paired_comparison.csv`,
+`variant_summary.csv`, and `slides_results.tex`.
+
+Only rows with both `cg_converged=true` and `cg_pricing_exhausted=true` count
+as certified. A master may have `termination_status=OPTIMAL` even when a
+pricing search times out; such a result is deliberately not treated as a
+pricing certificate or objective-equivalence observation.

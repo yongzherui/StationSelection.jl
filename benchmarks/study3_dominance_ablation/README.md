@@ -1,54 +1,58 @@
-# Study 3 -- Compensated dominance ablation
+# Study 3 — Compensated-dominance ablation
 
-## Objective
+## Question
 
-Compare `compensated_dominance=true` (the "catch-up" rule -- see
-`../../src/opt/label_setting/README.md`'s "Compensated dominance" section for the full
-mechanism) against `compensated_dominance=false` (plain subset dominance) on `exact/`'s
-pricer, holding everything else fixed. Two arms only -- no "no dominance at all" arm
-(dropped: dominance is necessary, not itself in question).
+How much does compensated dominance reduce the end-to-end work of exact Joint Routing
+Assignment column generation relative to plain subset dominance?
 
-Prior work already established the *mechanism* and a per-search effect size
-(`notes/2026-08-01_pfa_label_setting_algorithm_reference.md` §5: "the single biggest win
-in this pricer, 2.5-3.9x," `max_live` roughly halves) but explicitly left the
-*end-to-end* question open ("which side wins for CG is not yet run"). That's this
-study.
+The only experimental switch is
+`AggregateODRouteJointRoutingAssignmentFormulation(compensated_dominance=...)`:
 
-## Prerequisite -- blocks this study
+- `true`: the compensated/catch-up dominance rule;
+- `false`: plain subset dominance.
 
-Same as Study 2: **`exact/`'s standalone comparison driver does not exist yet.** Both
-arms of this ablation run through `exact/` (just with `compensated_dominance` flipped),
-so this study is blocked on the same fix as Study 2 -- see that study's README for the
-exact location (`darp/darp.jl`'s standalone-driver block as the template,
-`exact/exact.jl` currently ending at `_pricing_verify_column`).
+Both arms use `pricing_mode=:exact` and solve the same master problem. Certified paired
+objectives must agree; `analyze.jl` raises an error if they do not.
 
-`scripts/modes/dominance_audit.jl` (stale, pre-rename) is the closest port target once
-the driver exists -- every function it calls
-(`create_passenger_free_assignment_pricing_data`,
-`passenger_free_assignment_dominance_rejections`,
-`passenger_free_assignment_pricing_by_label_setting`, `PassengerFreeAssignmentRouteColumn`)
-has a confirmed current-API replacement (`create_joint_routing_assignment_pricing_data`,
-`joint_routing_assignment_dominance_rejections`
-(`src/opt/label_setting/joint_routing_assignment/exact/labels.jl`),
-`JointRoutingAssignmentRouteColumn`, and the missing standalone driver above). The
-`dominance_census=true` kwarg it uses still exists on the current exact search context.
+## Larger instance grid
 
-## Method
+The grid deliberately scales beyond Studies 1 and 2 so compensation has room to matter:
 
-Once the prerequisite lands: same instance, same `JointRoutingAssignmentPricingData`,
-call `exact/`'s driver twice with `compensated_dominance=true` then `false`,
-`profile=true` both times.
+- Zhuzhou top 20 stations;
+- 16 OD pairs and one scenario;
+- seeds 42–51;
+- `max_stops=10`;
+- 900-second per-scenario pricing limit.
+
+Every `(instance, dominance mode)` pair is a separate Julia process, producing 20 jobs.
+The remaining settings match Study 2: `k=10`, 600-second walking cap, route/walk
+weights 10.0/0.1, 20-second repositioning, 900-second pickup horizon, and detour factor
+2.0.
 
 ## Metrics
 
-Both runs' `stats` `NamedTuple` (labels generated, labels rejected/removed by
-dominance, pricing time breakdown -- same fields as Study 2). Plus: minimum reduced cost
-must match between the two arms (compensated dominance only ever *adds* valid
-dominations, so it must not change the pricing optimum -- this is the correctness check,
-not just a metric).
+The headline paired metrics are runtime, total labels generated, and peak live labels.
+The raw rows also retain termination and pricing certification, CG iterations, columns,
+dominance rejection/removal counts, maximum frontier size, and objective value.
 
-## Files
+Label statistics are accumulated across every pricing search in the full CG run. Runtime
+is `OptResult.runtime_sec`; it is not an outer process timer. Summaries use certified
+runs (`cg_converged=true` and `cg_pricing_exhausted=true`) while retaining every raw row.
 
-- `run_benchmark.jl` -- one instance's two-arm comparison.
-- `analyze.jl` -- aggregate across instances/sizes.
-- `submit_benchmark.sh` -- SLURM array submission.
+## Running
+
+```bash
+julia --project=. benchmarks/study3_dominance_ablation/generate_jobs.jl
+mkdir -p benchmarks/study3_dominance_ablation/slurm_logs
+sbatch --array=1-20 benchmarks/study3_dominance_ablation/submit_benchmark.sh
+```
+
+`STUDY3_DATA_DIR` and `STUDY3_OUTPUT_DIR` override the defaults. Aggregate with:
+
+```bash
+julia --project=. benchmarks/study3_dominance_ablation/analyze.jl \
+    experiments/YYYY-MM-DD_study3_dominance_ablation
+```
+
+Outputs are `case_results.csv`, `paired_comparison.csv`, `variant_summary.csv`, and
+`slides_results.tex`.

@@ -1,43 +1,62 @@
-"""
-`run_benchmark.jl <job_line>` -- one Study 1 job: build/reuse a fixed representative
-instance, run one (formulation, operating-setting) cell from `config/jobs.tsv` (see
-`generate_jobs.jl`), and append one result row to this job's output CSV under
-`../../experiments/<date>_study1_formulation_lp_ip_gap/` (see `../README.md` for the
-output-location convention).
+"""Run one independent Study 1 LP/IP-gap job from a `jobs.tsv` row."""
 
-Current-API shape to follow (confirmed against `test/opt/test_aggregate_od_route_base_cg.jl`
-and `test/opt/test_cg_solver_integer_recovery.jl` -- this is the "blessed example," not
-anything under `../../scripts/`, which is stale):
+using StationSelection
+using CSV
+using DataFrames
+include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
 
-```julia
-data        = create_station_selection_data(stations, requests, walking_costs; routing_costs, scenarios)
-problem     = StationSelectionProblem(data, k; max_walking_distance=800.0)
+length(ARGS) == 1 || error("usage: run_benchmark.jl '<tab-separated jobs.tsv row>'")
+fields = split(strip(ARGS[1]), '\t')
+length(fields) == 13 || error("expected 13 tab-separated fields, got $(length(fields))")
 
-# Base arm:
-formulation = AggregateODRouteBaseFormulation(; max_stops=...)
-solver      = DirectMIPSolver(; config=SolverOptions(silent=true))
-result      = run_opt(problem, formulation, solver)
-z_lp = <relax the enumerated pool's LP -- TODO: confirm the exact call shape for this;
-        DirectMIPSolver may need its own LP-relaxation entry point, unlike CGSolver's
-        recover_integer_solution path below>
-z_ip = result.objective_value
+job_id = parse(Int, fields[1])
+instance_id, comparison, variant, formulation_name = fields[2:5]
+formulation_name in ("base", "joint") || error("formulation must be base or joint")
+n_stations = parse(Int, fields[6])
+n_pairs = parse(Int, fields[7])
+n_scenarios = parse(Int, fields[8])
+seed = parse(Int, fields[9])
+max_stops = parse(Int, fields[10])
+max_wait_time = parse(Float64, fields[11])
+detour_factor = parse(Float64, fields[12])
+pricing_time_limit_sec = parse(Float64, fields[13])
 
-# Joint arm -- recover_integer_solution=true is required, it's the only way
-# OptResult.metadata["cg_lp_objective_value"] gets populated:
-formulation = AggregateODRouteJointRoutingAssignmentFormulation(; max_stops=..., max_wait_time=..., detour_factor=...)
-solver      = CGSolver(; config=SolverOptions(silent=true), recover_integer_solution=true)
-result      = run_opt(problem, formulation, solver)
-z_lp = result.metadata["cg_lp_objective_value"]
-z_ip = result.objective_value
-```
+problem, k = benchmark_problem(@__DIR__, "STUDY1", n_stations, n_pairs, n_scenarios, seed)
+output_dir = benchmark_output_dir(@__DIR__, "STUDY1", "study1_formulation_lp_ip_gap")
+common = (
+    route_regularization_weight=10.0, walk_cost_weight=0.1,
+    repositioning_time=20.0, max_wait_time=max_wait_time,
+    detour_factor=detour_factor, max_stops=max_stops,
+)
+formulation = formulation_name == "base" ?
+    AggregateODRouteBaseFormulation(; common...) :
+    AggregateODRouteJointRoutingAssignmentFormulation(; common..., pricing_mode=:exact)
+solver = benchmark_cg_solver(pricing_time_limit_sec; recover_integer_solution=true)
 
-Output row: `{instance, formulation, setting, z_lp, z_ip, gap, termination_status,
-runtime_sec}` -- see `README.md`'s Metrics section.
+result = run_opt(problem, formulation, solver)
+metadata = result.metadata
+has_lp = haskey(metadata, "cg_lp_objective_value")
+z_lp = has_lp ? Float64(metadata["cg_lp_objective_value"]) : missing
+z_ip = something(result.objective_value, missing)
+gap = ismissing(z_lp) || ismissing(z_ip) || abs(z_ip) <= 1e-12 ? missing :
+    (z_ip - z_lp) / abs(z_ip)
+columns_key = formulation_name == "base" ? :aggregate_od_route_base_theta :
+    :joint_routing_assignment_columns
+metrics = benchmark_cg_metrics(result, columns_key)
 
-TODO: not implemented -- confirm the Base-arm LP-relaxation call shape (DirectMIPSolver
-doesn't go through `recover_integer_solution`; check whether relaxing the built JuMP
-model directly, e.g. via `JuMP.relax_integrality!`, is the right approach, or whether
-there's an existing helper), then implement the two-arm solve + row-write body.
-"""
+row = DataFrame((
+    job_id=[job_id], instance_id=[instance_id], comparison=[comparison], variant=[variant],
+    formulation=[formulation_name], n_stations=[n_stations], n_pairs=[n_pairs],
+    n_scenarios=[n_scenarios], seed=[seed], k=[k], max_stops=[max_stops],
+    max_wait_time=[max_wait_time], detour_factor=[detour_factor],
+    pricing_time_limit_sec=[pricing_time_limit_sec],
+    lp_termination_status=[has_lp ? "OPTIMAL" : "NOT_RECORDED"],
+    ip_termination_status=[string(result.termination_status)], z_lp=[z_lp], z_ip=[z_ip],
+    gap=[gap], runtime_sec=[metrics.runtime_sec], cg_iterations=[metrics.cg_iterations],
+    cg_converged=[metrics.cg_converged], cg_pricing_exhausted=[metrics.cg_pricing_exhausted],
+    n_columns=[metrics.n_columns], seed_columns_added=[metrics.seed_columns_added],
+))
 
-# TODO: implement.
+outfile = joinpath(output_dir, "job_$(lpad(job_id, 4, '0'))_$(comparison)_$(variant).csv")
+CSV.write(outfile, row)
+println("Wrote $outfile")

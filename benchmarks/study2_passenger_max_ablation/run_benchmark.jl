@@ -1,32 +1,52 @@
-"""
-`run_benchmark.jl <job_line>` -- one Study 2 job: build one scenario's
-`JointRoutingAssignmentPricingData`, run `exact/`'s and `darp/`'s standalone pricer
-drivers against it, and write both `stats` payloads plus a reduced-cost-agreement check
-to this job's output row under
-`../../experiments/<date>_study2_passenger_max_ablation/` (see `../README.md`).
+"""Run one Study 2 `(instance, pricing_mode)` job from one `jobs.tsv` data row.
 
-BLOCKED on `exact/`'s missing standalone driver -- see `README.md`'s Prerequisite
-section. `darp/`'s side of this comparison can be exercised today:
-
-```julia
-pricing_data = create_joint_routing_assignment_pricing_data(...)   # src/opt/label_setting/joint_routing_assignment/data.jl
-darp_data    = JointRoutingAssignmentDarpPricingData(...)          # src/.../darp/types.jl -- separate struct, same shape
-columns_darp, exhausted_darp, stats_darp = joint_routing_assignment_pricing_by_darp_label_setting(
-    darp_data, existing_columns; profile=true,
-)
-# exact/'s counterpart, once built:
-columns_exact, exhausted_exact, stats_exact = joint_routing_assignment_pricing_by_label_setting(
-    pricing_data, existing_columns; profile=true,
-)
-```
-
-Output row: `{instance, driver ("exact"/"darp"), labels_generated,
-labels_rejected_by_dominance, labels_removed_by_dominance, max_frontier_size,
-max_live_labels, t_queue_sec, t_candidates_sec, t_extension_sec, t_dominance_sec,
-min_reduced_cost, wall_sec}` per driver, so `analyze.jl` can pair rows by instance.
-
-TODO: not implemented -- blocked (see above). Once `exact/`'s standalone driver exists,
-implement: build `pricing_data`/`darp_data` for a chosen instance, run both, write rows.
+`runtime_sec` is copied only from `run_opt(...).runtime_sec`; it excludes data
+generation and model construction and is never replaced by an outer timer.
 """
 
-# TODO: implement (blocked on exact/'s standalone driver -- see README.md).
+using StationSelection
+using CSV
+using DataFrames
+include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
+
+length(ARGS) == 1 || error("usage: run_benchmark.jl '<tab-separated jobs.tsv row>'")
+fields = split(strip(ARGS[1]), '\t')
+length(fields) == 9 || error("expected 9 tab-separated fields, got $(length(fields))")
+
+job_id = parse(Int, fields[1])
+instance_id = fields[2]
+mode_string = fields[3]
+mode_string in ("exact", "darp") || error("pricing_mode must be exact or darp, got $mode_string")
+n_stations = parse(Int, fields[4])
+n_pairs = parse(Int, fields[5])
+n_scenarios = parse(Int, fields[6])
+seed = parse(Int, fields[7])
+max_stops = parse(Int, fields[8])
+pricing_time_limit_sec = parse(Float64, fields[9])
+
+problem, k = benchmark_problem(@__DIR__, "STUDY2", n_stations, n_pairs, n_scenarios, seed)
+output_dir = benchmark_output_dir(@__DIR__, "STUDY2", "study2_passenger_max_ablation")
+formulation = AggregateODRouteJointRoutingAssignmentFormulation(
+    ; BENCHMARK_BASELINE..., pricing_mode=Symbol(mode_string), max_stops=max_stops,
+)
+solver = benchmark_cg_solver(pricing_time_limit_sec)
+
+result = run_opt(problem, formulation, solver)
+metadata = result.metadata
+metrics = benchmark_cg_metrics(result, :joint_routing_assignment_columns)
+row = DataFrame((
+    job_id=[job_id], instance_id=[instance_id], pricing_mode=[mode_string],
+    n_stations=[n_stations], n_pairs=[n_pairs], n_scenarios=[n_scenarios],
+    seed=[seed], k=[k], max_stops=[max_stops],
+    pricing_time_limit_sec=[pricing_time_limit_sec],
+    termination_status=[string(result.termination_status)],
+    objective_value=[something(result.objective_value, missing)],
+    runtime_sec=[metrics.runtime_sec], cg_iterations=[metrics.cg_iterations],
+    cg_converged=[metrics.cg_converged], cg_pricing_exhausted=[metrics.cg_pricing_exhausted],
+    n_columns=[metrics.n_columns], seed_columns_added=[metrics.seed_columns_added],
+))
+
+outfile = joinpath(output_dir, "job_$(lpad(job_id, 4, '0'))_$(mode_string).csv")
+CSV.write(outfile, row)
+println("Wrote $outfile")
+println("runtime_sec=$(result.runtime_sec) (from run_opt result)")

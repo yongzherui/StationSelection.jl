@@ -118,6 +118,8 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         "cg_converged" => converged,
         "cg_pricing_exhausted" => converged,
         "cg_integer_recovery" => solver.recover_integer_solution,
+        "cg_pricing_stats" => copy(get(JuMP.object_dictionary(m),
+            :label_setting_pricing_stats, Any[])),
     )
     if solver.recover_integer_solution && JuMP.termination_status(m) == MOI.OPTIMAL
         metadata["cg_lp_objective_value"] = JuMP.objective_value(m)

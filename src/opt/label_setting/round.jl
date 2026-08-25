@@ -107,17 +107,20 @@ function _run_pricing_round(
     # Phase 2: the label search itself, per scenario.
     candidates_by_scenario = Vector{Vector{Any}}(undef, length(scenarios))
     exhausted_by_scenario = trues(length(scenarios))
+    stats_by_scenario = Vector{Any}(undef, length(scenarios))
+    fill!(stats_by_scenario, nothing)
     if parallel
         Threads.@threads for i in eachindex(scenarios)
             p = prepared[i]
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
-                _labels, exhausted, _stats = _run_label_setting(
+                _labels, exhausted, stats = _run_label_setting(
                     p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
                 exhausted_by_scenario[i] = exhausted
+                stats_by_scenario[i] = (; scenario=scenarios[i], stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
@@ -127,11 +130,12 @@ function _run_pricing_round(
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
-                _labels, exhausted, _stats = _run_label_setting(
+                _labels, exhausted, stats = _run_label_setting(
                     p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
                 exhausted_by_scenario[i] = exhausted
+                stats_by_scenario[i] = (; scenario=scenarios[i], stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
@@ -141,6 +145,8 @@ function _run_pricing_round(
     # empty result came from a timeout or intentional early stop, not a proof
     # that the pricing problem contains no improving column.
     m[:label_setting_pricing_exhausted] = all(exhausted_by_scenario)
+    history = get!(() -> Any[], JuMP.object_dictionary(m), :label_setting_pricing_stats)
+    append!(history, filter(x -> !isnothing(x), stats_by_scenario))
 
     # Cross-scenario step: e.g. apply a shared column budget across
     # scenarios. Default (`_pricing_merge_scenarios` fallback below) is a

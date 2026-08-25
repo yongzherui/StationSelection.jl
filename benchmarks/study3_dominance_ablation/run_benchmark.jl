@@ -1,33 +1,51 @@
-"""
-`run_benchmark.jl <job_line>` -- one Study 3 job: build one instance's
-`JointRoutingAssignmentPricingData`, run `exact/`'s standalone driver twice
-(`compensated_dominance=true` then `false`), write both `stats` payloads plus a
-reduced-cost-agreement check to this job's output row under
-`../../experiments/<date>_study3_dominance_ablation/` (see `../README.md`).
+"""Run one Study 3 `(instance, compensated_dominance)` job."""
 
-BLOCKED on `exact/`'s missing standalone driver -- see `README.md`'s Prerequisite
-section (same blocker as Study 2). Once it exists:
+using StationSelection
+using CSV
+using DataFrames
 
-```julia
-pricing_data_compensated = create_joint_routing_assignment_pricing_data(...; compensated_dominance=true)
-pricing_data_plain       = create_joint_routing_assignment_pricing_data(...; compensated_dominance=false)
-columns_c, exhausted_c, stats_c = joint_routing_assignment_pricing_by_label_setting(
-    pricing_data_compensated, existing_columns; profile=true,
+include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
+
+length(ARGS) == 1 || error("usage: run_benchmark.jl '<tab-separated jobs.tsv row>'")
+fields = split(strip(ARGS[1]), '\t')
+length(fields) == 9 || error("expected 9 tab-separated fields, got $(length(fields))")
+
+job_id = parse(Int, fields[1])
+instance_id = fields[2]
+compensated_dominance = parse(Bool, fields[3])
+n_stations = parse(Int, fields[4])
+n_pairs = parse(Int, fields[5])
+n_scenarios = parse(Int, fields[6])
+seed = parse(Int, fields[7])
+max_stops = parse(Int, fields[8])
+pricing_time_limit_sec = parse(Float64, fields[9])
+
+problem, k = benchmark_problem(@__DIR__, "STUDY3", n_stations, n_pairs, n_scenarios, seed)
+output_dir = benchmark_output_dir(@__DIR__, "STUDY3", "study3_dominance_ablation")
+formulation = AggregateODRouteJointRoutingAssignmentFormulation(
+    ; BENCHMARK_BASELINE..., pricing_mode=:exact, max_stops=max_stops,
+    compensated_dominance=compensated_dominance,
 )
-columns_p, exhausted_p, stats_p = joint_routing_assignment_pricing_by_label_setting(
-    pricing_data_plain, existing_columns; profile=true,
-)
-```
+result = run_opt(problem, formulation, benchmark_cg_solver(pricing_time_limit_sec))
+metrics = benchmark_cg_metrics(result, :joint_routing_assignment_columns)
 
-Output row: `{instance, compensated_dominance (true/false), labels_generated,
-labels_rejected_by_dominance, labels_removed_by_dominance, max_frontier_size,
-max_live_labels, t_queue_sec, t_candidates_sec, t_extension_sec, t_dominance_sec,
-min_reduced_cost, wall_sec}` per arm, so `analyze.jl` can pair rows by instance and
-confirm `min_reduced_cost` agreement.
+row = DataFrame((
+    job_id=[job_id], instance_id=[instance_id],
+    compensated_dominance=[compensated_dominance], n_stations=[n_stations],
+    n_pairs=[n_pairs], n_scenarios=[n_scenarios], seed=[seed], k=[k],
+    max_stops=[max_stops], pricing_time_limit_sec=[pricing_time_limit_sec],
+    termination_status=[string(result.termination_status)],
+    objective_value=[something(result.objective_value, missing)],
+    runtime_sec=[metrics.runtime_sec], cg_iterations=[metrics.cg_iterations],
+    cg_converged=[metrics.cg_converged], cg_pricing_exhausted=[metrics.cg_pricing_exhausted],
+    n_columns=[metrics.n_columns], seed_columns_added=[metrics.seed_columns_added],
+    pricing_searches=[metrics.pricing_searches], labels_generated=[metrics.labels_generated],
+    labels_rejected_by_dominance=[metrics.labels_rejected_by_dominance],
+    labels_removed_by_dominance=[metrics.labels_removed_by_dominance],
+    max_frontier_size=[metrics.max_frontier_size], max_live_labels=[metrics.max_live_labels],
+))
 
-TODO: not implemented -- blocked (see above). Once `exact/`'s standalone driver exists,
-port `scripts/modes/dominance_audit.jl`'s structure (stale, but its renamed
-current-API counterparts are all confirmed to exist -- see `README.md`).
-"""
-
-# TODO: implement (blocked on exact/'s standalone driver -- see README.md).
+mode = compensated_dominance ? "compensated" : "plain"
+outfile = joinpath(output_dir, "job_$(lpad(job_id, 4, '0'))_$(mode).csv")
+CSV.write(outfile, row)
+println("Wrote $outfile")

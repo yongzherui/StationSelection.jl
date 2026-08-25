@@ -56,6 +56,8 @@
         @test result_ip.termination_status == MOI.OPTIMAL
         @test result_ip.metadata["cg_integer_recovery"] == true
         @test result_ip.metadata["cg_converged"] == true
+        @test !isempty(result_ip.metadata["cg_pricing_stats"])
+        @test all(s.labels_generated > 0 for s in result_ip.metadata["cg_pricing_stats"])
         @test result_ip.metadata["cg_lp_objective_value"] <= result_ip.objective_value + 1e-6
         @test isapprox(result_ip.metadata["cg_lp_objective_value"], result_lp.objective_value; atol = 1e-6)
 

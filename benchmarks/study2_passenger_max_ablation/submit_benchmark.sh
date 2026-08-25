@@ -1,6 +1,6 @@
 #!/bin/bash
-# Study 2 -- exact/ (running-max) vs. darp/ (first-commit explicit assignment), one job
-# per instance.
+# Study 2 -- exact running-max vs. explicit DARP-style pricing. Each array
+# task is one (instance, pricing_mode) row, so modes run in separate processes.
 #
 # Usage: sbatch --array=1-<n_jobs> submit_benchmark.sh
 #   <n_jobs> = number of data rows in config/jobs.tsv (i.e. lines - 1 for the header).
@@ -11,8 +11,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=8G
-#SBATCH --time=01:00:00
+#SBATCH --mem=16G
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm_logs/%x-%A_%a.out
 #SBATCH --error=slurm_logs/%x-%A_%a.err
 

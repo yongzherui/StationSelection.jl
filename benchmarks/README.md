@@ -23,17 +23,20 @@ Instance generation reuses `../scripts/generate_zhuzhou_instance.jl`'s
 `submit_benchmark.sh` sources `../scripts/lib/slurm_modules.sh` /
 `slurm_array_task_env.sh` (also current, unmodified) rather than duplicating them.
 
+End-to-end CG studies share `lib/cg_benchmark.jl` for Zhuzhou problem loading,
+baseline parameters, solver construction, output locations, and standard CG and
+label-search metrics. Per-search label statistics are retained in
+`OptResult.metadata["cg_pricing_stats"]`, including across integer recovery.
+
 ## Status
 
 | # | Directory | Objective | Status |
 | - | --- | --- | --- |
-| 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint LP/IP gap across operating settings | scaffolded, TODO |
-| 2 | `study2_passenger_max_ablation/` | `exact/`'s running-max reward vs. `darp/`'s explicit first-commit assignment | scaffolded, TODO — blocked on `exact/`'s missing standalone driver (see study README) |
-| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | scaffolded, TODO — same blocker as Study 2 |
+| 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint and operating-condition LP/IP gaps | implemented — four sub-studies, 110 Zhuzhou jobs |
+| 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 20-job Zhuzhou baseline grid |
+| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 20-job n=20, p=16 grid |
 | 4 | `study4_heuristic_local_search/` | Heuristic pricing frontier (provisional name `local_search`) | placeholder — no design yet, see study README |
 | 5 | `study5_scaling_vs_enumeration/` | Runtime vs. `\|P\|`/`\|J\|`/`\|S\|`: CG pricing, `darp/`, raw enumeration | scaffolded, TODO — blocked on a new `enumerate_joint_routing_assignment_columns` (see study README) |
 
-Every `run_benchmark.jl`/`generate_jobs.jl`/`analyze.jl` in each study directory is a
-stub: module docstring naming the study's I/O contract and the exact `src/` function(s)
-it will call, `# TODO:` body, no solve logic yet. `submit_benchmark.sh` files are
-complete — they're pure SLURM plumbing, nothing study-specific to fill in.
+Studies 1–3 are executable end to end. Studies 4–5 remain placeholders or scaffolds as
+described above. `submit_benchmark.sh` files are pure SLURM plumbing.
