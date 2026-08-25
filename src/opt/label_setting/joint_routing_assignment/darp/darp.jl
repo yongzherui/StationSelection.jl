@@ -8,11 +8,14 @@ that let `_run_pricing_round` harvest this context's surviving labels into
 context. Built by `_pricing_build_scenario_context`
 (`joint_routing_assignment/pricing_round.jl`) when
 `AggregateODRouteJointRoutingAssignmentFormulation.pricing_mode === :darp` --
-a controlled comparison point against `exact/`'s running-max crediting rule
-(see `types.jl`'s module docstring for that difference), selectable per solve
-alongside `:exact` (the default). Also exercisable standalone, bypassing the
-CG hub entirely, via `joint_routing_assignment_pricing_by_darp_label_setting`
-below -- the same driver shape the now-removed pre-hub driver functions used.
+a controlled comparison point for how much `exact/`'s reward-layer running-max
+trick is worth *computationally*, not a different reward model: run to
+exhaustion, this pricer's optimum is required to equal `exact/`'s (see
+`types.jl`'s module docstring for that invariant and the branching that makes
+it hold), selectable per solve alongside `:exact` (the default). Also
+exercisable standalone, bypassing the CG hub entirely, via
+`joint_routing_assignment_pricing_by_darp_label_setting` below -- the same
+driver shape the now-removed pre-hub driver functions used.
 
 Unlike `exact/exact.jl`, this pricer needs no route-replay step to recover
 concrete `(p,j,k)` assignments: a finished label's `served` field already is
@@ -119,8 +122,11 @@ _pricing_max_route_length(ctx::JointRoutingAssignmentDarpSearchContext) = ctx.pr
 _pricing_candidate_next_nodes(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel) =
     _joint_routing_assignment_darp_candidate_next_nodes(label, ctx.pricing_data)
 
-_pricing_extend_label(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, next_node::Int) =
-    _extend_joint_routing_assignment_darp_pricing_label(label, next_node, ctx.pricing_data)
+# `action`, not a bare node id: see `labels.jl`'s module docstring for why
+# commit/skip branching is expressed as one action per branch rather than as
+# multiple children of one action.
+_pricing_extend_label(ctx::JointRoutingAssignmentDarpSearchContext, label::JointRoutingAssignmentDarpPricingLabel, action::JointRoutingAssignmentDarpAction) =
+    _extend_joint_routing_assignment_darp_pricing_label(label, action, ctx.pricing_data)
 
 _pricing_dominates_fn(ctx::JointRoutingAssignmentDarpSearchContext) = ctx.dominates
 

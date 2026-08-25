@@ -24,7 +24,12 @@ for `CGSolver`.
   are both wired into production, selectable per solve via the formulation's
   `pricing_mode` field (`:exact`, the default, or `:darp`) --
   `pricing_round.jl` (this directory's own, not either subdirectory's) is
-  where `_pricing_build_scenario_context` branches between them.
+  where `_pricing_build_scenario_context` branches between them. `darp/` is
+  a *provably value-equivalent* alternative to `exact/`, not a weaker one --
+  run to exhaustion, the two are required to reach the same optimum (see
+  `darp/types.jl`'s module docstring); it exists to measure how much
+  `exact/`'s reward-layer running-max trick is worth computationally against
+  a search that makes the same choice explicit via branching instead.
   `station_simple/` is the same elementary-route alternative as
   `route_covering/`'s, not currently reachable from any `build_model`.
 
@@ -35,11 +40,11 @@ and a context file named after the directory (`exact.jl` /
 `station_simple.jl`, the `AbstractPricingSearchContext` + hooks).
 `joint_routing_assignment/darp/` adds a fourth file, `data.jl`, because
 unlike `exact/`'s and `station_simple/`'s shared reward-layer preprocessing
-(`joint_routing_assignment/data.jl`), `darp/`'s first-commit crediting needs
-its own pricing-data construction (see `darp/types.jl`'s module docstring
-for why); its own context file is named `darp.jl` rather than `exact.jl`,
-since it has no further internal elementary-route split to distinguish
-itself from.
+(`joint_routing_assignment/data.jl`), `darp/`'s branching commit-or-skip
+search needs its own pricing-data construction (see `darp/types.jl`'s module
+docstring for why); its own context file is named `darp.jl` rather than
+`exact.jl`, since it has no further internal elementary-route split to
+distinguish itself from.
 
 ## Compensated dominance (a.k.a. "catch-up" dominance)
 

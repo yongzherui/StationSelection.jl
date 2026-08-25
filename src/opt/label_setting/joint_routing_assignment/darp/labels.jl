@@ -1,9 +1,23 @@
 """
-Core label-DP primitives for `darp/`'s first-commit passenger free-assignment
+Core label-DP primitives for `darp/`'s branching passenger free-assignment
 pricing: label creation, extension, and dominance. `darp.jl` orchestrates
 these into a full pricing pass; this file is the one to audit for "is the
 label search correct". See `types.jl`'s module docstring for the reward
 model and the dominance-soundness argument this file implements.
+
+# The action type: physical move + commit choice, bundled
+
+`_run_label_setting`'s (`engine.jl`) hook contract is one action in, one
+child out (`_pricing_extend_label`) -- it has no notion of "one physical move
+can fan out into several children". To get branching (see
+`_joint_routing_assignment_darp_commit_subsets`, `data.jl`) without changing
+that shared contract, `_joint_routing_assignment_darp_candidate_next_nodes`
+below returns *actions*, not bare node ids: one
+`(next_node, commit_subset)` pair per `(reachable node, subset of that node's
+newly-eligible passengers to actually commit)` combination. Each action
+becomes its own label via `_pricing_extend_label`, exactly the way a bare
+`next_node` would for any other pricer -- branching lives entirely in how
+many actions one node produces, not in how many children one action produces.
 """
 
 export initial_joint_routing_assignment_darp_pricing_labels
@@ -57,7 +71,15 @@ function _has_useful_live_joint_routing_assignment_darp_origin(
     return false
 end
 
-function _joint_routing_assignment_darp_candidate_next_nodes(
+"""
+Physical reachability only -- which nodes `label` may legally move to next.
+Unaffected by branching: whether some other label chose to commit or skip a
+passenger doesn't change which stations are physically reachable, only
+`label.served`, which this already reads (so a passenger left uncommitted by
+an earlier "skip" branch still correctly looks eligible again here, exactly
+as it should).
+"""
+function _joint_routing_assignment_darp_reachable_next_nodes(
     label::JointRoutingAssignmentDarpPricingLabel,
     pricing_data::JointRoutingAssignmentDarpPricingData,
 )::Vector{Int}
@@ -94,37 +116,74 @@ function _joint_routing_assignment_darp_candidate_next_nodes(
     return sort!(collect(candidate_nodes))
 end
 
+"""
+One `(next_node, commit_subset)` action per reachable node × every subset of
+that node's newly-eligible not-yet-served passengers -- see this file's
+module docstring for why actions, not children, carry the branching, and
+`_joint_routing_assignment_darp_commit_subsets` (`data.jl`) for the subset
+enumeration itself. A node with no newly-eligible passengers still produces
+exactly one action (the empty subset), so this degenerates to the old
+one-action-per-node behavior wherever there is nothing to decide.
+"""
+function _joint_routing_assignment_darp_candidate_next_nodes(
+    label::JointRoutingAssignmentDarpPricingLabel,
+    pricing_data::JointRoutingAssignmentDarpPricingData,
+)::Vector{JointRoutingAssignmentDarpAction}
+    actions = JointRoutingAssignmentDarpAction[]
+    for next_node in _joint_routing_assignment_darp_reachable_next_nodes(label, pricing_data)
+        travel_time = _joint_routing_assignment_darp_travel(pricing_data, label.current, next_node)
+        eligible = _joint_routing_assignment_darp_eligible_at_node(
+            next_node, label.station_age, travel_time, label.served, pricing_data,
+        )
+        for commits in _joint_routing_assignment_darp_commit_subsets(eligible)
+            push!(actions, (next_node, commits))
+        end
+    end
+    return actions
+end
+
 # ── label extension ──────────────────────────────────────────────────────────
 """
-Extension always produces exactly one child (an unlimited-capacity route has
-nothing to branch on at a stop) -- same wrapper convention as every sibling
-pricer's public `extend_*` entrypoint."""
+Extension always produces exactly one child per *action* -- the branching is
+in how many actions `_joint_routing_assignment_darp_candidate_next_nodes`
+returns for one label, not in how many children one action produces here --
+same wrapper convention as every sibling pricer's public `extend_*`
+entrypoint."""
 function extend_joint_routing_assignment_darp_pricing_label(
     label::JointRoutingAssignmentDarpPricingLabel,
-    next_node::Int,
+    action::JointRoutingAssignmentDarpAction,
     pricing_data::JointRoutingAssignmentDarpPricingData,
 )::Vector{JointRoutingAssignmentDarpPricingLabel}
     return JointRoutingAssignmentDarpPricingLabel[
-        _extend_joint_routing_assignment_darp_pricing_label(label, next_node, pricing_data),
+        _extend_joint_routing_assignment_darp_pricing_label(label, action, pricing_data),
     ]
 end
 
 function _extend_joint_routing_assignment_darp_pricing_label(
     label::JointRoutingAssignmentDarpPricingLabel,
-    next_node::Int,
+    action::JointRoutingAssignmentDarpAction,
     pricing_data::JointRoutingAssignmentDarpPricingData,
 )::JointRoutingAssignmentDarpPricingLabel
+    next_node, commits = action
     travel_time = _joint_routing_assignment_darp_travel(pricing_data, label.current, next_node)
     arrival_time = label.time + travel_time
     new_tau = label.tau + travel_time
     new_route = vcat(label.route, next_node)
 
-    certified, reward = _certify_joint_routing_assignment_darp_assignments_at_node(
-        next_node, label.station_age, travel_time, label.served, pricing_data,
-    )
+    # Apply exactly this action's chosen subset -- anyone eligible here but
+    # left out of `commits` stays unserved, exactly as if this visit had
+    # never certified anything for them (a deliberate "skip" branch).
+    certified = copy(label.served)
+    reward = 0.0
+    for (p, origin, r) in commits
+        certified[p] = (origin, next_node)
+        reward += r
+    end
 
     # Age, reset, and prune in one pass -- same convention as
-    # `exact/labels.jl`'s twin.
+    # `exact/labels.jl`'s twin. Uses `certified` (this action's actual
+    # commitments), so a skipped-but-still-eligible passenger correctly keeps
+    # whatever station ages remain useful to it.
     aged_station = Dict{Int, Float64}()
     for (station, age) in label.station_age
         station == next_node && continue  # handled by the reset below

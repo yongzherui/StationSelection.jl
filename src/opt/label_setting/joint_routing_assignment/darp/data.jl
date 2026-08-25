@@ -1,10 +1,10 @@
 """
-Builds the per-scenario pricing graph for `darp/`'s first-commit passenger
-free-assignment pricer, and the certify/prune helpers `labels.jl`'s extension
-step calls. Counterpart to `../data.jl` (`exact/`+`station_simple/`'s
-reward-layer preprocessing) -- this pricer needs none of that, since credit
-is assigned once, directly, at the moment of first commitment (see
-`types.jl`'s module docstring).
+Builds the per-scenario pricing graph for `darp/`'s branching commit-or-skip
+passenger free-assignment pricer, and the eligibility/subset helpers
+`labels.jl`'s extension step calls. Counterpart to `../data.jl` (`exact/`+
+`station_simple/`'s reward-layer preprocessing) -- this pricer needs none of
+that, since credit is assigned directly, at the moment a branch chooses to
+commit (see `types.jl`'s module docstring).
 """
 
 export create_joint_routing_assignment_darp_pricing_data
@@ -20,7 +20,7 @@ end
 """
     create_joint_routing_assignment_darp_pricing_data(scenario, nodes, travel_cost, candidates; kwargs...)
 
-Build the preprocessed pricing data for one scenario's first-commit passenger
+Build the preprocessed pricing data for one scenario's branching passenger
 free-assignment pricing pass. `candidates` carries already-computed rewards
 (as `create_joint_routing_assignment_pricing_data` does for `exact/`); this
 constructor's only job is filtering to positive-reward candidates and
@@ -65,26 +65,42 @@ function create_joint_routing_assignment_darp_pricing_data(
 end
 
 """
-Certify every not-yet-served passenger whose assignment ends at `node` and
-whose origin's (aged) pickup clock still beats its ride limit -- first-commit,
-not running-max (see `types.jl`'s module docstring): among everything
-simultaneously certifiable for the same passenger right now, the best of
-*those* wins (there is no "wait for a later, better dropoff" -- once
-committed, a passenger's assignment cannot change). Ties broken by smaller
-origin id for determinism, mirroring `exact/exact.jl`'s replay tie-break.
+    JointRoutingAssignmentDarpEligibility
 
-Returns `(certified::Dict{Int,Tuple{Int,Int}}, reward::Float64)`, `certified`
-being `served` with any newly-committed passengers added.
+One not-yet-served passenger's best currently-live candidate ending at the
+node being visited: `(p, origin, reward)`. Deliberately *not* committed here
+-- see `_joint_routing_assignment_darp_eligible_at_node`'s docstring and
+`types.jl`'s module docstring for why commitment is a branch, not an
+automatic consequence of reachability.
 """
-function _certify_joint_routing_assignment_darp_assignments_at_node(
+const JointRoutingAssignmentDarpEligibility = Tuple{Int, Int, Float64}
+
+"""
+Every not-yet-served passenger whose assignment *could* be newly certified by
+a visit to `node` right now: origin's (aged) pickup clock still beats its
+ride limit. Returns the *option*, not a commitment -- see `types.jl`'s module
+docstring for why forcing commitment the instant a candidate becomes
+reachable is unsound (it can make strictly-better assignment sets physically
+unrepresentable), and `_joint_routing_assignment_darp_commit_subsets` below
+for how this feeds the branch.
+
+Among several simultaneously-live candidates for the *same* passenger ending
+here (e.g. two different live origins), only the best is returned -- unlike
+*whether* to commit at all, *which* of several options tied for "available
+right now" to take is never worth branching on: they differ only in reward at
+an otherwise-identical decision point, so the worse one is trivially
+dominated and would only bloat the branch count for free. Ties broken by
+smaller origin id for determinism, mirroring `exact/exact.jl`'s replay
+tie-break.
+"""
+function _joint_routing_assignment_darp_eligible_at_node(
     node::Int,
     station_age::Dict{Int, Float64},
     travel_time::Float64,
     served::Dict{Int, Tuple{Int, Int}},
     pricing_data::JointRoutingAssignmentDarpPricingData,
-)
-    # p -> (origin, reward), among this node's feasible not-yet-served candidates.
-    best_here = Dict{Int, Tuple{Int, Float64}}()
+)::Vector{JointRoutingAssignmentDarpEligibility}
+    best_here = Dict{Int, Tuple{Int, Float64}}()  # p -> (origin, reward)
     for idx in get(pricing_data.candidates_by_destination, node, Int[])
         c = pricing_data.candidates[idx]
         haskey(served, c.p) && continue
@@ -96,15 +112,34 @@ function _certify_joint_routing_assignment_darp_assignments_at_node(
             best_here[c.p] = (c.origin, c.reward)
         end
     end
-    isempty(best_here) && return served, 0.0
+    return JointRoutingAssignmentDarpEligibility[(p, origin, r) for (p, (origin, r)) in best_here]
+end
 
-    certified = copy(served)
-    reward = 0.0
-    for (p, (origin, r)) in best_here
-        certified[p] = (origin, node)
-        reward += r
+"""
+Every subset of `eligible` worth branching into -- `2^length(eligible)` of
+them, including the empty subset (commit nobody, everyone stays open for a
+possibly-better opportunity later) and the full subset (the old, unsound
+always-commit behavior, now just one branch among many). Each of `eligible`'s
+passengers has an independent commit-or-skip choice, so this is exactly that
+choice's cross product; enumerating it as explicit subsets (rather than
+threading a chain of per-passenger binary sub-decisions through the search)
+is what lets each subset become a single self-contained action for the
+one-action-in/one-child-out `_pricing_extend_label` hook contract
+(`label_setting/types.jl`) without changing the shared engine. See
+`_joint_routing_assignment_darp_candidate_next_nodes` (`labels.jl`), which
+turns each subset into one action, and `types.jl`'s module docstring for why
+this branching is what makes this pricer's optimum provably equal to
+`exact/`'s.
+"""
+function _joint_routing_assignment_darp_commit_subsets(
+    eligible::Vector{JointRoutingAssignmentDarpEligibility},
+)::Vector{Vector{JointRoutingAssignmentDarpEligibility}}
+    k = length(eligible)
+    subsets = Vector{Vector{JointRoutingAssignmentDarpEligibility}}(undef, 2^k)
+    @inbounds for mask in 0:(2^k - 1)
+        subsets[mask + 1] = [eligible[i] for i in 1:k if (mask >> (i - 1)) & 1 == 1]
     end
-    return certified, reward
+    return subsets
 end
 
 """

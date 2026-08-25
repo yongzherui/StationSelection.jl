@@ -35,16 +35,19 @@ label-setting pricer `_pricing_build_scenario_context`
 (`label_setting/joint_routing_assignment/pricing_round.jl`) builds:
 - `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/exact.jl`), which
   credits each passenger their single *best* certified `(j,k)` regardless of
-  visitation order (the running-max reward-layer trick).
+  visitation order, via a reward-layer running-max trick.
 - `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/darp.jl`),
-  which credits whichever `(j,k)` is *first* certified, in route-visitation
-  order, and never revisits that choice -- closer to how a real dial-a-ride
-  request is committed once a vehicle actually stops for it. Built as a
-  controlled comparison point against `:exact`'s running-max crediting; see
-  `darp/types.jl`'s module docstring for the full reward-model and
-  dominance-soundness argument. Both modes share every other field here
-  (including `compensated_dominance`), so switching `pricing_mode` alone
-  isolates the crediting-rule difference.
+  which computes the *same* optimum by literally branching the search on
+  whether to commit each passenger's candidate as it's reached or leave it
+  open for a possibly-better one later -- closer to how a real dial-a-ride
+  request gets committed, at the cost of a much larger search than `:exact`'s
+  trick needs. Run to exhaustion, `:darp` is required to match `:exact`'s
+  objective exactly, not just approximate it; see `darp/types.jl`'s module
+  docstring for that invariant and the branching that makes it hold, and for
+  the full reward-model and dominance-soundness argument. Both modes share
+  every other field here (including `compensated_dominance`), so switching
+  `pricing_mode` alone isolates the search-mechanism difference, holding the
+  achievable optimum fixed.
 No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
 assignment is simply the only behavior now. No `allow_walk_only` field either -- unlike

@@ -1,32 +1,64 @@
 """
-Label/bitsets/dominance/pricing-data types for `darp/`: a first-commit
-alternative to `exact/`'s running-max crediting, built as a controlled
-comparison point. See `darp.jl`'s module docstring for the search-context
-wiring; this file is the one to read for the reward model and dominance
-soundness argument.
+Label/bitsets/dominance/pricing-data types for `darp/`: a *provably
+value-equivalent* alternative to `exact/`'s running-max crediting, built as a
+controlled comparison point for how much `exact/`'s reward-layer trick is
+worth *computationally* -- not a different, weaker reward model. See
+`darp.jl`'s module docstring for the search-context wiring; this file is the
+one to read for the reward model and dominance soundness argument.
 
-# Reward model, in one paragraph
+# The equivalence this pricer is required to satisfy
 
-Unlike `exact/` (`../types.jl`/`../data.jl`), which lets a route credit a
-passenger's single *best* certified `(j, k)` regardless of visitation order
-(via the reward-layer running-max trick), `darp/` credits whichever `(j, k)`
-a not-yet-served passenger's assignment is *first* certified by, in
-route-visitation order -- closer to how a real dial-a-ride request is
-committed once a vehicle actually stops for it. This needs no reward-layer
-preprocessing: each passenger contributes at most one reward, decided the
-moment it happens, so the label tracks the concrete winning triple directly
-(`served::Dict{Int, Tuple{Int,Int}}`) instead of a running-maximum proxy.
-`exact/`'s replay-based reconstruction of concrete `(p,j,k)` assignments
-(`exact/exact.jl`'s `_replay_joint_routing_assignment_route`) has no
-counterpart here: since credit is assigned exactly once, in order, at
-extension time, a finished label's own `served` field already *is* the final
-answer -- see `darp.jl`'s `_pricing_candidate_from_label`, a trivial
-projection like `route_covering/exact/exact.jl`'s, not a replay.
+**Run to exhaustion (unbounded `max_stops`, no early `n_candidates`/time-limit
+cutoff), `darp/`'s optimal reduced cost for a scenario must equal `exact/`'s,
+and the two `CGSolver` modes (`AggregateODRouteJointRoutingAssignmentFormulation.pricing_mode
+= :exact` vs. `:darp`) must converge to the same master objective.** This is
+not an empirical tendency, it's the whole point of the pricer: `exact/`'s
+reward-layer running-max is a *computational shortcut* for "the search may
+credit any passenger to whichever of their certifiable candidates is best,
+independent of when each was reached" -- `darp/` computes that same optimum
+the straightforward way, by literally giving the search that choice, rather
+than encoding it away via a bitset trick. If the two ever disagree on a
+finished search, that is a bug in this pricer (most likely in the branching
+below), not an expected difference to shrug off.
+
+# Reward model: commit-or-skip is a branch, not forced
+
+A route's visit to a station where some not-yet-served passenger `p` has a
+certifiable candidate does **not** automatically commit `p` -- committing `p`
+there is one *option*; leaving `p` open (uncommitted, still eligible for a
+possibly-better candidate reached later) is the other, and the search
+branches into both. Forcing automatic commitment (this pricer's first
+implementation) is unsound: it can make `exact/`'s winning assignment set
+physically unrepresentable as *any* `darp/` route, whenever a passenger's
+weaker candidate's station also lies on the cheapest path to their better
+one -- concretely, `exact/` can pass through such a station "for free" (credit
+nothing there, credit the better candidate later), while forced-commit
+`darp/` cannot avoid taking the worse credit, or must pay extra travel to
+route around the station entirely. Branching removes exactly this gap: for
+any physical route and any target assignment achievable along it, the search
+can choose "skip" at every station before the target candidate and "commit"
+at the target itself, so `exact/`'s optimal assignment set is always reachable
+as *one* of `darp/`'s branches. See
+`_joint_routing_assignment_darp_eligible_at_node`/`_joint_routing_assignment_darp_commit_subsets`
+(`data.jl`) and `_joint_routing_assignment_darp_candidate_next_nodes`
+(`labels.jl`) for the mechanics -- `JointRoutingAssignmentDarpAction` below is
+the `(next_node, commit_subset)` pair one branch corresponds to.
+
+Each passenger contributes at most one reward regardless of which branch a
+label took, so the label tracks the concrete committed triple directly
+(`served::Dict{Int, Tuple{Int,Int}}`) rather than a running-maximum proxy --
+no reward-layer preprocessing needed. `exact/`'s replay-based reconstruction
+of concrete `(p,j,k)` assignments (`exact/exact.jl`'s
+`_replay_joint_routing_assignment_route`) has no counterpart here: since
+credit is assigned exactly once, at extension time, for whichever candidate a
+given branch actually committed to, a finished label's own `served` field
+already *is* the final answer -- see `darp.jl`'s `_pricing_candidate_from_label`,
+a trivial projection like `route_covering/exact/exact.jl`'s, not a replay.
 
 Still unlimited-capacity, synchronized-start, revisit-tolerant -- same
 physical route contract as `RouteCoveringPricingLabel`/
 `JointRoutingAssignmentPricingLabel` (see either's module docstring). Only
-what a route gets *credit* for differs.
+what a route gets *credit* for, and how that credit is chosen, differs.
 
 # Dominance: subset + compensated, not open-request equality
 
@@ -84,10 +116,11 @@ end
 A partial unlimited-capacity, synchronized-start route (`current`, `route`,
 `time`, `station_age`, `tau`, `reduced_cost`, `route_length` all carry the
 same meaning as `RouteCoveringPricingLabel`/`JointRoutingAssignmentPricingLabel`).
-`served[p] = (origin, destination)` is the one assignment `p` was first
-committed to -- unlike `exact/`'s reward-layer proxy, this already is the
-final answer for a finished label; no replay step recovers it after the
-fact. See this file's module docstring for the first-commit crediting rule.
+`served[p] = (origin, destination)` is the one assignment `p` was committed
+to by this label's particular sequence of commit/skip branch choices --
+unlike `exact/`'s reward-layer proxy, this already is the final answer for a
+finished label; no replay step recovers it after the fact. See this file's
+module docstring for the commit-or-skip branching rule.
 """
 struct JointRoutingAssignmentDarpPricingLabel
     current::Int
@@ -102,6 +135,20 @@ end
 
 const JointRoutingAssignmentDarpLabelId = Int
 const JointRoutingAssignmentDarpLabelOrderKey = Tuple{Float64, Float64, Int, Int}
+
+"""
+    JointRoutingAssignmentDarpAction
+
+`(next_node, commit_subset)`: a physical move to `next_node`, paired with
+which subset of the not-yet-served passengers newly eligible there
+(`JointRoutingAssignmentDarpEligibility`, `data.jl`) this particular branch
+commits -- everyone eligible but left out of `commit_subset` stays
+uncommitted. One label-setting engine "action" (`label_setting/types.jl`'s
+`_pricing_candidate_next_nodes`/`_pricing_extend_label` hooks) is one such
+pair, not just a bare node id -- see `labels.jl`'s module docstring for why
+this is how branching is expressed without changing the shared engine.
+"""
+const JointRoutingAssignmentDarpAction = Tuple{Int, Vector{Tuple{Int, Int, Float64}}}
 
 """
 Hot-path mirror of a `JointRoutingAssignmentDarpPricingLabel`, the same shape
