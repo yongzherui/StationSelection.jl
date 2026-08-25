@@ -106,16 +106,18 @@ function _run_pricing_round(
 
     # Phase 2: the label search itself, per scenario.
     candidates_by_scenario = Vector{Vector{Any}}(undef, length(scenarios))
+    exhausted_by_scenario = trues(length(scenarios))
     if parallel
         Threads.@threads for i in eachindex(scenarios)
             p = prepared[i]
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
-                _run_label_setting(
+                _labels, exhausted, _stats = _run_label_setting(
                     p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
+                exhausted_by_scenario[i] = exhausted
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
@@ -125,14 +127,20 @@ function _run_pricing_round(
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
-                _run_label_setting(
+                _labels, exhausted, _stats = _run_label_setting(
                     p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
+                exhausted_by_scenario[i] = exhausted
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
     end
+
+    # Read by CGSolver when this round returns no columns. `false` means the
+    # empty result came from a timeout or intentional early stop, not a proof
+    # that the pricing problem contains no improving column.
+    m[:label_setting_pricing_exhausted] = all(exhausted_by_scenario)
 
     # Cross-scenario step: e.g. apply a shared column budget across
     # scenarios. Default (`_pricing_merge_scenarios` fallback below) is a

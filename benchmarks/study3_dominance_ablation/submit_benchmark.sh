@@ -1,12 +1,11 @@
 #!/bin/bash
-# Study 2 -- exact/ (running-max) vs. darp/ (first-commit explicit assignment), one job
-# per instance.
+# Study 3 -- compensated_dominance true vs. false on exact/, one job per instance.
 #
 # Usage: sbatch --array=1-<n_jobs> submit_benchmark.sh
 #   <n_jobs> = number of data rows in config/jobs.tsv (i.e. lines - 1 for the header).
 #   -o/-e need slurm_logs/ to exist before first submit: mkdir -p slurm_logs
 #
-#SBATCH --job-name=study2_passenger_max_ablation
+#SBATCH --job-name=study3_dominance_ablation
 #SBATCH --partition=mit_normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

@@ -30,7 +30,7 @@ Instance generation reuses `../scripts/generate_zhuzhou_instance.jl`'s
 | 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint LP/IP gap across operating settings | scaffolded, TODO |
 | 2 | `study2_passenger_max_ablation/` | `exact/`'s running-max reward vs. `darp/`'s explicit first-commit assignment | scaffolded, TODO — blocked on `exact/`'s missing standalone driver (see study README) |
 | 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | scaffolded, TODO — same blocker as Study 2 |
-| 4 | — | Heuristic pricing frontier | shelved, no directory |
+| 4 | `study4_heuristic_local_search/` | Heuristic pricing frontier (provisional name `local_search`) | placeholder — no design yet, see study README |
 | 5 | `study5_scaling_vs_enumeration/` | Runtime vs. `\|P\|`/`\|J\|`/`\|S\|`: CG pricing, `darp/`, raw enumeration | scaffolded, TODO — blocked on a new `enumerate_joint_routing_assignment_columns` (see study README) |
 
 Every `run_benchmark.jl`/`generate_jobs.jl`/`analyze.jl` in each study directory is a

@@ -8,6 +8,8 @@
         (i, j) => Float64(abs(i - j)) for i in 1:n for j in 1:n if i != j
     )
 
+    @test_throws ArgumentError CGSolver(pricing_time_limit_sec=0.0)
+
     function darp_data(candidates; n=3, max_wait_time=10.0, max_stops=5)
         return create_joint_routing_assignment_darp_pricing_data(
             1, collect(1:n), complete_line_cost(n), candidates;
@@ -281,5 +283,18 @@
         @test !isempty(exact_result.model[:joint_routing_assignment_columns])
         @test !isempty(darp_result.model[:joint_routing_assignment_columns])
         @test isapprox(darp_result.objective_value, exact_result.objective_value; atol=1e-6)
+
+        timed_out = run_opt(
+            problem,
+            darp_formulation,
+            CGSolver(
+                max_iterations=100,
+                reduced_cost_tol=1e-7,
+                pricing_time_limit_sec=1e-9,
+            ),
+        )
+        @test timed_out.termination_status == JuMP.MOI.OPTIMAL # the RMP solved
+        @test !timed_out.metadata["cg_converged"]             # pricing did not certify it
+        @test !timed_out.metadata["cg_pricing_exhausted"]
     end
 end

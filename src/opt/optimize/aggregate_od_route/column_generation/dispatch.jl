@@ -29,7 +29,10 @@ function extract_duals(build_result::BuildResult, mapping::AggregateODRouteMap, 
 end
 
 price_columns(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver) =
-    _run_pricing_round(m[:aggregate_od_route_formulation], mapping, m, duals, solver)
+    _run_pricing_round(
+        m[:aggregate_od_route_formulation], mapping, m, duals, solver;
+        time_limit=solver.pricing_time_limit_sec,
+    )
 
 function add_columns!(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, columns)::Int
     return _aggregate_od_route_add_columns!(m[:aggregate_od_route_formulation], build_result, mapping, m, columns)

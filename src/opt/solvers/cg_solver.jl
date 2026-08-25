@@ -7,6 +7,11 @@ Column-generation outer loop: repeatedly solve the restricted master (`build_res
 model), price new columns against its duals, and add any improving ones back into the
 master, until pricing finds nothing improving or `max_iterations` is reached.
 
+`pricing_time_limit_sec` is the wall-clock budget for each scenario's label
+search in one pricing round. An empty result from a search that hits this
+limit does not set `cg_converged=true`; only exhausted pricing can certify
+that the restricted master needs no further improving columns.
+
 Relies on three formulation-specific hooks -- implemented per `AbstractFormulation`
 (or per `AbstractProblem`), not here:
 
@@ -57,6 +62,7 @@ struct CGSolver <: AbstractSolver
     config::SolverOptions
     max_iterations::Int
     reduced_cost_tol::Float64
+    pricing_time_limit_sec::Float64
     initial_columns::Union{Nothing, AbstractVector}
     recover_integer_solution::Bool
 
@@ -64,12 +70,17 @@ struct CGSolver <: AbstractSolver
             config::SolverOptions=SolverOptions(),
             max_iterations::Int=1_000,
             reduced_cost_tol::Number=1e-6,
+            pricing_time_limit_sec::Number=30.0,
             initial_columns::Union{Nothing, AbstractVector}=nothing,
             recover_integer_solution::Bool=false,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         reduced_cost_tol >= 0 || throw(ArgumentError("reduced_cost_tol must be non-negative"))
-        new(config, max_iterations, Float64(reduced_cost_tol), initial_columns, recover_integer_solution)
+        pricing_time_limit_sec > 0 || throw(ArgumentError("pricing_time_limit_sec must be positive"))
+        new(
+            config, max_iterations, Float64(reduced_cost_tol),
+            Float64(pricing_time_limit_sec), initial_columns, recover_integer_solution,
+        )
     end
 end
 
@@ -90,7 +101,12 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         duals = extract_duals(build_result, mapping, m)
         new_columns = price_columns(build_result, mapping, m, duals, solver)
         if isnothing(new_columns) || isempty(new_columns)
-            converged = true
+            # An empty result certifies convergence only when every underlying
+            # label search exhausted its frontier. A time-limited pricing pass
+            # can also return no columns; treating that as exhaustion silently
+            # turns a pricing timeout into a false optimality certificate.
+            key = :label_setting_pricing_exhausted
+            converged = !haskey(JuMP.object_dictionary(m), key) || Bool(m[key])
             break
         end
 
@@ -100,6 +116,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     metadata = Dict{String, Any}(
         "cg_iterations" => iterations_run,
         "cg_converged" => converged,
+        "cg_pricing_exhausted" => converged,
         "cg_integer_recovery" => solver.recover_integer_solution,
     )
     if solver.recover_integer_solution && JuMP.termination_status(m) == MOI.OPTIMAL
