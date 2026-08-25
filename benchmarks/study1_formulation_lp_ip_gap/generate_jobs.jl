@@ -13,8 +13,12 @@ const SEEDS = collect(42:51)
 const PRICING_TIME_LIMIT_SEC = 900.0
 
 const VARIANTS = [
-    (comparison="formulation", variant="base", formulation="base", max_stops=10, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="formulation", variant="joint", formulation="joint", max_stops=10, max_wait_time=900.0, detour_factor=2.0),
+    # max_stops=4 (not the Study 2 baseline of 10): keeps both formulations' exhaustive
+    # column enumeration tractable so each one's direct-solve LP/IP pair is a genuine
+    # global bound, not a truncated one (see run_benchmark.jl's "formulation" branch and
+    # this study's README).
+    (comparison="formulation", variant="base", formulation="base", max_stops=4, max_wait_time=900.0, detour_factor=2.0),
+    (comparison="formulation", variant="joint", formulation="joint", max_stops=4, max_wait_time=900.0, detour_factor=2.0),
     (comparison="max_stops", variant="max_stops_3", formulation="joint", max_stops=3, max_wait_time=900.0, detour_factor=2.0),
     (comparison="max_stops", variant="max_stops_5", formulation="joint", max_stops=5, max_wait_time=900.0, detour_factor=2.0),
     (comparison="max_stops", variant="max_stops_7", formulation="joint", max_stops=7, max_wait_time=900.0, detour_factor=2.0),

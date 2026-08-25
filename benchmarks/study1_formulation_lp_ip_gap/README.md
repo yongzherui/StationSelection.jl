@@ -2,30 +2,57 @@
 
 ## Question
 
-How does the formulation and its operating constraints change the gap between the
-column-generation LP bound and the integer solution recovered over the generated
-column pool?
+How does the formulation and its operating constraints change the gap between the LP
+bound and the integer solution?
 
-Both `AggregateODRouteBaseFormulation` and
-`AggregateODRouteJointRoutingAssignmentFormulation` use `CGSolver` with exact pricing
-and `recover_integer_solution=true`. Each job records its own LP objective and recovered
-IP objective. The minimization gap is `(z_ip - z_lp) / abs(z_ip)`.
+Comparisons 2-4 vary a single Joint parameter and use `CGSolver` with exact pricing and
+`recover_integer_solution=true`, exactly as before: `z_lp` is CG's dual-certified LP
+bound (`cg_lp_objective_value`), and `z_ip` is the MIP re-solved over exactly the column
+pool CG discovered -- a feasible upper bound, not claimed to be globally optimal over
+every possible column.
 
-The recovered IP is optimal over the columns found by exhaustive LP pricing. It is a
-feasible upper bound, but it is not claimed to be the globally optimal IP over every
-possible column.
+Comparison 1 (Base versus Joint) instead solves **both formulations through the same
+exhaustive-enumeration + `DirectMIPSolver` strategy**, not `CGSolver`: `z_ip` is the
+exhaustive-pool MIP solved directly; `z_lp` is the true LP relaxation of that same model,
+solved by relaxing it in place (`JuMP.relax_integrality`) and re-optimizing -- no CG duals
+or CG-restricted-recovery heuristic on either side.
+
+- **Base** (`AggregateODRouteBaseFormulation`) enumerates its whole column universe up
+  front (`enumerate_aggregate_od_route_columns`), which throws rather than return a
+  truncated pool if it can't finish, so any result at all is exact by construction.
+- **Joint** (`AggregateODRouteJointRoutingAssignmentFormulation`) has no separate
+  assignment variable to decouple from `θ` the way Base's `x` does, so a genuinely
+  exhaustive pool needs more than Base's route enumeration alone
+  (`enumerate_joint_routing_assignment_columns`,
+  `label_setting/joint_routing_assignment/exact/enumeration.jl`): it reuses Base's own
+  physical-route DFS (the two formulations' ride-limit rule is identical per `(j, k)`
+  pair, so the route universe is provably the same one), then combinatorially expands
+  each route's *station subsets* -- not passenger combinations, which would be
+  exponential in demand density rather than in route length; see that file's module
+  docstring for why coverage being `>= 1` (a real set-covering row, not a partition) is
+  what makes station subsets the right axis. Measured on this study's instance at
+  `max_stops=4`: 794 columns, matching Base's own 778 in scale, both cross-validated
+  exact against each other's independently-computed global optimum at `max_stops=2` and
+  `max_stops=4`.
+
+Running Base through `CGSolver` (as this comparison did previously) would compare
+Joint's native mechanism against Base forced through Joint's -- not apples to apples.
+Giving both formulations the same true direct-solve LP/IP pair is the fairer read, at
+the cost of capping `max_stops` low enough that exhaustive enumeration stays tractable
+for both (see below).
 
 ## Four comparisons
 
-1. Base versus Joint at `max_stops=10`, `max_wait_time=900`, and
-   `detour_factor=2.0`.
+1. Base versus Joint at `max_stops=4` (not the Study 2 baseline of 10 -- see above),
+   `max_wait_time=900`, and `detour_factor=2.0`.
 2. Joint with `max_stops` equal to 3, 5, and 7.
 3. Joint with `max_wait_time` equal to 600, 900, and 1200 seconds.
 4. Joint with `detour_factor` equal to 1.5, 2.0, and 2.5.
 
-Parameters not varied in a comparison retain the Study 2 baseline. These are four
-independent sub-studies—not one 120-task array. Each sub-study has its own job table,
-SLURM submission, and comparison CSV. Across all four submissions there are 110 jobs.
+Parameters not varied in a comparison retain the Study 2 baseline, except comparison 1's
+`max_stops` (see above). These are four independent sub-studies—not one 120-task array.
+Each sub-study has its own job table, SLURM submission, and comparison CSV. Across all
+four submissions there are 110 jobs.
 
 ## Shared instance and solver design
 
@@ -34,14 +61,23 @@ and seeds 42–51. All cells use `k=5`, a 600-second walking cap, route/walk wei
 10.0/0.1, 20-second repositioning, exact pricing, and a 900-second per-scenario pricing
 limit. Every row of the four `config/*_jobs.tsv` tables runs in a separate Julia process.
 
-`runtime_sec` is copied from `OptResult.runtime_sec`. It includes the CG loop and
-integer-recovery solve and is retained as a secondary result.
+`runtime_sec` is `OptResult.runtime_sec` and is retained as a secondary result. For
+Joint in comparisons 2-4 it is the CG loop plus the integer-recovery solve. For
+comparison 1's rows (both formulations) it is instead the direct-MIP solve plus the
+LP-relaxation solve combined (column enumeration itself runs once per solve, so its
+cost is paid twice) -- comparison 1's runtimes and comparisons 2-4's runtimes are not
+comparable to each other, only within their own comparison.
 
 ## Certification
 
 All configured jobs must be present. `analyze.jl` refuses to produce summaries unless
 every job has an optimal LP, exhaustive/converged pricing, a recorded LP objective, and
-an optimal recovered IP solve. Raw per-job CSVs remain available if certification fails.
+an optimal recovered IP solve. Comparison 1's rows have no CG loop to converge, so they
+report `cg_converged=true`/`cg_pricing_exhausted=true` unconditionally -- an OPTIMAL
+termination status on both the direct MIP and its LP relaxation already certifies
+exactness for those rows (both enumerators throw rather than silently truncate the
+pool), so the same certification gate still applies uniformly. Raw per-job CSVs remain
+available if certification fails.
 
 ## Running
 

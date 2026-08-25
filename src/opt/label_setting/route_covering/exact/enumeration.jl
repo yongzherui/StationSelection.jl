@@ -94,16 +94,30 @@ function _od_route_travel_lookup(
 end
 
 """
-    _enumerate_aggregate_od_route_columns_core(mapping, data, route_regularization_weight,
+    _enumerate_aggregate_od_route_raw_columns(mapping, data, route_regularization_weight,
         repositioning_time, max_wait_time, detour_factor, max_stops_cap, max_routes,
         time_limit_sec) -> Vector{AggregateODRouteColumn}
 
-Shared body behind both `enumerate_aggregate_od_route_columns` methods below -- the
-`AnyAggregateODRouteProblem` (single combined object) and `StationSelectionProblem`/
-formulation (split) call sites differ only in where the encoding-detail scalars come
-from; both resolve `mapping` and those scalars up front and delegate here.
+The DFS itself, *before* `_deduplicate_aggregate_od_route_columns` collapses it to one
+column per distinct `served_pairs` signature -- one `AggregateODRouteColumn` per distinct
+label/physical route the search visits (`metadata["route"]` carries the node sequence).
+`_enumerate_aggregate_od_route_columns_core` (below) is a thin wrapper over this that
+dedupes for `AggregateODRouteBaseFormulation`'s own use.
+
+Exposed raw because `AggregateODRouteJointRoutingAssignmentFormulation`'s own exhaustive
+enumerator (`label_setting/joint_routing_assignment/exact/enumeration.jl`) needs the same
+physical-route universe but a *different* per-route expansion (every combination of
+per-passenger assignment choices, not one column per served-pairs signature) -- collapsing
+by signature here first would silently discard physically distinct routes (different node
+order, different `tau`, potentially different passenger certifications) that happen to
+share a served-pairs signature. The two formulations' physical feasibility rule is
+identical (`detour_factor * routing_cost(j, k)` per `(j, k)` pair, independent of which
+formulation or which passenger uses it -- see `joint_routing_assignment/pricing_round.jl`'s
+own `ride_limit` computation), so reusing this DFS verbatim, rather than re-deriving an
+equivalent one against `JointRoutingAssignmentPricingLabel`'s transitions, is exact, not an
+approximation.
 """
-function _enumerate_aggregate_od_route_columns_core(
+function _enumerate_aggregate_od_route_raw_columns(
         mapping::AggregateODRouteMap,
         data::StationSelectionData,
         route_regularization_weight::Float64,
@@ -195,6 +209,36 @@ function _enumerate_aggregate_od_route_columns_core(
     ))
 
     append!(columns, mapping.columns)
+    return columns
+end
+
+"""
+    _enumerate_aggregate_od_route_columns_core(mapping, data, route_regularization_weight,
+        repositioning_time, max_wait_time, detour_factor, max_stops_cap, max_routes,
+        time_limit_sec) -> Vector{AggregateODRouteColumn}
+
+Shared body behind both `enumerate_aggregate_od_route_columns` methods below -- the
+`AnyAggregateODRouteProblem` (single combined object) and `StationSelectionProblem`/
+formulation (split) call sites differ only in where the encoding-detail scalars come
+from; both resolve `mapping` and those scalars up front and delegate here. Thin wrapper
+over `_enumerate_aggregate_od_route_raw_columns` (above) plus the final
+served-pairs-signature dedup `AggregateODRouteBaseFormulation`'s own `θ` pool wants.
+"""
+function _enumerate_aggregate_od_route_columns_core(
+        mapping::AggregateODRouteMap,
+        data::StationSelectionData,
+        route_regularization_weight::Float64,
+        repositioning_time::Float64,
+        max_wait_time::Float64,
+        detour_factor::Float64,
+        max_stops_cap::Int,
+        max_routes::Int,
+        time_limit_sec::Float64,
+    )::Vector{AggregateODRouteColumn}
+    columns = _enumerate_aggregate_od_route_raw_columns(
+        mapping, data, route_regularization_weight, repositioning_time, max_wait_time,
+        detour_factor, max_stops_cap, max_routes, time_limit_sec,
+    )
     return _deduplicate_aggregate_od_route_columns(columns)
 end
 

@@ -64,6 +64,12 @@ include("label_setting/joint_routing_assignment/exact/types.jl")
 include("label_setting/joint_routing_assignment/exact/labels.jl")
 include("label_setting/joint_routing_assignment/search_data.jl")
 include("label_setting/joint_routing_assignment/exact/exact.jl")
+# Exhaustive enumeration for AggregateODRouteJointRoutingAssignmentFormulation's own
+# DirectMIPSolver build (below, after column_generation/build_joint_routing_assignment.jl,
+# which it also depends on) -- reuses route_covering/exact/enumeration.jl's raw physical-
+# route DFS (already included above), so it must come after that too. See its own module
+# docstring for why reusing that DFS is exact, not an approximation.
+include("label_setting/joint_routing_assignment/exact/enumeration.jl")
 include("label_setting/joint_routing_assignment/station_simple/types.jl")
 include("label_setting/joint_routing_assignment/station_simple/labels.jl")
 include("label_setting/joint_routing_assignment/station_simple/station_simple.jl")
@@ -96,6 +102,12 @@ include("label_setting/joint_routing_assignment/darp/darp.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
+# AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
+# master CGSolver's build (above) solves, seeded with the exhaustive pool
+# (enumerate_joint_routing_assignment_columns) instead of the two-stop seed, via the same
+# shared _build_joint_routing_assignment_model body -- Joint's counterpart to Base's own
+# DirectMIPSolver build below.
+include("optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl")
 # AggregateODRouteBaseFormulation + CGSolver: same y/x/theta master DirectMIPSolver's build
 # (above) solves, grown from an empty column pool via add_aggregate_od_route_base_column!
 # (constraints/aggregate_od_route/base/route_activation.jl, part of opt/constraints.jl)
