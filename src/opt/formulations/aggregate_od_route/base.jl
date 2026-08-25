@@ -67,6 +67,14 @@ paths) belongs here instead, since it's an encoding choice, not a business decis
 - `max_wait_time`: maximum passenger wait time
 - `detour_factor`: maximum allowed in-vehicle detour ratio
 - `max_stops`: maximum stops per route
+- `compensated_dominance`: whether the CG pricer's label-setting dominance test uses the
+  compensated reward-diff rule (`rc_a + w(A_a \\ A_b) <= rc_b`) or the older, weaker plain
+  subset rule (`A_a subseteq A_b`); a toggle because compensated trades away column
+  diversity per search for speed, and which side wins for column generation overall is an
+  end-to-end question, not a pricing-speed one (see `RouteCoveringSearchContext`,
+  `label_setting/route_covering/exact/exact.jl`). Only affects `CGSolver`'s pricing loop --
+  `DirectMIPSolver`'s exhaustive enumeration (`enumerate_aggregate_od_route_columns`) never
+  performs dominance at all, so this field is inert there.
 
 No `assignment_policy` field: this formulation's `build_model` only ever supported free
 assignment in practice, so free assignment is simply the only behavior now. No
@@ -84,6 +92,7 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    compensated_dominance::Bool
 
     function AggregateODRouteBaseFormulation(;
             route_regularization_weight::Number=1.0,
@@ -92,6 +101,7 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
+            compensated_dominance::Bool=true,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
@@ -104,6 +114,7 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
+            compensated_dominance,
         )
     end
 end

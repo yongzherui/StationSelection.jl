@@ -112,6 +112,8 @@ function _build_joint_routing_assignment_model(
     m[:joint_routing_assignment_max_wait_time] = formulation.max_wait_time
     m[:joint_routing_assignment_max_stops] = formulation.max_stops
     m[:joint_routing_assignment_detour_factor] = formulation.detour_factor
+    m[:joint_routing_assignment_compensated_dominance] = formulation.compensated_dominance
+    m[:joint_routing_assignment_pricing_mode] = formulation.pricing_mode
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -212,6 +214,8 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time = m[:joint_routing_assignment_max_wait_time],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
+        compensated_dominance = m[:joint_routing_assignment_compensated_dominance],
+        pricing_mode = m[:joint_routing_assignment_pricing_mode],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(

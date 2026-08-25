@@ -124,7 +124,7 @@ end
 
 # ── candidate next-nodes ─────────────────────────────────────────────────────
 # `label` is untyped so both the revisit-tolerant and the elementary
-# (`../station_simple/station_simple.jl`) pricers can share this: it reads only `station_age`,
+# (`../station_simple/labels.jl`) pricers can share this: it reads only `station_age`,
 # `current`, and `activated_reward_layers`, which both label types expose. Julia
 # specializes per concrete call site, so there is no dispatch or speed cost.
 function _has_useful_live_joint_routing_assignment_origin(

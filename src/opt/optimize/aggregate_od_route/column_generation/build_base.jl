@@ -125,6 +125,7 @@ function _build_aggregate_od_route_base_cg_model(
     m[:aggregate_od_route_base_max_wait_time] = formulation.max_wait_time
     m[:aggregate_od_route_base_max_stops] = formulation.max_stops
     m[:aggregate_od_route_base_detour_factor] = formulation.detour_factor
+    m[:aggregate_od_route_base_compensated_dominance] = formulation.compensated_dominance
     m[:aggregate_od_route_base_nodes] = collect(1:n)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
@@ -207,6 +208,7 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time=m[:aggregate_od_route_base_max_wait_time],
         detour_factor=m[:aggregate_od_route_base_detour_factor],
         max_stops=m[:aggregate_od_route_base_max_stops],
+        compensated_dominance=m[:aggregate_od_route_base_compensated_dominance],
     )
     columns_by_id = m[:aggregate_od_route_base_columns_by_id]
     discovered = AggregateODRouteColumn[]

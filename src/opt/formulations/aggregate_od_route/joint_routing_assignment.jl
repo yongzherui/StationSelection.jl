@@ -26,7 +26,26 @@ masters, see `AggregateODRouteBendersYFormulation`/`XY`/`YZ`/`YZH` in `benders/`
 # Fields
 See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
-`max_wait_time`, `detour_factor`, `max_stops`. No `assignment_policy` field: this
+`max_wait_time`, `detour_factor`, `max_stops`, `compensated_dominance` (same
+toggle, same default, applying here to `JointRoutingAssignmentSearchContext`'s
+dominance test instead -- `label_setting/joint_routing_assignment/exact/exact.jl`).
+
+`pricing_mode::Symbol` (`:exact` or `:darp`, default `:exact`) picks which
+label-setting pricer `_pricing_build_scenario_context`
+(`label_setting/joint_routing_assignment/pricing_round.jl`) builds:
+- `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/exact.jl`), which
+  credits each passenger their single *best* certified `(j,k)` regardless of
+  visitation order (the running-max reward-layer trick).
+- `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/darp.jl`),
+  which credits whichever `(j,k)` is *first* certified, in route-visitation
+  order, and never revisits that choice -- closer to how a real dial-a-ride
+  request is committed once a vehicle actually stops for it. Built as a
+  controlled comparison point against `:exact`'s running-max crediting; see
+  `darp/types.jl`'s module docstring for the full reward-model and
+  dominance-soundness argument. Both modes share every other field here
+  (including `compensated_dominance`), so switching `pricing_mode` alone
+  isolates the crediting-rule difference.
+No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
 assignment is simply the only behavior now. No `allow_walk_only` field either -- unlike
 `AggregateODRouteBaseFormulation`/`AggregateODRouteBendersYXFormulation`, direct walking
@@ -45,6 +64,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    compensated_dominance::Bool
+    pricing_mode::Symbol
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -53,11 +74,16 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
+            compensated_dominance::Bool=true,
+            pricing_mode::Symbol=:exact,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
         )
+        pricing_mode in (:exact, :darp) || throw(ArgumentError(
+            "pricing_mode must be :exact or :darp, got $(repr(pricing_mode))",
+        ))
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
@@ -65,6 +91,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
+            compensated_dominance,
+            pricing_mode,
         )
     end
 end

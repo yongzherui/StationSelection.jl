@@ -2,7 +2,7 @@
 Plain data containers shared by every passenger free-assignment pricer variant
 (`exact/` and `station_simple/`): the pricing graph/reward-layer types and the
 final route-column type. Each variant's own label/bitsets/dominance types live
-under its own subdirectory instead (`exact/types.jl`) --
+under its own subdirectory instead (`exact/types.jl`, `station_simple/types.jl`) --
 `JointRoutingAssignmentPricingLabel` and friends are specific to the
 revisit-tolerant search, not shared with `station_simple/`'s elementary-route
 label.

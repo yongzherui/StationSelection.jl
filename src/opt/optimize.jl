@@ -41,6 +41,8 @@ include("label_setting/route_covering/data.jl")
 include("label_setting/route_covering/exact/types.jl")
 include("label_setting/route_covering/exact/labels.jl")
 include("label_setting/route_covering/exact/exact.jl")
+include("label_setting/route_covering/station_simple/types.jl")
+include("label_setting/route_covering/station_simple/labels.jl")
 include("label_setting/route_covering/station_simple/station_simple.jl")
 # generic_runner.jl, column_generation.jl, duals.jl, logging.jl, and dispatch.jl (the old
 # AggregateODRouteCG engine's outer loop, master-facing dual extraction, CG logging, and
@@ -62,10 +64,26 @@ include("label_setting/joint_routing_assignment/exact/types.jl")
 include("label_setting/joint_routing_assignment/exact/labels.jl")
 include("label_setting/joint_routing_assignment/search_data.jl")
 include("label_setting/joint_routing_assignment/exact/exact.jl")
+include("label_setting/joint_routing_assignment/station_simple/types.jl")
+include("label_setting/joint_routing_assignment/station_simple/labels.jl")
 include("label_setting/joint_routing_assignment/station_simple/station_simple.jl")
+# darp/ is a first-commit-crediting alternative to exact/'s running-max
+# passenger crediting, built as a controlled comparison point -- selectable
+# per solve via `AggregateODRouteJointRoutingAssignmentFormulation`'s
+# `pricing_mode` field (`:exact`/`:darp`), branched on in
+# `joint_routing_assignment/pricing_round.jl`'s `_pricing_build_scenario_context`
+# (below). Also fully exercisable standalone via
+# `joint_routing_assignment_pricing_by_darp_label_setting` (darp/darp.jl).
+# Needs `joint_routing_assignment/duals.jl` (below) for
+# `_verify_joint_routing_assignment_master_reduced_cost`, so darp/darp.jl is
+# included after it.
+include("label_setting/joint_routing_assignment/darp/types.jl")
+include("label_setting/joint_routing_assignment/darp/data.jl")
+include("label_setting/joint_routing_assignment/darp/labels.jl")
 include("label_setting/joint_routing_assignment/duals.jl")
+include("label_setting/joint_routing_assignment/darp/darp.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
-include("label_setting/joint_routing_assignment/exact/pricing_round.jl")
+include("label_setting/joint_routing_assignment/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteBaseFormulation + CGSolver: same y/x/theta master DirectMIPSolver's build
 # (above) solves, grown from an empty column pool via add_aggregate_od_route_base_column!

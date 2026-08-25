@@ -2,9 +2,9 @@
 Plain data containers shared by every AggregateODRouteProblem pricer variant
 (`exact/` and `station_simple/`): the pricing graph itself and the duals it
 prices against. Each variant's own label/bitsets/dominance types live under
-its own subdirectory instead (`exact/types.jl`) -- `RouteCoveringPricingLabel`
-and friends are specific to the revisit-tolerant search, not shared with
-`station_simple/`'s elementary-route label.
+its own subdirectory instead (`exact/types.jl`, `station_simple/types.jl`) --
+`RouteCoveringPricingLabel` and friends are specific to the revisit-tolerant
+search, not shared with `station_simple/`'s elementary-route label.
 """
 
 export RouteCoveringPricingData

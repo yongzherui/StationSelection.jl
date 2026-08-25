@@ -65,7 +65,7 @@ it.
 # `label`/`label_bs` are intentionally untyped: this bound is shared by the
 # revisit-tolerant pricer (`JointRoutingAssignmentPricingLabel` /
 # `JointRoutingAssignmentLabelBitsets`) and the elementary station-simple pricer
-# (`../station_simple/station_simple.jl`), whose label/bitset types differ but expose the same
+# (`../station_simple/types.jl`), whose label/bitset types differ but expose the same
 # `current`/`time`/`activated_reward_layers` and `age_idx`/`age_val` fields the
 # bound reads. Julia still specializes per concrete call site, so there is no
 # dispatch or performance cost to dropping the annotations.

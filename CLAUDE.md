@@ -43,7 +43,7 @@ blocks; they don't live inside `formulations/` or `problems/` themselves.
 | `ClusteringTwoStageFormulation` | `DirectMIPSolver` | Two-stage station-to-station assignment | `l` (activate/scenario) | y, z, x |
 | `ClusteringTwoStageODFormulation` | `DirectMIPSolver` | Two-stage OD pickup/dropoff assignment | `l`, `in_vehicle_time_weight` | y, z, x |
 | `ClusteringTwoStageODFlowRegularizerFormulation` | `DirectMIPSolver` | `ClusteringTwoStageODFormulation` + route-activation flow penalty | `l`, `in_vehicle_time_weight`, `flow_regularization_weight` | y, z, x, f_flow |
-| `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | Station build + decoupled OD assignment + route activation, against an exhaustively enumerated column pool built up front | `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`, `max_wait_time`, `detour_factor`, `max_stops` | y, x, x_walk, θ |
+| `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | Station build + decoupled OD assignment + route activation, against an exhaustively enumerated column pool built up front | `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`, `max_wait_time`, `detour_factor`, `max_stops`, `compensated_dominance` | y, x, x_walk, θ |
 | `AggregateODRouteJointRoutingAssignmentFormulation` | `CGSolver` | Same encoding-detail fields as Base, but θ columns carry OD assignment directly — no separate `x`; grown via column generation, no up-front enumeration | same field set as Base | y, x_walk, θ |
 
 **Important departure from the old two-stage convention:** the two `AggregateODRoute*`
@@ -114,7 +114,9 @@ radius, shared by every formulation that restricts assignment by walk distance).
 **AggregateODRoute formulations (both):** `route_regularization_weight` (μ, multiplies
 each route column's cost), `walk_cost_weight` (multiplies every walking-cost term),
 `repositioning_time` (ρ, added to every route column's travel/service cost),
-`max_wait_time`, `detour_factor` (min 1.0), `max_stops` (min 2, default unbounded).
+`max_wait_time`, `detour_factor` (min 1.0), `max_stops` (min 2, default unbounded),
+`compensated_dominance` (default `true`; only affects `CGSolver`'s label-setting pricer
+dominance test — inert for `DirectMIPSolver`'s enumeration, which never runs dominance).
 
 **Solver-level:** `SolverOptions` (`silent`, `mip_gap`, `time_limit_sec`) shared by every
 `AbstractSolver`. `CGSolver` additionally carries `max_iterations`,
