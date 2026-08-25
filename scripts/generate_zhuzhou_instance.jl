@@ -72,7 +72,8 @@ _zz_zipf_weights(n::Int, s::Float64) = [1.0 / k^s for k in 1:n]
 
 """
     generate_zhuzhou_data(data_dir, n_stations, n_pairs;
-                          n_scenarios=1, endpoint_overlap=2.0, seed=42)
+                          n_scenarios=1, endpoint_overlap=2.0, seed=42,
+                          demand_station_count=n_stations)
     -> (StationSelectionData, NamedTuple)
 
 Build a Zhuzhou StationSelectionData:
@@ -80,6 +81,9 @@ Build a Zhuzhou StationSelectionData:
   - `n_pairs`:        distinct (o,d) demand pairs per scenario
   - `n_scenarios`:    number of independent demand scenarios (each sampled separately)
   - `endpoint_overlap`: Zipf exponent (higher → demand concentrated on popular stations)
+  - `demand_station_count`: sample OD endpoints from only the top-N stations in the
+    candidate set. Keeping this fixed while increasing `n_stations` isolates candidate-set
+    scaling from changes in the sampled demand (default: all candidate stations).
 
 Stations are converted from BD-09 to WGS-84.
 Walking costs:  Haversine distance / 1.4 m/s (seconds).
@@ -98,11 +102,15 @@ function generate_zhuzhou_data(
     n_scenarios      :: Int     = 1,
     endpoint_overlap :: Float64 = 2.0,
     seed             :: Int     = 42,
+    demand_station_count :: Int = n_stations,
 )::Tuple{StationSelectionData, NamedTuple}
     n_stations   > 0 || throw(ArgumentError("n_stations must be positive"))
     n_pairs      > 0 || throw(ArgumentError("n_pairs must be positive"))
     n_scenarios  > 0 || throw(ArgumentError("n_scenarios must be positive"))
     endpoint_overlap >= 0 || throw(ArgumentError("endpoint_overlap must be non-negative"))
+    1 <= demand_station_count <= n_stations || throw(ArgumentError(
+        "demand_station_count must be between 1 and n_stations=$n_stations"
+    ))
 
     # 1. Top-N stations by total request volume
     all_rows = _zz_load_station_counts(data_dir)
@@ -128,42 +136,39 @@ function generate_zhuzhou_data(
     segment_file  = joinpath(data_dir, "segment.csv")
     routing_costs = read_routing_costs_from_segments(segment_file, stations)
 
-    # 5. Valid OD pairs drawn from real order history
-    valid_pairs = _zz_load_valid_pairs(data_dir, station_set)
+    # 5. Valid OD pairs drawn from real order history. `demand_station_count` lets a
+    # station-count sweep add candidate stations without also changing demand endpoints.
+    demand_station_ids = station_ids[1:demand_station_count]
+    demand_station_set = Set(demand_station_ids)
+    valid_pairs = sort!(collect(_zz_load_valid_pairs(data_dir, demand_station_set)))
+    n_pairs <= length(valid_pairs) || throw(ArgumentError(
+        "requested n_pairs=$n_pairs, but only $(length(valid_pairs)) distinct valid OD " *
+        "pairs exist among the top $demand_station_count demand stations"
+    ))
 
-    weights = _zz_zipf_weights(n_stations, endpoint_overlap)
-    cumw    = cumsum(weights)
-    max_misses = max(10_000, n_pairs * 500)
+    endpoint_weights = _zz_zipf_weights(demand_station_count, endpoint_overlap)
+    station_weight = Dict(demand_station_ids[i] => endpoint_weights[i]
+        for i in eachindex(demand_station_ids))
+    pair_weights = [station_weight[o] * station_weight[d] for (o, d) in valid_pairs]
 
     # 6. Sample independently per scenario; each gets its own RNG seed
     all_requests   = DataFrame[]
     pairs_per_scenario = Int[]
+    sampled_pairs_per_scenario = Vector{Vector{Tuple{Int, Int}}}()
     request_id     = 1
 
     for s in 1:n_scenarios
-        rng    = Random.MersenneTwister(seed + (s - 1) * 1000)
-        active = Tuple{Int,Int}[]
-        seen   = Set{Tuple{Int,Int}}()
-        misses = 0
-
-        while length(active) < n_pairs && misses < max_misses
-            oi = searchsortedfirst(cumw, rand(rng) * cumw[end])
-            di = searchsortedfirst(cumw, rand(rng) * cumw[end])
-            oi == di && (misses += 1; continue)
-            pair = (station_ids[oi], station_ids[di])
-            pair in seen       && (misses += 1; continue)
-            pair ∉ valid_pairs && (misses += 1; continue)
-            push!(seen, pair)
-            push!(active, pair)
-            misses = 0
-        end
-
+        rng = Random.MersenneTwister(seed + (s - 1) * 1000)
+        active = _zz_weighted_sample_without_replacement(rng, valid_pairs, pair_weights, n_pairs)
+        length(active) == n_pairs || error(
+            "internal generator error: scenario $s sampled $(length(active)) pairs, expected $n_pairs"
+        )
+        length(unique(active)) == n_pairs || error(
+            "internal generator error: scenario $s contains duplicate OD pairs"
+        )
         n_actual = length(active)
-        if n_actual < n_pairs
-            @warn "Scenario $s: could only assemble $n_actual / $n_pairs valid OD pairs " *
-                  "(n_stations=$n_stations, endpoint_overlap=$endpoint_overlap, seed=$(seed + (s-1)*1000))"
-        end
         push!(pairs_per_scenario, n_actual)
+        push!(sampled_pairs_per_scenario, active)
 
         # Place requests in a 1-hour window starting at 8am + (s-1) hours
         t0 = DateTime(2024, 1, 1, 7 + s, 0, 0)
@@ -195,12 +200,28 @@ function generate_zhuzhou_data(
         scenarios=scenario_windows,
     )
 
+    # These are hard postconditions, not diagnostics. In particular,
+    # `create_station_selection_data` is allowed to omit empty scenario windows; if a
+    # future change in request timestamps or window boundaries triggers that behavior,
+    # instance generation must fail here rather than silently changing the benchmark.
+    StationSelection.n_scenarios(data) == n_scenarios || error(
+        "generator produced $(StationSelection.n_scenarios(data)) scenarios, expected $n_scenarios"
+    )
+    constructed_pairs_per_scenario = [nrow(scenario.requests) for scenario in data.scenarios]
+    all(==(n_pairs), constructed_pairs_per_scenario) || error(
+        "generator produced scenario request counts $(constructed_pairs_per_scenario), " *
+        "expected $n_pairs in every scenario"
+    )
+
     meta = (
         n_stations_requested = n_stations,
         n_stations_actual    = nrow(stations),
         n_scenarios_actual   = StationSelection.n_scenarios(data),
         n_pairs_requested    = n_pairs,
-        pairs_per_scenario   = pairs_per_scenario,
+        pairs_per_scenario   = constructed_pairs_per_scenario,
+        sampled_pairs_per_scenario = sampled_pairs_per_scenario,
+        n_valid_pairs        = length(valid_pairs),
+        demand_station_count = demand_station_count,
         endpoint_overlap     = endpoint_overlap,
         seed                 = seed,
         station_ids          = station_ids,
@@ -208,6 +229,45 @@ function generate_zhuzhou_data(
         station_counts       = [r.total_count for r in top_rows],
     )
     return data, meta
+end
+
+"""Weighted sampling without replacement with stable prefix behavior.
+
+For a fixed seed and candidate pool, asking for `k+1` items returns the same first `k`
+items as asking for `k`. Sorting the valid-pair pool before calling this helper makes the
+result independent of `Set` iteration order.
+"""
+function _zz_weighted_sample_without_replacement(
+    rng::AbstractRNG,
+    items::Vector{T},
+    weights::Vector{Float64},
+    n::Int,
+)::Vector{T} where {T}
+    length(items) == length(weights) || throw(ArgumentError("items and weights must have equal length"))
+    0 <= n <= length(items) || throw(ArgumentError("cannot sample $n items from $(length(items))"))
+    all(w -> isfinite(w) && w > 0.0, weights) || throw(ArgumentError("weights must be finite and positive"))
+
+    remaining_items = copy(items)
+    remaining_weights = copy(weights)
+    selected = T[]
+    sizehint!(selected, n)
+    for _ in 1:n
+        total = sum(remaining_weights)
+        draw = rand(rng) * total
+        cumulative = 0.0
+        chosen = lastindex(remaining_items)
+        for i in eachindex(remaining_items)
+            cumulative += remaining_weights[i]
+            if draw < cumulative
+                chosen = i
+                break
+            end
+        end
+        push!(selected, remaining_items[chosen])
+        deleteat!(remaining_items, chosen)
+        deleteat!(remaining_weights, chosen)
+    end
+    return selected
 end
 
 # ── diagnostic summary ────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ max_wait_time = parse(Float64, fields[11])
 detour_factor = parse(Float64, fields[12])
 pricing_time_limit_sec = parse(Float64, fields[13])
 
-problem, k = benchmark_problem(@__DIR__, "STUDY1", n_stations, n_pairs, n_scenarios, seed)
+problem, k, instance_meta = benchmark_problem(@__DIR__, "STUDY1", n_stations, n_pairs, n_scenarios, seed)
 output_dir = benchmark_output_dir(@__DIR__, "STUDY1", "study1_formulation_lp_ip_gap")
 common = (
     route_regularization_weight=10.0, walk_cost_weight=0.1,
@@ -47,6 +47,8 @@ metrics = benchmark_cg_metrics(result, columns_key)
 row = DataFrame((
     job_id=[job_id], instance_id=[instance_id], comparison=[comparison], variant=[variant],
     formulation=[formulation_name], n_stations=[n_stations], n_pairs=[n_pairs],
+    n_pairs_actual=[sum(instance_meta.pairs_per_scenario)],
+    pairs_per_scenario=[join(instance_meta.pairs_per_scenario, ";")],
     n_scenarios=[n_scenarios], seed=[seed], k=[k], max_stops=[max_stops],
     max_wait_time=[max_wait_time], detour_factor=[detour_factor],
     pricing_time_limit_sec=[pricing_time_limit_sec],

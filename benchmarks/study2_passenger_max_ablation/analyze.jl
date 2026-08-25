@@ -18,6 +18,11 @@ mkpath(results_dir)
 files = sort(filter(path -> endswith(path, ".csv"), readdir(raw_dir; join=true)))
 isempty(files) && error("no CSV result files found in $raw_dir")
 case_results = reduce(vcat, (CSV.read(path, DataFrame) for path in files))
+bad_sizes = case_results[
+    case_results.n_pairs_actual .!= case_results.n_pairs .* case_results.n_scenarios,
+    [:job_id, :instance_id, :n_pairs, :n_scenarios, :n_pairs_actual, :pairs_per_scenario],
+]
+isempty(bad_sizes) || error("generated workload differs from configuration:\n$(sprint(show, bad_sizes))")
 sort!(case_results, [:instance_id, :pricing_mode])
 CSV.write(joinpath(results_dir, "case_results.csv"), case_results)
 

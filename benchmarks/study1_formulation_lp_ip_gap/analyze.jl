@@ -30,6 +30,12 @@ extra_ids = setdiff(case_results.job_id, jobs.job_id)
 isempty(missing_ids) || error("missing result jobs: $(join(missing_ids, ", "))")
 isempty(extra_ids) || error("unexpected result jobs: $(join(extra_ids, ", "))")
 
+bad_sizes = case_results[
+    case_results.n_pairs_actual .!= case_results.n_pairs .* case_results.n_scenarios,
+    [:job_id, :instance_id, :n_pairs, :n_scenarios, :n_pairs_actual, :pairs_per_scenario],
+]
+isempty(bad_sizes) || error("generated workload differs from configuration:\n$(sprint(show, bad_sizes))")
+
 bad = case_results[
     (case_results.lp_termination_status .!= "OPTIMAL") .|
     (case_results.ip_termination_status .!= "OPTIMAL") .|

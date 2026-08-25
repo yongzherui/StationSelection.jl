@@ -20,7 +20,7 @@ seed = parse(Int, fields[7])
 max_stops = parse(Int, fields[8])
 pricing_time_limit_sec = parse(Float64, fields[9])
 
-problem, k = benchmark_problem(@__DIR__, "STUDY3", n_stations, n_pairs, n_scenarios, seed)
+problem, k, instance_meta = benchmark_problem(@__DIR__, "STUDY3", n_stations, n_pairs, n_scenarios, seed)
 output_dir = benchmark_output_dir(@__DIR__, "STUDY3", "study3_dominance_ablation")
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
     ; BENCHMARK_BASELINE..., pricing_mode=:exact, max_stops=max_stops,
@@ -33,6 +33,8 @@ row = DataFrame((
     job_id=[job_id], instance_id=[instance_id],
     compensated_dominance=[compensated_dominance], n_stations=[n_stations],
     n_pairs=[n_pairs], n_scenarios=[n_scenarios], seed=[seed], k=[k],
+    n_pairs_actual=[sum(instance_meta.pairs_per_scenario)],
+    pairs_per_scenario=[join(instance_meta.pairs_per_scenario, ";")],
     max_stops=[max_stops], pricing_time_limit_sec=[pricing_time_limit_sec],
     termination_status=[string(result.termination_status)],
     objective_value=[something(result.objective_value, missing)],

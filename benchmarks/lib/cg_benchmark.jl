@@ -19,10 +19,20 @@ function benchmark_problem(study_dir::AbstractString, env_prefix::AbstractString
     project_root = normpath(joinpath(study_dir, "..", ".."))
     data_dir = get(ENV, "$(env_prefix)_DATA_DIR",
         normpath(joinpath(project_root, "..", "Data", "base_data")))
-    data, _meta = generate_zhuzhou_data(data_dir, n_stations, n_pairs;
+    data, meta = generate_zhuzhou_data(data_dir, n_stations, n_pairs;
         n_scenarios=n_scenarios, seed=seed)
+    meta.n_stations_actual == n_stations || error(
+        "benchmark instance has $(meta.n_stations_actual) stations, expected $n_stations"
+    )
+    meta.n_scenarios_actual == n_scenarios || error(
+        "benchmark instance has $(meta.n_scenarios_actual) scenarios, expected $n_scenarios"
+    )
+    meta.pairs_per_scenario == fill(n_pairs, n_scenarios) || error(
+        "benchmark instance has pair counts $(meta.pairs_per_scenario), expected " *
+        "$(fill(n_pairs, n_scenarios))"
+    )
     k = max(2, ceil(Int, n_stations / 2))
-    return StationSelectionProblem(data, k; max_walking_distance=600.0), k
+    return StationSelectionProblem(data, k; max_walking_distance=600.0), k, meta
 end
 
 function benchmark_output_dir(study_dir::AbstractString, env_prefix::AbstractString,

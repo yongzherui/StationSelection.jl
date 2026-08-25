@@ -41,6 +41,7 @@ const MOI = JuMP.MOI
         include("utils/test_scenarios.jl")
         include("utils/test_costs.jl")
         include("utils/test_generators.jl")
+        include("utils/test_zhuzhou_benchmark_generator.jl")
         include("utils/test_case_generators/test_base_middle_zone.jl")
         include("utils/test_case_generators/test_test1_vehicle.jl")
         include("utils/test_case_generators/test_test2_zone_proximity.jl")
