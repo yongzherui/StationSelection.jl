@@ -25,15 +25,18 @@ or CG-restricted-recovery heuristic on either side.
   exhaustive pool needs more than Base's route enumeration alone
   (`enumerate_joint_routing_assignment_columns`,
   `label_setting/joint_routing_assignment/exact/enumeration.jl`): it reuses Base's own
-  physical-route DFS (the two formulations' ride-limit rule is identical per `(j, k)`
-  pair, so the route universe is provably the same one), then combinatorially expands
-  each route's *station subsets* -- not passenger combinations, which would be
-  exponential in demand density rather than in route length; see that file's module
-  docstring for why coverage being `>= 1` (a real set-covering row, not a partition) is
-  what makes station subsets the right axis. Measured on this study's instance at
-  `max_stops=4`: 794 columns, matching Base's own 778 in scale, both cross-validated
-  exact against each other's independently-computed global optimum at `max_stops=2` and
-  `max_stops=4`.
+  physical-route DFS verbatim (the two formulations' ride-limit rule is identical per
+  `(j, k)` pair, so the route universe is provably the same one -- a route achieving the
+  same certifications with fewer stations is already its own separate entry in that
+  shared pool, since the DFS seeds a label at every relevant node and visits every
+  prefix length, not just one start/one length), then for each route takes the maximal,
+  elementarity-preserving cartesian product over every certified passenger's own
+  certified `(j, k)` options -- always claiming every certifiable passenger (never a
+  reason to omit one under `>= 1` coverage), branching only when a single passenger is
+  certified through more than one pair on the same route (never crediting the same
+  passenger twice in one column, since one column is one physical trip). Measured on
+  this study's instance at `max_stops=4`: 16,320 columns, cross-validated exact against
+  Base's own independently-computed global optimum at `max_stops=2` and `max_stops=4`.
 
 Running Base through `CGSolver` (as this comparison did previously) would compare
 Joint's native mechanism against Base forced through Joint's -- not apples to apples.

@@ -48,10 +48,11 @@ if comparison == "formulation"
     # `DirectMIPSolver`, not `CGSolver` -- Base's own (`enumerate_aggregate_od_route_columns`)
     # and Joint's own (`enumerate_joint_routing_assignment_columns`,
     # `label_setting/joint_routing_assignment/exact/enumeration.jl`, which reuses Base's
-    # physical-route DFS and combinatorially expands each route's *station subsets* -- see
-    # that file's module docstring). Solve the exhaustive-pool master directly for the true
-    # IP, then relax it in place (`JuMP.relax_integrality`) and resolve for the true LP bound
-    # -- no CG duals or CG-restricted-recovery heuristic on either side, so this is a genuine
+    # physical-route DFS and, for each route, takes the maximal elementarity-preserving
+    # cartesian product over every certified passenger's own certified options -- see that
+    # file's module docstring). Solve the exhaustive-pool master directly for the true IP,
+    # then relax it in place (`JuMP.relax_integrality`) and resolve for the true LP bound --
+    # no CG duals or CG-restricted-recovery heuristic on either side, so this is a genuine
     # apples-to-apples comparison. Both `build_model` methods dispatch on `formulation`'s
     # concrete type, so the same code below works for either.
     formulation = formulation_name == "base" ?
@@ -59,7 +60,14 @@ if comparison == "formulation"
         AggregateODRouteJointRoutingAssignmentFormulation(; common...)
     solver = DirectMIPSolver(config=SolverOptions(silent=true, time_limit_sec=300.0))
 
-    build = StationSelection.build_model(problem, formulation, solver)
+    # Joint's exhaustive pool can exceed the shared 10_000/30.0 default even at this
+    # study's small max_stops (measured: 16,320 columns at max_stops=4) -- Base's own pool
+    # stays comfortably under the default, so this kwarg is a no-op for it.
+    build = formulation_name == "base" ?
+        StationSelection.build_model(problem, formulation, solver) :
+        StationSelection.build_model(
+            problem, formulation, solver; max_routes=200_000, time_limit_sec=180.0,
+        )
     ip_result = StationSelection.optimize_model(build, solver)
     relax_integrality(build.model)
     lp_result = StationSelection.optimize_model(build, solver)

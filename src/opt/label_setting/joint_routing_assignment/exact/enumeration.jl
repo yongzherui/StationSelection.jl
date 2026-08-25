@@ -31,30 +31,30 @@ master can freely pick any subset via `x`. Joint has no such decoupling: a colum
 `_replay_joint_routing_assignment_route`) resolves a fixed route to exactly *one*
 assignment per passenger -- whichever `(j, k)` has the highest reward under the current
 duals -- which is the right thing for CG (only the single most-improving column matters at
-any one dual vector), but is not a complete column universe: coverage
-(`constraints/aggregate_od_route/joint_routing_assignment/coverage.jl`) is `>= 1`, a
-genuine set-*covering* constraint, not a partition, so over-serving a passenger is free --
-never a reason on its own to omit one. The real constraint is the *station-linking* rows
-(`linking.jl`'s `pickup_link`/`dropoff_link`, `θ <= y[j]`): a column only needs `y[j]=1` for
-stations its own `assignments` actually reference, not for every node the physical route
-passes through. So a column claiming *more* passengers on the same route needs *more*
-stations built, and the two are not directly comparable in general -- which is exactly why
-some columns claiming fewer passengers than the maximal one on their route are still needed
-(when the station budget can't afford everything the maximal column would require).
+any one dual vector), but is not a complete column universe on its own: coverage
+(`constraints/aggregate_od_route/joint_routing_assignment/coverage.jl`) is `>= 1`, a genuine
+set-*covering* constraint, not a partition, so a column should always claim *every*
+passenger a route certifies -- dropping one is never beneficial, only ever a missed free
+credit. What real pricing's arg-max throws away isn't *which* passengers to claim (always
+all of them), but *which* of several certified `(j, k)` pairs a multi-certified passenger
+should be credited through, since a column is one physical vehicle trip and a passenger can
+only actually be dropped off once: crediting the same passenger through two different pairs
+in one column would mean one `θ` representing two mutually exclusive outcomes for them
+(elementarity on `p`, the same idea as an elementary route not revisiting a node, applied
+here to a passenger's assignment within one column rather than to the route itself).
 
-That reframes the combinatorial dimension: not "which subset of *passengers* to claim"
-(exponential in demand density -- measured 193K raw candidates on this study's instance at
-`max_stops=4`, from up to 7 multi-option passengers on a single route), but "which subset
-of the route's *own stations* to require built" (exponential only in route length, i.e.
-bounded by `max_stops` -- at most 5 nodes, 32 subsets, at `max_stops=4`). For a fixed
-station subset `S`, every passenger certifiable *within* `S` (both their pickup and dropoff
-station in `S`) is included automatically -- there is no independent per-passenger choice
-left to make once `S` is fixed, since including a free certification can only help satisfy
-more `>= 1` coverage rows. `_joint_routing_assignment_route_combinations` below enumerates
-every subset of a route's *relevant* nodes (only those that are an endpoint of some
-certifiable triple) and derives each one's assignments deterministically; many subsets
-collapse to the same assignments set, which the existing dedup step already collapses to
-one column.
+So the combinatorial dimension is exactly: for each of Base's shared physical routes, take
+every certified passenger (never omit one -- see above), and for any passenger certified
+through more than one `(j, k)` pair on that route, branch over which single one they take.
+`_joint_routing_assignment_route_combinations` below is the direct cartesian product of
+each certified passenger's own option list (size 1 -- no branching -- for the large
+majority of passengers; only genuinely multi-certified ones contribute a real factor).
+There is no separate "which stations to require built" axis on top of this: a route
+achieving the same certifications with fewer stations is already its own, separately
+`max_stops`-bounded entry in the shared physical-route pool (the DFS seeds a label at
+*every* relevant node, not just one start, and visits every prefix length), so trying to
+carve smaller station requirements out of a *longer* route here would only duplicate routes
+the DFS already explores on its own.
 """
 
 export enumerate_joint_routing_assignment_columns
@@ -107,40 +107,24 @@ end
 """
     _joint_routing_assignment_route_combinations(certified) -> Vector{Vector{Tuple{Int,Int,Int}}}
 
-One combination per distinct subset `S` of the route's *relevant* nodes (only those that
-are an endpoint of some certifiable triple) -- `assignments(S) = {(p, j, k) : j in S, k in
-S}`, dropping the empty-`S` (and any other subset whose `assignments(S)` comes out empty)
-case, since `JointRoutingAssignmentRouteColumn` itself rejects an empty `assignments`
-vector. See this file's module docstring for why station subsets, not passenger
-combinations, are the right combinatorial axis for a `>= 1` coverage / per-assignment
-station-linking master: a passenger's inclusion is fully determined by whether `S` already
-contains both their pickup and dropoff station, not an independent choice. Distinct `S`
-routinely produce identical `assignments(S)` (deduplicated here, within one route, before
-the caller's own cross-route dedup); bounded by `2^(route length)`, not by demand density.
+One combination per way to pick, for *every* passenger this route certifies, exactly one of
+their own certified `(j, k)` pairs -- the direct cartesian product of each certified
+passenger's own option list. Always maximal (every certified passenger appears in every
+combination -- see this file's module docstring for why omitting one is never beneficial
+under `>= 1` coverage) and elementary on `p` (never more than one pair per passenger per
+combination). Most passengers contribute a size-1 option list (no branching); only
+passengers this specific route certifies through more than one `(j, k)` pair contribute a
+real factor, so this stays small in practice even though it is technically exponential in
+how many *multi-certified* passengers one route reaches.
 """
 function _joint_routing_assignment_route_combinations(
     certified::Dict{Int, Vector{Tuple{Int, Int}}},
 )::Vector{Vector{Tuple{Int, Int, Int}}}
-    triples = Tuple{Int, Int, Int}[]
-    for (p, options) in certified, (o, d) in options
-        push!(triples, (p, o, d))
-    end
-    isempty(triples) && return Vector{Tuple{Int, Int, Int}}[]
+    passengers = sort!(collect(keys(certified)))
+    isempty(passengers) && return Vector{Tuple{Int, Int, Int}}[]
 
-    relevant_nodes = sort!(unique(vcat([t[2] for t in triples], [t[3] for t in triples])))
-    m = length(relevant_nodes)
-
-    seen = Set{Vector{Tuple{Int, Int, Int}}}()
-    combinations = Vector{Tuple{Int, Int, Int}}[]
-    for mask in 0:(2^m - 1)
-        s = Set(relevant_nodes[i] for i in 1:m if (mask >> (i - 1)) & 1 == 1)
-        assignments = sort!(unique(t for t in triples if t[2] in s && t[3] in s))
-        isempty(assignments) && continue
-        assignments in seen && continue
-        push!(seen, assignments)
-        push!(combinations, assignments)
-    end
-    return combinations
+    choice_sets = [[(p, o, d) for (o, d) in certified[p]] for p in passengers]
+    return vec([collect(combo) for combo in Iterators.product(choice_sets...)])
 end
 
 """
@@ -181,16 +165,16 @@ end
 Exhaustive `θ` pool for `AggregateODRouteJointRoutingAssignmentFormulation`'s own
 `DirectMIPSolver` build (`optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl`)
 -- the formulation's counterpart to `enumerate_aggregate_od_route_columns`. See this
-file's module docstring for the design: reuse Base's physical-route DFS, then
-combinatorially expand each route's *station subsets* (not passenger combinations).
+file's module docstring for the design: reuse Base's physical-route DFS, then for each
+route take the maximal, elementarity-preserving cartesian product over every certified
+passenger's own certified `(j, k)` options.
 
-**Small instances only.** The combinatorial expansion is exponential in a route's own
-length (bounded by `max_stops`, not demand density -- see the module docstring for why
-that's the right axis), on top of the physical-route DFS's own combinatorial growth in
-`max_stops`. Both throw (never silently truncate) once `max_routes`/`time_limit_sec` is
-exceeded, exactly like `enumerate_aggregate_od_route_columns`. This makes the function
-suitable as a small-`max_stops` ground-truth/certification tool (see
-`benchmarks/study1_formulation_lp_ip_gap`), not as part of any scalability benchmark.
+**Small instances only.** The combinatorial expansion is exponential in how many passengers
+a single route certifies through more than one `(j, k)` pair, on top of the physical-route
+DFS's own combinatorial growth in `max_stops`. Both throw (never silently truncate) once
+`max_routes`/`time_limit_sec` is exceeded, exactly like `enumerate_aggregate_od_route_columns`.
+This makes the function suitable as a small-`max_stops` ground-truth/certification tool
+(see `benchmarks/study1_formulation_lp_ip_gap`), not as part of any scalability benchmark.
 
 Feeds the underlying `JointRoutingAssignmentPricingData` uniform positive rewards (mirroring
 `enumerate_aggregate_od_route_columns`'s own uniform duals trick) so every physically valid
