@@ -271,46 +271,39 @@ function _certify_joint_routing_assignment_layers_at_node(
 end
 
 """
-Drop station ages that can no longer certify anything new. A station age for
-origin `j` is safe to delete once no opportunity `(p, j, k)` can both (a) still
-be reached within its ride limit and (b) still activate a layer this label
-hasn't already collected -- deleting it costs nothing because it represents a
-potential certification, not an irrevocable passenger-pickup commitment (unlike
-a real onboard-passenger resource, which unbounded capacity means this never is).
-"""
-function _prune_irrelevant_joint_routing_assignment_station_ages(
-    station_age::Dict{Int, Float64},
-    activated::RewardLayerBitset,
-    pricing_data::JointRoutingAssignmentPricingData,
-    current::Int,
-)
-    remaining = Dict{Int, Float64}()
-    for (station, age) in station_age
-        _joint_routing_assignment_age_is_useful(station, age, activated, pricing_data, current) &&
-            (remaining[station] = age)
-    end
-    return remaining
-end
-
-"""
 Is a live clock at `station` (of age `age`, with the vehicle at `current`) still
-able to certify anything new? `travel(current, dest)` is the *minimum* additional
-time before reaching any destination -- detouring only adds more -- so this test
-is exact, not heuristic.
+reachable in time for *any* opportunity it could certify -- purely a ride-limit
+expiry test, deliberately blind to whether those opportunities' layers are
+already activated. `travel(current, dest)` is the *minimum* additional time
+before reaching any destination -- detouring only adds more -- so this test is
+exact, not heuristic.
+
+A clock used to also die once every reachable opportunity's layer was already
+active (nothing new left to certify), on the reasoning that discarding it cost
+nothing since it represents a potential certification, not an irrevocable
+passenger-pickup commitment. That entangles the clock -- a resource query,
+"can this station's age still reach a ride-limit deadline" -- with
+`activated_reward_layers`, which is *per-label* and differs between whatever
+two labels a dominance check happens to compare: dropping the clock the moment
+label `a`'s own activated set makes it look reward-dead removes it from `a`'s
+`station_age` dict, so a later dominance comparison against some `b` that
+still carries a live (but, from `b`'s perspective, likewise reward-exhausted)
+clock at that station sees `a` as *lacking* a resource `b` has -- `a` reads as
+strictly worse there even though the two are equivalent. The resource should
+only expire on its own physical term (the ride limit), not on a label-local
+reward-bookkeeping question; keeping it live doesn't cost anything the
+dominance test doesn't already price in via `_joint_routing_assignment_compensation`.
 """
 function _joint_routing_assignment_age_is_useful(
     station::Int,
     age::Float64,
-    activated::RewardLayerBitset,
     pricing_data::JointRoutingAssignmentPricingData,
     current::Int,
 )::Bool
     for opp in get(pricing_data.assignments_by_origin, station, PassengerAssignmentOpportunity[])
-        _has_inactive_layer(opp.layer_mask, activated) || continue
         t_to_dest = opp.destination == current ? 0.0 :
             _joint_routing_assignment_travel(pricing_data, current, opp.destination)
-        age + t_to_dest <= opp.ride_limit + 1e-9 || continue
-        return true
+        age + t_to_dest <= opp.ride_limit + 1e-9 && return true
     end
     return false
 end

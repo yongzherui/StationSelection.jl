@@ -294,11 +294,11 @@ function _extend_joint_routing_assignment_station_simple_label(
     aged_station = Dict{Int, Float64}()
     for (station, age) in label.station_age
         aged = age + travel_time
-        _joint_routing_assignment_age_is_useful(station, aged, certified_layers, pricing_data, next_node) &&
+        _joint_routing_assignment_age_is_useful(station, aged, pricing_data, next_node) &&
             (aged_station[station] = aged)
     end
     if arrival_time <= pricing_data.max_wait_time + 1e-9
-        _joint_routing_assignment_age_is_useful(next_node, 0.0, certified_layers, pricing_data, next_node) &&
+        _joint_routing_assignment_age_is_useful(next_node, 0.0, pricing_data, next_node) &&
             (aged_station[next_node] = 0.0)
     end
 

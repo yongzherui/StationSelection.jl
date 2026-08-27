@@ -236,19 +236,19 @@ function _extend_joint_routing_assignment_pricing_label(
     for (station, age) in label.station_age
         station == next_node && continue  # handled by the reset below
         aged = age + travel_time
-        _joint_routing_assignment_age_is_useful(station, aged, certified_layers, pricing_data, next_node) &&
+        _joint_routing_assignment_age_is_useful(station, aged, pricing_data, next_node) &&
             (aged_station[station] = aged)
     end
     if arrival_time <= pricing_data.max_wait_time + 1e-9
         # A fresh clock at the arrival station: age 0 is the most useful an age can
-        # be, but it still only earns a slot if it can certify something new.
-        _joint_routing_assignment_age_is_useful(next_node, 0.0, certified_layers, pricing_data, next_node) &&
+        # be, but it still only earns a slot if it can reach some opportunity in time.
+        _joint_routing_assignment_age_is_useful(next_node, 0.0, pricing_data, next_node) &&
             (aged_station[next_node] = 0.0)
     elseif haskey(label.station_age, next_node)
         # Past the cutoff the visit creates no new clock, so `next_node`'s existing
         # clock (if any) just ages like the rest.
         aged = label.station_age[next_node] + travel_time
-        _joint_routing_assignment_age_is_useful(next_node, aged, certified_layers, pricing_data, next_node) &&
+        _joint_routing_assignment_age_is_useful(next_node, aged, pricing_data, next_node) &&
             (aged_station[next_node] = aged)
     end
 
