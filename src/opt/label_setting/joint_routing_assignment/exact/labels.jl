@@ -440,6 +440,67 @@ function _dominates_joint_routing_assignment_label(
     )
 end
 
+"""
+    _dominates_joint_routing_assignment_label_reward_aware(a, b, pricing_data, layer_weight, bounded_max_stops, compensated_dominance=true)
+
+Alternative to `_dominates_joint_routing_assignment_label` above: same D1
+(shared node), D2 (`a.time <= b.time`) and D4 (compensated reward-cost budget)
+conditions, but a strictly more permissive station-age condition (D3).
+
+The existing rule requires, for *every* station either label has a live clock
+at, that `a`'s age be no worse than `b`'s -- a clock `a` lacks compares as
+`Inf` and always fails. This rule instead only requires that for stations `j`
+where `b` *still* has a live clock: either `a` matches it (has a live clock
+there, no older), **or** `a` has already collected every reward layer
+reachable from origin `j` (`j` is "reward-dead" for `a`, tested against
+`pricing_data.origin_layer_mask[j]`, exactly as `_has_useful_live_joint_routing_assignment_origin`
+tests it elsewhere). In the reward-dead case, no suffix of `b`'s can use `j`'s
+clock to certify anything `a` doesn't already have, so `a` doesn't need the
+physical resource to match it -- the difference is already priced by D4.
+
+Unlike the reward-coupled `_joint_routing_assignment_age_is_useful` removed in
+commit `f644a7c` (which made this same exemption unsound by baking it into
+what `station_age` stores, so it leaked into *every* future comparison,
+including against labels for which the station was not reward-dead), the
+exemption here is recomputed fresh for `a` and `b`'s own
+`activated_reward_layers` at comparison time and never mutates either label's
+stored clocks.
+
+Deliberately the plain, `Dict`-based label form -- not the optimized
+bitset/filter scan (`_pricing_dominates_at_state`). That scan's condition
+order and inlined filters are tuned around the existing D3; this is the
+correctness-first version to establish whether the rule is worth adopting
+before it earns a place in the hot path.
+"""
+function _dominates_joint_routing_assignment_label_reward_aware(
+    a::JointRoutingAssignmentPricingLabel,
+    b::JointRoutingAssignmentPricingLabel,
+    pricing_data::JointRoutingAssignmentPricingData,
+    layer_weight::Vector{Float64},
+    bounded_max_stops::Bool,
+    compensated_dominance::Bool=true,
+)::Bool
+    _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false  # D1
+    (!bounded_max_stops || a.route_length <= b.route_length) || return false
+    a.time <= b.time + 1e-9 || return false                                                   # D2
+    budget = b.reduced_cost - a.reduced_cost + 1e-9
+    budget >= 0.0 || return false
+    _joint_routing_assignment_compensation(
+        a.activated_reward_layers, b.activated_reward_layers, layer_weight, budget,
+        compensated_dominance,
+    ) <= budget || return false                                                               # D4
+    for (station, b_age) in b.station_age                                                     # D3
+        reward_dead = !_has_inactive_layer(
+            get(pricing_data.origin_layer_mask, station, RewardLayerBitset()),
+            a.activated_reward_layers,
+        )
+        reward_dead && continue
+        haskey(a.station_age, station) || return false
+        a.station_age[station] <= b_age + 1e-9 || return false
+    end
+    return true
+end
+
 # ── dominance rejection census (diagnostics) ─────────────────────────────────
 """
 Rejection census for `_pricing_dominates_at_state` (passenger method), one counter
