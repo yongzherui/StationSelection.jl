@@ -458,6 +458,29 @@ tests it elsewhere). In the reward-dead case, no suffix of `b`'s can use `j`'s
 clock to certify anything `a` doesn't already have, so `a` doesn't need the
 physical resource to match it -- the difference is already priced by D4.
 
+# Why this can't also be exempted when `j` is reward-dead for `b` instead
+
+Tempting symmetric extension, and unsound: reward-dead-for-`a` on a *non-empty*
+origin mask implies `a` has, at some point in its own history, actually
+certified something there -- so `a`'s current `reduced_cost` already
+corresponds to a real, extractable route, and comparing it against `b`'s is a
+comparison between two real achievements. Reward-dead-for-`b` says nothing
+about `a`'s own capability: `a` can hold a numerically lower `reduced_cost`
+while being *physically incapable* of ever certifying anything (no live clock
+anywhere, no way to reopen one in time), in which case its "advantage" is a
+mirage that never cashes out into a real column, while `b`'s current position
+already is one. Concretely: seed labels start at every opportunity endpoint,
+so a label seeded directly at a destination with `rc=0` and no useful clocks
+at all can look identical (by every condition here) to one that started at
+the matching origin and already paid for and banked the one certification
+this pricer's whole instance offers -- exempting the origin because *the
+banked label* is reward-dead would let the empty-handed seed dominate and
+discard the only completable route in the instance. Confirmed as a live bug
+against the randomized brute-force regression test above (a 5-node,
+1-candidate instance where the symmetric version reported `best_rc = Inf`
+against a true optimum of `1.0`) before being reverted -- the exemption below
+is the one-sided (`a`-only) form that test passes against.
+
 Unlike the reward-coupled `_joint_routing_assignment_age_is_useful` removed in
 commit `f644a7c` (which made this same exemption unsound by baking it into
 what `station_age` stores, so it leaked into *every* future comparison,
