@@ -509,4 +509,155 @@
             @test column.metadata["reduced_cost"] < -1e-6
         end
     end
+
+    @testset "label search finds the brute-force-optimal reduced cost (randomized)" begin
+        # End-to-end soundness check: for a random small instance, does the
+        # full label-setting search (dominance included) agree with exhaustive
+        # enumeration of every valid route up to max_stops? Kept as a
+        # permanent regression test -- this is exactly the kind of check that
+        # would catch a future dominance rule that discards a label the
+        # search actually needed.
+        function brute_force_best_reduced_cost(nodes, travel, pricing_data, max_stops)
+            best = Ref(Inf)
+            function visit!(route::Vector{Int})
+                if length(route) >= 2
+                    assignments, _tau, rc = StationSelection._joint_routing_assignment_column_from_route(route, pricing_data)
+                    isempty(assignments) || (best[] = min(best[], rc))
+                end
+                length(route) >= max_stops && return
+                for nd in nodes
+                    nd == route[end] && continue
+                    haskey(travel, (route[end], nd)) || continue
+                    visit!(vcat(route, nd))
+                end
+            end
+            for start in nodes
+                visit!([start])
+            end
+            return best[]
+        end
+
+        rng = MersenneTwister(2026)
+        n_trials = 300
+        n_checked = 0
+        for _ in 1:n_trials
+            n = rand(rng, 3:5)
+            nodes = collect(1:n)
+            travel = line_travel_cost(n)
+            n_cand = rand(rng, 2:5)
+            cands = PassengerAssignmentCandidate[]
+            for p in 1:n_cand
+                j, k = rand(rng, nodes, 2)
+                j == k && continue
+                push!(cands, PassengerAssignmentCandidate(
+                    p, j, k, Float64(rand(rng, 1:6)), Float64(rand(rng, 1:10)),
+                ))
+            end
+            isempty(cands) && continue
+            max_stops = rand(rng, 2:4)
+            pd = create_joint_routing_assignment_pricing_data(
+                1, nodes, travel, cands;
+                route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
+                max_wait_time=Float64(rand(rng, 1:4)),
+                max_stops=max_stops,
+            )
+            isempty(pd.opportunities) && continue
+            n_checked += 1
+
+            brute = brute_force_best_reduced_cost(nodes, travel, pd, max_stops)
+            ctx = StationSelection.JointRoutingAssignmentSearchContext(pd)
+            labels, exhausted, _stats = StationSelection._run_label_setting(
+                ctx; time_limit=30.0, reduced_cost_tol=0.0, use_reduced_cost_pruning=false,
+            )
+            @test exhausted
+            search_best = isempty(labels) ? Inf : minimum(
+                StationSelection._pricing_candidate_from_label(ctx, l).reduced_cost for l in labels
+            )
+            ok = (brute == Inf && search_best == Inf) || isapprox(search_best, brute; atol=1e-6)
+            @test ok
+        end
+        @test n_checked > 0
+    end
+
+    @testset "dominance is preserved under any common one-step extension (randomized)" begin
+        # This is the property dominance-based pruning actually relies on: the
+        # search discards a dominated label the instant it is inserted, so if
+        # `a` dominates `b` now but a shared future move could make that stop
+        # being true, discarding `b` was unsound. Every label here comes from
+        # an actual random walk through the real extend function
+        # (`_extend_joint_routing_assignment_pricing_label`), never
+        # hand-constructed, so every one automatically satisfies whatever
+        # invariants the real search maintains -- a hand-built label can
+        # violate invariants the real search would never produce, which reads
+        # as a false "violation" that has nothing to do with the dominance
+        # rule itself.
+        function random_walk_labels(rng, seed_label, pd, nodes, depth)
+            labels = [seed_label]
+            label = seed_label
+            for _ in 1:depth
+                candidates = [nd for nd in nodes if nd != label.current && haskey(pd.travel_cost, (label.current, nd))]
+                isempty(candidates) && break
+                next_node = rand(rng, candidates)
+                label = StationSelection._extend_joint_routing_assignment_pricing_label(label, next_node, pd)
+                push!(labels, label)
+            end
+            return labels
+        end
+
+        rng = MersenneTwister(20260827)
+        n_trials = 300
+        n_checked = 0
+        for _ in 1:n_trials
+            n = rand(rng, 3:6)
+            nodes = collect(1:n)
+            travel = line_travel_cost(n)
+            n_cand = rand(rng, 1:5)
+            cands = PassengerAssignmentCandidate[]
+            for p in 1:n_cand
+                j, k = rand(rng, nodes, 2)
+                j == k && continue
+                push!(cands, PassengerAssignmentCandidate(
+                    p, j, k, Float64(rand(rng, 1:6)), Float64(rand(rng, 1:10)),
+                ))
+            end
+            isempty(cands) && continue
+            pd = create_joint_routing_assignment_pricing_data(
+                1, nodes, travel, cands;
+                route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
+                max_wait_time=Float64(rand(rng, 1:4)),
+                max_stops=typemax(Int),
+            )
+            isempty(pd.opportunities) && continue
+
+            seeds = initial_joint_routing_assignment_pricing_labels(pd)
+            isempty(seeds) && continue
+
+            by_current = Dict{Int, Vector{Any}}()
+            for _ in 1:6
+                seed_label = rand(rng, seeds)
+                depth = rand(rng, 0:4)
+                for label in random_walk_labels(rng, seed_label, pd, nodes, depth)
+                    push!(get!(() -> Any[], by_current, label.current), label)
+                end
+            end
+
+            for (current, labels) in by_current
+                length(labels) < 2 && continue
+                for i in eachindex(labels), j in eachindex(labels)
+                    i == j && continue
+                    a, b = labels[i], labels[j]
+                    StationSelection._dominates_joint_routing_assignment_label(a, b, pd.layer_weight, false) || continue
+                    for next_node in nodes
+                        next_node == current && continue
+                        haskey(travel, (current, next_node)) || continue
+                        n_checked += 1
+                        a2 = StationSelection._extend_joint_routing_assignment_pricing_label(a, next_node, pd)
+                        b2 = StationSelection._extend_joint_routing_assignment_pricing_label(b, next_node, pd)
+                        @test StationSelection._dominates_joint_routing_assignment_label(a2, b2, pd.layer_weight, false)
+                    end
+                end
+            end
+        end
+        @test n_checked > 0
+    end
 end

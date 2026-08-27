@@ -294,4 +294,135 @@
         sig(cols) = Set(Tuple(sort(c.assignments)) for c in cols)
         @test sig(subset_cols) == sig(exact_cols)
     end
+
+    @testset "label search finds the brute-force-optimal reduced cost (randomized)" begin
+        # End-to-end soundness check against exhaustive enumeration of every
+        # elementary route -- see the revisit-tolerant pricer's twin in
+        # `test_joint_routing_assignment_pricing.jl` for why this is kept as a
+        # permanent regression test.
+        rng = MersenneTwister(2026)
+        n_trials = 300
+        n_checked = 0
+        for _ in 1:n_trials
+            n = rand(rng, 3:5)
+            nodes = collect(1:n)
+            travel = line_travel_cost(n)
+            n_cand = rand(rng, 2:5)
+            cands = PassengerAssignmentCandidate[]
+            for p in 1:n_cand
+                j, k = rand(rng, nodes, 2)
+                j == k && continue
+                push!(cands, PassengerAssignmentCandidate(
+                    p, j, k, Float64(rand(rng, 1:6)), Float64(rand(rng, 1:10)),
+                ))
+            end
+            isempty(cands) && continue
+            pd = create_joint_routing_assignment_pricing_data(
+                1, nodes, travel, cands;
+                route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
+                max_wait_time=Float64(rand(rng, 1:4)),
+                max_stops=typemax(Int),
+            )
+            isempty(pd.opportunities) && continue
+            n_checked += 1
+
+            brute = brute_force_best_elementary_rc(nodes, travel, pd)
+            ctx = StationSelection.JointRoutingAssignmentStationSimpleSearchContext(pd)
+            labels, exhausted, _stats = StationSelection._run_label_setting(
+                ctx; time_limit=30.0, reduced_cost_tol=0.0, use_reduced_cost_pruning=false,
+            )
+            @test exhausted
+            search_best = isempty(labels) ? Inf : minimum(
+                StationSelection._pricing_candidate_from_label(ctx, l).reduced_cost for l in labels
+            )
+            ok = (brute == Inf && search_best == Inf) || isapprox(search_best, brute; atol=1e-6)
+            @test ok
+        end
+        @test n_checked > 0
+    end
+
+    @testset "dominance is preserved under any common one-step extension (randomized)" begin
+        # Same property, same rationale as the revisit-tolerant pricer's twin
+        # in `test_joint_routing_assignment_pricing.jl`: every label here is
+        # produced by an actual random walk through the real extend function,
+        # never hand-constructed.
+        function random_walk_ss_labels(rng, seed_label, pd, nodes, depth)
+            labels = [seed_label]
+            label = seed_label
+            for _ in 1:depth
+                candidates = [
+                    nd for nd in nodes
+                    if nd != label.current && nd ∉ label.visited && haskey(pd.travel_cost, (label.current, nd))
+                ]
+                isempty(candidates) && break
+                next_node = rand(rng, candidates)
+                label = StationSelection._extend_joint_routing_assignment_station_simple_label(label, next_node, pd)
+                push!(labels, label)
+            end
+            return labels
+        end
+
+        rng = MersenneTwister(20260827)
+        n_trials = 300
+        n_checked = 0
+        for _ in 1:n_trials
+            n = rand(rng, 3:6)
+            nodes = collect(1:n)
+            travel = line_travel_cost(n)
+            n_cand = rand(rng, 1:5)
+            cands = PassengerAssignmentCandidate[]
+            for p in 1:n_cand
+                j, k = rand(rng, nodes, 2)
+                j == k && continue
+                push!(cands, PassengerAssignmentCandidate(
+                    p, j, k, Float64(rand(rng, 1:6)), Float64(rand(rng, 1:10)),
+                ))
+            end
+            isempty(cands) && continue
+            pd = create_joint_routing_assignment_pricing_data(
+                1, nodes, travel, cands;
+                route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
+                max_wait_time=Float64(rand(rng, 1:4)),
+                max_stops=typemax(Int),
+            )
+            isempty(pd.opportunities) && continue
+
+            node_index = Dict(nd => i for (i, nd) in enumerate(pd.nodes))
+            ages(label) = StationSelection._make_joint_routing_assignment_station_simple_ages(label, node_index)
+            dominates(x, y) = StationSelection._dominates_joint_routing_assignment_station_simple_label(
+                x, y, ages(x), ages(y), pd.layer_weight,
+            )
+
+            seeds = StationSelection._initial_joint_routing_assignment_station_simple_labels(pd)
+            isempty(seeds) && continue
+
+            by_current = Dict{Int, Vector{Any}}()
+            for _ in 1:6
+                seed_label = rand(rng, seeds)
+                depth = rand(rng, 0:min(4, n - 1))
+                for label in random_walk_ss_labels(rng, seed_label, pd, nodes, depth)
+                    push!(get!(() -> Any[], by_current, label.current), label)
+                end
+            end
+
+            for (current, labels) in by_current
+                length(labels) < 2 && continue
+                for i in eachindex(labels), j in eachindex(labels)
+                    i == j && continue
+                    a, b = labels[i], labels[j]
+                    dominates(a, b) || continue
+                    for next_node in nodes
+                        next_node in b.visited && continue
+                        next_node in a.visited && continue
+                        haskey(travel, (current, next_node)) || continue
+                        n_checked += 1
+                        a2 = StationSelection._extend_joint_routing_assignment_station_simple_label(a, next_node, pd)
+                        b2 = StationSelection._extend_joint_routing_assignment_station_simple_label(b, next_node, pd)
+                        @test dominates(a2, b2)
+                    end
+                end
+            end
+        end
+        @test n_checked > 0
+    end
 end
