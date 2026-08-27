@@ -1,65 +1,53 @@
-# Study 5 -- Scalability vs. raw enumeration
+# Study 5 — Exact column-generation scalability
 
 ## Objective
 
-Runtime vs. `|P|` (passengers), `|J|` (candidate stations), `|S|` (scenarios), swept
-independently, for three methods: `exact/`'s CG pricing, `darp/`'s pricing, and raw
-brute-force enumeration. The point is showing exactly where enumeration stops scaling
-and pricing keeps going -- not just that CG "is faster."
+Measure how the Joint formulation's exact, dual-certified column-generation solver
+scales independently with candidate stations, passengers, and scenarios.
 
-## Prior findings to extend, not re-derive
+## Grid
 
-- `notes/2026-08-05_free_assignment_cg_direct_ms5_comparison.md` already has real
-  n=10/15/20 CG-vs-Direct timing at `max_stops=5`: CG up to 21x faster, Direct OOMs at
-  n=20/q=3 (16GB limit), CG stays at 0.8-1.6GB throughout. **This study's sweep should
-  extend past n=20** (Direct already can't finish there) rather than re-measure n<=20.
-- `notes/2026-08-04_adaptive_station_cluster_certification_results.md` found the
-  opposite ordering at `max_stops=3`: **Direct is faster than CG all the way to n=40.**
-  The crossover is stop-count-dependent, not purely size-dependent -- **this study's
-  sweep must vary `max_stops` explicitly** to map where that crossover sits, not assume
-  one fixed `max_stops` throughout. The same note flags a 0.36% integer-pool gap at
-  n=15 -- worth carrying an integrity check (does the CG-generated pool's integer
-  optimum match Direct's, when both finish) alongside the timing comparison.
-- `notes/2026-07-31_pfa_equals_direct_enumeration_verified.md` is the correctness
-  precondition (small instances, complete-column-set equivalence) but has no timing
-  data by itself.
+One dimension is swept at a time using the following fixed settings:
 
-All of the above used the now-removed `AggregateODRouteModel`/`DirectSolver` -- these
-are target/sanity-check numbers to reproduce and extend against the current API, not
-scripts to resurrect.
+- stations: `n = 10, 20, 30, 40`, holding `p=16`, `s=3`;
+- passengers/OD pairs: `p = 8, 16, 24, 32`, holding `n=20`, `s=3`;
+- scenarios: `s = 3, 6, 9, 12`, holding `n=20`, `p=16` per scenario;
+- `max_stops`: 10 throughout;
+- seeds: 42–51.
 
-## Prerequisite -- blocks the enumeration arm
+These are three separately submitted sub-studies with one exact-CG job per configured
+instance. Each table contains 40 jobs, for 120 jobs total.
 
-**`enumerate_joint_routing_assignment_columns` does not exist.** Port it from
-`../../src/opt/label_setting/route_covering/exact/enumeration.jl`'s
-`enumerate_aggregate_od_route_columns` pattern: plain bounded DFS over the same label
-transitions the pricer uses, dominance and reduced-cost pruning both off (uniform
-positive rewards so nothing gets pruned), keep the cheapest column per served-signature.
-This is a straightforward port of an existing, working pattern (see that file's own
-module docstring for the exact rationale), not a new design -- it belongs in
-`src/opt/label_setting/joint_routing_assignment/exact/`, not in this `benchmarks/`
-directory. The CG and `darp/` arms of this study don't depend on it and can be built
-first.
+Every task is explicitly single-threaded: SLURM allocates one CPU, Julia uses one thread
+(so scenarios are priced serially), and Gurobi's `Threads` parameter is set to one.
 
-## Method
+Each job has a 900-second per-scenario pricing limit. The SLURM task limit is one hour
+and memory is 16 GB. Jobs killed by the scheduler remain visible as `missing_result` in
+the analyzer output and should be classified with `sacct`.
 
-For each of `|P|`, `|J|`, `|S|` swept independently (holding the other two fixed, plus a
-`max_stops` axis per the crossover above): build an instance via
-`../../scripts/generate_zhuzhou_instance.jl`'s `generate_zhuzhou_data(data_dir,
-n_stations, n_pairs; n_scenarios, ...)`, run all three methods under a wall-clock time
-limit, record runtime + completion status (exhausted / timed out / OOM-killed) per cell.
+## Running
 
-## Metrics
+From the repository root:
 
-Per (method, `|P|`, `|J|`, `|S|`, `max_stops`) cell: wall-clock runtime, memory (if
-measurable -- see the OOM-censoring bookkeeping convention in the 2026-08-05 note above),
-completion status, and (where more than one method completes) objective/optimum
-agreement.
+```bash
+julia --project=. benchmarks/study5_scaling_vs_enumeration/generate_jobs.jl
+cd benchmarks/study5_scaling_vs_enumeration
+mkdir -p slurm_logs
+sbatch --job-name=study5_stations --array=1-40 submit_benchmark.sh stations
+sbatch --job-name=study5_passengers --array=1-40 submit_benchmark.sh passengers
+sbatch --job-name=study5_scenarios --array=1-40 submit_benchmark.sh scenarios
+```
 
-## Files
+`STUDY5_DATA_DIR` and `STUDY5_OUTPUT_DIR` override the shared defaults. Raw results go to
+`benchmarks/experiments/YYYY-MM-DD_study5_scaling_exact_cg/`.
 
-- `run_benchmark.jl` -- one cell: build instance, run the three methods, write one row
-  per method.
-- `analyze.jl` -- aggregate across cells, including the OOM/timeout censoring
-  convention.
-- `submit_benchmark.sh` -- SLURM array submission.
+After the array finishes:
+
+```bash
+cd ../..
+julia --project=. benchmarks/study5_scaling_vs_enumeration/analyze.jl \
+    benchmarks/experiments/YYYY-MM-DD_study5_scaling_exact_cg
+```
+
+The analyzer writes `case_comparison.csv`, `variant_summary.csv`,
+`missing_results.csv`, and `slides_results.tex` under `benchmarks/results/`.

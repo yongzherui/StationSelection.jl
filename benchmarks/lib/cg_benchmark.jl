@@ -46,9 +46,10 @@ function benchmark_output_dir(study_dir::AbstractString, env_prefix::AbstractStr
     return output_dir
 end
 
-function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solution::Bool=false)
+function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solution::Bool=false,
+        threads::Union{Nothing, Int}=nothing)
     return CGSolver(
-        config=SolverOptions(silent=true, time_limit_sec=300.0), max_iterations=1_000,
+        config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
         recover_integer_solution=recover_integer_solution,
     )

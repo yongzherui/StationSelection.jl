@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-STUDY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STUDY_DIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set -- submit from the Study 4 directory}"
 PROJECT_ROOT="$(cd "$STUDY_DIR/../.." && pwd)"
 
 source "$PROJECT_ROOT/scripts/lib/slurm_modules.sh"

@@ -30,20 +30,25 @@ struct SolverOptions
     silent::Bool
     mip_gap::Union{Nothing, Float64}
     time_limit_sec::Union{Nothing, Float64}
+    threads::Union{Nothing, Int}
 
     function SolverOptions(;
             silent::Bool=true,
             mip_gap::Union{Number, Nothing}=nothing,
             time_limit_sec::Union{Number, Nothing}=nothing,
+            threads::Union{Integer, Nothing}=nothing,
         )
         isnothing(mip_gap) || mip_gap >= 0 ||
             throw(ArgumentError("mip_gap must be non-negative"))
         isnothing(time_limit_sec) || time_limit_sec > 0 ||
             throw(ArgumentError("time_limit_sec must be positive"))
+        isnothing(threads) || threads > 0 ||
+            throw(ArgumentError("threads must be positive"))
         new(
             silent,
             isnothing(mip_gap) ? nothing : Float64(mip_gap),
             isnothing(time_limit_sec) ? nothing : Float64(time_limit_sec),
+            isnothing(threads) ? nothing : Int(threads),
         )
     end
 end
@@ -52,6 +57,7 @@ function _apply_solver_config!(m::JuMP.Model, config::SolverOptions)
     config.silent && set_silent(m)
     isnothing(config.mip_gap) || set_optimizer_attribute(m, "MIPGap", config.mip_gap)
     isnothing(config.time_limit_sec) || set_time_limit_sec(m, config.time_limit_sec)
+    isnothing(config.threads) || set_optimizer_attribute(m, "Threads", config.threads)
     return nothing
 end
 

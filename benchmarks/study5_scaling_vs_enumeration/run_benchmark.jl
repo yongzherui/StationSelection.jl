@@ -1,43 +1,69 @@
-"""
-`run_benchmark.jl <job_line>` -- one Study 5 cell: build an instance at the job's
-`(|P|, |J|, |S|, max_stops)` point, run three methods against it under a wall-clock time
-limit, and write one row per method to this job's output under
-`../experiments/<date>_study5_scaling_vs_enumeration/` (see `../README.md`).
+"""Run one single-threaded exact-CG Study 5 scaling job."""
 
-Instance generation (current, reused as-is via relative `include`):
+using StationSelection
+using CSV
+using DataFrames
+include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
 
-```julia
-include("../../scripts/generate_zhuzhou_instance.jl")
-data, meta = generate_zhuzhou_data(data_dir, n_stations, n_pairs; n_scenarios=n_scenarios, seed=seed)
-problem = StationSelectionProblem(data, k; max_walking_distance=800.0)
-```
+length(ARGS) == 1 || error("usage: run_benchmark.jl '<tab-separated jobs.tsv row>'")
+fields = split(strip(ARGS[1]), '\t')
+length(fields) == 12 || error("expected 12 tab-separated fields, got $(length(fields))")
 
-Three methods per cell:
+job_id = parse(Int, fields[1])
+cell_id, substudy = fields[2:3]
+axis_value = parse(Int, fields[4])
+fields[5] == "cg_exact" || error("Study 5 only supports method=cg_exact")
+n_stations, n_pairs, n_scenarios, seed, max_stops = parse.(Int, fields[6:10])
+time_limit_sec = parse(Float64, fields[11])
+max_routes = parse(Int, fields[12]) # retained in the shared table schema; unused by CG
 
-1. **CG / `exact/`**: `run_opt(problem,
-   AggregateODRouteJointRoutingAssignmentFormulation(; max_stops=...), CGSolver(;
-   config=SolverOptions(silent=true, time_limit_sec=...)))` -- time the call, read
-   `result.runtime_sec`/`result.termination_status`.
-2. **`darp/`**: build `JointRoutingAssignmentDarpPricingData`, call
-   `joint_routing_assignment_pricing_by_darp_label_setting(...; time_limit=...)`
-   directly (bypassing the CG outer loop -- this study measures pricing itself, not a
-   full solve) -- time the call, read the returned `exhausted` flag.
-3. **Enumeration**: BLOCKED on `enumerate_joint_routing_assignment_columns` not existing
-   yet (see `README.md`'s Prerequisite section) -- once it exists, call it the same way
-   `../../src/opt/optimize/aggregate_od_route/direct/build_base.jl` calls
-   `enumerate_aggregate_od_route_columns`, under a wall-clock `time_limit_sec`, and
-   catch/record the `ArgumentError` it raises on timeout (see that function's own
-   contract) as this cell's "timed out" status rather than a hard failure.
+problem, k, instance_meta = benchmark_problem(
+    @__DIR__, "STUDY5", n_stations, n_pairs, n_scenarios, seed,
+)
+output_dir = benchmark_output_dir(@__DIR__, "STUDY5", "study5_scaling_exact_cg")
+formulation = AggregateODRouteJointRoutingAssignmentFormulation(
+    ; BENCHMARK_BASELINE..., max_stops=max_stops, pricing_mode=:exact,
+)
+solver = benchmark_cg_solver(time_limit_sec; recover_integer_solution=true, threads=1)
 
-Output row (one per method): `{n_stations, n_pairs, n_scenarios, max_stops, method
-("cg"/"darp"/"enumeration"), wall_sec, status ("exhausted"/"timed_out"/"oom"/"error"),
-objective_or_min_reduced_cost}`.
+let
+status = "error"
+termination_status = "NOT_RUN"
+objective_value = missing
+n_columns = missing
+cg_iterations = missing
+cg_converged = missing
+cg_pricing_exhausted = missing
+error_message = ""
+t_start = time()
+try
+    result = run_opt(problem, formulation, solver)
+    metrics = benchmark_cg_metrics(result, :joint_routing_assignment_columns)
+    termination_status = string(result.termination_status)
+    objective_value = something(result.objective_value, missing)
+    n_columns = metrics.n_columns
+    cg_iterations = metrics.cg_iterations
+    cg_converged = metrics.cg_converged
+    cg_pricing_exhausted = metrics.cg_pricing_exhausted
+    status = metrics.cg_converged && metrics.cg_pricing_exhausted ? "exhausted" : "incomplete"
+catch err
+    error_message = replace(sprint(showerror, err), '\n' => ' ')
+end
+wall_sec = time() - t_start
 
-TODO: not implemented. The CG and darp/ arms have no code prerequisite and can be built
-now; the enumeration arm is blocked (see README.md) -- write this file so the
-enumeration branch is a clearly isolated `# TODO: needs enumerate_...` block, not a
-reason to hold up the other two arms.
-"""
-
-# TODO: implement (CG + darp/ arms are unblocked; enumeration arm needs
-# enumerate_joint_routing_assignment_columns first -- see README.md).
+row = DataFrame((
+    job_id=[job_id], cell_id=[cell_id], substudy=[substudy], axis_value=[axis_value],
+    method=["cg_exact"], n_stations=[n_stations], n_pairs=[n_pairs],
+    n_scenarios=[n_scenarios], seed=[seed],
+    n_pairs_actual=[sum(instance_meta.pairs_per_scenario)],
+    pairs_per_scenario=[join(instance_meta.pairs_per_scenario, ";")],
+    k=[k], max_stops=[max_stops], time_limit_sec=[time_limit_sec], max_routes=[max_routes],
+    status=[status], termination_status=[termination_status],
+    objective_value=[objective_value], wall_sec=[wall_sec], n_columns=[n_columns],
+    cg_iterations=[cg_iterations], cg_converged=[cg_converged],
+    cg_pricing_exhausted=[cg_pricing_exhausted], error_message=[error_message],
+))
+outfile = joinpath(output_dir, "job_$(lpad(job_id, 4, '0'))_cg_exact.csv")
+CSV.write(outfile, row)
+println("Wrote $outfile (status=$status, wall_sec=$(round(wall_sec; digits=2)))")
+end

@@ -16,7 +16,8 @@ wiring is shared with `CGSolver`'s own build for this formulation via
 """
     build_model(problem::StationSelectionProblem,
                 formulation::AggregateODRouteBaseFormulation,
-                solver::DirectMIPSolver) -> BuildResult
+                solver::DirectMIPSolver; max_routes=10_000,
+                time_limit_sec=30.0) -> BuildResult
 
 Free assignment only -- the coverage/linking helpers here assume that semantics (matches
 `AggregateODRouteJointRoutingAssignmentFormulation`).
@@ -25,6 +26,9 @@ function build_model(
         problem::StationSelectionProblem,
         formulation::AggregateODRouteBaseFormulation,
         solver::DirectMIPSolver,
+        ;
+        max_routes::Int=10_000,
+        time_limit_sec::Float64=30.0,
     )::BuildResult
     # ---- 1. Parameters ----
     # Column pool and mapping are built up front here (no CGSolver hooks need scalars
@@ -33,7 +37,9 @@ function build_model(
     # pre-`m`: the enumerated `θ` pool, the resulting `AggregateODRouteMap`, and the
     # feasibility check that every demand group has a real coverage option.
     data = problem.data
-    columns = enumerate_aggregate_od_route_columns(problem, formulation, data)
+    columns = enumerate_aggregate_od_route_columns(
+        problem, formulation, data; max_routes=max_routes, time_limit_sec=time_limit_sec,
+    )
     mapping = create_aggregate_od_route_map(problem, formulation, data; initial_columns=columns)
     aggregate_od_route_validate_feasible_coverage(data, mapping)
 

@@ -57,15 +57,24 @@ On a genuinely new signature: mints a fresh id off `m[:aggregate_od_route_base_n
 (a `Ref{Int}`), registers a real `AggregateODRouteColumn` into `mapping` via
 `_register_aggregate_od_route_column_metadata!`, and records it in
 `m[:aggregate_od_route_base_column_signatures]`/`m[:aggregate_od_route_base_columns_by_id]`.
-On a signature match, the already-registered geometry's `id`/`tau` is always reused --
-`mapping.columns` is add-only here, so a marginally cheaper `tau` rediscovered later for an
-identical pair set is never swapped in. This is a deliberate simplification: `tau` for a
-fixed served-pairs set is close to invariant across searches, and CG's other geometries still
-compete on price regardless.
+On a signature match the registered geometry's `id` is reused **only when its `tau` is no
+worse** than the incoming column's. A rediscovered pair set whose `tau` is strictly better
+gets a fresh id and repoints the signature, mirroring `add_joint_routing_assignment_column!`
+(`../joint_routing_assignment/routing_and_assignment.jl`), which has always compared `tau`
+here.
 
-`action` is `:skipped` when `theta[(column_id, s)]` already exists (this exact geometry is
-already activated for this exact scenario) -- a plain `haskey`, not a cost comparison, since
-geometry id and `(column_id,s)` activation are separate keys. Otherwise `:added`: creates one
+Reusing the stale id unconditionally (the behaviour before 2026-08-25) deadlocks CG. The
+pricer's novelty rule (`_pricing_accept_closure`, `label_setting/round.jl`) returns a
+duplicate signature *only* when its `tau` beats the pool's best, so exactly the columns that
+could be rediscovered were exactly the ones guaranteed to be skipped: the pool froze, the
+duals froze, the same column was re-priced every iteration, and CG spun to `max_iterations`.
+See `notes/2026-08-25_study6_cg_livelock_stale_tau_columns.md`. The old docstring's premise
+-- that `tau` is "close to invariant" for a fixed pair set -- is what the reproduction
+falsified.
+
+`action` is `:skipped` when the signature matched at no-worse `tau` **and**
+`theta[(column_id, s)]` already exists (this exact geometry is already activated for this
+exact scenario). Otherwise `:added`: creates one
 new `theta` variable (domain from `m[:aggregate_od_route_base_relax_integrality]`), sets its
 objective coefficient via the same `aggregate_od_route_column_objective_coefficient`
 (`constraints/aggregate_od_route/core.jl`) Direct's closed-form objective uses, and patches
@@ -88,6 +97,14 @@ function add_aggregate_od_route_base_column!(
     s = Int(column.metadata["scenario"])
     signature = _aggregate_od_route_column_signature(column)
     column_id = get(signatures, signature, nothing)
+    # Strictly cheaper rediscovery of a known pair set is a genuinely new geometry, not a
+    # duplicate: fall through to mint a fresh id for it (and repoint `signatures`) rather
+    # than reusing the stale, more expensive one, which could never be added and so would
+    # be re-priced forever. Matches Joint's `columns[existing_id].tau <= column.tau + 1e-9`
+    # skip test.
+    if !isnothing(column_id) && columns_by_id[column_id].tau > column.tau + 1e-9
+        column_id = nothing
+    end
     if isnothing(column_id)
         next_id_ref = m[:aggregate_od_route_base_next_column_id]
         column_id = next_id_ref[]

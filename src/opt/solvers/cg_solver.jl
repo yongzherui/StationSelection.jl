@@ -69,7 +69,8 @@ One `NamedTuple` per CG iteration, in order:
 | `pricing_sec` | wall time in `price_columns` |
 | `add_columns_sec` | wall time in `add_columns!` |
 | `columns_added` | how many columns pricing returned this iteration |
-| `cumulative_columns_added` | running total, excluding seed columns |
+| `columns_accepted` | how many of those actually entered the master (`add_columns!`'s return; the rest were de-duplicated away) |
+| `cumulative_columns_added` | running total of `columns_accepted`, excluding seed columns |
 | `master_objective` | master LP objective, or `missing` if not `OPTIMAL` |
 | `master_status` | this iteration's master termination status |
 
@@ -140,7 +141,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         if status != MOI.OPTIMAL
             push!(iteration_log, (
                 iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
-                add_columns_sec=0.0, columns_added=0,
+                add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
                 master_objective=missing, master_status=string(status),
             ))
@@ -162,7 +163,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             converged = !haskey(JuMP.object_dictionary(m), key) || Bool(m[key])
             push!(iteration_log, (
                 iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
-                add_columns_sec=0.0, columns_added=0,
+                add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
                 master_objective=master_objective, master_status=string(status),
             ))
@@ -170,15 +171,24 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         end
 
         t0 = time()
-        add_columns!(build_result, mapping, m, new_columns)
+        columns_accepted = add_columns!(build_result, mapping, m, new_columns)
         add_columns_sec = time() - t0
-        cumulative_columns_added += length(new_columns)
+        cumulative_columns_added += columns_accepted
         push!(iteration_log, (
             iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
             add_columns_sec=add_columns_sec, columns_added=length(new_columns),
+            columns_accepted=columns_accepted,
             cumulative_columns_added=cumulative_columns_added,
             master_objective=master_objective, master_status=string(status),
         ))
+
+        # Pricing returned improving columns but every one was de-duplicated away, so the
+        # master is unchanged and the next iteration would extract identical duals and
+        # re-find the identical columns -- a livelock that otherwise burns every remaining
+        # iteration (see notes/2026-08-25_study6_cg_livelock_stale_tau_columns.md).
+        # `converged` deliberately stays false: pricing DID find a negative-reduced-cost
+        # column, so this is a failure to make progress, never an optimality certificate.
+        columns_accepted == 0 && break
     end
     lp_loop_sec = time() - start_time
 
