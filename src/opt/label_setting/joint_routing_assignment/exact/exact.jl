@@ -157,15 +157,6 @@ function JointRoutingAssignmentSearchContext(
     # `julia scripts/diagnose.jl split_census` to census the live-label population
     # (live-clock support, pickup-phase membership) without duplicating this loop.
     label_observer=nothing,
-    # Opt-in alternative to the default station-age dominance condition: exempts
-    # a station from the age-match requirement when the dominating label has
-    # already collected every reward layer reachable from it (see
-    # `_dominates_joint_routing_assignment_label_reward_aware`'s docstring for
-    # the soundness argument). Routed through the plain `Dict`-based label form
-    # rather than the optimized bitset scan, so this trades the scan's
-    # scalar-filter fast rejects away -- correctness-first, not yet a
-    # replacement for the default.
-    reward_aware_dominance::Bool=false,
 )
     n_nodes = length(pricing_data.nodes)
     search_index = _build_joint_routing_assignment_search_index(pricing_data)
@@ -177,16 +168,9 @@ function JointRoutingAssignmentSearchContext(
         pricing_data.compensated_dominance,
         dominance_census,
     )
-    dominates = if reward_aware_dominance
-        (x::PricingLabelEntry, y::PricingLabelEntry) -> _dominates_joint_routing_assignment_label_reward_aware(
-            x.label, y.label, pricing_data, pricing_data.layer_weight,
-            pricing_data.bounded_max_stops, pricing_data.compensated_dominance,
-        )
-    else
-        (x::PricingLabelEntry, y::PricingLabelEntry) -> _pricing_dominates_at_state(
-            x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.layer_weight, dominance_rules,
-        )
-    end
+    dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
+        x.filters, x.bitsets, y.filters, y.bitsets, pricing_data.layer_weight, dominance_rules,
+    )
     return JointRoutingAssignmentSearchContext(
         pricing_data, dominates, search_index, bound_workspace, n_nodes, label_observer,
     )
