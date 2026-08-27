@@ -47,10 +47,10 @@ end
 `column::AggregateODRouteColumn` must carry `column.metadata["scenario"]` -- the
 `(column_id, scenario)` pair is the actual master key, mirroring the pricer's own
 convention (`_aggregate_od_route_column_from_label`,
-`label_setting/route_covering/exact/labels.jl`, tags every priced column with the scenario it
+`label_setting/route_covering/exact/hooks.jl`, tags every priced column with the scenario it
 was priced against). `column.id` on the argument itself is never trusted: geometry identity
 is decided purely by `_aggregate_od_route_column_signature(column)`
-(`label_setting/route_covering/exact/labels.jl`) against
+(`label_setting/route_covering/exact/hooks.jl`) against
 `m[:aggregate_od_route_base_column_signatures]`.
 
 On a genuinely new signature: mints a fresh id off `m[:aggregate_od_route_base_next_column_id]`

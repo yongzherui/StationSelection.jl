@@ -1,58 +1,32 @@
 """
-Core label-DP primitives for passenger free-assignment pricing: label creation,
-extension, and dominance. `exact.jl` orchestrates these into a full pricing
-pass; this file is the one to audit for "is the label search correct".
-
-# Operational contract of the column being priced
-
-Same unlimited-capacity, synchronized-start physical route as
-`RouteCoveringPricingLabel` (see that file's module docstring for the shared
-station-age/wait/detour rules) -- this pricer changes only what a route gets
-*credit* for:
-
-- a visit to origin `j` within `max_wait_time` opens a live pickup clock for `j`,
-  exactly as before;
-- a later visit to `k` certifies `(p, j, k)` for every passenger `p` with a
-  positive-reward candidate on that pair, when elapsed time since the pickup is
-  at most that candidate's own `ride_limit` (passenger-specific, not a single
-  `detour_factor * travel_time` shared by all pairs);
-- but a passenger is not "served" by the union of everything certified -- of all
-  the assignments the finished route certifies for `p`, only the single best one
-  counts. `activated_reward_layers` tracks running per-passenger maxima (via the
-  prefix-layer encoding from `data.jl`) so labels can compare/dominate on this
-  without carrying dense per-passenger reward vectors or a discrete "which
-  assignment is current best" pointer -- reaching a strictly better destination
-  later activates only the incremental layers between the old and new reward, so
-  the layer weight sum is always exactly `sum(max reward per passenger)`, never a
-  double count. Reaching a worse destination afterwards activates nothing (its
-  prefix mask is already a subset of what's active).
-
-No onboard-passenger state, capacity resource, or drop-off subset enumeration is
-modeled -- unbounded capacity means certifying `p`'s assignment never prevents
-certifying anyone else's, so there is nothing to branch on beyond the physical
-route itself. The concrete `(j, k)` a passenger is ultimately assigned to is
-reconstructed only for finished, negative-reduced-cost routes (`exact.jl`'s
-route replay) -- not tracked while labels are being extended.
+When is one label strictly better than another? State/order keys, the
+per-label bitsets mirror the scan needs, the reward-layer compensation
+sub-test, and the dominance predicates themselves (`_pricing_dominates_fn`,
+wired in `hooks.jl`) all live here. The optional rejection-census
+instrumentation each predicate can increment into is declared separately, in
+`logging.jl` -- this file is the one to read for the algorithm; `logging.jl`
+is dev tooling for measuring it.
 
 # Where the time actually goes (read before optimizing)
 
 Profiled 2026-07-30: **the dominance scan is ~85-90% of wall time.** Everything
-else -- the remaining-reward bound, candidate generation, label extension, the
-priority queue -- is together under 2%. Optimizations that do not either shrink
-the live-label population or make the per-state label-list walk cheaper have
-consistently measured as no-ops here, however sound they look on paper.
+else -- the remaining-reward bound (`prune.jl`), candidate generation, label
+extension (`extend.jl`), the priority queue -- is together under 2%.
+Optimizations that do not either shrink the live-label population or make the
+per-state label-list walk cheaper have consistently measured as no-ops here,
+however sound they look on paper.
 
 Scoreboard of what was tried, each measured on its own
 (`scripts/bench_joint_routing_assignment_labels.jl`; full write-up in
-`notes/2026-07-30_passenger_pricing_label_search_optimizations.md`):
+`notes/2026-07-30_passenger_pricing_label_search_optimizations.md`).
 
 | change | result |
 | --- | --- |
 | compensated layer dominance (this file) | **2.5-3.9x** -- halves `max_live` |
 | `Vector` per-state label lists (`types.jl`) | **1.3-1.5x** |
 | label inlined into label entry (`types.jl`) | **1.1-1.15x** |
-| reuse popped priority (`exact.jl`) | no effect; the bound is ~0.6% of runtime |
-| travel-discounted reward bound (`exact.jl`) | no effect at cold-start duals |
+| reuse popped priority (`hooks.jl`) | no effect; the bound is ~0.6% of runtime |
+| travel-discounted reward bound (`prune.jl`) | no effect at cold-start duals |
 | station-budget cap at `l` (removed 2026-08-10) | measured off by default -- pricing-neutral to 1.7x slower, LP bound identical to 10 decimals at n=10/n=15; removed rather than kept dark |
 | compatibility-component decomposition | not built: the reward graph is one component holding 100% of opportunities |
 
@@ -83,198 +57,17 @@ why the order of these conditions is worth this much.
 Any exact change must leave the benchmark's `best_rc` bit-identical.
 """
 
-export initial_joint_routing_assignment_pricing_labels
-export extend_joint_routing_assignment_pricing_label
-
-# ── label seeding ────────────────────────────────────────────────────────────
-function initial_joint_routing_assignment_pricing_labels(
-    pricing_data::JointRoutingAssignmentPricingData,
-)::Vector{JointRoutingAssignmentPricingLabel}
-    # Same reasoning as the route-covering pricer's twin: a route can only
-    # ever collect reward through one of an opportunity's two endpoints, so
-    # seeding elsewhere would waste search on routes that can never certify
-    # anything.
-    endpoints = Set{Int}()
-    for opp in pricing_data.opportunities
-        push!(endpoints, opp.origin)
-        push!(endpoints, opp.destination)
-    end
-
-    labels = JointRoutingAssignmentPricingLabel[]
-    for node in pricing_data.nodes
-        node in endpoints || continue
-        # One depth-1 label per relevant node: route so far is `[node]`,
-        # `time = 0`, this node's own pickup clock starts live at age 0, no
-        # reward layers activated yet, and `tau`/`reduced_cost` already carry
-        # the fixed `repositioning_time` cost every route pays regardless of
-        # length.
-        push!(labels, JointRoutingAssignmentPricingLabel(
-            node,
-            [node],
-            0.0,
-            Dict(node => 0.0),
-            RewardLayerBitset(),
-            0.0,
-            pricing_data.route_regularization_weight * pricing_data.repositioning_time,
-            1,
-        ))
-    end
-    return labels
-end
-
-# ── candidate next-nodes ─────────────────────────────────────────────────────
-# `label` is untyped so both the revisit-tolerant and the elementary
-# (`../station_simple/labels.jl`) pricers can share this: it reads only `station_age`,
-# `current`, and `activated_reward_layers`, which both label types expose. Julia
-# specializes per concrete call site, so there is no dispatch or speed cost.
-function _has_useful_live_joint_routing_assignment_origin(
-    label,
-    pricing_data::JointRoutingAssignmentPricingData,
-)::Bool
-    for (station, age) in label.station_age
-        opportunities = get(pricing_data.assignments_by_origin, station, PassengerAssignmentOpportunity[])
-        for opp in opportunities
-            _has_inactive_layer(opp.layer_mask, label.activated_reward_layers) || continue
-            t_to_dest = opp.destination == label.current ? 0.0 :
-                _joint_routing_assignment_travel(pricing_data, label.current, opp.destination)
-            age + t_to_dest <= opp.ride_limit + 1e-9 || continue
-            return true
-        end
-    end
-    return false
-end
-
-"""
-    is_useful_destination(label, k)
-
-A station `k` is worth visiting next as a destination if some *currently live*
-origin age can still certify a currently-inactive layer there. A station `j` is
-worth visiting as an origin (only while still inside the pickup window) if
-visiting it could open a live clock that later unlocks a currently-inactive
-layer, judged via `origin_layer_mask` (the union of everything reachable from
-that origin, an optimistic pre-filter -- true feasibility from that origin is
-re-checked once its age actually becomes live).
-"""
-function _joint_routing_assignment_candidate_next_nodes(
-    label::JointRoutingAssignmentPricingLabel,
-    pricing_data::JointRoutingAssignmentPricingData,
-)::Vector{Int}
-    candidate_nodes = Set{Int}()
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
-    if past_pickup_cutoff && !_has_useful_live_joint_routing_assignment_origin(label, pricing_data)
-        return Int[]
-    end
-
-    if !past_pickup_cutoff
-        for (origin, mask) in pricing_data.origin_layer_mask
-            origin == label.current && continue
-            _has_inactive_layer(mask, label.activated_reward_layers) || continue
-            arrival_time = label.time + _joint_routing_assignment_travel(pricing_data, label.current, origin)
-            arrival_time <= pricing_data.max_wait_time + 1e-9 && push!(candidate_nodes, origin)
-        end
-    end
-
-    # Driven from the label's *live origins* rather than from every destination
-    # group: only a live origin can make a destination useful, and pruning keeps
-    # the live set small, whereas `assignments_by_destination` spans all
-    # `~P * n^2` opportunities regardless of label state.
-    for (origin, origin_age) in label.station_age
-        for opp in get(pricing_data.assignments_by_origin, origin, PassengerAssignmentOpportunity[])
-            opp.destination == label.current && continue
-            opp.destination in candidate_nodes && continue
-            _has_inactive_layer(opp.layer_mask, label.activated_reward_layers) || continue
-            origin_age + _joint_routing_assignment_travel(pricing_data, label.current, opp.destination) <=
-                opp.ride_limit + 1e-9 || continue
-            push!(candidate_nodes, opp.destination)
-        end
-    end
-
-    return sort!(collect(candidate_nodes))
-end
-
-# ── label extension ──────────────────────────────────────────────────────────
-"""
-Extension always produces exactly one child (an unlimited-capacity route has
-nothing to branch on at a stop), so the search calls
-`_extend_joint_routing_assignment_pricing_label` and gets the label back
-directly. This method wraps it in the one-element `Vector` the public API has
-always returned; that wrapper allocation is per *extension*, so it is worth not
-paying on the search's hot path.
-"""
-function extend_joint_routing_assignment_pricing_label(
-    label::JointRoutingAssignmentPricingLabel,
-    next_node::Int,
-    pricing_data::JointRoutingAssignmentPricingData,
-)::Vector{JointRoutingAssignmentPricingLabel}
-    return JointRoutingAssignmentPricingLabel[
-        _extend_joint_routing_assignment_pricing_label(label, next_node, pricing_data),
-    ]
-end
-
-function _extend_joint_routing_assignment_pricing_label(
-    label::JointRoutingAssignmentPricingLabel,
-    next_node::Int,
-    pricing_data::JointRoutingAssignmentPricingData,
-)::JointRoutingAssignmentPricingLabel
-    travel_time = _joint_routing_assignment_travel(pricing_data, label.current, next_node)
-    arrival_time = label.time + travel_time
-    new_tau = label.tau + travel_time
-    new_route = vcat(label.route, next_node)
-
-    certified_layers, reward = _certify_joint_routing_assignment_layers_at_node(
-        next_node,
-        label.station_age,
-        travel_time,
-        label.activated_reward_layers,
-        pricing_data,
-    )
-
-    # Age, reset, and prune in ONE pass. Previously this built an aged Dict and
-    # then a second pruned Dict from it -- two allocations and two traversals per
-    # extension, on the hottest path in the search.
-    aged_station = Dict{Int, Float64}()
-    for (station, age) in label.station_age
-        station == next_node && continue  # handled by the reset below
-        aged = age + travel_time
-        _joint_routing_assignment_age_is_useful(station, aged, pricing_data, next_node) &&
-            (aged_station[station] = aged)
-    end
-    if arrival_time <= pricing_data.max_wait_time + 1e-9
-        # A fresh clock at the arrival station: age 0 is the most useful an age can
-        # be, but it still only earns a slot if it can reach some opportunity in time.
-        _joint_routing_assignment_age_is_useful(next_node, 0.0, pricing_data, next_node) &&
-            (aged_station[next_node] = 0.0)
-    elseif haskey(label.station_age, next_node)
-        # Past the cutoff the visit creates no new clock, so `next_node`'s existing
-        # clock (if any) just ages like the rest.
-        aged = label.station_age[next_node] + travel_time
-        _joint_routing_assignment_age_is_useful(next_node, aged, pricing_data, next_node) &&
-            (aged_station[next_node] = aged)
-    end
-
-    return JointRoutingAssignmentPricingLabel(
-        next_node,
-        new_route,
-        arrival_time,
-        aged_station,
-        certified_layers,
-        new_tau,
-        label.reduced_cost + pricing_data.route_regularization_weight * travel_time - reward,
-        label.route_length + 1,
-    )
-end
-
 # ── state key / order key ────────────────────────────────────────────────────
 _joint_routing_assignment_state(label::JointRoutingAssignmentPricingLabel) = label.current
 
 """
 The cheap bookkeeping signature used by the label search itself (dedup within
-`best_by_signature`, see `exact.jl`) -- deliberately *not* the final column
+`best_by_signature`, see `hooks.jl`) -- deliberately *not* the final column
 signature. Two labels can share this signature (same running per-passenger
 maxima) while representing different physical routes with different concrete
 `(p, j, k)` assignments and therefore different station-linking coefficients;
-only route replay on a finished, accepted route (section 13) resolves which
-concrete assignment each passenger actually gets.
+only route replay on a finished, accepted route (section 13, `accept.jl`)
+resolves which concrete assignment each passenger actually gets.
 """
 _joint_routing_assignment_layer_signature(label::JointRoutingAssignmentPricingLabel) = label.activated_reward_layers
 
@@ -306,12 +99,12 @@ whole label population. Two things it deliberately does *not* do:
     allocations.
   - **no `copy` of the reward-layer set.** Labels are immutable and nothing in the
     search ever mutates `activated_reward_layers` -- `_certify_..._layers_at_node`
-    builds a label's set with the non-mutating `union`/`setdiff`, and the reward
-    bound only ever reads it as a `union!` *source* into its own workspace. The
-    mirror can therefore alias it. (If a future change makes any label's layer set
-    mutable in place, this alias is the thing that breaks: the state's label
-    list would then be dominance-testing against a set that has since changed
-    underneath it.)
+    (`../data.jl`) builds a label's set with the non-mutating `union`/`setdiff`,
+    and the reward bound (`prune.jl`) only ever reads it as a `union!` *source*
+    into its own workspace. The mirror can therefore alias it. (If a future change
+    makes any label's layer set mutable in place, this alias is the thing that
+    breaks: the state's label list would then be dominance-testing against a set
+    that has since changed underneath it.)
 """
 function _make_joint_routing_assignment_label_bitsets(
     label::JointRoutingAssignmentPricingLabel,
@@ -440,24 +233,6 @@ function _dominates_joint_routing_assignment_label(
     )
 end
 
-# ── dominance rejection census (diagnostics) ─────────────────────────────────
-"""
-Rejection census for `_pricing_dominates_at_state` (passenger method), one counter
-per condition plus one for "dominates".
-
-Only written when the dominance rules carry `Instrumented = true`, which the
-production search never sets; with `Instrumented = false` the increments are
-constant-folded away, so an uninstrumented scan pays nothing for their existence.
-Ordering the conditions cheapest-and-likeliest-to-reject first is only meaningful
-against measured rejection rates, and this is where those come from -- see
-`julia scripts/diagnose.jl dominance_audit`.
-"""
-const PFA_DOMINANCE_CONDITIONS = (
-    :time, :live_clock_support, :route_length,
-    :reduced_cost, :station_age, :compensation, :dominates, :age_mask,
-)
-const PFA_DOMINANCE_REJECTIONS = zeros(Int, length(PFA_DOMINANCE_CONDITIONS))
-
 """
     _pricing_dominates_at_state(a..., b..., layer_weight, rules)
 
@@ -532,7 +307,7 @@ compensation's early bail is defined against a non-negative budget.
     layer_weight::Vector{Float64},
     ::JointRoutingAssignmentDominanceRules{BoundedStops, Compensated, Instrumented},
 )::Bool where {BoundedStops, Compensated, Instrumented}
-    @inline _reject(i::Int) = (Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[i] += 1); false)
+    @inline _reject(i::Int) = (Instrumented && (@inbounds JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS[i] += 1); false)
 
     af.time <= bf.time + 1e-9 || return _reject(1)
 
@@ -569,26 +344,6 @@ compensation's early bail is defined against a non-negative budget.
         abs.activated_bits, bbs.activated_bits, layer_weight, budget, Val(Compensated),
     ) <= budget || return _reject(6)
 
-    Instrumented && (@inbounds PFA_DOMINANCE_REJECTIONS[7] += 1)
+    Instrumented && (@inbounds JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS[7] += 1)
     return true
 end
-
-"""
-Read out and reset the rejection census. Returns
-`condition => count` pairs in evaluation order.
-"""
-function joint_routing_assignment_dominance_rejections(; reset::Bool=true)
-    counts = [PFA_DOMINANCE_CONDITIONS[i] => PFA_DOMINANCE_REJECTIONS[i]
-              for i in eachindex(PFA_DOMINANCE_CONDITIONS)]
-    reset && fill!(PFA_DOMINANCE_REJECTIONS, 0)
-    return counts
-end
-
-
-# ── column signature ──────────────────────────────────────────────────────────
-function _joint_routing_assignment_column_signature(assignments)::Tuple{Vararg{Tuple{Int, Int, Int}}}
-    return Tuple(sort!(collect(assignments)))
-end
-
-_joint_routing_assignment_column_signature(column::JointRoutingAssignmentRouteColumn) =
-    _joint_routing_assignment_column_signature(column.assignments)

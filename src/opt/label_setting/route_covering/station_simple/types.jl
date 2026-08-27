@@ -1,7 +1,49 @@
 """
-Label/bitsets/dominance types specific to the elementary-route pricer
-(`station_simple.jl`). See `../types.jl` for the pricing graph/duals types
-this pricer shares with `exact/`.
+Label/bitsets/dominance types specific to the elementary-route pricer. See
+`../types.jl` for the pricing graph/duals types this pricer shares with
+`exact/`, and `seed.jl` / `extend.jl` / `prune.jl` / `dominate.jl` /
+`context.jl` / `hooks.jl` for the label-setting functionality built on top of
+the types below -- `seed.jl` is the file to start from for "is the label
+search correct".
+
+An alternative to the revisit-tolerant search in `../exact/` (types.jl/
+seed.jl/extend.jl/prune.jl/dominate.jl/context.jl/hooks.jl): a route may
+never revisit a station, so a certified `(j,k)` pair settles permanently the
+first (and only) time `k` is visited after `j` -- there is no need for a
+`station_age` `Dict` tracking every past visit, only `live_origin_age` for
+stations already on the route whose destination hasn't been reached yet.
+
+Because `visited` only grows and is part of the dominance signature (exact match,
+not subset), a dominating label's `served_pairs` need not be compared separately:
+identical `(current, visited)` plus reduced-cost/time/live-origin-age domination
+already implies every future extension available to the dominated label is at
+least as good from the dominating one, since which nodes remain reachable depends
+only on `visited` and rewards not yet banked are fully described by
+`live_origin_age`. Do not add a served-pairs comparison here without re-deriving
+that invariant; see `_dominates_route_covering_station_simple_label`
+(`dominate.jl`).
+
+# Why this is faster
+
+Fewer extensions, since candidate generation drops any already-visited node --
+the branching factor shrinks as a route grows.
+
+# Correctness caveat
+
+Restricting to elementary routes restricts the column universe the master
+problem prices over. Where the model's optimum genuinely wants a revisiting
+route this pricer is a *heuristic* -- it can terminate CG with a weaker LP
+bound or miss improving columns. It is therefore opt-in and off by default (not
+currently reachable from any `pricing_round.jl`); validate the LP bound against
+the revisit-tolerant pricer before relying on it.
+
+# Reuse
+
+Shares `RouteCoveringPricingData`/`RouteCoveringPricingDuals` and the
+`_route_covering_travel`/`_direct_ride_limit` helpers from `../data.jl`, and
+produces `AggregateODRouteColumn`s via the same `_aggregate_od_route_column_from_label`
+convention as the revisit-tolerant pricer (a new method dispatched on this
+directory's label type, in `hooks.jl`).
 """
 
 export RouteCoveringStationSimpleLabel
@@ -36,7 +78,7 @@ Inline scalar fields the state's label-list scan needs, read straight off the
 entry rather than chasing into `label`/`bitsets` -- same rationale as
 `RouteCoveringDominanceFilters` (`../exact/types.jl`). `current`/`visited_bits` are
 not carried here because the state itself is exactly that key (see
-`_route_covering_station_simple_state`, `labels.jl`), so every pair the
+`_route_covering_station_simple_state`, `dominate.jl`), so every pair the
 state's label-list scan tests already agrees on them.
 """
 struct RouteCoveringStationSimpleDominanceFilters

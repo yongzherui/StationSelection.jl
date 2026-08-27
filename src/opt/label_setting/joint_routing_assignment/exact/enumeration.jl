@@ -10,7 +10,7 @@ The physical feasibility rule this formulation's routes obey -- wait time at pic
 `AggregateODRouteBaseFormulation`'s, and it is evaluated per `(j, k)` pair, not per
 passenger (`ride_limit = detour_factor * get_routing_cost(data, j, k)` in
 `joint_routing_assignment/pricing_round.jl`, the exact formula
-`route_covering/exact/labels.jl`'s `_direct_ride_limit` uses). So the set of physical
+`route_covering/data.jl`'s `_direct_ride_limit` uses). So the set of physical
 routes a from-scratch DFS against `JointRoutingAssignmentPricingLabel`'s own transitions
 would visit is provably identical to what `route_covering/exact/enumeration.jl`'s DFS
 already visits, given the same `max_stops`/`max_wait_time`/`detour_factor` and every
@@ -27,7 +27,7 @@ signature.
 
 Base's `x` is decoupled from `θ`, so a route's `served_pairs` is a plain *set* -- the
 master can freely pick any subset via `x`. Joint has no such decoupling: a column's
-`assignments` are baked in at creation. Real pricing (`exact/exact.jl`'s
+`assignments` are baked in at creation. Real pricing (`exact/accept.jl`'s
 `_replay_joint_routing_assignment_route`) resolves a fixed route to exactly *one*
 assignment per passenger -- whichever `(j, k)` has the highest reward under the current
 duals -- which is the right thing for CG (only the single most-improving column matters at
@@ -63,7 +63,7 @@ export enumerate_joint_routing_assignment_columns
     _replay_joint_routing_assignment_route_all_certifications(route, pricing_data)
         -> Dict{Int, Vector{Tuple{Int, Int}}}
 
-Same replay walk as `_replay_joint_routing_assignment_route` (`exact/exact.jl`) -- same
+Same replay walk as `_replay_joint_routing_assignment_route` (`exact/accept.jl`) -- same
 station-age/ride-limit physical rules, same `pricing_data.assignments_by_destination`
 lookups -- but keeps *every* distinct `(origin, destination)` certified for each
 passenger `p`, not only the highest-reward one. Reward plays no role here (this

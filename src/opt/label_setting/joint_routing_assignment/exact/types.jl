@@ -1,7 +1,43 @@
 """
 Label/bitsets/dominance types specific to the revisit-tolerant passenger
-free-assignment pricer (`exact.jl`). See `../types.jl` for the pricing
-graph/reward-layer types this pricer shares with `station_simple/`.
+free-assignment pricer, plus the operational contract those types encode. See
+`../types.jl` for the pricing graph/reward-layer types this pricer shares
+with `station_simple/`, and `seed.jl` / `extend.jl` / `prune.jl` /
+`dominate.jl` / `context.jl` / `accept.jl` / `hooks.jl` for the label-setting
+functionality built on top of the types below (plus `logging.jl`, the
+dominance rejection-census dev tooling split out of `dominate.jl`) --
+`seed.jl` is the file to start from for "is the label search correct".
+
+# Operational contract of the column being priced
+
+Same unlimited-capacity, synchronized-start physical route as
+`RouteCoveringPricingLabel` (see that file's module docstring for the shared
+station-age/wait/detour rules) -- this pricer changes only what a route gets
+*credit* for:
+
+- a visit to origin `j` within `max_wait_time` opens a live pickup clock for `j`,
+  exactly as before;
+- a later visit to `k` certifies `(p, j, k)` for every passenger `p` with a
+  positive-reward candidate on that pair, when elapsed time since the pickup is
+  at most that candidate's own `ride_limit` (passenger-specific, not a single
+  `detour_factor * travel_time` shared by all pairs);
+- but a passenger is not "served" by the union of everything certified -- of all
+  the assignments the finished route certifies for `p`, only the single best one
+  counts. `activated_reward_layers` tracks running per-passenger maxima (via the
+  prefix-layer encoding from `data.jl`) so labels can compare/dominate on this
+  without carrying dense per-passenger reward vectors or a discrete "which
+  assignment is current best" pointer -- reaching a strictly better destination
+  later activates only the incremental layers between the old and new reward, so
+  the layer weight sum is always exactly `sum(max reward per passenger)`, never a
+  double count. Reaching a worse destination afterwards activates nothing (its
+  prefix mask is already a subset of what's active).
+
+No onboard-passenger state, capacity resource, or drop-off subset enumeration is
+modeled -- unbounded capacity means certifying `p`'s assignment never prevents
+certifying anyone else's, so there is nothing to branch on beyond the physical
+route itself. The concrete `(j, k)` a passenger is ultimately assigned to is
+reconstructed only for finished, negative-reduced-cost routes (`accept.jl`'s
+route replay) -- not tracked while labels are being extended.
 """
 
 export JointRoutingAssignmentPricingLabel
@@ -14,7 +50,8 @@ change is `activated_reward_layers` in place of `served_pairs`: since a passenge
 selects a single, best, certified assignment rather than being "served" by every
 pair the route happens to certify, the label only needs to remember the highest
 reward level certified so far per passenger -- not which concrete `(j, k)` pairs
-were involved. See `labels.jl` for the full pricing contract.
+were involved. See this file's own module docstring above for the full pricing
+contract.
 """
 struct JointRoutingAssignmentPricingLabel
     current::Int

@@ -72,7 +72,7 @@ paths) belongs here instead, since it's an encoding choice, not a business decis
   subset rule (`A_a subseteq A_b`); a toggle because compensated trades away column
   diversity per search for speed, and which side wins for column generation overall is an
   end-to-end question, not a pricing-speed one (see `RouteCoveringSearchContext`,
-  `label_setting/route_covering/exact/exact.jl`). Only affects `CGSolver`'s pricing loop --
+  `label_setting/route_covering/exact/dominate.jl`). Only affects `CGSolver`'s pricing loop --
   `DirectMIPSolver`'s exhaustive enumeration (`enumerate_aggregate_od_route_columns`) never
   performs dominance at all, so this field is inert there.
 

@@ -35,18 +35,80 @@ for `CGSolver`.
   `station_simple/` is the same elementary-route alternative as
   `route_covering/`'s, not currently reachable from any `build_model`.
 
-`exact/` and `station_simple/` (both pricer families) follow the same
-three-file shape: `types.jl` (label/bitsets/dominance structs), `labels.jl`
-(the label-DP primitives — the file to audit for "is the search correct"),
-and a context file named after the directory (`exact.jl` /
-`station_simple.jl`, the `AbstractPricingSearchContext` + hooks).
-`joint_routing_assignment/darp/` adds a fourth file, `data.jl`, because
-unlike `exact/`'s and `station_simple/`'s shared reward-layer preprocessing
-(`joint_routing_assignment/data.jl`), `darp/`'s branching commit-or-skip
-search needs its own pricing-data construction (see `darp/types.jl`'s module
-docstring for why); its own context file is named `darp.jl` rather than
-`exact.jl`, since it has no further internal elementary-route split to
-distinguish itself from.
+Every pricer directory below `route_covering/`/`joint_routing_assignment/`
+(`route_covering/exact/`, `route_covering/station_simple/`,
+`joint_routing_assignment/exact/`, `joint_routing_assignment/station_simple/`,
+`joint_routing_assignment/darp_modified/`, `joint_routing_assignment/darp/`)
+is split by label-setting *functionality* rather than bundled into one
+`labels.jl` + one context file -- logic and wiring kept in separate files
+throughout:
+
+- `types.jl` — label/bitsets/dominance-filter structs, plus the module
+  docstring describing the operational contract those types encode (what a
+  route gets *credit* for). Start here for "what does a label mean".
+- `seed.jl` — the depth-1 labels the search seeds its frontier from.
+- `extend.jl` — candidate next-nodes + label extension: which nodes/actions a
+  label may legally visit next, and what taking one produces.
+- `prune.jl` — the admissible remaining-reward bound behind frontier ordering
+  and pop-time pruning. Not present in `joint_routing_assignment/station_simple/`,
+  which reuses `exact/prune.jl`'s bound directly (the reward model is
+  identical; only the route universe differs) -- wired straight into its own
+  `hooks.jl` with no forwarding file of its own.
+- `dominate.jl` — state/order keys, the bitsets mirror, any reward-diff
+  compensation sub-test, and the dominance predicate itself. Start here for
+  "why did the search not explode" — this is measured at ~85-90% of wall
+  time in every pricer that has been profiled.
+- `context.jl` — just the search-context struct and its constructor. No hook
+  methods, no search logic.
+- `hooks.jl` — all wiring, no logic: every one-line (or thin-adapter) method
+  forwarding `context.jl`'s struct into the two hook contracts every pricer
+  implements -- the twelve `AbstractPricingSearchContext` hooks
+  (`_pricing_initial_labels`, ..., forwarding to `seed.jl`/`extend.jl`/
+  `prune.jl`/`dominate.jl`) and the four `round.jl` accept/harvest hooks
+  (`_pricing_candidate_from_label`/`_pricing_pool_signature`/
+  `_pricing_make_column`/`_pricing_verify_column`). Loads last in every
+  directory -- it needs `context.jl`'s struct type in every method signature,
+  and calls into every logic file above it.
+- `accept.jl` — route replay: how a finished label's physical route becomes
+  concrete per-passenger assignments. Pure logic, no `ctx`, no hook methods.
+  Present only in `joint_routing_assignment/exact/` -- every other pricer's
+  round-level hooks are either a trivial projection off the label's own
+  fields (`route_covering/`, `darp_modified/`, `darp/`, all folded straight
+  into `hooks.jl`) or reuse `exact/accept.jl`'s replay directly
+  (`station_simple/`).
+- `logging.jl` — off-by-default dev instrumentation (a dominance
+  rejection census), split out of `dominate.jl` so the production algorithm
+  and the tooling for measuring it don't share a file. Present only in
+  `joint_routing_assignment/exact/`, the one pricer profiled/instrumented
+  this way.
+- `driver.jl` — a standalone entrypoint reproducing `round.jl`'s accept/
+  dedupe/harvest logic by hand, for benchmarking one pricer against another
+  outside the CG hub (no live master model/duals needed). Present only in
+  `joint_routing_assignment/darp_modified/` and `joint_routing_assignment/darp/`,
+  which exist specifically as comparison points against `exact/`.
+- `data.jl` — pricing-data preprocessing, present only where a pricer can't
+  share `../data.jl`'s (or, for `route_covering/`, the parent directory's)
+  construction: `joint_routing_assignment/darp_modified/` and
+  `joint_routing_assignment/darp/`, whose branching search needs its own
+  eligibility/subset-enumeration helpers (see either's `types.jl` module
+  docstring for why). Unaffected by this split -- it predates it and was
+  already its own file.
+
+Load order in `optimize.jl` follows each directory's real dependency graph
+(not always identical across directories): `types.jl` and `logging.jl`
+first (no dependencies), then `seed.jl`/`extend.jl`/`dominate.jl` (logic
+files that read from `types.jl`/`data.jl` but never need the search-context
+struct), then anything `prune.jl` needs precomputed
+(`joint_routing_assignment/`'s shared `search_data.jl`, included between
+`exact/`'s `dominate.jl` and `prune.jl`), then `prune.jl` and `context.jl` in
+whichever order that directory's `prune.jl` allows (a `prune.jl` typed on the
+context struct loads after `context.jl`; one that takes `pricing_data`
+directly, or an untyped `ctx`, doesn't care), then `accept.jl` (pure logic,
+no context dependency), then `hooks.jl` last (needs the context struct in
+every method signature), then `driver.jl` last of all (needs `hooks.jl`'s
+hooks). See each directory's own `types.jl` module docstring, and the
+comments directly above its block in `optimize.jl`, for the specific
+ordering rationale that applies there.
 
 ## Compensated dominance (a.k.a. "catch-up" dominance)
 

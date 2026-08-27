@@ -1,7 +1,7 @@
 """
 Builds the per-scenario pricing graph for `darp_modified/`'s branching commit-or-skip
 passenger free-assignment pricer, and the eligibility/subset helpers
-`labels.jl`'s extension step calls. Counterpart to `../data.jl` (`exact/`+
+`extend.jl`'s extension step calls. Counterpart to `../data.jl` (`exact/`+
 `station_simple/`'s reward-layer preprocessing) -- this pricer needs none of
 that, since credit is assigned directly, at the moment a branch chooses to
 commit (see `types.jl`'s module docstring).
@@ -90,7 +90,7 @@ here (e.g. two different live origins), only the best is returned -- unlike
 right now" to take is never worth branching on: they differ only in reward at
 an otherwise-identical decision point, so the worse one is trivially
 dominated and would only bloat the branch count for free. Ties broken by
-smaller origin id for determinism, mirroring `exact/exact.jl`'s replay
+smaller origin id for determinism, mirroring `exact/accept.jl`'s replay
 tie-break.
 """
 function _joint_routing_assignment_darp_modified_eligible_at_node(
@@ -126,7 +126,7 @@ threading a chain of per-passenger binary sub-decisions through the search)
 is what lets each subset become a single self-contained action for the
 one-action-in/one-child-out `_pricing_extend_label` hook contract
 (`label_setting/types.jl`) without changing the shared engine. See
-`_joint_routing_assignment_darp_modified_candidate_next_nodes` (`labels.jl`), which
+`_joint_routing_assignment_darp_modified_candidate_next_nodes` (`extend.jl`), which
 turns each subset into one action, and `types.jl`'s module docstring for why
 this branching is what makes this pricer's optimum provably equal to
 `exact/`'s.

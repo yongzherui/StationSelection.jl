@@ -8,7 +8,7 @@ pricer is optimized for finding negative-reduced-cost columns under a particular
 vector, while direct solves need a dual-free route universe. This module does a plain
 bounded depth-first search over the same pricing-label transitions
 (the pricing graph/duals in `../types.jl`, the label type in `types.jl`, and the
-transitions in `labels.jl`) -- station-age/wait/detour rules are
+transitions in `extend.jl`) -- station-age/wait/detour rules are
 genuine physical feasibility, not reduced-cost pruning -- but applies neither dominance
 nor reduced-cost pruning itself, and uses uniform positive rewards so nothing gets
 pruned. Every label serving at least one active pair is emitted as a candidate column;
@@ -159,7 +159,7 @@ function _enumerate_aggregate_od_route_raw_columns(
     # Depth-first visit of every reachable label. Unlike the pricer
     # (`_run_label_setting`/`engine.jl`), there is no dominance test, no
     # priority queue, and no reduced-cost pruning here -- every label the
-    # transitions in `labels.jl` say is physically reachable gets visited, in
+    # transitions in `extend.jl` say is physically reachable gets visited, in
     # whatever order the plain recursion produces.
     function visit!(label::RouteCoveringPricingLabel)
         if time() - t_start > time_limit_sec

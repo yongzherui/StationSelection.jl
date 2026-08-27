@@ -74,14 +74,14 @@ end
 Weight of the bits `a_bits` holds that `b_bits` lacks, capped at a running
 early-exit against `budget`. Reward-model-independent: works identically
 whether a bit stands for a passenger reward layer
-(`joint_routing_assignment/exact/labels.jl`'s `activated_reward_layers`) or a
-certified OD pair (`route_covering/exact/labels.jl`'s `served_pairs`) --
+(`joint_routing_assignment/exact/types.jl`'s `activated_reward_layers`) or a
+certified OD pair (`route_covering/exact/types.jl`'s `served_pairs`) --
 `weight` is just "cost of holding bit `i` that the other label doesn't".
 
 This is the "catch-up" term in the compensated dominance rule: for label `a`
 to dominate `b` despite holding bits `b` lacks, `a`'s reduced-cost advantage
 must cover the weight of that excess (`rc_a + w(A_a \\ A_b) <= rc_b`; see
-`joint_routing_assignment/exact/labels.jl`'s `_dominates_joint_routing_assignment_label`
+`joint_routing_assignment/exact/dominate.jl`'s `_dominates_joint_routing_assignment_label`
 docstring for the full soundness argument, which is generic in what a bit
 means). Requiring `A_a ⊆ A_b` (`compensated = false`) is the special case
 `w(A_a ∖ A_b) = 0`, so this only ever adds dominations relative to the plain

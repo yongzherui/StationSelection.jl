@@ -28,23 +28,23 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
 `max_wait_time`, `detour_factor`, `max_stops`, `compensated_dominance` (same
 toggle, same default, applying here to `JointRoutingAssignmentSearchContext`'s
-dominance test instead -- `label_setting/joint_routing_assignment/exact/exact.jl`).
+dominance test instead -- `label_setting/joint_routing_assignment/exact/dominate.jl`).
 
 `pricing_mode::Symbol` (`:exact`, `:darp_modified`, or `:darp`, default
 `:exact`) picks which label-setting pricer `_pricing_build_scenario_context`
 (`label_setting/joint_routing_assignment/pricing_round.jl`) builds -- three
 pricers that are all, run to exhaustion, required to reach the *same*
 optimum, differing only in search mechanism and cost:
-- `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/exact.jl`), which
+- `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/context.jl`), which
   credits each passenger their single *best* certified `(j,k)` regardless of
   visitation order, via a reward-layer running-max trick.
 - `:darp_modified` -- `JointRoutingAssignmentDarpModifiedSearchContext`
-  (`darp_modified/darp_modified.jl`), which computes the same optimum by
+  (`darp_modified/context.jl`), which computes the same optimum by
   branching the search on whether to commit each passenger's candidate as
   it's reached or leave it open for a possibly-better one later, tracking
   only *which passengers* are committed (compensated dominance, an
   upper-bound weight per passenger).
-- `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/darp.jl`), a
+- `:darp` -- `JointRoutingAssignmentDarpSearchContext` (`darp/context.jl`), a
   literal onboard-bitset DARP-style pricer: boarding commits to a specific
   `(j,k)` pair (not deferred like `:darp_modified`'s), tracked with plain
   (uncompensated) dominance over the full triple identity plus an explicit

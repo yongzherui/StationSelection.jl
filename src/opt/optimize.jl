@@ -39,11 +39,29 @@ include("label_setting/round.jl")
 include("label_setting/route_covering/types.jl")
 include("label_setting/route_covering/data.jl")
 include("label_setting/route_covering/exact/types.jl")
-include("label_setting/route_covering/exact/labels.jl")
-include("label_setting/route_covering/exact/exact.jl")
+# seed.jl/extend.jl/dominate.jl have no dependency on the context struct;
+# context.jl is self-contained (only needs types.jl); prune.jl needs
+# RouteCoveringSearchContext (context.jl) since this pricer's precomputed
+# indices live on the context struct itself rather than a separate index
+# type (see prune.jl's own module docstring); hooks.jl loads last, needing
+# the context struct in every method signature.
+include("label_setting/route_covering/exact/seed.jl")
+include("label_setting/route_covering/exact/extend.jl")
+include("label_setting/route_covering/exact/dominate.jl")
+include("label_setting/route_covering/exact/context.jl")
+include("label_setting/route_covering/exact/prune.jl")
+include("label_setting/route_covering/exact/hooks.jl")
 include("label_setting/route_covering/station_simple/types.jl")
-include("label_setting/route_covering/station_simple/labels.jl")
-include("label_setting/route_covering/station_simple/station_simple.jl")
+# seed.jl/extend.jl/dominate.jl/prune.jl have no dependency on the context
+# struct here (unlike ../exact/, this pricer's bound needs nothing off the
+# context beyond pricing_data/duals); context.jl is self-contained; hooks.jl
+# loads last, needing the context struct in every method signature.
+include("label_setting/route_covering/station_simple/seed.jl")
+include("label_setting/route_covering/station_simple/extend.jl")
+include("label_setting/route_covering/station_simple/prune.jl")
+include("label_setting/route_covering/station_simple/dominate.jl")
+include("label_setting/route_covering/station_simple/context.jl")
+include("label_setting/route_covering/station_simple/hooks.jl")
 # generic_runner.jl, column_generation.jl, duals.jl, logging.jl, and dispatch.jl (the old
 # AggregateODRouteCG engine's outer loop, master-facing dual extraction, CG logging, and
 # CG-algorithm dispatch choke point) were all removed -- none of them were reachable from
@@ -61,9 +79,26 @@ include("optimize/aggregate_od_route/direct/build_base.jl")
 include("label_setting/joint_routing_assignment/types.jl")
 include("label_setting/joint_routing_assignment/data.jl")
 include("label_setting/joint_routing_assignment/exact/types.jl")
-include("label_setting/joint_routing_assignment/exact/labels.jl")
+# logging.jl declares the rejection-census counters dominate.jl's
+# _pricing_dominates_at_state increments, so it loads first, standalone (no
+# dependency on anything else in this directory). seed.jl/extend.jl/
+# dominate.jl themselves have no dependency on search_data.jl's types, but
+# prune.jl/context.jl (struct fields) and hooks.jl (method signatures
+# dispatching on JointRoutingAssignmentSearchContext) do -- see each file's
+# own module docstring. Order below reflects that: everything that can load
+# before search_data.jl does, then search_data.jl, then prune.jl/context.jl
+# (need its types), then accept.jl (pure logic, no context dependency), then
+# hooks.jl last -- it's pure wiring forwarding to every file above it,
+# including context.jl's struct and accept.jl's route replay.
+include("label_setting/joint_routing_assignment/exact/logging.jl")
+include("label_setting/joint_routing_assignment/exact/seed.jl")
+include("label_setting/joint_routing_assignment/exact/extend.jl")
+include("label_setting/joint_routing_assignment/exact/dominate.jl")
 include("label_setting/joint_routing_assignment/search_data.jl")
-include("label_setting/joint_routing_assignment/exact/exact.jl")
+include("label_setting/joint_routing_assignment/exact/prune.jl")
+include("label_setting/joint_routing_assignment/exact/context.jl")
+include("label_setting/joint_routing_assignment/exact/accept.jl")
+include("label_setting/joint_routing_assignment/exact/hooks.jl")
 # Exhaustive enumeration for AggregateODRouteJointRoutingAssignmentFormulation's own
 # DirectMIPSolver build (below, after column_generation/build_joint_routing_assignment.jl,
 # which it also depends on) -- reuses route_covering/exact/enumeration.jl's raw physical-
@@ -71,8 +106,16 @@ include("label_setting/joint_routing_assignment/exact/exact.jl")
 # docstring for why reusing that DFS is exact, not an approximation.
 include("label_setting/joint_routing_assignment/exact/enumeration.jl")
 include("label_setting/joint_routing_assignment/station_simple/types.jl")
-include("label_setting/joint_routing_assignment/station_simple/labels.jl")
-include("label_setting/joint_routing_assignment/station_simple/station_simple.jl")
+# No prune.jl/accept.jl here: this pricer reuses ../exact/prune.jl's bound and
+# ../exact/accept.jl's route replay directly (both already loaded by this
+# point), wired straight into hooks.jl. seed.jl/extend.jl/dominate.jl have no
+# dependency on the context struct; context.jl is self-contained; hooks.jl
+# loads last, needing the context struct in every method signature.
+include("label_setting/joint_routing_assignment/station_simple/seed.jl")
+include("label_setting/joint_routing_assignment/station_simple/extend.jl")
+include("label_setting/joint_routing_assignment/station_simple/dominate.jl")
+include("label_setting/joint_routing_assignment/station_simple/context.jl")
+include("label_setting/joint_routing_assignment/station_simple/hooks.jl")
 # darp_modified/ and darp/ are two controlled comparison points against
 # exact/'s running-max passenger crediting, both selectable per solve via
 # `AggregateODRouteJointRoutingAssignmentFormulation`'s `pricing_mode` field
@@ -85,20 +128,39 @@ include("label_setting/joint_routing_assignment/station_simple/station_simple.jl
 # darp_modified/: value-equivalent to exact/ (branches commit-or-skip per
 # passenger instead of running-max), served keyed by passenger with
 # compensated dominance -- see darp_modified/types.jl's module docstring.
+# seed.jl/extend.jl/dominate.jl have no dependency on the context struct;
+# prune.jl's bound takes an untyped `ctx` so it has no load-order dependency
+# on context.jl either (see prune.jl's own module docstring); context.jl is
+# self-contained; hooks.jl loads after it, needing the context struct in
+# every method signature; driver.jl loads last, needing hooks.jl's hooks.
 include("label_setting/joint_routing_assignment/darp_modified/types.jl")
 include("label_setting/joint_routing_assignment/darp_modified/data.jl")
-include("label_setting/joint_routing_assignment/darp_modified/labels.jl")
+include("label_setting/joint_routing_assignment/darp_modified/seed.jl")
+include("label_setting/joint_routing_assignment/darp_modified/extend.jl")
+include("label_setting/joint_routing_assignment/darp_modified/dominate.jl")
 include("label_setting/joint_routing_assignment/duals.jl")
-include("label_setting/joint_routing_assignment/darp_modified/darp_modified.jl")
+include("label_setting/joint_routing_assignment/darp_modified/prune.jl")
+include("label_setting/joint_routing_assignment/darp_modified/context.jl")
+include("label_setting/joint_routing_assignment/darp_modified/hooks.jl")
+include("label_setting/joint_routing_assignment/darp_modified/driver.jl")
 # darp/: literal onboard-bitset DARP-style pricer -- boarding commits to a
 # specific (j,k) pair, served keyed by the full triple with plain (not
 # compensated) dominance, ride-limit violations are hard infeasibility (the
 # whole label is discarded, not just the one commitment) -- see
-# darp/types.jl's module docstring.
+# darp/types.jl's module docstring. Load order mirrors darp_modified/'s:
+# seed.jl/extend.jl/dominate.jl have no dependency on the context struct;
+# prune.jl takes pricing_data directly (no dependency on context.jl at all,
+# unlike either sibling pricer's bound); context.jl is self-contained;
+# hooks.jl loads after it; driver.jl loads last, needing hooks.jl's hooks.
 include("label_setting/joint_routing_assignment/darp/types.jl")
 include("label_setting/joint_routing_assignment/darp/data.jl")
-include("label_setting/joint_routing_assignment/darp/labels.jl")
-include("label_setting/joint_routing_assignment/darp/darp.jl")
+include("label_setting/joint_routing_assignment/darp/seed.jl")
+include("label_setting/joint_routing_assignment/darp/extend.jl")
+include("label_setting/joint_routing_assignment/darp/dominate.jl")
+include("label_setting/joint_routing_assignment/darp/prune.jl")
+include("label_setting/joint_routing_assignment/darp/context.jl")
+include("label_setting/joint_routing_assignment/darp/hooks.jl")
+include("label_setting/joint_routing_assignment/darp/driver.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")

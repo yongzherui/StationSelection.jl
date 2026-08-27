@@ -1,53 +1,22 @@
 """
-`JointRoutingAssignmentStationSimpleSearchContext`: the elementary-route
-passenger free-assignment pricer's plug into the shared search loop
-(`_run_label_setting`, `engine.jl`), mirroring `JointRoutingAssignmentSearchContext`'s
-hook set (`../exact/exact.jl`) one for one. See `labels.jl` for the label-DP
-primitives (candidate generation, extension, dominance) and `types.jl` for the
-underlying label/bitsets/dominance types.
+All wiring, no logic: every method that plugs
+`JointRoutingAssignmentStationSimpleSearchContext` (`context.jl`) into the
+two generic hook contracts this pricer implements, mirroring
+`../exact/hooks.jl`'s hook set one for one. Two contracts, both forwarded
+from here:
+
+  - the twelve `AbstractPricingSearchContext` hooks (`../../types.jl`) that
+    `_run_label_setting` (`engine.jl`) calls during the search itself --
+    forwarded to `seed.jl` / `extend.jl` / `dominate.jl`, with the
+    remaining-reward bound (`_pricing_label_priority`) and the round-level
+    replay (below) reused directly from `../exact/prune.jl` /
+    `../exact/accept.jl` -- this pricer has no `prune.jl`/`accept.jl` of its
+    own since replay is agnostic to how the physical route was found;
+  - the four context-level hooks `round.jl` calls once per surviving label to
+    harvest it into a column.
 """
 
-"""
-Context for the elementary-route passenger free-assignment search: bundles
-`pricing_data`, `dominance_mode` (`:exact` states on `(current, visited)`;
-`:subset` states on `current` alone, pairing it with a shared `empty_visited`
-so both modes share one concrete state type), the once-built `dominates`
-closure, and the `search_index`/`bound_workspace` the shared remaining-reward
-bound needs. Plugs into `_run_label_setting` (`engine.jl`) the same way
-`JointRoutingAssignmentSearchContext` does (`../exact/exact.jl`). Not currently
-reachable from `joint_routing_assignment/exact/pricing_round.jl`'s
-`_pricing_build_scenario_context` (always builds the revisit-tolerant context
-today) -- kept as a real, independently usable capability.
-"""
-struct JointRoutingAssignmentStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
-    JointRoutingAssignmentStationSimpleDominanceFilters, JointRoutingAssignmentStationSimpleLabel, JointRoutingAssignmentStationSimpleAges,
-    Tuple{Int, BitSet}, RewardLayerBitset,
-}
-    pricing_data::JointRoutingAssignmentPricingData
-    dominance_mode::Symbol
-    dominates::D
-    search_index::JointRoutingAssignmentSearchIndex
-    bound_workspace::JointRoutingAssignmentBoundWorkspace
-    node_index::Dict{Int, Int}
-    empty_visited::BitSet
-end
-
-function JointRoutingAssignmentStationSimpleSearchContext(
-    pricing_data::JointRoutingAssignmentPricingData; dominance_mode::Symbol=:exact,
-)
-    dominance_mode in (:subset, :exact) ||
-        throw(ArgumentError("dominance_mode must be :subset or :exact, got $(dominance_mode)"))
-    rules = JointRoutingAssignmentStationSimpleDominanceRules()
-    dominates(x::PricingLabelEntry, y::PricingLabelEntry) = _pricing_dominates_at_state(
-        x.filters, x.label, x.bitsets, y.filters, y.label, y.bitsets, pricing_data.layer_weight, rules,
-    )
-    search_index = _build_joint_routing_assignment_search_index(pricing_data)
-    bound_workspace = _create_joint_routing_assignment_bound_workspace()
-    return JointRoutingAssignmentStationSimpleSearchContext(
-        pricing_data, dominance_mode, dominates, search_index, bound_workspace, search_index.node_index, BitSet(),
-    )
-end
-
+# ── AbstractPricingSearchContext hooks (engine.jl / label_setting/types.jl) ──
 _pricing_initial_labels(ctx::JointRoutingAssignmentStationSimpleSearchContext) =
     _initial_joint_routing_assignment_station_simple_labels(ctx.pricing_data)
 
@@ -62,7 +31,7 @@ _pricing_state(
 
 # The reward bound reads only `current`/`time`/`activated_reward_layers` from the
 # label and `age_idx`/`age_val` from the ages mirror, so the revisit-tolerant
-# pricer's bound (`../exact/exact.jl`) applies unchanged here.
+# pricer's bound (`../exact/prune.jl`) applies unchanged here.
 _pricing_label_priority(
     ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel, label_ages::JointRoutingAssignmentStationSimpleAges,
 ) = label.reduced_cost -
@@ -83,9 +52,10 @@ _pricing_extend_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, lab
 
 _pricing_dominates_fn(ctx::JointRoutingAssignmentStationSimpleSearchContext) = ctx.dominates
 
+# ── round.jl context-level hooks (candidate → column → master verification) ──
 """
 Elementary-route counterpart of the revisit-tolerant pricer's
-`_pricing_candidate_from_label` (`../exact/exact.jl`): identical route-replay, since
+`_pricing_candidate_from_label` (`../exact/hooks.jl`): identical route-replay, since
 replay is agnostic to how the physical route was found."""
 function _pricing_candidate_from_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel)
     assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
@@ -112,7 +82,7 @@ _pricing_make_column(ctx::JointRoutingAssignmentStationSimpleSearchContext, colu
     )
 
 """Same master reduced-cost cross-check as the revisit-tolerant context's twin
-(`../exact/exact.jl`) -- the master doesn't know which route universe a column came
+(`../exact/hooks.jl`) -- the master doesn't know which route universe a column came
 from, only the assignments it carries."""
 function _pricing_verify_column(::JointRoutingAssignmentStationSimpleSearchContext, column::JointRoutingAssignmentRouteColumn, m::JuMP.Model, mapping, duals)
     alpha, gamma_o, gamma_d = duals

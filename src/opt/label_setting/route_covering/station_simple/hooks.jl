@@ -1,47 +1,25 @@
 """
-`RouteCoveringStationSimpleSearchContext`: the elementary-route pricer's plug
-into the shared search loop (`_run_label_setting`, `engine.jl`), mirroring
-`RouteCoveringSearchContext`'s hook set (`../exact/exact.jl`) one for one. See
-`labels.jl` for the label-DP primitives (candidate generation, extension,
-dominance) and `types.jl` for the underlying label/bitsets/dominance types.
+All wiring, no logic: every method that plugs
+`RouteCoveringStationSimpleSearchContext` (`context.jl`) into the two generic
+hook contracts this pricer implements, mirroring `../exact/hooks.jl`'s hook
+set one for one. Two contracts, both forwarded from here:
+
+  - the twelve `AbstractPricingSearchContext` hooks (`../../types.jl`) that
+    `_run_label_setting` (`engine.jl`) calls during the search itself --
+    forwarded to `seed.jl` / `extend.jl` / `prune.jl` / `dominate.jl`;
+  - the four context-level hooks `round.jl` calls once per surviving label to
+    harvest it into a column.
+
+Like the revisit-tolerant twin, this pricer's round-level hooks have no
+route-replay step (`_pricing_candidate_from_label` is a trivial projection off
+`label.served_pairs`), so `_aggregate_od_route_column_from_label` (this
+label type's own method) lives inline here rather than in a separate
+`accept.jl`; `_aggregate_od_route_column_signature` itself is reused directly
+from `../exact/hooks.jl` (generic over any `pairs`/`AggregateODRouteColumn`,
+not label-type-specific).
 """
 
-"""
-Context for the elementary-route pricer: bundles `pricing_data`/`duals`, the
-once-built `dominates` closure, and `node_index` (the only precomputed index
-this pricer's reward bound needs -- unlike the revisit-tolerant twin, it has
-no travel matrix or per-pair arrays to precompute, since
-`_route_covering_station_simple_future_reward_bound` (`labels.jl`) iterates
-`active_pairs` directly). Plugs into the shared `_run_label_setting`
-(`engine.jl`) the same way `RouteCoveringSearchContext` does (`../exact/exact.jl`).
-Not currently reachable from `../exact/pricing_round.jl`'s `_pricing_build_scenario_context`
-(`AggregateODRouteBaseFormulation` always builds the revisit-tolerant context
-today) -- kept as a real, independently usable capability for whoever wants to
-wire station-simple pricing back into the hub.
-"""
-struct RouteCoveringStationSimpleSearchContext{D<:Function} <: AbstractPricingSearchContext{
-    RouteCoveringStationSimpleDominanceFilters, RouteCoveringStationSimpleLabel, RouteCoveringStationSimpleBitsets,
-    Tuple{Int, BitSet}, Tuple{Vararg{Tuple{Int, Int}}},
-}
-    pricing_data::RouteCoveringPricingData
-    duals::RouteCoveringPricingDuals
-    dominates::D
-    node_index::Dict{Int, Int}
-end
-
-function RouteCoveringStationSimpleSearchContext(
-    pricing_data::RouteCoveringPricingData, duals::RouteCoveringPricingDuals,
-)
-    rules = RouteCoveringStationSimpleDominanceRules()
-    # Built once per search and handed to `_add_pricing_label_to_state!`
-    # unchanged for every dominance test, same convention as the
-    # revisit-tolerant pricer's own `dominates` closure (`../exact/exact.jl`).
-    dominates(x::PricingLabelEntry, y::PricingLabelEntry) =
-        _pricing_dominates_at_state(x.filters, x.bitsets, y.filters, y.bitsets, rules)
-    node_index = Dict(node => i for (i, node) in enumerate(pricing_data.nodes))
-    return RouteCoveringStationSimpleSearchContext(pricing_data, duals, dominates, node_index)
-end
-
+# ── AbstractPricingSearchContext hooks (engine.jl / label_setting/types.jl) ──
 _pricing_initial_labels(ctx::RouteCoveringStationSimpleSearchContext) =
     _initial_route_covering_station_simple_labels(ctx.pricing_data, ctx.duals)
 
@@ -70,7 +48,21 @@ _pricing_extend_label(ctx::RouteCoveringStationSimpleSearchContext, label::Route
 
 _pricing_dominates_fn(ctx::RouteCoveringStationSimpleSearchContext) = ctx.dominates
 
-# ── round-level hooks (engine.jl's `_run_pricing_round`, dispatched on ctx) ──
+# ── round.jl context-level hooks (candidate → column → master verification) ──
+_aggregate_od_route_column_from_label(
+    label::RouteCoveringStationSimpleLabel,
+    column_id::Int,
+    scenario::Int,
+)::AggregateODRouteColumn = AggregateODRouteColumn(
+    column_id,
+    collect(label.served_pairs),
+    label.tau;
+    metadata=Dict{String, Any}(
+        "scenario" => scenario,
+        "route" => Tuple(label.route),
+        "reduced_cost" => label.reduced_cost,
+    ),
+)
 
 function _pricing_candidate_from_label(::RouteCoveringStationSimpleSearchContext, label::RouteCoveringStationSimpleLabel)
     isempty(label.served_pairs) && return nothing
@@ -87,7 +79,7 @@ _pricing_make_column(ctx::RouteCoveringStationSimpleSearchContext, column_id::In
     _aggregate_od_route_column_from_label(candidate.payload, column_id, ctx.pricing_data.scenario)
 
 """Same reduced-cost cross-check as the revisit-tolerant context's twin
-(`../exact/exact.jl`) -- the master doesn't know which route universe a column came
+(`../exact/hooks.jl`) -- the master doesn't know which route universe a column came
 from, only the pair set it carries."""
 function _pricing_verify_column(ctx::RouteCoveringStationSimpleSearchContext, column::AggregateODRouteColumn, ::JuMP.Model, mapping, duals; atol::Float64=1e-5)
     pricer_rc = Float64(get(column.metadata, "reduced_cost", NaN))

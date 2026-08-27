@@ -1,6 +1,6 @@
 """
 Builds the per-scenario pricing graph for `darp/`'s onboard-bitset pricer,
-and the board-option/subset-enumeration helpers `labels.jl`'s extension step
+and the board-option/subset-enumeration helpers `extend.jl`'s extension step
 calls. Counterpart to `../data.jl` (`exact/`+`station_simple/`'s reward-layer
 preprocessing) and `../darp_modified/data.jl` (`darp_modified/`'s eligibility/
 commit-subset helpers) -- this pricer's boarding decision is a genuinely

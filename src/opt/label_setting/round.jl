@@ -23,8 +23,8 @@ Two dispatch layers, at two different granularities:
   that varies per *formulation* (which scenarios to price, how to build a
   scenario's context, how to merge results across scenarios);
 - the four remaining hooks dispatch on `ctx::AbstractPricingSearchContext`
-  (defined alongside each concrete context in `route_covering/exact/exact.jl` /
-  `joint_routing_assignment/exact/exact.jl`) for anything that varies per *label
+  (implemented alongside each concrete context in `route_covering/exact/hooks.jl` /
+  `joint_routing_assignment/exact/hooks.jl`) for anything that varies per *label
   type* (candidate extraction, pool signature, column materialization,
   master-reduced-cost verification) -- the same granularity `types.jl`'s
   inner search hooks already dispatch at.

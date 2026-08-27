@@ -2,8 +2,9 @@
 Label/bitsets/dominance/pricing-data types for `darp/`: a literal onboard-
 bitset DARP-style pricer, built as a comparison point against `darp_modified/`'s
 retroactive commit-or-skip and `exact/`'s reward-layer running-max. See
-`darp.jl`'s module docstring for the search-context wiring; this file is the
-one to read for the reward model and dominance argument.
+`context.jl`/`hooks.jl` for the search-context wiring and `driver.jl` for the
+standalone comparison entrypoint; this file is the one to read for the
+reward model and dominance argument.
 
 This is a DARP-style label-setting algorithm adapted to this pricing problem,
 not a general classical DARP solver: starts are synchronized, capacity is
@@ -53,7 +54,7 @@ package -- with `age_a(p) <= age_b(p)` on every commitment both still share.
 Because the support and value directions don't couple the same way
 `label_setting/utils.jl`'s sparse-age machinery assumes, this pricer has its
 own small merge-walk (`_joint_routing_assignment_darp_onboard_ages_dominate`,
-`labels.jl`) rather than reusing that utility directly.
+`dominate.jl`) rather than reusing that utility directly.
 
 Reward is credited immediately at pickup, so an onboard entry is purely a
 future feasibility liability rather than an unbooked economic opportunity.
@@ -74,7 +75,7 @@ missed opportunity) and from `darp_modified/`'s recommended alternative
 (prune just the dead entry) -- chosen because it's closer to how textbook
 DARP resource-extension functions actually behave: an infeasible extension
 simply produces no child, full stop. See
-`_joint_routing_assignment_darp_candidate_next_nodes` (`labels.jl`) for where
+`_joint_routing_assignment_darp_candidate_next_nodes` (`extend.jl`) for where
 this is enforced -- as an action-generation filter, not a per-entry prune,
 since the shared engine's `_pricing_extend_label` hook cannot itself signal
 "no child produced."
@@ -113,7 +114,7 @@ which not-yet-resolved passengers newly board *here*, each committed to one
 specific candidate destination (`board_subset::Vector{(p, origin, destination,
 reward)}`). One label-setting engine "action" (`label_setting/types.jl`'s
 `_pricing_candidate_next_nodes`/`_pricing_extend_label` hooks) is one such
-pair -- see `labels.jl`'s module docstring for why branching over board
+pair -- see `extend.jl`'s module docstring for why branching over board
 selections has to be expressed as multiple actions rather than multiple
 children of one action.
 """

@@ -1,7 +1,7 @@
 """
 Builds the per-scenario pricing graph (nodes, travel costs, active station OD
 pairs, and the direct-ride-limit/reduced-cost helpers derived from it) that
-the label search in `exact/labels.jl`/`exact/exact.jl` operates over.
+the label search in `exact/` (seed.jl/extend.jl/prune.jl/dominate.jl/context.jl/hooks.jl) operates over.
 """
 
 function _route_covering_travel(pricing_data::RouteCoveringPricingData, u::Int, v::Int)::Float64

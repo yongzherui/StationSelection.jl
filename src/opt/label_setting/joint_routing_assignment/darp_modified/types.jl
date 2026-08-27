@@ -3,8 +3,9 @@ Label/bitsets/dominance/pricing-data types for `darp_modified/`: a *provably
 value-equivalent* alternative to `exact/`'s running-max crediting, built as a
 controlled comparison point for how much `exact/`'s reward-layer trick is
 worth *computationally* -- not a different, weaker reward model. See
-`darp_modified.jl`'s module docstring for the search-context wiring; this file is the
-one to read for the reward model and dominance soundness argument.
+`context.jl`/`hooks.jl` for the search-context wiring and `driver.jl` for the
+standalone comparison entrypoint; this file is the one to read for the
+reward model and dominance soundness argument.
 
 # The equivalence this pricer is required to satisfy
 
@@ -41,19 +42,19 @@ at the target itself, so `exact/`'s optimal assignment set is always reachable
 as *one* of `darp_modified/`'s branches. See
 `_joint_routing_assignment_darp_modified_eligible_at_node`/`_joint_routing_assignment_darp_modified_commit_subsets`
 (`data.jl`) and `_joint_routing_assignment_darp_modified_candidate_next_nodes`
-(`labels.jl`) for the mechanics -- `JointRoutingAssignmentDarpModifiedAction` below is
+(`extend.jl`) for the mechanics -- `JointRoutingAssignmentDarpModifiedAction` below is
 the `(next_node, commit_subset)` pair one branch corresponds to.
 
 Each passenger contributes at most one reward regardless of which branch a
 label took, so the label tracks the concrete committed triple directly
 (`served::Dict{Int, Tuple{Int,Int}}`) rather than a running-maximum proxy --
 no reward-layer preprocessing needed. `exact/`'s replay-based reconstruction
-of concrete `(p,j,k)` assignments (`exact/exact.jl`'s
+of concrete `(p,j,k)` assignments (`exact/accept.jl`'s
 `_replay_joint_routing_assignment_route`) has no counterpart here: since
 credit is assigned exactly once, at extension time, for whichever candidate a
 given branch actually committed to, a finished label's own `served` field
-already *is* the final answer -- see `darp_modified.jl`'s `_pricing_candidate_from_label`,
-a trivial projection like `route_covering/exact/exact.jl`'s, not a replay.
+already *is* the final answer -- see `hooks.jl`'s `_pricing_candidate_from_label`,
+a trivial projection like `route_covering/exact/hooks.jl`'s, not a replay.
 
 Still unlimited-capacity, synchronized-start, revisit-tolerant -- same
 physical route contract as `RouteCoveringPricingLabel`/
@@ -145,7 +146,7 @@ which subset of the not-yet-served passengers newly eligible there
 commits -- everyone eligible but left out of `commit_subset` stays
 uncommitted. One label-setting engine "action" (`label_setting/types.jl`'s
 `_pricing_candidate_next_nodes`/`_pricing_extend_label` hooks) is one such
-pair, not just a bare node id -- see `labels.jl`'s module docstring for why
+pair, not just a bare node id -- see `extend.jl`'s module docstring for why
 this is how branching is expressed without changing the shared engine.
 """
 const JointRoutingAssignmentDarpModifiedAction = Tuple{Int, Vector{Tuple{Int, Int, Float64}}}
