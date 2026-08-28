@@ -18,7 +18,6 @@ function initial_joint_routing_assignment_pricing_labels(
     endpoints = Set{Int}()
     for opp in pricing_data.opportunities
         push!(endpoints, opp.origin)
-        push!(endpoints, opp.destination)
     end
 
     labels = JointRoutingAssignmentPricingLabel[]
