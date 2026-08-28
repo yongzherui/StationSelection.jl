@@ -37,20 +37,19 @@ Two levers:
 1. **Fewer extensions.** Candidate generation drops any already-visited node, so
    the branching factor shrinks as a route grows.
 
-2. **Fine dominance states (`dominance_mode = :exact`, the default).** The state
-   is the exact `(current, visited)` pair, so each state's label list is tiny and
-   every insertion's dominance scan is short. That is the whole game here: the
-   scan is O(list size) per insertion and ~85-90% of wall time, so state
-   *granularity* dominates. At n=20 this makes the elementary search 1.6-3.5x
-   faster than the revisit-tolerant pricer.
-
-   A `:subset` mode also exists (state = `current` alone, add `U_a ⊆ U_b` to
-   dominance). It is a strictly stronger dominance and keeps ~2x fewer live labels,
-   yet it is **1.4-6.6x slower** than `:exact` because its coarse `current`-only
-   states grow label lists to tens of thousands of entries and the per-insertion
-   scan blows up -- fewer labels do not pay for scanning giant lists. Retained for
-   research only; measured verdict and numbers in
-   `notes/2026-07-30_passenger_station_simple_pricing.md`.
+2. **Subset dominance, state = `current` alone.** The elementarity resource
+   `U_a ⊆ U_b` is enforced inside the dominance predicate (`dominate.jl`), not the
+   state key, so a "lean" label (visited a subset of another's stations) can
+   dominate a "wandered" one with the same `current`. This is strictly stronger
+   than keying the state on the exact `(current, visited)` pair, which was tried
+   first and measured letting the live population balloon 3-6x, since labels with
+   differing visited sets could then never even be compared -- see
+   `notes/2026-07-30_passenger_station_simple_pricing.md` for the full
+   before/after numbers and the history of that comparison (an earlier pass also
+   measured the exact-keyed state faster in wall clock, at the cost of that larger
+   live population -- unresolved whether that measurement still holds now that
+   `dominate.jl`'s dominance-condition ordering has since been optimized; there is
+   no toggle back to it today).
 
 # Correctness caveat
 

@@ -263,38 +263,6 @@
         @test !dominates(no_clock, has_clock)
     end
 
-    @testset "dominance_mode :exact and :subset agree on the priced optimum" begin
-        # Exact keys the state more finely and subset prunes more, but both
-        # are sound over the same elementary route universe, so the best reduced cost
-        # and the set of column signatures must be identical.
-        nodes = [1, 2, 3, 4]
-        travel = line_travel_cost(4)
-        candidates = [
-            PassengerAssignmentCandidate(1, 1, 3, 100.0, 8.0),
-            PassengerAssignmentCandidate(2, 2, 4, 100.0, 6.0),
-            PassengerAssignmentCandidate(3, 1, 4, 100.0, 7.0),
-            PassengerAssignmentCandidate(4, 2, 1, 100.0, 5.0),
-        ]
-        pd = create_joint_routing_assignment_pricing_data(
-            1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
-        )
-        run(mode) = joint_routing_assignment_pricing_by_station_simple_label_setting(
-            pd, JointRoutingAssignmentRouteColumn[];
-            next_column_id=1, max_new_columns=10^6, n_candidates=10^6, time_limit=30.0,
-            dominance_mode=mode,
-        )
-        subset_cols, sub_exh, _ = run(:subset)
-        exact_cols, exa_exh, _ = run(:exact)
-        @test sub_exh && exa_exh
-        @test isapprox(
-            minimum(c.metadata["reduced_cost"] for c in subset_cols),
-            minimum(c.metadata["reduced_cost"] for c in exact_cols); atol=1e-6,
-        )
-        sig(cols) = Set(Tuple(sort(c.assignments)) for c in cols)
-        @test sig(subset_cols) == sig(exact_cols)
-    end
-
     @testset "label search finds the brute-force-optimal reduced cost (randomized)" begin
         # End-to-end soundness check against exhaustive enumeration of every
         # elementary route -- see the revisit-tolerant pricer's twin in

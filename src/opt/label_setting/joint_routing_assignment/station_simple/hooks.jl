@@ -23,11 +23,11 @@ _pricing_initial_labels(ctx::JointRoutingAssignmentStationSimpleSearchContext) =
 _pricing_make_bitsets(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel) =
     _make_joint_routing_assignment_station_simple_ages(label, ctx.node_index)
 
-# `:subset` states on `current` alone; pairing it with the shared `empty_visited`
-# keeps a single concrete key type for both modes.
+# States on `current` alone; the elementarity resource `U_a ⊆ U_b` is enforced
+# inside the dominance predicate itself (`dominate.jl`), not the state key.
 _pricing_state(
     ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel, ::JointRoutingAssignmentStationSimpleAges,
-) = ctx.dominance_mode === :exact ? (label.current, label.visited) : (label.current, ctx.empty_visited)
+) = label.current
 
 # The reward bound reads only `current`/`time`/`activated_reward_layers` from the
 # label and `age_idx`/`age_val` from the ages mirror, so the revisit-tolerant
