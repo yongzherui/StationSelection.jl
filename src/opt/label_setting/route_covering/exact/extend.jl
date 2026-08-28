@@ -127,11 +127,13 @@ function _extend_route_covering_pricing_label(
         aged_station[next_node] = 0.0
     end
     # Drop any clock (including the one possibly just opened above) that can
-    # no longer reach any uncertified pair's destination in time -- keeps the
-    # label's state lean for the dominance/bitset machinery downstream.
+    # no longer reach any pair's destination in time -- keeps the label's
+    # state lean for the dominance/bitset machinery downstream. Deliberately
+    # blind to `certified_pairs`/`served_pairs` -- see `_prune_irrelevant_route_covering_station_ages`'s
+    # docstring (`../data.jl`) for why coupling this to per-label served-pairs
+    # bookkeeping is unsound, not just a missed optimization.
     aged_station = _prune_irrelevant_route_covering_station_ages(
         aged_station,
-        certified_pairs,
         pricing_data,
         duals,
         next_node,

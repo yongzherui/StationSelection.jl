@@ -451,4 +451,146 @@
             end
         end
     end
+
+    @testset "dominance under a single station extension (regression: station-clock pruning must not couple to served_pairs)" begin
+        # Fuzz-discovered regression case for `_prune_irrelevant_route_covering_station_ages`
+        # (`route_covering/data.jl`): it used to drop a station's live clock
+        # once every pair reachable from it was already in `served_pairs`.
+        # `served_pairs` is per-label and legitimately differs between two
+        # labels compensated dominance allows to compare (one may have served
+        # strictly more than the other, charged against its reduced-cost
+        # lead) -- so the same physical station could get pruned from one
+        # label but not the other purely because of which pairs each had
+        # already banked, not because of any real physical/ride-limit
+        # difference. That can flip a domination that held *before* a shared
+        # one-station extension into one that no longer holds *after* it --
+        # exactly the property dominance-based pruning depends on to discard
+        # a label for good. See `_prune_irrelevant_route_covering_station_ages`'s
+        # own docstring for the full argument and its analogue in
+        # `joint_routing_assignment/data.jl`'s `_joint_routing_assignment_age_is_useful`
+        # (fixed for the same reason in commit f644a7c).
+        travel = line_travel_cost(3)
+        active_pairs = [(2, 1), (1, 3), (3, 1)]
+        sigma = Dict((2, 1) => 9.0, (1, 3) => 7.0, (3, 1) => 4.0)
+        pd = RouteCoveringPricingData(
+            1, [1, 2, 3], travel, active_pairs,
+            0.5, 0.0, 3.0, 1.5, typemax(Int), false, true,
+        )
+        duals = RouteCoveringPricingDuals(sigma)
+        pair_weight = Dict(pair => max(0.0, get(sigma, pair, 0.0)) for pair in active_pairs)
+
+        seeds = StationSelection.initial_route_covering_pricing_labels(pd, duals)
+        seed3 = only(filter(l -> l.current == 3, seeds))
+
+        # `a`: 3 -> 2 -> 1, banking both (2,1) and (3,1) along the way.
+        a1 = StationSelection._extend_route_covering_pricing_label(seed3, 2, pd, duals)
+        a = StationSelection._extend_route_covering_pricing_label(a1, 1, pd, duals)
+        # `b`: 3 -> 1 directly, banking only (3,1) -- strictly less than `a`,
+        # but `a`'s reduced-cost lead is enough to compensate for the gap.
+        b = StationSelection._extend_route_covering_pricing_label(seed3, 1, pd, duals)
+
+        @test a.current == b.current == 1
+        @test StationSelection._dominates_route_covering_label(
+            a, b, false; pair_weight=pair_weight, compensated_dominance=true,
+        )
+
+        # A single common extension to node 2 -- one more station, nothing
+        # hand-constructed -- must preserve that domination.
+        a2 = StationSelection._extend_route_covering_pricing_label(a, 2, pd, duals)
+        b2 = StationSelection._extend_route_covering_pricing_label(b, 2, pd, duals)
+        @test StationSelection._dominates_route_covering_label(
+            a2, b2, false; pair_weight=pair_weight, compensated_dominance=true,
+        )
+    end
+
+    @testset "dominance is preserved under any common one-step extension (randomized)" begin
+        # Same property and methodology as the passenger pricer's twin
+        # (`test_joint_routing_assignment_pricing.jl`): every label here comes
+        # from an actual random walk through the real extend function
+        # (`_extend_route_covering_pricing_label`), never hand-constructed, so
+        # every one automatically satisfies whatever invariants the real
+        # search maintains.
+        using Random
+
+        function random_walk_route_covering_labels(rng, seed_label, pd, duals, nodes, depth)
+            labels = [seed_label]
+            label = seed_label
+            for _ in 1:depth
+                candidates = [nd for nd in nodes if nd != label.current && haskey(pd.travel_cost, (label.current, nd))]
+                isempty(candidates) && break
+                next_node = rand(rng, candidates)
+                label = StationSelection._extend_route_covering_pricing_label(label, next_node, pd, duals)
+                push!(labels, label)
+            end
+            return labels
+        end
+
+        rng = MersenneTwister(20260828)
+        n_trials = 300
+        n_checked = 0
+        for _ in 1:n_trials
+            n = rand(rng, 3:6)
+            nodes = collect(1:n)
+            travel = line_travel_cost(n)
+            n_pairs = rand(rng, 1:5)
+            active_pairs = Tuple{Int, Int}[]
+            sigma = Dict{Tuple{Int, Int}, Float64}()
+            for _ in 1:n_pairs
+                j, k = rand(rng, nodes, 2)
+                j == k && continue
+                pair = (j, k)
+                pair in active_pairs || push!(active_pairs, pair)
+                sigma[pair] = Float64(rand(rng, 1:10))
+            end
+            isempty(active_pairs) && continue
+
+            pd = RouteCoveringPricingData(
+                1, nodes, travel, active_pairs,
+                Float64(rand(rng, [0.0, 0.5, 1.0])),
+                0.0,
+                Float64(rand(rng, 1:4)),
+                Float64(rand(rng, [1.0, 1.5, 2.0])),
+                typemax(Int),
+                false,
+                true,
+            )
+            duals = RouteCoveringPricingDuals(sigma)
+
+            seeds = StationSelection.initial_route_covering_pricing_labels(pd, duals)
+            isempty(seeds) && continue
+
+            by_current = Dict{Int, Vector{Any}}()
+            for _ in 1:6
+                seed_label = rand(rng, seeds)
+                depth = rand(rng, 0:4)
+                for label in random_walk_route_covering_labels(rng, seed_label, pd, duals, nodes, depth)
+                    push!(get!(() -> Any[], by_current, label.current), label)
+                end
+            end
+
+            pair_weight = Dict(pair => max(0.0, get(sigma, pair, 0.0)) for pair in active_pairs)
+
+            for (current, labels) in by_current
+                length(labels) < 2 && continue
+                for i in eachindex(labels), j in eachindex(labels)
+                    i == j && continue
+                    a, b = labels[i], labels[j]
+                    StationSelection._dominates_route_covering_label(
+                        a, b, false; pair_weight=pair_weight, compensated_dominance=true,
+                    ) || continue
+                    for next_node in nodes
+                        next_node == current && continue
+                        haskey(travel, (current, next_node)) || continue
+                        n_checked += 1
+                        a2 = StationSelection._extend_route_covering_pricing_label(a, next_node, pd, duals)
+                        b2 = StationSelection._extend_route_covering_pricing_label(b, next_node, pd, duals)
+                        @test StationSelection._dominates_route_covering_label(
+                            a2, b2, false; pair_weight=pair_weight, compensated_dominance=true,
+                        )
+                    end
+                end
+            end
+        end
+        @test n_checked > 0
+    end
 end
