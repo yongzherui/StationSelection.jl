@@ -11,12 +11,12 @@ Note that `k = max(2, ceil(n/2))` (see `../lib/cg_benchmark.jl`) still tracks `n
 so the larger cells build more stations for the same 16 OD pairs.
 """
 
-const N_STATIONS = [15, 20, 25]
+const N_STATIONS = [10, 15, 20]
 const N_PAIRS = [16]
 const N_SCENARIOS = 1
 const SEEDS = collect(42:51)
 const MAX_STOPS = [10]
-const PRICING_TIME_LIMIT_SEC = 900.0
+const PRICING_TIME_LIMIT_SEC = 1800.0
 const DOMINANCE_MODES = [true, false]
 
 outpath = isempty(ARGS) ? joinpath(@__DIR__, "config", "jobs.tsv") : abspath(ARGS[1])

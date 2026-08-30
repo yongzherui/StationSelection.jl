@@ -2,7 +2,7 @@
 
 const SEEDS = 42:51
 const MAX_STOPS = 10
-const TIME_LIMIT_SEC = 900.0
+const TIME_LIMIT_SEC = 1800.0
 const MAX_ROUTES = 2_000_000
 
 const SUBSTUDIES = (

@@ -35,6 +35,7 @@ cg_iterations = missing
 cg_converged = missing
 cg_pricing_exhausted = missing
 error_message = ""
+result = nothing
 t_start = time()
 try
     result = run_opt(problem, formulation, solver)
@@ -66,4 +67,20 @@ row = DataFrame((
 outfile = joinpath(output_dir, "job_$(lpad(job_id, 4, '0'))_cg_exact.csv")
 CSV.write(outfile, row)
 println("Wrote $outfile (status=$status, wall_sec=$(round(wall_sec; digits=2)))")
+
+# Long-format per-iteration log (master/pricing/add-columns seconds per CG
+# iteration) -- absent when `result` is `nothing` (the try block errored before
+# ever calling `run_opt`).
+if result !== nothing
+    iteration_rows = benchmark_iteration_rows(result, (
+        job_id=job_id, cell_id=cell_id, substudy=substudy, axis_value=axis_value,
+        n_stations=n_stations, n_pairs=n_pairs, n_scenarios=n_scenarios, seed=seed,
+        k=k, max_stops=max_stops,
+    ))
+    iterations_dir = joinpath(output_dir, "iterations")
+    mkpath(iterations_dir)
+    iterations_file = joinpath(iterations_dir, "job_$(lpad(job_id, 4, '0'))_cg_exact_iterations.csv")
+    CSV.write(iterations_file, DataFrame(iteration_rows))
+    println("Wrote $iterations_file ($(length(iteration_rows)) iterations)")
+end
 end

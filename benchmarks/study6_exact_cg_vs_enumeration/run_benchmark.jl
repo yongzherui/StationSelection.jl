@@ -78,6 +78,19 @@ try
         cg_converged = metrics.cg_converged
         cg_pricing_exhausted = metrics.cg_pricing_exhausted
         status = metrics.cg_converged && metrics.cg_pricing_exhausted ? "exhausted" : "incomplete"
+
+        # Long-format per-iteration log (master/pricing/add-columns seconds per CG
+        # iteration) -- enumeration has no CG loop, so only this arm writes one.
+        iteration_rows = benchmark_iteration_rows(result, (
+            job_id=job_id, instance_id=instance_id, method=method,
+            n_stations=n_stations, n_pairs=n_pairs, n_scenarios=n_scenarios, seed=seed,
+            k=k, max_stops=max_stops,
+        ))
+        iterations_dir = joinpath(output_dir, "iterations")
+        mkpath(iterations_dir)
+        iterations_file = joinpath(iterations_dir, "job_$(lpad(job_id, 4, '0'))_cg_exact_iterations.csv")
+        CSV.write(iterations_file, DataFrame(iteration_rows))
+        println("Wrote $iterations_file ($(length(iteration_rows)) iterations)")
     end
 catch err
     error_message = replace(sprint(showerror, err), '\n' => ' ')

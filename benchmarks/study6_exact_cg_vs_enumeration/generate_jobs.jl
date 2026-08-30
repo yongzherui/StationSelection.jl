@@ -6,7 +6,7 @@ const N_SCENARIOS = 3
 const SEEDS = 42:51
 const METHODS = ("cg_exact", "enumeration")
 const MAX_STOPS = 4
-const TIME_LIMIT_SEC = 900.0
+const TIME_LIMIT_SEC = 1800.0
 const MAX_ROUTES = 2_000_000
 
 config_dir = isempty(ARGS) ? joinpath(@__DIR__, "config") : abspath(ARGS[1])
