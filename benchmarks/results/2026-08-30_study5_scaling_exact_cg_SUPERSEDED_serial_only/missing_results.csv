@@ -1,0 +1,12 @@
+job_id,cell_id,substudy,axis_value,method,n_stations,n_pairs,n_scenarios,seed,max_stops,time_limit_sec,certifying_time_limit_sec,total_time_limit_sec,max_routes,status,termination_status,objective_value,wall_sec,n_columns,cg_iterations,cg_converged,cg_pricing_exhausted,error_message,cg_stop_reason,cg_total_budget_exhausted,cg_certifying_rounds,objective_agreement
+27,stations_30_n30_p16_s3_ms10_seed48,stations,30,cg_exact,30,16,3,48,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+30,stations_30_n30_p16_s3_ms10_seed51,stations,30,cg_exact,30,16,3,51,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+31,stations_40_n40_p16_s3_ms10_seed42,stations,40,cg_exact,40,16,3,42,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+32,stations_40_n40_p16_s3_ms10_seed43,stations,40,cg_exact,40,16,3,43,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+33,stations_40_n40_p16_s3_ms10_seed44,stations,40,cg_exact,40,16,3,44,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+34,stations_40_n40_p16_s3_ms10_seed45,stations,40,cg_exact,40,16,3,45,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+35,stations_40_n40_p16_s3_ms10_seed46,stations,40,cg_exact,40,16,3,46,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+36,stations_40_n40_p16_s3_ms10_seed47,stations,40,cg_exact,40,16,3,47,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+37,stations_40_n40_p16_s3_ms10_seed48,stations,40,cg_exact,40,16,3,48,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+38,stations_40_n40_p16_s3_ms10_seed49,stations,40,cg_exact,40,16,3,49,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,
+39,stations_40_n40_p16_s3_ms10_seed50,stations,40,cg_exact,40,16,3,50,10,300.0,3600.0,21600.0,2000000,missing_result,,,,,,,,,,,,

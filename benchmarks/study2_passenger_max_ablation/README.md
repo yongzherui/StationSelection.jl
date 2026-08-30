@@ -24,24 +24,26 @@ benefiting from the other's JIT compilation, caches, or memory state.
 
 The grid in `generate_jobs.jl` is:
 
-- Zhuzhou top 15, 20, and 25 stations;
+- Zhuzhou top 10, 15, and 20 stations;
 - 8 OD pairs, one scenario;
 - seeds 42–51;
 - `max_stops=10`;
 - modes `exact` and `darp`;
-- 900-second limit for each scenario's label search.
+- 1800-second limit for each scenario's label search.
 
 This produces 60 jobs (3 station counts x 10 seeds x 2 modes). `n_pairs` is held
 fixed across the sweep so the size axis isolates the candidate-station count `|J|`
 rather than moving demand and stations together. Note that `k = ceil(n/2)` still
-tracks `n`, so the `n=25` cells build 13 stations for the same 8 OD pairs and may
+tracks `n`, so the `n=20` cells build 10 stations for the same 8 OD pairs and may
 turn out easier rather than harder — read that cell with the station/demand ratio in
 mind. Edit the constants in `generate_jobs.jl` to expand the grid further.
 
 Both modes use the production `CGSolver`, normal two-stop seed columns, and
-the same formulation parameters: `k=ceil(n/2)`, 600-second walking cap,
-route/walk weights 10.0/0.1, 20-second repositioning, 900-second pickup
-horizon, and detour factor 2.0.
+the same formulation parameters: `k=ceil(n/2)` (5, 8, and 10), 600-second
+walking cap, route/walk weights 10.0/0.1, 20-second repositioning, 900-second
+pickup horizon, and detour factor 2.0. Note the 900 s pickup horizon
+(`max_wait_time`) is a *model* parameter and is unrelated to the 1800 s pricing
+budget above.
 
 ## Runtime definition
 
@@ -127,3 +129,22 @@ Only rows with both `cg_converged=true` and `cg_pricing_exhausted=true` count
 as certified. A master may have `termination_status=OPTIMAL` even when a
 pricing search times out; such a result is deliberately not treated as a
 pricing certificate or objective-equivalence observation.
+
+
+## Run history
+
+Raw output goes to `benchmarks/experiments/<date>_<slug>/`, curated output to
+`benchmarks/results/<date>_<slug>/`; both directories are stamped with the date the run
+was *submitted*, so a re-run never overwrites its predecessor. Note that `.gitignore`
+carries `*.csv` and `experiments/`, so **only `slides_results.tex` is committed** -- every
+CSV under `results/` exists solely on the filesystem that produced it.
+
+| Date | Array | Tasks | Config at that revision | Outcome |
+| --- | --- | --- | --- | --- |
+| 2026-08-25 | `21243070` (re-run) | 60 | n {15,20,25}, 900 s pricing, 1 h walltime | archived `..._SUPERSEDED_pre_dominance_fix`; 40/60 certified, 20 `darp` clock-2 losses |
+| 2026-08-29 | `21570513` | 60 | n {10,15,20}, 1800 s pricing, 2 h walltime, 4 CPU / 8G | in flight |
+
+`de5d56b` raised the pricing cap 900 -> 1800 s and moved the grid off `n=25` because the
+corrected dominance rule is provably weaker; re-running the old configuration unchanged
+risked certifying *fewer* cells than 2026-08-25, not more. The two runs' cells therefore
+overlap only at n=15 and n=20, and even there the pricing budget differs -- do not pool them.

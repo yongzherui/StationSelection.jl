@@ -1,0 +1,8 @@
+job_id,instance_id,arm,n_stations,n_pairs,seed,clock,budget_sec,evidence
+41,zhuzhou_n25_p16_sc1_seed42_ms10,true,25,16,42,slurm_walltime,3600,sacct 21243071_41 TIMEOUT; no job_0041_*.csv
+42,zhuzhou_n25_p16_sc1_seed42_ms10,false,25,16,42,slurm_walltime,3600,sacct 21243071_42 TIMEOUT; no job_0042_*.csv
+46,zhuzhou_n25_p16_sc1_seed44_ms10,false,25,16,44,slurm_walltime,3600,sacct 21243071_46 TIMEOUT; no job_0046_*.csv
+51,zhuzhou_n25_p16_sc1_seed47_ms10,true,25,16,47,slurm_walltime,3600,sacct 21243071_51 TIMEOUT; no job_0051_*.csv
+52,zhuzhou_n25_p16_sc1_seed47_ms10,false,25,16,47,slurm_walltime,3600,sacct 21243071_52 TIMEOUT; no job_0052_*.csv
+54,zhuzhou_n25_p16_sc1_seed48_ms10,false,25,16,48,slurm_walltime,3600,sacct 21243071_54 TIMEOUT; no job_0054_*.csv
+56,zhuzhou_n25_p16_sc1_seed49_ms10,false,25,16,49,slurm_walltime,3600,sacct 21243071_56 TIMEOUT; no job_0056_*.csv

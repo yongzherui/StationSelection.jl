@@ -1,0 +1,69 @@
+job_id,cell_id,substudy,axis_value,cause,limit,evidence
+6,stations_10_n10_p16_s3_ms10_seed47,stations,10,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.9s
+7,stations_10_n10_p16_s3_ms10_seed48,stations,10,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.7s
+8,stations_10_n10_p16_s3_ms10_seed49,stations,10,max_iterations,1000,"iteration cap after 58.3s, master OPTIMAL"
+13,stations_20_n20_p16_s3_ms10_seed44,stations,20,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.1s
+17,stations_20_n20_p16_s3_ms10_seed48,stations,20,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+21,stations_30_n30_p16_s3_ms10_seed42,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+22,stations_30_n30_p16_s3_ms10_seed43,stations,30,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.9s
+23,stations_30_n30_p16_s3_ms10_seed44,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+24,stations_30_n30_p16_s3_ms10_seed45,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+25,stations_30_n30_p16_s3_ms10_seed46,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+26,stations_30_n30_p16_s3_ms10_seed47,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+27,stations_30_n30_p16_s3_ms10_seed48,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+28,stations_30_n30_p16_s3_ms10_seed49,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+29,stations_30_n30_p16_s3_ms10_seed50,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+30,stations_30_n30_p16_s3_ms10_seed51,stations,30,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+31,stations_40_n40_p16_s3_ms10_seed42,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+32,stations_40_n40_p16_s3_ms10_seed43,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+33,stations_40_n40_p16_s3_ms10_seed44,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+34,stations_40_n40_p16_s3_ms10_seed45,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+35,stations_40_n40_p16_s3_ms10_seed46,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+36,stations_40_n40_p16_s3_ms10_seed47,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+37,stations_40_n40_p16_s3_ms10_seed48,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+38,stations_40_n40_p16_s3_ms10_seed49,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+39,stations_40_n40_p16_s3_ms10_seed50,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+40,stations_40_n40_p16_s3_ms10_seed51,stations,40,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+42,passengers_8_n20_p8_s3_ms10_seed43,passengers,8,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.0s
+43,passengers_8_n20_p8_s3_ms10_seed44,passengers,8,max_iterations,1000,"iteration cap after 2345.1s, master OPTIMAL"
+44,passengers_8_n20_p8_s3_ms10_seed45,passengers,8,max_iterations,1000,"iteration cap after 797.7s, master OPTIMAL"
+53,passengers_16_n20_p16_s3_ms10_seed44,passengers,16,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.4s
+57,passengers_16_n20_p16_s3_ms10_seed48,passengers,16,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+61,passengers_24_n20_p24_s3_ms10_seed42,passengers,24,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+62,passengers_24_n20_p24_s3_ms10_seed43,passengers,24,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+63,passengers_24_n20_p24_s3_ms10_seed44,passengers,24,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+64,passengers_24_n20_p24_s3_ms10_seed45,passengers,24,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+71,passengers_32_n20_p32_s3_ms10_seed42,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+72,passengers_32_n20_p32_s3_ms10_seed43,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+73,passengers_32_n20_p32_s3_ms10_seed44,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+74,passengers_32_n20_p32_s3_ms10_seed45,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+75,passengers_32_n20_p32_s3_ms10_seed46,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+76,passengers_32_n20_p32_s3_ms10_seed47,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+77,passengers_32_n20_p32_s3_ms10_seed48,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+79,passengers_32_n20_p32_s3_ms10_seed50,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+80,passengers_32_n20_p32_s3_ms10_seed51,passengers,32,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+83,scenarios_3_n20_p16_s3_ms10_seed44,scenarios,3,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 8.1s
+87,scenarios_3_n20_p16_s3_ms10_seed48,scenarios,3,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+91,scenarios_6_n20_p16_s6_ms10_seed42,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.0s
+93,scenarios_6_n20_p16_s6_ms10_seed44,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.9s
+96,scenarios_6_n20_p16_s6_ms10_seed47,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.7s
+97,scenarios_6_n20_p16_s6_ms10_seed48,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.7s
+98,scenarios_6_n20_p16_s6_ms10_seed49,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.8s
+99,scenarios_6_n20_p16_s6_ms10_seed50,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.9s
+100,scenarios_6_n20_p16_s6_ms10_seed51,scenarios,6,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.1s
+101,scenarios_9_n20_p16_s9_ms10_seed42,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.2s
+103,scenarios_9_n20_p16_s9_ms10_seed44,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.1s
+106,scenarios_9_n20_p16_s9_ms10_seed47,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.7s
+107,scenarios_9_n20_p16_s9_ms10_seed48,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 5.7s
+108,scenarios_9_n20_p16_s9_ms10_seed49,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.7s
+109,scenarios_9_n20_p16_s9_ms10_seed50,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 6.7s
+110,scenarios_9_n20_p16_s9_ms10_seed51,scenarios,9,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.8s
+111,scenarios_12_n20_p16_s12_ms10_seed42,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.6s
+113,scenarios_12_n20_p16_s12_ms10_seed44,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.7s
+114,scenarios_12_n20_p16_s12_ms10_seed45,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.7s
+115,scenarios_12_n20_p16_s12_ms10_seed46,scenarios,12,slurm_walltime,7200s,no CSV written; sacct TIMEOUT
+116,scenarios_12_n20_p16_s12_ms10_seed47,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.4s
+117,scenarios_12_n20_p16_s12_ms10_seed48,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.5s
+118,scenarios_12_n20_p16_s12_ms10_seed49,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.6s
+119,scenarios_12_n20_p16_s12_ms10_seed50,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.2s
+120,scenarios_12_n20_p16_s12_ms10_seed51,scenarios,12,infeasible_master_bug,n/a,master INFEASIBLE at iteration 1 after 7.3s

@@ -1,0 +1,8 @@
+instance_id,arm,n_stations,cause,evidence
+zhuzhou_n10_p16_s3_seed43_ms4,cg_exact,10,early_stop_not_exhausted,"stopped at iters=20 with OPTIMAL master after 12.1s; either the new columns_accepted==0 guard or empty non-exhausted pricing (iteration log not persisted, so undetermined)"
+zhuzhou_n10_p16_s3_seed47_ms4,cg_exact,10,infeasible_master_bug,master INFEASIBLE at iteration 1 after 7.1s
+zhuzhou_n10_p16_s3_seed48_ms4,cg_exact,10,infeasible_master_bug,master INFEASIBLE at iteration 1 after 7.6s
+zhuzhou_n10_p16_s3_seed49_ms4,cg_exact,10,early_stop_not_exhausted,"stopped at iters=13 with OPTIMAL master after 12.1s; either the new columns_accepted==0 guard or empty non-exhausted pricing (iteration log not persisted, so undetermined)"
+zhuzhou_n15_p16_s3_seed42_ms4,cg_exact,15,infeasible_master_bug,master INFEASIBLE at iteration 1 after 6.6s
+zhuzhou_n15_p16_s3_seed45_ms4,cg_exact,15,infeasible_master_bug,master INFEASIBLE at iteration 1 after 7.6s
+zhuzhou_n20_p16_s3_seed44_ms4,cg_exact,20,infeasible_master_bug,master INFEASIBLE at iteration 1 after 7.8s

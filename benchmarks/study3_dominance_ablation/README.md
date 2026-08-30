@@ -20,24 +20,27 @@ The grid carries twice Study 2's demand so compensation has room to matter, and 
 the station count so that effect can be read against instance size rather than at a
 single point:
 
-- Zhuzhou top 15, 20, and 25 stations;
+- Zhuzhou top 10, 15, and 20 stations;
 - 16 OD pairs and one scenario;
 - seeds 42–51;
 - `max_stops=10`;
-- 900-second per-scenario pricing limit.
+- 1800-second per-scenario pricing limit.
 
 Every `(instance, dominance mode)` pair is a separate Julia process, producing 60 jobs
 (3 station counts x 10 seeds x 2 arms). `n_pairs` is held fixed across the sweep so the
 size axis isolates the candidate-station count `|J|` rather than moving demand and
 stations together; Study 2 sweeps the same three station counts at `p=8`, so the two
 studies' station axes line up and demand is the only instance difference between them.
-The remaining settings match Study 2: `k = ceil(n/2)` (8, 10, and 13), 600-second
+The remaining settings match Study 2: `k = ceil(n/2)` (5, 8, and 10), 600-second
 walking cap, route/walk weights 10.0/0.1, 20-second repositioning, 900-second pickup
 horizon, and detour factor 2.0.
 
-`n=25` at `max_stops=10` is the least certain cell in this grid: it is the largest
+`n=20` at `max_stops=10` is the least certain cell in this grid: it is the largest
 instance either ablation attempts, and uncertified runs are excluded from the summaries
-by design. If it fails to certify, the `n=15`/`n=20` cells still stand on their own.
+by design. If it fails to certify, the `n=10`/`n=15` cells still stand on their own.
+The grid previously topped out at `n=25`, where the `plain` arm certified only 5/10 and
+seven cells were lost to walltime; `de5d56b` dropped that point in favour of `n=10` so
+more cells certify on *both* arms and the paired comparison has more usable rows.
 
 ## Metrics
 
@@ -99,3 +102,22 @@ MIP that `runtime_sec` lumps together.
 
 `analyze.jl` concatenates them into `iteration_log.csv` (every row) and
 `iteration_profile.csv` (mean columns/timings per `(n_stations, arm, iteration)`).
+
+
+## Run history
+
+Raw output goes to `benchmarks/experiments/<date>_<slug>/`, curated output to
+`benchmarks/results/<date>_<slug>/`; both directories are stamped with the date the run
+was *submitted*, so a re-run never overwrites its predecessor. Note that `.gitignore`
+carries `*.csv` and `experiments/`, so **only `slides_results.tex` is committed** -- every
+CSV under `results/` exists solely on the filesystem that produced it.
+
+| Date | Array | Tasks | Config at that revision | Outcome |
+| --- | --- | --- | --- | --- |
+| 2026-08-25 | `21243071` (re-run) | 60 | n {15,20,25}, 900 s pricing, 1 h walltime | archived `..._SUPERSEDED_pre_dominance_fix`; 53/60 certified, 7 clock-1 losses at n=25 |
+| 2026-08-29 | `21570514` | 60 | n {10,15,20}, 1800 s pricing, 2 h walltime, 4 CPU / 8G | in flight |
+
+This study's switch (`compensated_dominance`) sits *on top of* the base station-clock
+dominance rule that `f644a7c`/`b38d46b` corrected for unsoundness. Both arms therefore
+moved between the two runs: the 2026-08-29 ablation delta is not comparable to the
+2026-08-25 one, and only the newer figure reflects a sound dominance test.

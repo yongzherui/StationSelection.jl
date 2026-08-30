@@ -1,0 +1,21 @@
+instance_id,arm,clock,budget_sec,evidence
+zhuzhou_n15_p8_sc1_seed42_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n15_p8_sc1_seed44_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n15_p8_sc1_seed46_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n15_p8_sc1_seed47_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed42_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed44_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed45_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed46_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed47_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed48_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed50_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n20_p8_sc1_seed51_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed42_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed44_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed46_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed47_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed48_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed49_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed50_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false
+zhuzhou_n25_p8_sc1_seed51_ms10,darp,pricing_time_limit,900,CSV written; cg_pricing_exhausted=false

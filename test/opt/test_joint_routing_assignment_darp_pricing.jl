@@ -284,6 +284,28 @@
         @test !isempty(darp_result.model[:joint_routing_assignment_columns])
         @test isapprox(darp_result.objective_value, exact_result.objective_value; atol=1e-6)
 
+        # A regular round too short to finish is inconclusive, not a verdict: the loop
+        # must escalate to the certifying budget, which here is long enough to exhaust.
+        escalated = run_opt(
+            problem,
+            darp_formulation,
+            CGSolver(
+                max_iterations=100,
+                reduced_cost_tol=1e-7,
+                pricing_time_limit_sec=1e-9,
+                certifying_pricing_time_limit_sec=600.0,
+            ),
+        )
+        @test escalated.termination_status == JuMP.MOI.OPTIMAL
+        @test escalated.metadata["cg_converged"]          # the certifying round proved it
+        @test escalated.metadata["cg_pricing_exhausted"]
+        @test escalated.metadata["cg_certifying_rounds"] >= 1
+        @test escalated.metadata["cg_stop_reason"] == "converged"
+        @test any(row.certifying_pricing for row in escalated.metadata["cg_iteration_log"])
+        @test isapprox(escalated.objective_value, exact_result.objective_value; atol=1e-6)
+
+        # With BOTH tiers too short nothing can certify -- the original guarantee that a
+        # pricing timeout never becomes a false optimality certificate still holds.
         timed_out = run_opt(
             problem,
             darp_formulation,
@@ -291,10 +313,35 @@
                 max_iterations=100,
                 reduced_cost_tol=1e-7,
                 pricing_time_limit_sec=1e-9,
+                certifying_pricing_time_limit_sec=1e-9,
             ),
         )
         @test timed_out.termination_status == JuMP.MOI.OPTIMAL # the RMP solved
         @test !timed_out.metadata["cg_converged"]             # pricing did not certify it
         @test !timed_out.metadata["cg_pricing_exhausted"]
+        @test timed_out.metadata["cg_stop_reason"] == "pricing_inconclusive"
+
+        # A total budget that expires mid-solve must still return a usable, feasible
+        # result -- flagged uncertified -- rather than running past it or throwing.
+        budget_bound = run_opt(
+            problem,
+            darp_formulation,
+            CGSolver(
+                max_iterations=100,
+                reduced_cost_tol=1e-7,
+                pricing_time_limit_sec=600.0,
+                certifying_pricing_time_limit_sec=600.0,
+                total_time_limit_sec=1e-6,
+            ),
+        )
+        @test budget_bound.metadata["cg_total_budget_exhausted"]
+        @test budget_bound.metadata["cg_stop_reason"] == "total_budget"
+        @test !budget_bound.metadata["cg_converged"]
+        @test !budget_bound.metadata["cg_pricing_exhausted"]
+        @test budget_bound.metadata["cg_total_time_limit_sec"] == 1e-6
+
+        # An unbounded budget must not report itself as budget-bound.
+        @test !exact_result.metadata["cg_total_budget_exhausted"]
+        @test exact_result.metadata["cg_total_time_limit_sec"] == Inf
     end
 end

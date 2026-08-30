@@ -1,0 +1,2 @@
+job_id,instance_id,method,n_stations,n_pairs,n_scenarios,seed,max_stops,time_limit_sec,max_routes,status,termination_status,objective_value,lp_objective_value,wall_sec,n_columns,cg_iterations,cg_converged,cg_pricing_exhausted,error_message
+48,zhuzhou_n20_p16_s3_seed45_ms4,enumeration,20,16,3,45,4,1800.0,2000000,missing_result,,,,,,,,,

@@ -114,3 +114,25 @@ julia --project=. benchmarks/study1_formulation_lp_ip_gap/analyze.jl \
 
 Outputs are `case_results.csv`, `variant_summary.csv`, four `comparison_*.csv` files,
 and `slides_results.tex`.
+
+
+## Run history
+
+Raw output goes to `benchmarks/experiments/<date>_<slug>/`, curated output to
+`benchmarks/results/<date>_<slug>/`; both directories are stamped with the date the run
+was *submitted*, so a re-run never overwrites its predecessor. Note that `.gitignore`
+carries `*.csv` and `experiments/`, so **only `slides_results.tex` is committed** -- every
+CSV under `results/` exists solely on the filesystem that produced it.
+
+| Date | Array | Tasks | Config at that revision | Outcome |
+| --- | --- | --- | --- | --- |
+| 2026-08-25 | (4 arrays) | 110 | 900 s pricing, 30 min walltime, 8 CPU / 8G | archived `..._SUPERSEDED_pre_dominance_fix`; 110/110 certified |
+| 2026-08-29 | `21570508` `21570509` `21570510` `21570511` | 110 | **unchanged** -- 900 s pricing, 30 min walltime, 8 CPU / 8G | in flight |
+
+Study 1 was deliberately **not** re-scoped by `de5d56b`. It keeps the original grid, the
+900 s pricing cap and the 30 min walltime so its 2026-08-29 cells stay directly comparable
+to its own 2026-08-25 cells, isolating the pricer correction as the only variable.
+Comparisons 2-4 run the exact pricer under `CGSolver`, which the 2026-08-26/28 dominance
+fixes made provably weaker (more labels, more iterations), so some of those cells may now
+exhaust the 30 min budget where they previously did not -- a clock-1 loss writing no CSV.
+Comparison 1 is enumeration-based and unaffected by the pricing budget.

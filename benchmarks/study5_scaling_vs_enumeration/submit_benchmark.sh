@@ -14,14 +14,24 @@
 #SBATCH --partition=mit_preemptable
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
+# Overridden per submission: the parallel arm needs --cpus-per-task=<n_scenarios>.
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
-#SBATCH --time=02:00:00
+# 24G for BOTH arms, deliberately. The parallel arm holds n_scenarios label-search
+# frontiers live at once where serial holds one, and the archived serial run already peaked
+# at 6.1-10.8G of 16G at s=12. Giving the arms *different* memory would confound the
+# measurement: Julia sizes its GC heap against the cgroup limit, so GC time -- which lands
+# in the wall clock this study compares -- would differ for reasons unrelated to threading.
+#SBATCH --mem=24G
+#SBATCH --time=06:30:00
 #SBATCH --output=slurm_logs/%x-%A_%a.out
 #SBATCH --error=slurm_logs/%x-%A_%a.err
 
 set -euo pipefail
-export JULIA_NUM_THREADS=1
+# Match Julia's threads to whatever the allocation actually granted. The serial arm is
+# submitted with 1 CPU and the parallel arm with n_scenarios, so this is 1 and n_scenarios
+# respectively -- and it can never silently disagree with the allocation. run_benchmark.jl
+# additionally hard-fails if a parallel row gets fewer threads than its table asked for.
+export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 STUDY_DIR="${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set -- submit from the Study 5 directory}"
 PROJECT_ROOT="$(cd "$STUDY_DIR/../.." && pwd)"

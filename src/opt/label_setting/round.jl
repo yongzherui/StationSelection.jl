@@ -54,6 +54,29 @@ them.
         n_candidates=typemax(Int) ÷ 2, max_new_columns=typemax(Int) ÷ 2,
         time_limit=30.0, profile=false) -> Vector{<:Any}
 
+`time_limit` is the **wall-clock budget for one whole round**, not a per-scenario budget.
+Serial execution divides it *equally* across scenarios (each gets `time_limit /
+n_scenarios`) because their searches sum; parallel execution gives each scenario the full
+`time_limit` because their searches overlap. Either way a round costs about `time_limit`
+of wall time.
+
+Equal division rather than a shared running deadline is deliberate for the serial path. A
+shared deadline consumed in scenario order lets the first scenario spend the whole round,
+starving the rest -- and because the scenario order is stable across iterations, the same
+scenarios would be starved every round, so pricing would improve one scenario's coverage
+and never the others'. An equal split guarantees every scenario advances each round.
+
+The **serial** path additionally re-divides the *remaining* budget before each scenario,
+so slack left by a scenario that exhausted early is handed to those after it rather than
+wasted. When every scenario spends its full slice this is identical to the equal split.
+
+The **parallel** path gives every scenario the *whole* `time_limit`, because concurrent
+searches make the round's wall their max rather than their sum. Both paths therefore obey
+the same round wall budget, but the parallel one performs up to `n_scenarios` x more label
+search within it -- which is exactly how parallelism buys certification rather than merely
+finishing sooner. It does not reallocate slack (all scenarios start together), and it has
+no need to: no scenario is competing for another's time.
+
 `price_columns`'s real body for every label-setting-priced formulation.
 Phase 1: build each scenario's search context and accept/dedupe state
 (`_prepare_pricing_scenario`). Phase 2: run `_run_label_setting`
@@ -87,7 +110,28 @@ function _run_pricing_round(
     # phases below parallelize across them when the formulation opts in and
     # there's more than one thread to use.
     scenarios = _pricing_scenarios(formulation, mapping, m)
-    parallel = _pricing_parallel_scenarios(formulation) && length(scenarios) > 1 && Threads.nthreads() > 1
+    parallel = (solver.parallel_scenario_pricing || _pricing_parallel_scenarios(formulation)) &&
+        length(scenarios) > 1 && Threads.nthreads() > 1
+
+    # `time_limit` budgets the ROUND'S WALL CLOCK. How that converts to a per-scenario
+    # search budget depends on how the scenarios are executed:
+    #
+    #   serial   -- searches run back to back, so the round's wall is their SUM: each
+    #               scenario gets time_limit / n_scenarios (re-divided below as slack frees
+    #               up), and no scenario can starve another.
+    #   parallel -- searches run concurrently, so the round's wall is their MAX: each
+    #               scenario can have the FULL time_limit and the round still finishes
+    #               within its wall budget.
+    #
+    # So both arms honour the same round wall budget; the parallel arm simply converts the
+    # extra cores into n_scenarios x more search inside it. That is the whole point of the
+    # comparison, and it is why this is not `time_limit / n_scenarios` here.
+    #
+    # This holds only while every scenario gets its own thread. With nthreads < n_scenarios
+    # the searches run in waves and the round's wall can reach
+    # ceil(n_scenarios / nthreads) x time_limit -- callers that must respect the wall bound
+    # have to allocate accordingly (Study 5's runner hard-fails otherwise).
+    scenario_time_limit = time_limit
 
     # Phase 1: prepare -- context, pool-novelty state, accept/dedupe closure
     # -- for every scenario, so phase 2 below has nothing left to do but call
@@ -115,27 +159,47 @@ function _run_pricing_round(
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
+                t_scenario = time()
                 _labels, exhausted, stats = _run_label_setting(
-                    p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
+                    p.ctx; time_limit=scenario_time_limit, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
+                search_sec = time() - t_scenario
                 exhausted_by_scenario[i] = exhausted
-                stats_by_scenario[i] = (; scenario=scenarios[i], stats...)
+                # `search_sec`/`slice_sec` are recorded unconditionally (not gated on
+                # `profile`): comparing the SUM of per-scenario searches against their MAX
+                # is what distinguishes a serial round from a parallel one, and it must be
+                # available on ordinary benchmark runs.
+                stats_by_scenario[i] = (; scenario=scenarios[i], search_sec=search_sec,
+                                        slice_sec=scenario_time_limit, stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
     else
-        for i in eachindex(scenarios)
+        # Serial: re-divide the *remaining* round budget before each scenario, over the
+        # scenarios still to run. A scenario that exhausts early (or has nothing to price)
+        # hands its unused time to the ones after it, instead of that slack being lost.
+        # When every scenario uses its whole slice this reduces exactly to the equal split:
+        # after k of s scenarios have each spent T/s, the next slice is
+        # (T - k*T/s) / (s - k) = T/s. So reallocation can only ever help, never let one
+        # scenario claim more than its fair share of what is left.
+        round_deadline = time() + time_limit
+        for (position, i) in enumerate(eachindex(scenarios))
             p = prepared[i]
             if isnothing(p)
                 candidates_by_scenario[i] = Any[]
             else
+                remaining_scenarios = length(scenarios) - position + 1
+                slice = max(0.0, (round_deadline - time()) / remaining_scenarios)
+                t_scenario = time()
                 _labels, exhausted, stats = _run_label_setting(
-                    p.ctx; time_limit=time_limit, reduced_cost_tol=solver.reduced_cost_tol,
+                    p.ctx; time_limit=slice, reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
+                search_sec = time() - t_scenario
                 exhausted_by_scenario[i] = exhausted
-                stats_by_scenario[i] = (; scenario=scenarios[i], stats...)
+                stats_by_scenario[i] = (; scenario=scenarios[i], search_sec=search_sec,
+                                        slice_sec=slice, stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end

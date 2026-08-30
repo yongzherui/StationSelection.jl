@@ -11,8 +11,9 @@ Benchmark code and output now live together under this directory. Generated dire
 are dated when a study is actually run:
 
 - `experiments/<date>_studyN_<name>/` — raw per-run CSVs (gitignored).
-- `results/<date>_studyN_<name>/` — curated case-level + variant-summary CSVs
-  (git-tracked), plus a `slides_results.tex` of `\newcommand{\RowName}{col & col & ...}`
+- `results/<date>_studyN_<name>/` — curated case-level + variant-summary CSVs. Note
+  `.gitignore` carries `*.csv`, so these are **not** committed: only the
+  `slides_results.tex` in each directory is. Plus a `slides_results.tex` of `\newcommand{\RowName}{col & col & ...}`
   macros ready to `\input` into the manuscript, following
   `../experiments/2026-07-15_restricted_pricing_report/slides_results.tex`'s convention.
 - `notes/<date>_studyN_<name>_results.md` — benchmark write-ups.
@@ -32,8 +33,8 @@ label-search metrics. Per-search label statistics are retained in
 | # | Directory | Objective | Status |
 | - | --- | --- | --- |
 | 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint and operating-condition LP/IP gaps | implemented — four sub-studies, 110 Zhuzhou jobs |
-| 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 60-job Zhuzhou grid, n ∈ {15, 20, 25} at p=8 |
-| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 60-job grid, n ∈ {15, 20, 25} at p=16 |
+| 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 60-job Zhuzhou grid, n ∈ {10, 15, 20} at p=8 |
+| 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 60-job grid, n ∈ {10, 15, 20} at p=16 |
 | 4 | `study4_heuristic_local_search/` | Heuristic pricing frontier (provisional name `local_search`) | placeholder — no design yet, see study README |
 | 5 | `study5_scaling_vs_enumeration/` | Exact-CG runtime vs. `\|P\|`/`\|J\|`/`\|S\|` | implemented — three sub-studies, 120 single-threaded jobs |
 | 6 | `study6_exact_cg_vs_enumeration/` | Joint CG vs. Base exhaustive enumeration at `max_stops=4` | implemented — 60 single-threaded jobs; re-run 2026-08-25 after the arm correction |
@@ -43,60 +44,97 @@ described above. `submit_benchmark.sh` files are pure SLURM plumbing.
 
 ## Compute budgets (what "timed out" means)
 
-Three independent clocks bound a benchmark job. Only the first is a global cap, so it is
-the one that produces a censored, reportable "timed out" outcome:
+> **The authoritative record of what each run was granted and what it actually used is
+> [`notes/2026-08-30_compute_budgets_of_record.md`](notes/2026-08-30_compute_budgets_of_record.md).**
+> Its numbers are read back from `sacct`/`scontrol` and the written result rows, not from
+> the submission scripts (which have been overridden on the `sbatch` command line in the
+> past). Cite that file for any runtime claim; the sections below give the concepts.
 
-1. **SLURM walltime** (`#SBATCH --time` in each `submit_benchmark.sh`) — the *only*
-   global budget on a run. The CG solver itself has no overall wall budget: it runs to
-   `max_iterations=1_000` (`lib/cg_benchmark.jl`'s `benchmark_cg_solver`). Exceeding it
-   kills the process, so **no CSV row is written at all** — a job that hit this limit is
-   identifiable solely by its `TIMEOUT` state in `sacct` and by a missing
+Five independent limits bound a benchmark job. They are not interchangeable and imply
+different remedies, so a censored cell must always name the one that bound it. Only the
+first loses data:
+
+1. **SLURM walltime** (`#SBATCH --time` in each `submit_benchmark.sh`, or an
+   `sbatch --time=` override) — the only limit that *loses data*. Exceeding it kills the
+   process, so **no CSV row is written at all**: a job that hit it is identifiable solely
+   by its `TIMEOUT` state in `sacct` and by a missing
    `experiments/<date>_studyN_*/job_NNNN_*.csv`.
-2. **`pricing_time_limit_sec` / `time_limit_sec`** (900.0 s in every `config/*.tsv`) —
-   for CG arms, the per-scenario, per-iteration label-search budget. Hitting it makes the
-   search return without proving no negative-reduced-cost column remains, so CG cannot
-   certify: the row *is* written, with `cg_pricing_exhausted=false` and
-   `status="incomplete"`. For Study 6's `enumeration` arm the same field is instead
-   Gurobi's budget for the one direct MIP solve.
-3. **`SolverOptions.time_limit_sec`** (300.0 s, set in `benchmark_cg_solver`) — Gurobi's
+2. **`total_time_limit_sec`** (Study 5 only: 21600 s = 6 h; `Inf`, i.e. unset, everywhere
+   else) — a strict budget on the CG loop, added 2026-08-30. On expiry the loop stops and
+   the row **is** written, with `status="budget_exhausted"`,
+   `cg_stop_reason="total_budget"` and `cg_converged=false`: a feasible incumbent whose
+   optimality is not certified and whose `z_lp` is not a valid bound. This clock exists so
+   a job that runs out of time still yields an interpretable data point rather than
+   vanishing under clock 1.
+3. **`pricing_time_limit_sec` / `certifying_pricing_time_limit_sec`** — the budget for
+   **one whole pricing round**, divided *equally* across scenarios (each gets
+   `limit / n_scenarios`). Hitting it makes the search return without proving no
+   negative-reduced-cost column remains, so CG cannot certify. For Study 6's `enumeration`
+   arm the same config field is instead Gurobi's budget for the one direct MIP solve.
+
+   > **Changed 2026-08-30, after every run currently on record.** These limits were
+   > previously **per scenario**, so a round cost up to `n_scenarios ×` the stated value.
+   > All recorded results ran under the old semantics — read their numbers with the
+   > multiplier, and see the compute-budgets record §1 and §3c. Committed config values
+   > were chosen under the old meaning and are 3× smaller at s=3 when read the new way.
+4. **`SolverOptions.time_limit_sec`** (300.0 s, set in `benchmark_cg_solver`) — Gurobi's
    budget for each individual master LP/IP solve inside the CG loop.
-4. **`max_iterations`** (1_000, set in `benchmark_cg_solver`) — not a clock at all, but it
+5. **`max_iterations`** (1_000, set in `benchmark_cg_solver`) — not a clock at all, but it
    censors the same way. A run that tails off adds columns without closing the bound and
    stops at iteration 1000 having spent very little wall time. It is distinguishable from
-   clock 2 only by `cg_iterations == 1000` in the CSV: the tell is a *short* wall time
-   paired with a non-certified status.
+   the time limits only by `cg_iterations == 1000` in the CSV: the tell is a *short* wall
+   time paired with a non-certified status.
 
-So an absent CSV with `sacct` `TIMEOUT` means clock 1 bound. A written row with
-`status="incomplete"` means clock 2, 3, or the iteration cap bound — **check
-`cg_iterations` before attributing it to time**: 1000 means the iteration cap, and neither
-more wall time nor a larger pricing budget will change the outcome. All are legitimate
-censored outcomes, but they are different limits and imply different remedies.
+Reading an outcome back:
+
+- absent CSV + `sacct` `TIMEOUT` → **clock 1**. The only case where data is lost.
+- `status="budget_exhausted"` (`cg_stop_reason="total_budget"`) → **clock 2**. Report as
+  "did not certify within the solve budget", quoting the budget, not the walltime.
+- `status="incomplete"` → clock 3, 4, or the iteration cap. **Check `cg_iterations` and
+  `cg_stop_reason` before attributing it to time**: 1000 means the iteration cap, and
+  neither more wall time nor a larger pricing budget will change it;
+  `"pricing_inconclusive"` means the loop stopped with budget still remaining.
+
+All are legitimate censored outcomes, but they are different limits and imply different
+remedies.
 
 ### Walltime granted per study
 
-`--time` is doubled on the `sbatch` command line when re-running jobs that hit clock 1
-(`sbatch --time=... --array=<timed-out tasks> submit_benchmark.sh`); the committed
-`submit_benchmark.sh` files always retain the *original* budget, so the table below is
-the record of what each attempt actually received.
+`--time` can be raised on the `sbatch` command line when re-running jobs that hit clock 1
+(`sbatch --time=... --array=<timed-out tasks> submit_benchmark.sh`). For the 2026-08-25
+attempts the committed scripts retained the *original* budget and the doubling lived only
+on the command line; `de5d56b` has since folded 2 h into the committed
+`submit_benchmark.sh` for Studies 2/3/5/6, so no command-line override was needed on
+2026-08-29.
 
-| # | Study | CPUs / mem | Original `--time` | Doubled retry | Pricing limit |
+As committed today (after `de5d56b`), which is what the 2026-08-29 re-run used:
+
+| # | Study | CPUs / mem | `--time` | Pricing limit | Changed by `de5d56b`? |
 | - | --- | --- | --- | --- | --- |
-| 1 | `study1_formulation_lp_ip_gap` | 8 / 8G | 30 min | not needed (110/110 completed) | 900 s |
-| 2 | `study2_passenger_max_ablation` | 4 / 8G | 30 min | **1 h** | 900 s |
-| 3 | `study3_dominance_ablation` | 4 / 8G | 30 min | **1 h** | 900 s |
+| 1 | `study1_formulation_lp_ip_gap` | 8 / 8G | 30 min | 900 s | no — deliberately left as-is |
+| 2 | `study2_passenger_max_ablation` | 4 / 8G | **2 h** | **1800 s** | yes, + grid n {15,20,25}→{10,15,20} |
+| 3 | `study3_dominance_ablation` | 4 / 8G | **2 h** | **1800 s** | yes, + grid n {15,20,25}→{10,15,20} |
 | 4 | `study4_heuristic_local_search` | 4 / 8G | 1 h | — (placeholder) | — |
-| 5 | `study5_scaling_vs_enumeration` | 1 / 16G | 1 h | **2 h** | 900 s |
-| 6 | `study6_exact_cg_vs_enumeration` | 1 / 16G | 1 h | **2 h** | 900 s |
+| 5 | `study5_scaling_vs_enumeration` | 1 / 16G | **6 h 30 m** | **300 s regular / 3600 s certifying**, 6 h total budget | yes; budgets revised again 2026-08-30 |
+| 6 | `study6_exact_cg_vs_enumeration` | 1 / 16G | **2 h** | **1800 s** | yes |
+
+The 2026-08-25 attempts ran at 900 s pricing with 30 min / 1 h original walltimes and
+needed doubled-budget retries; see the re-run history below. Those budgets are the
+*superseded* ones and no longer match any committed script.
 
 All studies run on `mit_preemptable` except Study 4 (`mit_normal`). Studies 5 and 6 pin
 `JULIA_NUM_THREADS=1` so their timings are single-threaded and comparable.
 
-**Reporting a job as timed out** requires naming the largest budget it was given — after
-the 2026-08-25 re-runs that is 1 h (Studies 2–3) or 2 h (Studies 5–6), *not* the 30 min /
-1 h in the committed scripts. Note that Study 5's `scenarios` arm can exceed even the
-doubled budget without clock 1 being the real constraint: at `n_scenarios=12`, a single
-CG iteration can consume up to 12 × 900 s = 3 h of label search, so those cells are
-bounded by clock 2 accumulating past clock 1 rather than by slow convergence.
+**Reporting a job as timed out** requires naming the largest budget it was actually
+given. For the 2026-08-29 run that is the committed 2 h (Studies 2/3/5/6) or 30 min
+(Study 1). For the archived 2026-08-25 run it was 1 h (Studies 2–3) or 2 h (Studies 5–6)
+via command-line override, *not* the 30 min / 1 h those scripts then carried.
+
+Note that Study 5's `scenarios` arm can exceed even the 2 h budget without clock 1 being
+the real constraint: at `n_scenarios=12` a single CG iteration can now consume up to
+12 × 1800 s = 6 h of label search (was 3 h at the 900 s cap), so those cells are bounded
+by clock 2 accumulating past clock 1 rather than by slow convergence. Raising the pricing
+cap makes this *more* likely, not less — read those cells accordingly.
 
 ### Re-run history
 
@@ -111,11 +149,29 @@ bounded by clock 2 accumulating past clock 1 rather than by slow convergence.
 | 2026-08-25 | 5 `passengers` | `21243293` | 1 | 2 h (conditional) |
 | 2026-08-25 | 5 `scenarios` | `21243294` | 1 | 2 h (conditional) |
 | 2026-08-25 | 5 `stations` | `21243295` | 1 | 2 h (conditional) |
+| **2026-08-29** | **1** (4 sub-studies) | `21570508` `21570509` `21570510` `21570511` | 110 | 30 min (unchanged) |
+| **2026-08-29** | **2** | `21570513` | 60 | 2 h (committed) |
+| **2026-08-29** | **3** | `21570514` | 60 | 2 h (committed) |
+| **2026-08-29** | **5** (3 sub-studies) | `21570516` `21570517` `21570518` | 120 | 2 h (committed) |
+| **2026-08-29** | **6** | `21570519` | 60 | 2 h (committed) |
+| **2026-08-30** | **5** (3 sub-studies, re-run) | `21589496` `21589497` `21589498` | 120 | 6 h 30 m (6 h solve budget) |
+
+The 2026-08-29 rows are a **full 410-job re-run of every implemented study** on the
+corrected dominance rules, not a top-up of censored cells. The 2026-08-25 output was
+archived to `experiments/`/`results/2026-08-25_*_SUPERSEDED_pre_dominance_fix/` first;
+each archived directory carries a `README_SUPERSEDED.txt` naming the superseding commits.
 
 Re-runs pass `--export=ALL,STUDY<N>_OUTPUT_DIR=<original experiments dir>` so late-
 finishing jobs write beside the first attempt instead of opening a new date directory.
 
-### Censored cells after the doubled-budget re-runs
+### Censored cells after the doubled-budget re-runs (2026-08-25 run — SUPERSEDED)
+
+> Everything in this subsection describes the **2026-08-25** results, now archived under
+> `experiments/`/`results/2026-08-25_*_SUPERSEDED_pre_dominance_fix/`. Those runs predate
+> the dominance-soundness corrections (`f644a7c`, `b38d46b`), the CG livelock fix
+> (`6f8db0b`) and the column-dedup fix (`0bb2d43`). Retained as the analysis of record for
+> *that* run and as the rationale for the `de5d56b` budget/grid changes — the 2026-08-29
+> re-run's own censoring analysis replaces it once its `analyze.jl` pass lands.
 
 Each analysed study carries a `censored_cells.csv` in its `results/` directory recording
 every cell that did not certify, which clock bound it, and the evidence. Counts as of

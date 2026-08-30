@@ -1,0 +1,6 @@
+instance_id,arm,cause,limit,wall_sec,cg_iterations,evidence
+zhuzhou_n10_p16_s3_seed44_ms4,cg_exact,max_iterations,1000,31.9,1000,"CSV written; stopped at iteration cap, not a time limit"
+zhuzhou_n15_p16_s3_seed47_ms4,cg_exact,max_iterations,1000,242.8,1000,"CSV written; stopped at iteration cap, not a time limit"
+zhuzhou_n15_p16_s3_seed48_ms4,cg_exact,max_iterations,1000,227.6,1000,"CSV written; stopped at iteration cap, not a time limit"
+zhuzhou_n20_p16_s3_seed45_ms4,cg_exact,max_iterations,1000,1717.1,1000,"CSV written; stopped at iteration cap, not a time limit"
+zhuzhou_n20_p16_s3_seed50_ms4,cg_exact,max_iterations,1000,1405.7,1000,"CSV written; stopped at iteration cap, not a time limit"

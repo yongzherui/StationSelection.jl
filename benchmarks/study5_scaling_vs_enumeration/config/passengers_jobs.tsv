@@ -1,41 +1,81 @@
-job_id	cell_id	substudy	axis_value	method	n_stations	n_pairs	n_scenarios	seed	max_stops	time_limit_sec	max_routes
-41	passengers_8_n20_p8_s3_ms10_seed42	passengers	8	cg_exact	20	8	3	42	10	1800.0	2000000
-42	passengers_8_n20_p8_s3_ms10_seed43	passengers	8	cg_exact	20	8	3	43	10	1800.0	2000000
-43	passengers_8_n20_p8_s3_ms10_seed44	passengers	8	cg_exact	20	8	3	44	10	1800.0	2000000
-44	passengers_8_n20_p8_s3_ms10_seed45	passengers	8	cg_exact	20	8	3	45	10	1800.0	2000000
-45	passengers_8_n20_p8_s3_ms10_seed46	passengers	8	cg_exact	20	8	3	46	10	1800.0	2000000
-46	passengers_8_n20_p8_s3_ms10_seed47	passengers	8	cg_exact	20	8	3	47	10	1800.0	2000000
-47	passengers_8_n20_p8_s3_ms10_seed48	passengers	8	cg_exact	20	8	3	48	10	1800.0	2000000
-48	passengers_8_n20_p8_s3_ms10_seed49	passengers	8	cg_exact	20	8	3	49	10	1800.0	2000000
-49	passengers_8_n20_p8_s3_ms10_seed50	passengers	8	cg_exact	20	8	3	50	10	1800.0	2000000
-50	passengers_8_n20_p8_s3_ms10_seed51	passengers	8	cg_exact	20	8	3	51	10	1800.0	2000000
-51	passengers_16_n20_p16_s3_ms10_seed42	passengers	16	cg_exact	20	16	3	42	10	1800.0	2000000
-52	passengers_16_n20_p16_s3_ms10_seed43	passengers	16	cg_exact	20	16	3	43	10	1800.0	2000000
-53	passengers_16_n20_p16_s3_ms10_seed44	passengers	16	cg_exact	20	16	3	44	10	1800.0	2000000
-54	passengers_16_n20_p16_s3_ms10_seed45	passengers	16	cg_exact	20	16	3	45	10	1800.0	2000000
-55	passengers_16_n20_p16_s3_ms10_seed46	passengers	16	cg_exact	20	16	3	46	10	1800.0	2000000
-56	passengers_16_n20_p16_s3_ms10_seed47	passengers	16	cg_exact	20	16	3	47	10	1800.0	2000000
-57	passengers_16_n20_p16_s3_ms10_seed48	passengers	16	cg_exact	20	16	3	48	10	1800.0	2000000
-58	passengers_16_n20_p16_s3_ms10_seed49	passengers	16	cg_exact	20	16	3	49	10	1800.0	2000000
-59	passengers_16_n20_p16_s3_ms10_seed50	passengers	16	cg_exact	20	16	3	50	10	1800.0	2000000
-60	passengers_16_n20_p16_s3_ms10_seed51	passengers	16	cg_exact	20	16	3	51	10	1800.0	2000000
-61	passengers_24_n20_p24_s3_ms10_seed42	passengers	24	cg_exact	20	24	3	42	10	1800.0	2000000
-62	passengers_24_n20_p24_s3_ms10_seed43	passengers	24	cg_exact	20	24	3	43	10	1800.0	2000000
-63	passengers_24_n20_p24_s3_ms10_seed44	passengers	24	cg_exact	20	24	3	44	10	1800.0	2000000
-64	passengers_24_n20_p24_s3_ms10_seed45	passengers	24	cg_exact	20	24	3	45	10	1800.0	2000000
-65	passengers_24_n20_p24_s3_ms10_seed46	passengers	24	cg_exact	20	24	3	46	10	1800.0	2000000
-66	passengers_24_n20_p24_s3_ms10_seed47	passengers	24	cg_exact	20	24	3	47	10	1800.0	2000000
-67	passengers_24_n20_p24_s3_ms10_seed48	passengers	24	cg_exact	20	24	3	48	10	1800.0	2000000
-68	passengers_24_n20_p24_s3_ms10_seed49	passengers	24	cg_exact	20	24	3	49	10	1800.0	2000000
-69	passengers_24_n20_p24_s3_ms10_seed50	passengers	24	cg_exact	20	24	3	50	10	1800.0	2000000
-70	passengers_24_n20_p24_s3_ms10_seed51	passengers	24	cg_exact	20	24	3	51	10	1800.0	2000000
-71	passengers_32_n20_p32_s3_ms10_seed42	passengers	32	cg_exact	20	32	3	42	10	1800.0	2000000
-72	passengers_32_n20_p32_s3_ms10_seed43	passengers	32	cg_exact	20	32	3	43	10	1800.0	2000000
-73	passengers_32_n20_p32_s3_ms10_seed44	passengers	32	cg_exact	20	32	3	44	10	1800.0	2000000
-74	passengers_32_n20_p32_s3_ms10_seed45	passengers	32	cg_exact	20	32	3	45	10	1800.0	2000000
-75	passengers_32_n20_p32_s3_ms10_seed46	passengers	32	cg_exact	20	32	3	46	10	1800.0	2000000
-76	passengers_32_n20_p32_s3_ms10_seed47	passengers	32	cg_exact	20	32	3	47	10	1800.0	2000000
-77	passengers_32_n20_p32_s3_ms10_seed48	passengers	32	cg_exact	20	32	3	48	10	1800.0	2000000
-78	passengers_32_n20_p32_s3_ms10_seed49	passengers	32	cg_exact	20	32	3	49	10	1800.0	2000000
-79	passengers_32_n20_p32_s3_ms10_seed50	passengers	32	cg_exact	20	32	3	50	10	1800.0	2000000
-80	passengers_32_n20_p32_s3_ms10_seed51	passengers	32	cg_exact	20	32	3	51	10	1800.0	2000000
+job_id	cell_id	substudy	axis_value	arm	method	n_stations	n_pairs	n_scenarios	seed	max_stops	n_threads	time_limit_sec	certifying_time_limit_sec	total_time_limit_sec	max_routes
+61	passengers_8_n20_p8_s3_ms10_seed42	passengers	8	serial	cg_exact	20	8	3	42	10	1	300.0	3600.0	21600.0	2000000
+62	passengers_8_n20_p8_s3_ms10_seed43	passengers	8	serial	cg_exact	20	8	3	43	10	1	300.0	3600.0	21600.0	2000000
+63	passengers_8_n20_p8_s3_ms10_seed44	passengers	8	serial	cg_exact	20	8	3	44	10	1	300.0	3600.0	21600.0	2000000
+64	passengers_8_n20_p8_s3_ms10_seed45	passengers	8	serial	cg_exact	20	8	3	45	10	1	300.0	3600.0	21600.0	2000000
+65	passengers_8_n20_p8_s3_ms10_seed46	passengers	8	serial	cg_exact	20	8	3	46	10	1	300.0	3600.0	21600.0	2000000
+66	passengers_8_n20_p8_s3_ms10_seed47	passengers	8	serial	cg_exact	20	8	3	47	10	1	300.0	3600.0	21600.0	2000000
+67	passengers_8_n20_p8_s3_ms10_seed48	passengers	8	serial	cg_exact	20	8	3	48	10	1	300.0	3600.0	21600.0	2000000
+68	passengers_8_n20_p8_s3_ms10_seed49	passengers	8	serial	cg_exact	20	8	3	49	10	1	300.0	3600.0	21600.0	2000000
+69	passengers_8_n20_p8_s3_ms10_seed50	passengers	8	serial	cg_exact	20	8	3	50	10	1	300.0	3600.0	21600.0	2000000
+70	passengers_8_n20_p8_s3_ms10_seed51	passengers	8	serial	cg_exact	20	8	3	51	10	1	300.0	3600.0	21600.0	2000000
+71	passengers_16_n20_p16_s3_ms10_seed42	passengers	16	serial	cg_exact	20	16	3	42	10	1	300.0	3600.0	21600.0	2000000
+72	passengers_16_n20_p16_s3_ms10_seed43	passengers	16	serial	cg_exact	20	16	3	43	10	1	300.0	3600.0	21600.0	2000000
+73	passengers_16_n20_p16_s3_ms10_seed44	passengers	16	serial	cg_exact	20	16	3	44	10	1	300.0	3600.0	21600.0	2000000
+74	passengers_16_n20_p16_s3_ms10_seed45	passengers	16	serial	cg_exact	20	16	3	45	10	1	300.0	3600.0	21600.0	2000000
+75	passengers_16_n20_p16_s3_ms10_seed46	passengers	16	serial	cg_exact	20	16	3	46	10	1	300.0	3600.0	21600.0	2000000
+76	passengers_16_n20_p16_s3_ms10_seed47	passengers	16	serial	cg_exact	20	16	3	47	10	1	300.0	3600.0	21600.0	2000000
+77	passengers_16_n20_p16_s3_ms10_seed48	passengers	16	serial	cg_exact	20	16	3	48	10	1	300.0	3600.0	21600.0	2000000
+78	passengers_16_n20_p16_s3_ms10_seed49	passengers	16	serial	cg_exact	20	16	3	49	10	1	300.0	3600.0	21600.0	2000000
+79	passengers_16_n20_p16_s3_ms10_seed50	passengers	16	serial	cg_exact	20	16	3	50	10	1	300.0	3600.0	21600.0	2000000
+80	passengers_16_n20_p16_s3_ms10_seed51	passengers	16	serial	cg_exact	20	16	3	51	10	1	300.0	3600.0	21600.0	2000000
+81	passengers_24_n20_p24_s3_ms10_seed42	passengers	24	serial	cg_exact	20	24	3	42	10	1	300.0	3600.0	21600.0	2000000
+82	passengers_24_n20_p24_s3_ms10_seed43	passengers	24	serial	cg_exact	20	24	3	43	10	1	300.0	3600.0	21600.0	2000000
+83	passengers_24_n20_p24_s3_ms10_seed44	passengers	24	serial	cg_exact	20	24	3	44	10	1	300.0	3600.0	21600.0	2000000
+84	passengers_24_n20_p24_s3_ms10_seed45	passengers	24	serial	cg_exact	20	24	3	45	10	1	300.0	3600.0	21600.0	2000000
+85	passengers_24_n20_p24_s3_ms10_seed46	passengers	24	serial	cg_exact	20	24	3	46	10	1	300.0	3600.0	21600.0	2000000
+86	passengers_24_n20_p24_s3_ms10_seed47	passengers	24	serial	cg_exact	20	24	3	47	10	1	300.0	3600.0	21600.0	2000000
+87	passengers_24_n20_p24_s3_ms10_seed48	passengers	24	serial	cg_exact	20	24	3	48	10	1	300.0	3600.0	21600.0	2000000
+88	passengers_24_n20_p24_s3_ms10_seed49	passengers	24	serial	cg_exact	20	24	3	49	10	1	300.0	3600.0	21600.0	2000000
+89	passengers_24_n20_p24_s3_ms10_seed50	passengers	24	serial	cg_exact	20	24	3	50	10	1	300.0	3600.0	21600.0	2000000
+90	passengers_24_n20_p24_s3_ms10_seed51	passengers	24	serial	cg_exact	20	24	3	51	10	1	300.0	3600.0	21600.0	2000000
+91	passengers_32_n20_p32_s3_ms10_seed42	passengers	32	serial	cg_exact	20	32	3	42	10	1	300.0	3600.0	21600.0	2000000
+92	passengers_32_n20_p32_s3_ms10_seed43	passengers	32	serial	cg_exact	20	32	3	43	10	1	300.0	3600.0	21600.0	2000000
+93	passengers_32_n20_p32_s3_ms10_seed44	passengers	32	serial	cg_exact	20	32	3	44	10	1	300.0	3600.0	21600.0	2000000
+94	passengers_32_n20_p32_s3_ms10_seed45	passengers	32	serial	cg_exact	20	32	3	45	10	1	300.0	3600.0	21600.0	2000000
+95	passengers_32_n20_p32_s3_ms10_seed46	passengers	32	serial	cg_exact	20	32	3	46	10	1	300.0	3600.0	21600.0	2000000
+96	passengers_32_n20_p32_s3_ms10_seed47	passengers	32	serial	cg_exact	20	32	3	47	10	1	300.0	3600.0	21600.0	2000000
+97	passengers_32_n20_p32_s3_ms10_seed48	passengers	32	serial	cg_exact	20	32	3	48	10	1	300.0	3600.0	21600.0	2000000
+98	passengers_32_n20_p32_s3_ms10_seed49	passengers	32	serial	cg_exact	20	32	3	49	10	1	300.0	3600.0	21600.0	2000000
+99	passengers_32_n20_p32_s3_ms10_seed50	passengers	32	serial	cg_exact	20	32	3	50	10	1	300.0	3600.0	21600.0	2000000
+100	passengers_32_n20_p32_s3_ms10_seed51	passengers	32	serial	cg_exact	20	32	3	51	10	1	300.0	3600.0	21600.0	2000000
+101	passengers_8_n20_p8_s3_ms10_seed42	passengers	8	parallel	cg_exact	20	8	3	42	10	3	300.0	3600.0	21600.0	2000000
+102	passengers_8_n20_p8_s3_ms10_seed43	passengers	8	parallel	cg_exact	20	8	3	43	10	3	300.0	3600.0	21600.0	2000000
+103	passengers_8_n20_p8_s3_ms10_seed44	passengers	8	parallel	cg_exact	20	8	3	44	10	3	300.0	3600.0	21600.0	2000000
+104	passengers_8_n20_p8_s3_ms10_seed45	passengers	8	parallel	cg_exact	20	8	3	45	10	3	300.0	3600.0	21600.0	2000000
+105	passengers_8_n20_p8_s3_ms10_seed46	passengers	8	parallel	cg_exact	20	8	3	46	10	3	300.0	3600.0	21600.0	2000000
+106	passengers_8_n20_p8_s3_ms10_seed47	passengers	8	parallel	cg_exact	20	8	3	47	10	3	300.0	3600.0	21600.0	2000000
+107	passengers_8_n20_p8_s3_ms10_seed48	passengers	8	parallel	cg_exact	20	8	3	48	10	3	300.0	3600.0	21600.0	2000000
+108	passengers_8_n20_p8_s3_ms10_seed49	passengers	8	parallel	cg_exact	20	8	3	49	10	3	300.0	3600.0	21600.0	2000000
+109	passengers_8_n20_p8_s3_ms10_seed50	passengers	8	parallel	cg_exact	20	8	3	50	10	3	300.0	3600.0	21600.0	2000000
+110	passengers_8_n20_p8_s3_ms10_seed51	passengers	8	parallel	cg_exact	20	8	3	51	10	3	300.0	3600.0	21600.0	2000000
+111	passengers_16_n20_p16_s3_ms10_seed42	passengers	16	parallel	cg_exact	20	16	3	42	10	3	300.0	3600.0	21600.0	2000000
+112	passengers_16_n20_p16_s3_ms10_seed43	passengers	16	parallel	cg_exact	20	16	3	43	10	3	300.0	3600.0	21600.0	2000000
+113	passengers_16_n20_p16_s3_ms10_seed44	passengers	16	parallel	cg_exact	20	16	3	44	10	3	300.0	3600.0	21600.0	2000000
+114	passengers_16_n20_p16_s3_ms10_seed45	passengers	16	parallel	cg_exact	20	16	3	45	10	3	300.0	3600.0	21600.0	2000000
+115	passengers_16_n20_p16_s3_ms10_seed46	passengers	16	parallel	cg_exact	20	16	3	46	10	3	300.0	3600.0	21600.0	2000000
+116	passengers_16_n20_p16_s3_ms10_seed47	passengers	16	parallel	cg_exact	20	16	3	47	10	3	300.0	3600.0	21600.0	2000000
+117	passengers_16_n20_p16_s3_ms10_seed48	passengers	16	parallel	cg_exact	20	16	3	48	10	3	300.0	3600.0	21600.0	2000000
+118	passengers_16_n20_p16_s3_ms10_seed49	passengers	16	parallel	cg_exact	20	16	3	49	10	3	300.0	3600.0	21600.0	2000000
+119	passengers_16_n20_p16_s3_ms10_seed50	passengers	16	parallel	cg_exact	20	16	3	50	10	3	300.0	3600.0	21600.0	2000000
+120	passengers_16_n20_p16_s3_ms10_seed51	passengers	16	parallel	cg_exact	20	16	3	51	10	3	300.0	3600.0	21600.0	2000000
+121	passengers_24_n20_p24_s3_ms10_seed42	passengers	24	parallel	cg_exact	20	24	3	42	10	3	300.0	3600.0	21600.0	2000000
+122	passengers_24_n20_p24_s3_ms10_seed43	passengers	24	parallel	cg_exact	20	24	3	43	10	3	300.0	3600.0	21600.0	2000000
+123	passengers_24_n20_p24_s3_ms10_seed44	passengers	24	parallel	cg_exact	20	24	3	44	10	3	300.0	3600.0	21600.0	2000000
+124	passengers_24_n20_p24_s3_ms10_seed45	passengers	24	parallel	cg_exact	20	24	3	45	10	3	300.0	3600.0	21600.0	2000000
+125	passengers_24_n20_p24_s3_ms10_seed46	passengers	24	parallel	cg_exact	20	24	3	46	10	3	300.0	3600.0	21600.0	2000000
+126	passengers_24_n20_p24_s3_ms10_seed47	passengers	24	parallel	cg_exact	20	24	3	47	10	3	300.0	3600.0	21600.0	2000000
+127	passengers_24_n20_p24_s3_ms10_seed48	passengers	24	parallel	cg_exact	20	24	3	48	10	3	300.0	3600.0	21600.0	2000000
+128	passengers_24_n20_p24_s3_ms10_seed49	passengers	24	parallel	cg_exact	20	24	3	49	10	3	300.0	3600.0	21600.0	2000000
+129	passengers_24_n20_p24_s3_ms10_seed50	passengers	24	parallel	cg_exact	20	24	3	50	10	3	300.0	3600.0	21600.0	2000000
+130	passengers_24_n20_p24_s3_ms10_seed51	passengers	24	parallel	cg_exact	20	24	3	51	10	3	300.0	3600.0	21600.0	2000000
+131	passengers_32_n20_p32_s3_ms10_seed42	passengers	32	parallel	cg_exact	20	32	3	42	10	3	300.0	3600.0	21600.0	2000000
+132	passengers_32_n20_p32_s3_ms10_seed43	passengers	32	parallel	cg_exact	20	32	3	43	10	3	300.0	3600.0	21600.0	2000000
+133	passengers_32_n20_p32_s3_ms10_seed44	passengers	32	parallel	cg_exact	20	32	3	44	10	3	300.0	3600.0	21600.0	2000000
+134	passengers_32_n20_p32_s3_ms10_seed45	passengers	32	parallel	cg_exact	20	32	3	45	10	3	300.0	3600.0	21600.0	2000000
+135	passengers_32_n20_p32_s3_ms10_seed46	passengers	32	parallel	cg_exact	20	32	3	46	10	3	300.0	3600.0	21600.0	2000000
+136	passengers_32_n20_p32_s3_ms10_seed47	passengers	32	parallel	cg_exact	20	32	3	47	10	3	300.0	3600.0	21600.0	2000000
+137	passengers_32_n20_p32_s3_ms10_seed48	passengers	32	parallel	cg_exact	20	32	3	48	10	3	300.0	3600.0	21600.0	2000000
+138	passengers_32_n20_p32_s3_ms10_seed49	passengers	32	parallel	cg_exact	20	32	3	49	10	3	300.0	3600.0	21600.0	2000000
+139	passengers_32_n20_p32_s3_ms10_seed50	passengers	32	parallel	cg_exact	20	32	3	50	10	3	300.0	3600.0	21600.0	2000000
+140	passengers_32_n20_p32_s3_ms10_seed51	passengers	32	parallel	cg_exact	20	32	3	51	10	3	300.0	3600.0	21600.0	2000000

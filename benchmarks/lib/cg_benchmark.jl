@@ -46,11 +46,31 @@ function benchmark_output_dir(study_dir::AbstractString, env_prefix::AbstractStr
     return output_dir
 end
 
+"""
+    benchmark_cg_solver(pricing_time_limit_sec; kwargs...) -> CGSolver
+
+`pricing_time_limit_sec` is the *regular* pricing budget for one whole round, divided
+equally across scenarios. `parallel_scenario_pricing` prices those scenarios concurrently
+(needs `Threads.nthreads() > 1`); `threads` is Gurobi's own limit and is independent of it.
+`certifying_pricing_time_limit_sec` (default `3600.0`) is the longer budget the loop
+escalates to when a regular round returns no columns without exhausting -- only that
+round can certify. `total_time_limit_sec` (default `Inf`) is a strict wall cap on the CG
+loop: on expiry the run stops and reports `cg_stop_reason="total_budget"` with
+`cg_converged=false`, so a censored job still writes a row instead of being killed by the
+scheduler. The recovery MIP afterwards is bounded separately by `config.time_limit_sec`
+(300 s), so budget a job's walltime for `total_time_limit_sec + 300 s` plus start-up.
+"""
 function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solution::Bool=false,
-        threads::Union{Nothing, Int}=nothing)
+        threads::Union{Nothing, Int}=nothing,
+        certifying_pricing_time_limit_sec::Real=3600.0,
+        total_time_limit_sec::Real=Inf,
+        parallel_scenario_pricing::Bool=false)
     return CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
+        certifying_pricing_time_limit_sec=certifying_pricing_time_limit_sec,
+        total_time_limit_sec=total_time_limit_sec,
+        parallel_scenario_pricing=parallel_scenario_pricing,
         recover_integer_solution=recover_integer_solution,
     )
 end
