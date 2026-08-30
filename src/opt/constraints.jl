@@ -16,6 +16,7 @@ This file includes:
 include("constraints/base.jl")
 include("constraints/assignment.jl")
 include("constraints/flow_activation.jl")
+include("constraints/endpoint_feasibility.jl")
 include("constraints/aggregate_od_route/core.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/coverage.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/linking.jl")

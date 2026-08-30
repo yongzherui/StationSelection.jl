@@ -87,6 +87,7 @@ include("opt/formulations/aggregate_od_route/benders/yz.jl")
 include("opt/formulations/aggregate_od_route/benders/yzh.jl")
 include("opt/formulations/aggregate_od_route/benders/yx.jl")
 include("opt/formulations/aggregate_od_route/joint_routing_assignment.jl")
+include("opt/formulations/aggregate_od_route/feasibility.jl")
 
 # Clustering OD map (depends on AbstractClusteringTwoStageODFormulation)
 include("data/maps/clustering_od_map.jl")

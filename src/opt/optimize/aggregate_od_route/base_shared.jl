@@ -61,6 +61,8 @@ function _aggregate_od_route_base_master_core!(
     route_link = add_aggregate_od_route_base_route_linking_constraints!(m, mapping, x, theta)
     constraint_counts["route_link"] = length(route_link)
     constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, l; equality=true)
+    endpoint_feasibility = add_aggregate_od_route_endpoint_feasibility_constraints!(m, data, mapping, y)
+    constraint_counts["endpoint_feasibility"] = length(endpoint_feasibility)
 
     set_aggregate_od_route_base_objective!(
         m, data, mapping, x, x_walk, theta,

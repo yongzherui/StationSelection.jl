@@ -46,12 +46,22 @@ end
 """
     add_joint_routing_assignment_column!(m, data, mapping, column) -> (theta, action)
 
-`action` is `:added`, or `:skipped` when an identical assignment signature
-(`_joint_routing_assignment_column_signature`, `pricing/.../labels.jl`, unchanged) is
-already in the pool at no greater `tau`. `theta`/`columns`/`column_signatures` all live
-on `m[...]` (mirrors `add_aggregate_od_route_base_column!`'s
-`m[:aggregate_od_route_base_theta]` convention, `constraints/aggregate_od_route/base/route_activation.jl`)
--- no separate master wrapper struct.
+`action` is `:added`, or `:skipped` when an identical `(scenario, assignment signature)`
+pair (`_joint_routing_assignment_column_signature`, `pricing/.../labels.jl`, unchanged,
+paired here with `column.metadata["scenario"]`) is already in the pool at no greater
+`tau`. The scenario has to be part of the dedup key, not just the raw signature: `p`
+(inside each `(p, j, k)` assignment) is only unique *within* a scenario's own
+`Omega_s[s]`, so two different scenarios can produce columns with an identical bare
+signature and tau that mean completely different coverage -- deduping on the signature
+alone silently drops one scenario's column in favor of the other's, leaving that
+scenario's demand group uncovered (see
+`notes/2026-08-28_study5_dominance_fix_pilot_infeasible_repro.md` for the resulting
+spurious `INFEASIBLE`). `enumeration.jl` already keys its own dedup on `(scenario,
+signature)` for the same reason; this was the one remaining path that didn't.
+`theta`/`columns`/`column_signatures` all live on `m[...]` (mirrors
+`add_aggregate_od_route_base_column!`'s `m[:aggregate_od_route_base_theta]` convention,
+`constraints/aggregate_od_route/base/route_activation.jl`) -- no separate master wrapper
+struct.
 
 New `theta` variables read `m[:joint_routing_assignment_relax_integrality]` (stashed by
 `_build_joint_routing_assignment_model`, `optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl`)
@@ -72,13 +82,13 @@ function add_joint_routing_assignment_column!(
     columns = m[:joint_routing_assignment_columns]
     signatures = m[:joint_routing_assignment_column_signatures]
 
-    signature = _joint_routing_assignment_column_signature(column)
+    s = Int(column.metadata["scenario"])
+    signature = (s, _joint_routing_assignment_column_signature(column))
     existing_id = get(signatures, signature, nothing)
     if !isnothing(existing_id)
         columns[existing_id].tau <= column.tau + 1e-9 && return theta[existing_id], :skipped
     end
 
-    s = Int(column.metadata["scenario"])
     coverage = m[:joint_routing_assignment_coverage]
     pickup_link = m[:joint_routing_assignment_pickup_link]
     dropoff_link = m[:joint_routing_assignment_dropoff_link]

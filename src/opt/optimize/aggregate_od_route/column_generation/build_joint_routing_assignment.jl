@@ -150,6 +150,8 @@ function _build_joint_routing_assignment_model(
     constraint_counts["pickup_link"] = length(pickup_link)
     constraint_counts["dropoff_link"] = length(dropoff_link)
     constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, l; equality = true)
+    endpoint_feasibility = add_aggregate_od_route_endpoint_feasibility_constraints!(m, data, mapping, y)
+    constraint_counts["endpoint_feasibility"] = length(endpoint_feasibility)
 
     # ---- 4. Objective ----
     set_joint_routing_assignment_objective!(m, data, mapping, x_walk)

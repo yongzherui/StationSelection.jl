@@ -155,6 +155,7 @@ assumes it's always on.
 _aggregate_od_route_allow_walk_only(formulation) = formulation.allow_walk_only
 _aggregate_od_route_allow_walk_only(::AggregateODRouteJointRoutingAssignmentFormulation) = true
 _aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = true
+_aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = true
 
 """
     aggregate_od_route_validate_feasible_coverage(data, mapping)
@@ -209,15 +210,21 @@ end
         -> AggregateODRouteMap
 
 Build the `AggregateODRouteMap` for `AggregateODRouteBaseFormulation`/
-`AggregateODRouteJointRoutingAssignmentFormulation`, reading `problem.max_walking_distance`
-and `_aggregate_od_route_allow_walk_only(formulation)`. (`RouteCoveringProblem`'s
+`AggregateODRouteJointRoutingAssignmentFormulation`/`AggregateODRouteFeasibilityFormulation`,
+reading `problem.max_walking_distance` and `_aggregate_od_route_allow_walk_only(formulation)`
+-- the only two things this function actually needs from `formulation`, which is why its
+parameter type is the broad `AbstractFormulation` rather than the narrower
+`AnyAggregateODRouteFormulation` Union: that Union is reserved for formulations sharing the
+full route-column encoding-detail field set (`enumerate_aggregate_od_route_columns` and
+friends), which `AggregateODRouteFeasibilityFormulation` deliberately doesn't carry, and
+this function was never one of the callers that needed it. (`RouteCoveringProblem`'s
 fixed-assignment variant of this, `_apply_route_covering_assignments!`, was removed along
 with `AggregateODRouteProblem` -- `RouteCoveringProblem` is currently unwired, see
 `StationSelection.jl`'s include comments.)
 """
 function create_aggregate_od_route_map(
     problem::StationSelectionProblem,
-    formulation::AnyAggregateODRouteFormulation,
+    formulation::AbstractFormulation,
     data::StationSelectionData;
     initial_columns::Union{Nothing, AbstractVector}=nothing,
 )::AggregateODRouteMap

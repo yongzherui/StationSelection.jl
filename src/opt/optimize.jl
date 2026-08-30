@@ -76,6 +76,7 @@ include("label_setting/route_covering/exact/enumeration.jl")
 # it.
 include("optimize/aggregate_od_route/base_shared.jl")
 include("optimize/aggregate_od_route/direct/build_base.jl")
+include("optimize/aggregate_od_route/direct/build_feasibility.jl")
 include("label_setting/joint_routing_assignment/types.jl")
 include("label_setting/joint_routing_assignment/data.jl")
 include("label_setting/joint_routing_assignment/exact/types.jl")
