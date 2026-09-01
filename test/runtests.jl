@@ -67,6 +67,7 @@ const MOI = JuMP.MOI
         include("opt/test_cg_solver_integer_recovery.jl")
         include("opt/test_joint_routing_assignment_column_dedup.jl")
         include("opt/test_aggregate_od_route_base_cg.jl")
+        include("opt/test_solve_status.jl")
     end
 
 end

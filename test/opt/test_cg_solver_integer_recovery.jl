@@ -49,11 +49,11 @@
     @testset "CGSolver recovers a feasible integer solution at or above the LP bound" begin
         solver_lp = CGSolver()
         result_lp = run_opt(problem, formulation, solver_lp)
-        @test result_lp.termination_status == MOI.OPTIMAL
+        @test result_lp.termination_status == SOLVE_OPTIMAL
 
         solver_ip = CGSolver(recover_integer_solution = true)
         result_ip = run_opt(problem, formulation, solver_ip)
-        @test result_ip.termination_status == MOI.OPTIMAL
+        @test result_ip.termination_status == SOLVE_OPTIMAL
         @test result_ip.metadata["cg_integer_recovery"] == true
         @test result_ip.metadata["cg_converged"] == true
         @test !isempty(result_ip.metadata["cg_pricing_stats"])
@@ -70,7 +70,7 @@
     @testset "recover_integer_solution=false leaves the LP-relaxed domains untouched" begin
         solver = CGSolver()
         result = run_opt(problem, formulation, solver)
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
         @test result.metadata["cg_integer_recovery"] == false
         @test !haskey(result.metadata, "cg_lp_objective_value")
         m = result.model

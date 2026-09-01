@@ -12,13 +12,14 @@ fast `optimize!` call.
     check_feasibility(problem::StationSelectionProblem,
                        formulation::Union{AggregateODRouteBaseFormulation,
                                            AggregateODRouteJointRoutingAssignmentFormulation},
-                       solver::AbstractSolver)
+                       solver::AbstractSolver) -> Union{Nothing, String}
 
 `run_opt`'s generic feasibility-gate hook (`optimize/run_opt.jl`), specialized for the two
 live aggregate-OD-route formulations: solves `AggregateODRouteFeasibilityFormulation`
 (this file, `y` + `station_limit` + `endpoint_feasibility` only -- no route columns) via
-`DirectMIPSolver` and throws `ArgumentError` unless it comes back `OPTIMAL`, regardless of
-which solver (`DirectMIPSolver` or `CGSolver`) is about to actually run. `run_opt` calls
+`DirectMIPSolver` and returns a refutation string unless it comes back `SOLVE_OPTIMAL`,
+regardless of which solver (`DirectMIPSolver` or `CGSolver`) is about to actually run.
+`run_opt` turns that string into a `SOLVE_INFEASIBLE` `OptResult`. `run_opt` calls
 this right after `build_model` and before `optimize_model`, so a structurally infeasible
 `k` fails immediately instead of only surfacing after expensive route enumeration or
 several CG pricing rounds -- and, worse, sometimes not surfacing correctly even then, if
@@ -41,18 +42,16 @@ function check_feasibility(
             AggregateODRouteJointRoutingAssignmentFormulation,
         },
         solver::AbstractSolver,
-    )
+    )::Union{Nothing, String}
     result = run_opt(
         problem, AggregateODRouteFeasibilityFormulation(),
         DirectMIPSolver(config=SolverOptions(silent=true)),
     )
-    result.termination_status == MOI.OPTIMAL || throw(ArgumentError(
-        "aggregate OD route: no size-$(problem.k) station selection can reach every " *
+    result.termination_status == SOLVE_OPTIMAL && return nothing
+    return "aggregate OD route: no size-$(problem.k) station selection can reach every " *
         "demand group that lacks a direct-walk fallback (endpoint feasibility check " *
         "returned $(result.termination_status)) -- the full problem is infeasible " *
-        "regardless of route/routing details",
-    ))
-    return nothing
+        "regardless of route/routing details"
 end
 
 """

@@ -46,7 +46,7 @@ end
     problem = StationSelectionProblem(data, 3; max_walking_distance = mwd_sec)
     formulation = ClusteringTwoStageODFormulation(3; in_vehicle_time_weight = 0.0)
     result = run_opt(problem, formulation, DirectMIPSolver())
-    @test result.termination_status == MOI.OPTIMAL
+    @test result.termination_status == SOLVE_OPTIMAL
 
     # equilateral / equilateral_with_m1: the source hypothesis language is
     # exploratory ("optimizer must decide" / "chooses among M0, M1, M") --
@@ -59,6 +59,6 @@ end
             inst.suggested_l; in_vehicle_time_weight = 0.0,
         )
         result = run_opt(problem, formulation, DirectMIPSolver())
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
     end
 end

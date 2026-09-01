@@ -274,8 +274,8 @@
         exact_result = run_opt(problem, exact_formulation, solver)
         darp_result = run_opt(problem, darp_formulation, solver)
 
-        @test exact_result.termination_status == JuMP.MOI.OPTIMAL
-        @test darp_result.termination_status == JuMP.MOI.OPTIMAL
+        @test exact_result.termination_status == SOLVE_OPTIMAL
+        @test darp_result.termination_status == SOLVE_OPTIMAL
         @test exact_result.metadata["cg_converged"]
         @test darp_result.metadata["cg_converged"]
         @test exact_result.model[:joint_routing_assignment_pricing_mode] == :exact
@@ -296,7 +296,7 @@
                 certifying_pricing_time_limit_sec=600.0,
             ),
         )
-        @test escalated.termination_status == JuMP.MOI.OPTIMAL
+        @test escalated.termination_status == SOLVE_OPTIMAL
         @test escalated.metadata["cg_converged"]          # the certifying round proved it
         @test escalated.metadata["cg_pricing_exhausted"]
         @test escalated.metadata["cg_certifying_rounds"] >= 1
@@ -316,7 +316,12 @@
                 certifying_pricing_time_limit_sec=1e-9,
             ),
         )
-        @test timed_out.termination_status == JuMP.MOI.OPTIMAL # the RMP solved
+        # FEASIBLE, not OPTIMAL: the restricted master did solve, but over a pool no
+        # pricing round ever proved complete. The raw MOI code still reads OPTIMAL --
+        # that it does is exactly why the reported status is a separate enum.
+        @test timed_out.termination_status == SOLVE_FEASIBLE
+        @test timed_out.metadata["moi_termination_status"] == "OPTIMAL"
+        @test timed_out.objective_value !== nothing           # a valid upper bound
         @test !timed_out.metadata["cg_converged"]             # pricing did not certify it
         @test !timed_out.metadata["cg_pricing_exhausted"]
         @test timed_out.metadata["cg_stop_reason"] == "pricing_inconclusive"
@@ -334,6 +339,8 @@
                 total_time_limit_sec=1e-6,
             ),
         )
+        @test budget_bound.termination_status == SOLVE_FEASIBLE
+        @test budget_bound.objective_value !== nothing
         @test budget_bound.metadata["cg_total_budget_exhausted"]
         @test budget_bound.metadata["cg_stop_reason"] == "total_budget"
         @test !budget_bound.metadata["cg_converged"]

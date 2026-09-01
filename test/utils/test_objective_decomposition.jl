@@ -292,7 +292,7 @@
     @testset "Integration: ClusteringTwoStageODModel round-trip" begin
         formulation = ClusteringTwoStageODFormulation(3)
         result = run_opt(problem, formulation, DirectMIPSolver())
-        @test result.termination_status == JuMP.MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
 
         reported = result.objective_value
 

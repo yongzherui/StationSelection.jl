@@ -112,5 +112,5 @@ end
     @test result.metadata["cg_lp_loop_sec"] <= 3 * budget
     @test haskey(result.metadata, "cg_stop_reason")
     # A budget-bound run still yields a usable incumbent rather than an empty row.
-    @test result.termination_status == JuMP.MOI.OPTIMAL
+    @test result.termination_status == SOLVE_OPTIMAL
 end

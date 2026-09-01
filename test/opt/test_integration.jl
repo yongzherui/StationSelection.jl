@@ -169,7 +169,7 @@
             formulation = ClusteringTwoStageODFormulation(2)
             result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMAL
+            @test result.termination_status == SOLVE_OPTIMAL
             @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)
@@ -180,7 +180,7 @@
             formulation = ClusteringBaseFormulation()
             result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMAL
+            @test result.termination_status == SOLVE_OPTIMAL
             @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)
@@ -191,7 +191,7 @@
             formulation = ClusteringTwoStageFormulation(2)
             result = run_opt(problem, formulation, DirectMIPSolver())
 
-            @test result.termination_status == MOI.OPTIMAL
+            @test result.termination_status == SOLVE_OPTIMAL
             @test !isnothing(result.objective_value)
             @test result.model isa JuMP.Model
             @test !isempty(result.counts.variables)

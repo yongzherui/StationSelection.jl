@@ -75,7 +75,7 @@
 
         result = run_opt(problem, formulation, DirectMIPSolver())
 
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
 
         # Annotate orders
         annotated = annotate_orders_with_solution(result, data)

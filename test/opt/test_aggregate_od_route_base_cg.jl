@@ -62,14 +62,14 @@
 
     @testset "CGSolver LP bound and integer recovery agree with DirectMIPSolver's exact optimum" begin
         direct_result = run_opt(problem, formulation, DirectMIPSolver())
-        @test direct_result.termination_status == MOI.OPTIMAL
+        @test direct_result.termination_status == SOLVE_OPTIMAL
 
         result_lp = run_opt(problem, formulation, CGSolver())
-        @test result_lp.termination_status == MOI.OPTIMAL
+        @test result_lp.termination_status == SOLVE_OPTIMAL
         @test result_lp.objective_value <= direct_result.objective_value + 1e-4
 
         result_ip = run_opt(problem, formulation, CGSolver(recover_integer_solution = true))
-        @test result_ip.termination_status == MOI.OPTIMAL
+        @test result_ip.termination_status == SOLVE_OPTIMAL
         @test result_ip.metadata["cg_converged"] == true
         @test result_ip.metadata["cg_lp_objective_value"] <= result_ip.objective_value + 1e-6
         @test isapprox(result_ip.metadata["cg_lp_objective_value"], result_lp.objective_value; atol = 1e-6)
@@ -78,7 +78,7 @@
 
     @testset "recover_integer_solution=false leaves the LP-relaxed domains untouched" begin
         result = run_opt(problem, formulation, CGSolver())
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
         @test result.metadata["cg_integer_recovery"] == false
         m = result.model
         @test !any(is_binary(v) for v in m[:y])
@@ -86,12 +86,12 @@
 
     @testset "dispatch.jl disambiguates Base vs JointRoutingAssignment CGSolver hooks" begin
         base_result = run_opt(problem, formulation, CGSolver())
-        @test base_result.termination_status == MOI.OPTIMAL
+        @test base_result.termination_status == SOLVE_OPTIMAL
 
         joint_result = run_opt(
             problem, AggregateODRouteJointRoutingAssignmentFormulation(), CGSolver(),
         )
-        @test joint_result.termination_status == MOI.OPTIMAL
+        @test joint_result.termination_status == SOLVE_OPTIMAL
         @test haskey(joint_result.model.obj_dict, :joint_routing_assignment_theta)
         @test !haskey(base_result.model.obj_dict, :joint_routing_assignment_theta)
         @test haskey(base_result.model.obj_dict, :aggregate_od_route_base_theta)

@@ -45,6 +45,6 @@ end
             inst.suggested_l; in_vehicle_time_weight = 1.0,
         )
         result = run_opt(problem, formulation, DirectMIPSolver())
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
     end
 end

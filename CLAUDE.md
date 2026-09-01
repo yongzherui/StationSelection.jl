@@ -184,6 +184,31 @@ result = run_opt(problem, formulation, solver)
 `warm_start_solution`, `metadata`, `duals` (`nothing` outside Benders dual-problem
 results).
 
+## Solve status
+
+`OptResult.termination_status` is a package-owned `SolveStatus` enum, **not**
+`MOI.TerminationStatusCode`. The MOI code reports the status of the last model object that
+was optimized, which for `CGSolver` is the master over a restricted column pool -- a
+budget-stopped run still leaves that master at `MOI.OPTIMAL`, so the raw code claimed
+`OPTIMAL` for runs that proved nothing. MOI also has no code for "feasible but not proven
+optimal" (`MOI.FEASIBLE_POINT` is a *primal* status).
+
+| Member | Prints as | Meaning |
+| --- | --- | --- |
+| `SOLVE_OPTIMAL` | `OPTIMAL` | Certified optimum. For `CGSolver` this additionally requires pricing to have exhausted (`metadata["cg_converged"]`), i.e. a provably complete pool |
+| `SOLVE_FEASIBLE` | `FEASIBLE` | Valid incumbent / upper bound, optimality NOT proven: budget-stopped or pricing-inconclusive CG, or a MIP that hit a limit with an incumbent |
+| `SOLVE_INFEASIBLE` | `INFEASIBLE` | No feasible solution: solver said so, or `check_feasibility`'s gate refuted the instance before any solve |
+| `SOLVE_NOT_SOLVED` | `NOT_SOLVED` | No incumbent to report |
+
+Member names carry the `SOLVE_` prefix because `using JuMP` re-exports bare
+`OPTIMAL`/`INFEASIBLE` from MOI into scope; the printed labels drop it so result CSVs stay
+readable. The raw MOI code is preserved as `metadata["moi_termination_status"]`.
+
+`run_opt`'s `check_feasibility` hook returns `nothing` to proceed or a reason `String` to
+abort; `run_opt` converts the string into a `SOLVE_INFEASIBLE` result carrying it as
+`metadata["infeasibility_reason"]`. It does **not** throw -- a proven-infeasible instance
+is an answer, not a usage error.
+
 # Notes
 
 - When adding new variables in opt/variables/ we need to make sure to add the corresponding export variables function to ensure consistency.

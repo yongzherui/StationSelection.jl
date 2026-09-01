@@ -352,7 +352,14 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     end
     runtime_sec = time() - start_time
 
-    return _package_result(build_result, m, runtime_sec; metadata=metadata)
+    # `converged` is the ONLY thing that makes this master's optimum the problem's
+    # optimum: it means pricing exhausted, i.e. no negative-reduced-cost column remains
+    # outside the pool. Every other exit (total budget, iteration cap, de-dup stall,
+    # inconclusive pricing) leaves the pool possibly incomplete, so the incumbent is a
+    # valid upper bound and nothing more -- `_solve_status` reports SOLVE_FEASIBLE there
+    # instead of the SOLVE_OPTIMAL the restricted master would otherwise claim.
+    return _package_result(build_result, m, runtime_sec;
+                           metadata=metadata, certified=converged)
 end
 
 # ── hooks (implemented per Problem/Formulation, dispatching on `mapping`'s concrete

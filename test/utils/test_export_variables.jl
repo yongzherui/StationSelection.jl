@@ -32,7 +32,7 @@ using CSV
         )
 
         result = run_opt(problem, formulation, DirectMIPSolver())
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
 
         mktempdir() do tmpdir
             StationSelection.export_variables(result, tmpdir)
@@ -72,7 +72,7 @@ using CSV
         formulation = ClusteringTwoStageODFormulation(2)
 
         result = run_opt(problem, formulation, DirectMIPSolver())
-        @test result.termination_status == MOI.OPTIMAL
+        @test result.termination_status == SOLVE_OPTIMAL
 
         mktempdir() do tmpdir
             StationSelection.export_variables(result, tmpdir)
