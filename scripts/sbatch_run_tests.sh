@@ -13,7 +13,9 @@ set -euo pipefail
 
 PROJECT_ROOT="/home/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl"
 
-source "$(dirname "${BASH_SOURCE[0]}")/lib/slurm_modules.sh"
+# Absolute path: under sbatch, BASH_SOURCE points at SLURM's copy of this script in
+# /var/spool/slurmd/, where scripts/lib/ does not exist.
+source "$PROJECT_ROOT/scripts/lib/slurm_modules.sh"
 
 cd "$PROJECT_ROOT"
 julia --startup-file=no --project="$PROJECT_ROOT" -e 'using Pkg; Pkg.test()'

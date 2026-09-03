@@ -25,7 +25,9 @@ if [ "$#" -lt 1 ]; then
     exit 1
 fi
 
-source "$(dirname "${BASH_SOURCE[0]}")/lib/slurm_modules.sh"
+# Absolute path: under sbatch, BASH_SOURCE points at SLURM's copy of this script in
+# /var/spool/slurmd/, where scripts/lib/ does not exist.
+source "$PROJECT_ROOT/scripts/lib/slurm_modules.sh"
 
 cd "$PROJECT_ROOT"
 stdbuf -oL -eL julia --startup-file=no --color=no --project="$PROJECT_ROOT" \
