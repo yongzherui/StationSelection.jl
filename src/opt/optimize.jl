@@ -164,6 +164,28 @@ include("label_setting/joint_routing_assignment/darp/hooks.jl")
 include("label_setting/joint_routing_assignment/darp/driver.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
+# relaxed_cluster/: NOT a fourth column-producing pricer -- a relaxation of the pricing
+# problem, whose exhaustion certifies that no improving column exists in the FULL route
+# universe without ever finding one. Selected via `CGSolver.certification_pricing_mode`
+# (never `pricing_mode`), and only for a formulation built with `relaxed_cluster_count`.
+# See relaxed_cluster/types.jl for the bound it rests on.
+#
+# Load order: clustering.jl is standalone; types.jl needs it (struct field) plus
+# ../types.jl's RewardLayerBitset; data.jl needs both; seed.jl/extend.jl/replay.jl need
+# types.jl only (labels, dominance and the reward bound are ../exact/'s, already loaded);
+# context.jl is self-contained beyond that; hooks.jl loads after it, needing the context
+# struct in every method signature; certify.jl loads last -- it is the only file here that
+# reaches out to the formulation/mapping/CGSolver layer, and it uses pricing_round.jl's
+# candidate extraction, so it sits after both.
+include("label_setting/joint_routing_assignment/relaxed_cluster/clustering.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/types.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/data.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/seed.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/extend.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/replay.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/context.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/hooks.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/certify.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
 # master CGSolver's build (above) solves, seeded with the exhaustive pool

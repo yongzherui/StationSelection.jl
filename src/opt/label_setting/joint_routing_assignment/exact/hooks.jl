@@ -72,13 +72,14 @@ not the search's proxy signature (`_joint_routing_assignment_layer_signature`,
 `payload` carries what `_pricing_make_column` needs to build the column.
 """
 function _pricing_candidate_from_label(ctx::JointRoutingAssignmentSearchContext, label::JointRoutingAssignmentPricingLabel)
-    assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
+    assignments, tau, reduced_cost, positions = _joint_routing_assignment_column_from_route(
         label.route, ctx.pricing_data; label_reduced_cost=label.reduced_cost,
     )
     isempty(assignments) && return nothing
     return (
         signature=_joint_routing_assignment_column_signature(assignments),
-        tau=tau, reduced_cost=reduced_cost, payload=(route=label.route, assignments=assignments),
+        tau=tau, reduced_cost=reduced_cost,
+        payload=(route=label.route, assignments=assignments, positions=positions),
     )
 end
 
@@ -92,6 +93,10 @@ _pricing_make_column(ctx::JointRoutingAssignmentSearchContext, column_id::Int, c
             "scenario" => ctx.pricing_data.scenario,
             "route" => Tuple(candidate.payload.route),
             "reduced_cost" => candidate.reduced_cost,
+            # The boarding/alighting stop each assignment was certified at, straight from
+            # replay. Not derivable from the column afterwards once a route revisits a
+            # station -- see `_replay_joint_routing_assignment_route`.
+            "assignment_positions" => candidate.payload.positions,
         ),
     )
 

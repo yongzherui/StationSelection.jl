@@ -30,14 +30,38 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 toggle, same default, applying here to `JointRoutingAssignmentSearchContext`'s
 dominance test instead -- `label_setting/joint_routing_assignment/exact/dominate.jl`).
 
-`pricing_mode::Symbol` (`:exact`, `:darp_modified`, or `:darp`, default
-`:exact`) picks which label-setting pricer `_pricing_build_scenario_context`
-(`label_setting/joint_routing_assignment/pricing_round.jl`) builds -- three
-pricers that are all, run to exhaustion, required to reach the *same*
-optimum, differing only in search mechanism and cost:
+`pricing_mode::Symbol` (`:exact`, `:station_simple`, `:darp_modified`, or `:darp`,
+default `:exact`) picks which label-setting pricer `_pricing_build_scenario_context`
+(`label_setting/joint_routing_assignment/pricing_round.jl`) builds.
+
+**Three of the four are exhaustive-equivalent; `:station_simple` is not.** `:exact`,
+`:darp_modified` and `:darp` all search the full revisit-tolerant route universe and are
+required to reach the *same* optimum when run to exhaustion, differing only in search
+mechanism and cost -- switching among them isolates the mechanism while holding the
+achievable optimum fixed. `:station_simple` searches a strict *subset* of that universe
+(elementary routes only), so exhausting it proves only that no *elementary* column prices
+negative. A `:station_simple` run that exhausts still reports `SOLVE_OPTIMAL` -- the status
+keeps its usual meaning, "no improving column remains in the universe searched" -- but the
+scope of that claim is narrower, and every such result carries
+`metadata["cg_optimality_scope"] == "elementary_routes_only"` (plus
+`cg_pricing_universe_restricted == true` and `cg_final_pricing_mode == :station_simple`) so
+the restriction travels with the number. Read that key before treating a
+`:station_simple` optimum as a full-universe one. To certify against the full universe
+while still getting the elementary pricer's speed, use `CGSolver`'s
+`warm_start_pricing_mode`, which harvests columns cheaply in the elementary universe and
+then hands off to the formulation's own pricer, whose exhaustion is what certifies.
 - `:exact` -- `JointRoutingAssignmentSearchContext` (`exact/context.jl`), which
   credits each passenger their single *best* certified `(j,k)` regardless of
   visitation order, via a reward-layer running-max trick.
+- `:station_simple` -- `JointRoutingAssignmentStationSimpleSearchContext`
+  (`station_simple/context.jl`), the elementary-route restriction: consumes the
+  identical `pricing_data` as `:exact` and differs only in label type and dominance
+  rule (`U_a ⊆ U_b` over visited stations), so a route may not revisit a station.
+  Cheaper than `:exact` because the elementarity resource strengthens dominance, but
+  it forfeits any column whose value depends on a revisit -- e.g. serving `o→d` and
+  `d→o` on one vehicle needs `o→d→o`. See
+  `test_joint_routing_assignment_station_simple_pricing.jl`'s "restriction is visible
+  where a revisit strictly helps" for the minimal case.
 - `:darp_modified` -- `JointRoutingAssignmentDarpModifiedSearchContext`
   (`darp_modified/context.jl`), which computes the same optimum by
   branching the search on whether to commit each passenger's candidate as
@@ -57,8 +81,22 @@ the exhaustive-equivalence invariant each is required to satisfy and the
 mechanism that makes it hold. `compensated_dominance` (below) applies to
 `:exact` and `:darp_modified` only -- `:darp` has no such field, since a
 compensated version would be unsound for its triple-indexed served set (see
-`darp/types.jl`). Switching `pricing_mode` alone isolates the
-search-mechanism difference, holding the achievable optimum fixed.
+`darp/types.jl`), and to `:station_simple`, which reuses `:exact`'s `pricing_data`
+verbatim.
+`relaxed_cluster_count::Union{Nothing, Int}` (default `nothing`) sizes the station
+partition the *relaxed-cluster certification pricer* runs on
+(`label_setting/joint_routing_assignment/relaxed_cluster/`). It is a formulation field, not
+a solver one, because the partition is computed **once at build time** and stashed on the
+model (`m[:joint_routing_assignment_station_clustering]`): the cells must be identical
+across every CG iteration of a run for the cluster count to be a meaningful swept
+parameter. Setting it costs one k-medoids pass at build time and nothing else -- the
+relaxation only ever runs when `CGSolver.certification_pricing_mode = :relaxed_cluster`
+asks for it. Note `:relaxed_cluster` is deliberately **not** a `pricing_mode` value: that
+pricer searches a relaxed cluster graph, so its routes are not real routes and cannot
+become columns; it only answers "can an improving column still exist", and a
+`no` from it is a full-route-universe optimality certificate. See
+`relaxed_cluster/types.jl` for the bound's proof.
+
 No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
 assignment is simply the only behavior now. No `allow_walk_only` field either -- unlike
@@ -80,6 +118,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     max_stops::Int
     compensated_dominance::Bool
     pricing_mode::Symbol
+    relaxed_cluster_count::Union{Nothing, Int}
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -90,13 +129,19 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             max_stops::Union{Nothing, Int}=nothing,
             compensated_dominance::Bool=true,
             pricing_mode::Symbol=:exact,
+            relaxed_cluster_count::Union{Nothing, Int}=nothing,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
         )
-        pricing_mode in (:exact, :darp_modified, :darp) || throw(ArgumentError(
-            "pricing_mode must be :exact, :darp_modified, or :darp, got $(repr(pricing_mode))",
+        pricing_mode in (:exact, :station_simple, :darp_modified, :darp) || throw(ArgumentError(
+            "pricing_mode must be :exact, :station_simple, :darp_modified, or :darp, " *
+            "got $(repr(pricing_mode)). :relaxed_cluster is NOT a pricing_mode: it produces " *
+            "no columns, and is enabled via CGSolver's certification_pricing_mode instead",
+        ))
+        isnothing(relaxed_cluster_count) || relaxed_cluster_count >= 1 || throw(ArgumentError(
+            "relaxed_cluster_count must be >= 1 (or nothing), got $(relaxed_cluster_count)",
         ))
         new(
             Float64(route_regularization_weight),
@@ -107,6 +152,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             resolved_max_stops,
             compensated_dominance,
             pricing_mode,
+            relaxed_cluster_count,
         )
     end
 end

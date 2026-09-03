@@ -42,3 +42,50 @@ end
 function integer_recovery_build(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model)::BuildResult
     return _aggregate_od_route_integer_recovery_build(m[:aggregate_od_route_formulation], build_result, mapping, m)
 end
+
+# `CGSolver.warm_start_pricing_mode` support. Only the joint formulation has a selectable
+# pricer, so these read/write `m[:joint_routing_assignment_pricing_mode]` -- the same slot
+# `_pricing_build_scenario_context` consults on every pricing call, which is what makes a
+# mid-solve switch take effect without rebuilding anything. `AggregateODRouteBaseFormulation`
+# falls through to `cg_pricing_mode`'s `nothing` default (no selectable pricer), so asking
+# it for a warm start is rejected rather than silently ignored.
+cg_pricing_mode(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model) =
+    get(m.obj_dict, :joint_routing_assignment_pricing_mode, nothing)
+
+function set_cg_pricing_mode!(build_result::BuildResult, mapping::AggregateODRouteMap,
+        m::JuMP.Model, mode::Symbol)
+    haskey(m.obj_dict, :joint_routing_assignment_pricing_mode) || throw(ArgumentError(
+        "this AggregateODRoute model has no selectable pricer to switch " *
+        "(no :joint_routing_assignment_pricing_mode on the model)",
+    ))
+    m[:joint_routing_assignment_pricing_mode] = mode
+    return mode
+end
+
+# `CGSolver.certification_pricing_mode` support -- the relaxation-based certify-first
+# path, structurally parallel to the warm-start pair above but answering a different
+# question: not "which pricer finds columns" but "can we prove none exist without running
+# one at all". Only the joint formulation has a relaxation
+# (`label_setting/joint_routing_assignment/relaxed_cluster/`), and only when its build
+# stashed a station partition -- `AggregateODRouteBaseFormulation`, or a joint model built
+# without `relaxed_cluster_count`, falls through to `cg_certification_supported`'s `false`
+# default, so asking for certification is rejected rather than silently ignored.
+function cg_certification_supported(build_result::BuildResult, mapping::AggregateODRouteMap,
+        m::JuMP.Model, mode::Symbol)
+    mode === :relaxed_cluster || return false
+    m[:aggregate_od_route_formulation] isa AggregateODRouteJointRoutingAssignmentFormulation ||
+        return false
+    return haskey(m.obj_dict, :joint_routing_assignment_station_clustering)
+end
+
+function cg_certification_round(build_result::BuildResult, mapping::AggregateODRouteMap,
+        m::JuMP.Model, duals, solver::CGSolver, mode::Symbol; time_limit_sec::Real)
+    mode === :relaxed_cluster || throw(ArgumentError(
+        "unknown certification_pricing_mode $(repr(mode)) for an AggregateODRoute model -- " *
+        "expected :relaxed_cluster",
+    ))
+    return _run_relaxed_cluster_certification_round(
+        m[:aggregate_od_route_formulation], mapping, m, duals, solver;
+        time_limit=Float64(time_limit_sec),
+    )
+end

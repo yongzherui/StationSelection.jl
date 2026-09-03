@@ -566,14 +566,43 @@ function _export_route_activations(
 end
 
 
+
 """
     export_model_specific_variables(result, mapping::AggregateODRouteMap, export_dir, metadata)
 
-Export AggregateODRouteProblem/RouteCoveringProblem-specific variables:
-route_columns.csv (static route pool) and route_activations.csv
-(per-scenario route_theta activations).
+Both live AggregateODRoute formulations share `mapping::AggregateODRouteMap`, so this one
+method has to serve both -- a second method on the same signature would not be an overload,
+it would silently overwrite the first at load time. It therefore redispatches on the
+formulation stashed on the model at build time (`m[:aggregate_od_route_formulation]`),
+exactly as the `CGSolver` hooks in
+`optimize/aggregate_od_route/column_generation/dispatch.jl` do. A model carrying no such
+key (`RouteCoveringProblem` reuses this mapping but is not built by either `build_model`)
+falls back to the `AggregateODRouteBaseFormulation` exports, preserving the behaviour this
+function had before the split.
 """
 function export_model_specific_variables(
+    result::OptResult,
+    mapping::AggregateODRouteMap,
+    export_dir::String,
+    metadata::Dict
+)
+    formulation = get(result.model.obj_dict, :aggregate_od_route_formulation, nothing)
+    return _aggregate_od_route_export_model_specific_variables(
+        formulation, result, mapping, export_dir, metadata,
+    )
+end
+
+
+"""
+    _aggregate_od_route_export_model_specific_variables(::AggregateODRouteBaseFormulation, ...)
+
+`AggregateODRouteBaseFormulation`/`RouteCoveringProblem` exports: route_columns.csv (the
+up-front enumerated pool, read off `mapping.columns`) and route_activations.csv
+(`m[:route_theta]`, keyed `(column_id, scenario)`). Neither name exists on the joint CG
+path, which is why that formulation gets its own method below rather than sharing this one.
+"""
+function _aggregate_od_route_export_model_specific_variables(
+    ::Union{Nothing, AggregateODRouteBaseFormulation},
     result::OptResult,
     mapping::AggregateODRouteMap,
     export_dir::String,
@@ -587,4 +616,360 @@ function export_model_specific_variables(
     n_activations = _export_route_activations(result.model, mapping, export_dir)
     metadata["n_route_columns_exported"] = n_columns
     metadata["n_route_activations"] = n_activations
+end
+
+
+# =============================================================================
+# AggregateODRouteJointRoutingAssignmentFormulation exports (CGSolver)
+# =============================================================================
+
+"""
+Selection tolerance for joint `theta`/`x_walk`. Deliberately not the `0.5` the Base
+exporter uses: `theta` is binary only after `CGSolver`'s integer recovery
+(`recover_integer_solution=true`), and on an LP-master result it is fractional, where a
+`0.5` cut would silently discard most of the solution instead of reporting it.
+"""
+const JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL = 1e-6
+
+"""
+    _joint_has_primal(m) -> Bool
+
+Whether `JuMP.value` can be called on `m` at all. `CGSolver` can return a result whose
+model was never solved to a point (`SOLVE_NOT_SOLVED`), and `value` throws there rather
+than returning a sentinel, so every joint export below is gated on this and writes
+correctly-headed empty frames when it is false.
+"""
+_joint_has_primal(m::JuMP.Model) =
+    JuMP.result_count(m) > 0 &&
+    JuMP.primal_status(m) in (MOI.FEASIBLE_POINT, MOI.NEARLY_FEASIBLE_POINT)
+
+"""
+    _joint_selected_columns(m) -> Vector{Tuple{Int, Float64}}
+
+The `(column_id, theta_value)` pairs above [`JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL`], sorted
+by id. `m[:joint_routing_assignment_theta]` is keyed by **column id alone**, not
+`(column_id, scenario)` as the Base formulation's `route_theta` is: a joint column belongs
+to exactly one scenario (it is part of the column's dedup signature, see
+`add_joint_routing_assignment_column!`), which is recovered from
+`column.metadata["scenario"]` rather than from the variable key.
+"""
+function _joint_selected_columns(m::JuMP.Model)
+    theta = m[:joint_routing_assignment_theta]
+    selected = Tuple{Int, Float64}[]
+    for (column_id, var) in theta
+        val = JuMP.value(var)
+        val > JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL || continue
+        push!(selected, (column_id, val))
+    end
+    sort!(selected; by = first)
+    return selected
+end
+
+"""
+    _export_joint_route_activations(m, mapping, selected, export_dir) -> Int
+
+One row per selected route column, written to `route_activations.csv`.
+
+`route_station_ids` is `column.route` -- the physical stop sequence in visit order --
+translated through `mapping.array_idx_to_station_id` and joined with `|`. `is_elementary`
+records whether that sequence visits each station at most once: the pricer's labels are
+revisit-tolerant, so a column may legitimately repeat a station, and whether the columns
+that end up *selected* do so is not something the pool size or the objective can answer.
+`column_cost` is the true objective coefficient via `joint_routing_assignment_column_cost`,
+i.e. `mu*(tau + rho)` plus the demand-weighted walking cost of the assignments it carries.
+"""
+function _export_joint_route_activations(
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    selected::Vector{Tuple{Int, Float64}},
+    export_dir::String,
+)
+    empty_df() = DataFrame(
+        scenario=Int[], column_id=Int[], theta_value=Float64[], is_integral=Bool[],
+        tau=Float64[], column_cost=Float64[], n_stops=Int[], n_distinct_stations=Int[],
+        is_elementary=Bool[], route_station_ids=String[], n_assignments=Int[],
+        total_demand=Int[], initialization=String[],
+    )
+
+    data = m[:joint_routing_assignment_data]
+    columns = m[:joint_routing_assignment_columns]
+    id_map = mapping.array_idx_to_station_id
+
+    rows = []
+    for (column_id, val) in selected
+        column = columns[column_id]
+        s = Int(column.metadata["scenario"])
+        route = column.route
+        push!(rows, (
+            scenario = s,
+            column_id = column_id,
+            theta_value = val,
+            is_integral = abs(val - round(val)) <= JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL,
+            tau = column.tau,
+            column_cost = joint_routing_assignment_column_cost(m, data, mapping, column),
+            n_stops = length(route),
+            n_distinct_stations = length(Set(route)),
+            is_elementary = length(Set(route)) == length(route),
+            route_station_ids = join((id_map[idx] for idx in route), "|"),
+            n_assignments = length(column.assignments),
+            total_demand = sum(mapping.Q_s[s][p] for (p, _, _) in column.assignments; init = 0),
+            initialization = string(get(column.metadata, "initialization", "")),
+        ))
+    end
+
+    df = isempty(rows) ? empty_df() : sort!(DataFrame(rows), [:scenario, :column_id])
+    CSV.write(joinpath(export_dir, "route_activations.csv"), df)
+    println("    ✓ route_activations.csv ($(nrow(df)) selected columns)")
+    return nrow(df)
+end
+
+"""
+    _export_joint_route_assignments(m, mapping, selected, export_dir) -> Int
+
+One row per `(selected column, passenger assignment)` pair, written to
+`route_assignments.csv` -- the long form of `column.assignments`, whose entries are
+`(p, pickup, dropoff)` with `p` indexing `mapping.Omega_s[scenario]` and pickup/dropoff
+being station array indices. This is the table that says who rides which route and where
+they board and alight; the joint formulation has no `x` variable, so it exists nowhere else.
+
+`pickup_stop_position`/`dropoff_stop_position` are the indices route replay actually
+certified, read from `column.metadata["assignment_positions"]`
+(`_replay_joint_routing_assignment_route` records them at the point they are known). They
+are **not** re-derived here from the station pair: on a revisiting route the certifying
+dropoff is the earliest ride-limit-feasible index and its pickup is the most recent prior
+visit to the origin, so a `findfirst`/`findlast` scan of `route` gets both ends wrong in
+general and agrees only by coincidence on an elementary route. Columns built by a path that
+does not record the key (`darp`, `darp_modified`, direct enumeration) export `0`, which is
+distinguishable from any real 1-based position.
+"""
+function _export_joint_route_assignments(
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    selected::Vector{Tuple{Int, Float64}},
+    export_dir::String,
+)
+    empty_df() = DataFrame(
+        scenario=Int[], column_id=Int[], theta_value=Float64[], p=Int[],
+        origin_id=Int[], dest_id=Int[], demand=Int[],
+        pickup_idx=Int[], dropoff_idx=Int[], pickup_id=Int[], dropoff_id=Int[],
+        walk_cost=Float64[], pickup_stop_position=Int[], dropoff_stop_position=Int[],
+    )
+
+    data = m[:joint_routing_assignment_data]
+    columns = m[:joint_routing_assignment_columns]
+    id_map = mapping.array_idx_to_station_id
+
+    rows = []
+    for (column_id, val) in selected
+        column = columns[column_id]
+        s = Int(column.metadata["scenario"])
+        omega = mapping.Omega_s[s]
+        positions = get(column.metadata, "assignment_positions",
+                        Dict{Int, Tuple{Int, Int}}())
+        for (p, j, k) in column.assignments
+            pickup_pos, dropoff_pos = get(positions, p, (0, 0))
+            o, d = omega[p]
+            push!(rows, (
+                scenario = s,
+                column_id = column_id,
+                theta_value = val,
+                p = p,
+                origin_id = id_map[o],
+                dest_id = id_map[d],
+                demand = mapping.Q_s[s][p],
+                pickup_idx = j,
+                dropoff_idx = k,
+                pickup_id = _exported_station_id(id_map, j),
+                dropoff_id = _exported_station_id(id_map, k),
+                walk_cost = od_pair_walking_cost(data, o, d, (j, k)),
+                pickup_stop_position = pickup_pos,
+                dropoff_stop_position = dropoff_pos,
+            ))
+        end
+    end
+
+    df = isempty(rows) ? empty_df() : sort!(DataFrame(rows), [:scenario, :column_id, :p])
+    CSV.write(joinpath(export_dir, "route_assignments.csv"), df)
+    println("    ✓ route_assignments.csv ($(nrow(df)) route-borne assignments)")
+    return nrow(df)
+end
+
+"""
+    _export_joint_walk_only_assignments(m, mapping, export_dir) -> Int
+
+The `x_walk` half of the solution, written to `walk_only_assignments.csv`. Every
+positive-demand group is covered by route columns **or** by a direct walk (the coverage
+constraint), so without this file the export silently drops demand and a genuinely
+walk-served group is indistinguishable from an export bug.
+"""
+function _export_joint_walk_only_assignments(
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    export_dir::String,
+)
+    empty_df() = DataFrame(
+        scenario=Int[], p=Int[], origin_id=Int[], dest_id=Int[],
+        demand=Int[], value=Float64[], walk_cost=Float64[],
+    )
+
+    if !haskey(m.obj_dict, :x_walk) || !_joint_has_primal(m)
+        CSV.write(joinpath(export_dir, "walk_only_assignments.csv"), empty_df())
+        println("    ✓ walk_only_assignments.csv (0 — no x_walk or no primal solution)")
+        return 0
+    end
+
+    data = m[:joint_routing_assignment_data]
+    id_map = mapping.array_idx_to_station_id
+
+    rows = []
+    for ((s, p), var) in m[:x_walk]
+        val = JuMP.value(var)
+        val > JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL || continue
+        o, d = mapping.Omega_s[s][p]
+        push!(rows, (
+            scenario = s,
+            p = p,
+            origin_id = id_map[o],
+            dest_id = id_map[d],
+            demand = mapping.Q_s[s][p],
+            value = val,
+            walk_cost = od_pair_walking_cost(data, o, d, WALK_ONLY_PAIR),
+        ))
+    end
+
+    df = isempty(rows) ? empty_df() : sort!(DataFrame(rows), [:scenario, :p])
+    CSV.write(joinpath(export_dir, "walk_only_assignments.csv"), df)
+    println("    ✓ walk_only_assignments.csv ($(nrow(df)) direct walks)")
+    return nrow(df)
+end
+
+"""
+    _joint_export_self_checks!(metadata, m, mapping, selected)
+
+Two invariants recomputed from the exported quantities alone, recorded in
+`variable_export_metadata.json`. Both are cheap, and both fail loudly if this exporter has
+misread the index conventions (`p` vs station array index vs station id is easy to get
+wrong here) -- which matters because the alternative way to notice is re-running the solve.
+
+- `coverage_shortfall_max`: over every `(s, p)`, `max(0, 1 - (sum(theta over covering
+  columns) + x_walk))`. The coverage constraint is `>= 1`, so a shortfall is a genuine
+  violation while an excess is not -- overcoverage is feasible and merely paid for. The
+  check is therefore one-sided, and `coverage_max` records the largest total seen so
+  overcoverage stays visible without being flagged as an error.
+- `objective_residual`: `sum(theta * column_cost) + sum(x_walk * walk cost)` against
+  `result.objective_value`. Reconstructs the objective from the exported rows only.
+"""
+function _joint_export_self_checks!(
+    metadata::Dict,
+    result::OptResult,
+    m::JuMP.Model,
+    mapping::AggregateODRouteMap,
+    selected::Vector{Tuple{Int, Float64}},
+)
+    data = m[:joint_routing_assignment_data]
+    columns = m[:joint_routing_assignment_columns]
+    walk_cost_weight = Float64(m[:joint_routing_assignment_walk_cost_weight])
+
+    coverage = Dict{Tuple{Int, Int}, Float64}()
+    for s in 1:n_scenarios(data), p in 1:length(mapping.Omega_s[s])
+        coverage[(s, p)] = 0.0
+    end
+
+    objective = 0.0
+    for (column_id, val) in selected
+        column = columns[column_id]
+        s = Int(column.metadata["scenario"])
+        objective += val * joint_routing_assignment_column_cost(m, data, mapping, column)
+        for (p, _, _) in column.assignments
+            haskey(coverage, (s, p)) && (coverage[(s, p)] += val)
+        end
+    end
+
+    n_walk = 0
+    if haskey(m.obj_dict, :x_walk)
+        for ((s, p), var) in m[:x_walk]
+            val = JuMP.value(var)
+            val > JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL || continue
+            n_walk += 1
+            haskey(coverage, (s, p)) && (coverage[(s, p)] += val)
+            o, d = mapping.Omega_s[s][p]
+            objective += val * walk_cost_weight * mapping.Q_s[s][p] *
+                od_pair_walking_cost(data, o, d, WALK_ONLY_PAIR)
+        end
+    end
+
+    metadata["coverage_shortfall_max"] =
+        isempty(coverage) ? 0.0 : maximum(max(0.0, 1.0 - v) for v in values(coverage))
+    metadata["coverage_max"] =
+        isempty(coverage) ? 0.0 : maximum(values(coverage))
+    metadata["objective_reconstructed"] = objective
+    if !isnothing(result.objective_value)
+        metadata["objective_residual"] = abs(objective - result.objective_value)
+    end
+    metadata["n_walk_only_assignments"] = n_walk
+    return nothing
+end
+
+"""
+    _aggregate_od_route_export_model_specific_variables(::AggregateODRouteJointRoutingAssignmentFormulation, ...)
+
+Joint routing+assignment CG exports. Writes route_activations.csv (one row per selected
+`theta`, with the decoded stop sequence and whether it is elementary), route_assignments.csv
+(the per-passenger `(p, pickup, dropoff)` triples those columns carry), and
+walk_only_assignments.csv (the `x_walk` complement), plus the self-check fields
+`_joint_export_self_checks!` documents.
+
+Reads `m[:joint_routing_assignment_{theta,columns}]`, **not** `mapping.columns` /
+`m[:route_theta]`: the CG path never registers columns onto the mapping
+(`_register_aggregate_od_route_column_metadata!` is only called from the Base formulation's
+`route_activation.jl`), so `mapping.columns` holds the unrelated singleton seed pool here.
+
+`result.model` is the last model optimized, which under `recover_integer_solution=true` is
+the rebuilt integer-recovery MIP rather than the LP master -- the right object, and the one
+whose `theta` are binary. That rebuild re-runs the column adder and so re-deduplicates, so
+its pool can be a strict subset of the LP pool; both sizes are recorded rather than assumed
+equal. Column ids survive the rebuild (`column.id` travels on the column and keys the dict).
+"""
+function _aggregate_od_route_export_model_specific_variables(
+    ::AggregateODRouteJointRoutingAssignmentFormulation,
+    result::OptResult,
+    mapping::AggregateODRouteMap,
+    export_dir::String,
+    metadata::Dict
+)
+    m = result.model
+    metadata["model_type"] = "AggregateODRouteJointRoutingAssignment"
+    metadata["has_walking_limit"] = has_walking_distance_limit(mapping)
+    metadata["n_route_columns_in_pool"] = length(m[:joint_routing_assignment_columns])
+    metadata["theta_relaxed"] = Bool(m[:joint_routing_assignment_relax_integrality])
+
+    if !_joint_has_primal(m)
+        metadata["has_primal_solution"] = false
+        empty = Tuple{Int, Float64}[]
+        metadata["n_route_activations"] = _export_joint_route_activations(m, mapping, empty, export_dir)
+        metadata["n_route_assignments"] = _export_joint_route_assignments(m, mapping, empty, export_dir)
+        metadata["n_walk_only_assignments"] = _export_joint_walk_only_assignments(m, mapping, export_dir)
+        println("    ! no primal solution on the final model — wrote empty route exports")
+        return nothing
+    end
+
+    metadata["has_primal_solution"] = true
+    selected = _joint_selected_columns(m)
+    metadata["n_route_activations"] =
+        _export_joint_route_activations(m, mapping, selected, export_dir)
+    metadata["n_route_assignments"] =
+        _export_joint_route_assignments(m, mapping, selected, export_dir)
+    _export_joint_walk_only_assignments(m, mapping, export_dir)
+    _joint_export_self_checks!(metadata, result, m, mapping, selected)
+
+    # The study question this export exists to answer, precomputed so a reader does not
+    # have to re-derive it from route_station_ids.
+    columns = m[:joint_routing_assignment_columns]
+    n_elementary = count(
+        length(Set(columns[id].route)) == length(columns[id].route) for (id, _) in selected;
+        init = 0,
+    )
+    metadata["n_selected_elementary"] = n_elementary
+    metadata["n_selected_non_elementary"] = length(selected) - n_elementary
+    return nothing
 end

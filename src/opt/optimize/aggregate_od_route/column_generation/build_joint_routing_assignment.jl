@@ -125,6 +125,19 @@ function _build_joint_routing_assignment_model(
         isfinite(cost) && (travel_cost[(i, j)] = cost)
     end
     m[:joint_routing_assignment_travel_cost] = travel_cost
+    # Station partition for the relaxed-cluster certification pricer
+    # (`label_setting/joint_routing_assignment/relaxed_cluster/`). Computed HERE, once,
+    # and never re-derived per pricing round: the relaxation is valid for any partition,
+    # but only a partition that is constant for the whole solve makes `relaxed_cluster_count`
+    # a meaningful swept parameter and successive rounds' bounds comparable. Absent when
+    # the formulation did not ask for one, in which case
+    # `CGSolver(certification_pricing_mode=:relaxed_cluster)` is rejected rather than
+    # silently ignored.
+    if !isnothing(formulation.relaxed_cluster_count)
+        m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
+            m[:joint_routing_assignment_nodes], travel_cost, formulation.relaxed_cluster_count,
+        )
+    end
     # Empty pool containers: real entries arrive from the seed pass below and (for the
     # LP master) from every later CG iteration (`add_columns!`, routing_and_assignment.jl).
     m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()
@@ -218,6 +231,7 @@ function _aggregate_od_route_integer_recovery_build(
         max_stops = m[:joint_routing_assignment_max_stops],
         compensated_dominance = m[:joint_routing_assignment_compensated_dominance],
         pricing_mode = m[:joint_routing_assignment_pricing_mode],
+        relaxed_cluster_count = _joint_routing_assignment_rebuilt_cluster_count(m),
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(
@@ -225,4 +239,21 @@ function _aggregate_od_route_integer_recovery_build(
         relax_integrality = false,
         initial_columns = initial_columns,
     )
+end
+
+"""
+    _joint_routing_assignment_rebuilt_cluster_count(m) -> Union{Nothing, Int}
+
+The `relaxed_cluster_count` an `integer_recovery_build` rebuild should carry, read back
+off the clustering the original build stashed (the scalar itself is not stashed
+separately -- the partition is the authoritative record, and its `n_clusters` is what
+`cluster_stations_by_travel_cost` actually produced after dropping any empty cell).
+
+Recovery does no pricing at all, so the rebuilt model never uses this; it is reconstructed
+only so the rebuilt `formulation` compares equal to the original one, which callers and
+tests rely on.
+"""
+function _joint_routing_assignment_rebuilt_cluster_count(m::JuMP.Model)::Union{Nothing, Int}
+    haskey(m.obj_dict, :joint_routing_assignment_station_clustering) || return nothing
+    return m[:joint_routing_assignment_station_clustering].n_clusters
 end

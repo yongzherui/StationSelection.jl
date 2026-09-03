@@ -27,6 +27,8 @@ opt/
 ├── solvers/                # AbstractSolver subtypes + shared solver utils
 ├── optimize/               # build_model methods, one per (problem × formulation × solver)
 ├── label_setting/          # pricing/column-enumeration engine for the AggregateODRoute formulations
+│                          #   joint_routing_assignment/{exact,station_simple,darp,darp_modified}/ price columns;
+│                          #   joint_routing_assignment/relaxed_cluster/ prices none — it CERTIFIES (see below)
 ├── variables/               # shared variable-creation building blocks (y, z, x, θ, f, walk)
 ├── constraints/             # shared constraint-creation building blocks
 └── objectives/               # shared objective-assembly building blocks
@@ -44,7 +46,7 @@ blocks; they don't live inside `formulations/` or `problems/` themselves.
 | `ClusteringTwoStageODFormulation` | `DirectMIPSolver` | Two-stage OD pickup/dropoff assignment | `l`, `in_vehicle_time_weight` | y, z, x |
 | `ClusteringTwoStageODFlowRegularizerFormulation` | `DirectMIPSolver` | `ClusteringTwoStageODFormulation` + route-activation flow penalty | `l`, `in_vehicle_time_weight`, `flow_regularization_weight` | y, z, x, f_flow |
 | `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | Station build + decoupled OD assignment + route activation, against an exhaustively enumerated column pool built up front | `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`, `max_wait_time`, `detour_factor`, `max_stops`, `compensated_dominance` | y, x, x_walk, θ |
-| `AggregateODRouteJointRoutingAssignmentFormulation` | `CGSolver` | Same encoding-detail fields as Base, but θ columns carry OD assignment directly — no separate `x`; grown via column generation, no up-front enumeration | same field set as Base | y, x_walk, θ |
+| `AggregateODRouteJointRoutingAssignmentFormulation` | `CGSolver` | Same encoding-detail fields as Base, but θ columns carry OD assignment directly — no separate `x`; grown via column generation, no up-front enumeration | Base's field set + `pricing_mode`, `relaxed_cluster_count` | y, x_walk, θ |
 
 **Important departure from the old two-stage convention:** the two `AggregateODRoute*`
 formulations have **no `z`/per-scenario-activation variable and no `l` distinct from
@@ -116,12 +118,53 @@ each route column's cost), `walk_cost_weight` (multiplies every walking-cost ter
 `repositioning_time` (ρ, added to every route column's travel/service cost),
 `max_wait_time`, `detour_factor` (min 1.0), `max_stops` (min 2, default unbounded),
 `compensated_dominance` (default `true`; only affects `CGSolver`'s label-setting pricer
-dominance test — inert for `DirectMIPSolver`'s enumeration, which never runs dominance).
+dominance test — inert for `DirectMIPSolver`'s enumeration, which never runs dominance),
+`pricing_mode` (Joint only; `:exact` default, plus `:station_simple`, `:darp_modified`,
+`:darp`), `relaxed_cluster_count` (Joint only; default `nothing`).
+`:exact`/`:darp_modified`/`:darp` all search the full revisit-tolerant route
+universe and are exhaustive-equivalent; `:station_simple` searches elementary routes only
+and is therefore a *restriction* of the universe, not just a different search of it — its
+optimum is scoped, see the `cg_optimality_scope` note under "Solve status".
+
+`relaxed_cluster_count = K` builds a k-medoids station partition **once at build time**
+(stashed as `m[:joint_routing_assignment_station_clustering]`) for the relaxed-cluster
+*certification* pricer (`label_setting/joint_routing_assignment/relaxed_cluster/`). It is a
+formulation field rather than a solver one precisely because the cells must be identical
+across every CG iteration of a run, which is what makes `K` a meaningful swept parameter.
+Setting it alone changes nothing — it takes effect only when
+`CGSolver.certification_pricing_mode = :relaxed_cluster` asks for it. Note `:relaxed_cluster`
+is deliberately **not** a `pricing_mode` value: that pricer searches a relaxed cluster
+graph, so its routes are not real routes and can never become columns.
 
 **Solver-level:** `SolverOptions` (`silent`, `mip_gap`, `time_limit_sec`) shared by every
 `AbstractSolver`. `CGSolver` additionally carries `max_iterations`,
-`recover_integer_solution`, `initial_columns`. `BendersSolver` carries `max_iterations`,
-`optimality_tol`.
+`recover_integer_solution`, `initial_columns`, and `warm_start_pricing_mode`
+(default `nothing`) -- when set, CG prices in that mode until its universe exhausts, then
+hands off to the formulation's own pricer, which is the phase that certifies. Both phases
+share one master and one column pool. Requires a formulation with a selectable pricer
+(only `AggregateODRouteJointRoutingAssignmentFormulation` today, via the
+`cg_pricing_mode`/`set_cg_pricing_mode!` hooks); a warm start that would be a no-op (same
+mode both phases) or that has nothing to hand off to is rejected, never silently ignored.
+
+`CGSolver` also carries `certification_pricing_mode` (default `nothing`; `:relaxed_cluster`
+today) and `certification_time_limit_sec` (default 300) -- **certify-first**, a different
+axis from `warm_start_pricing_mode`. A warm start changes *which pricer finds columns*; a
+certification pricer finds none at all. When set, every iteration first runs a
+**relaxation** of the pricing problem whose minimum reduced cost lower-bounds the real
+one, so exhausting it without finding anything below `-reduced_cost_tol` proves no real
+improving column exists -- ending the solve with
+`cg_stop_reason="converged_by_certification"` and skipping both the regular and the
+(expensive) certifying round. A failed attempt proves nothing and the iteration proceeds
+to normal pricing unchanged; failure is early-exit, so it is cheap. The certificate covers
+the **full** route universe (it bounds every real route, not just the ones the active
+pricer searches), so such a run reports `cg_optimality_scope="full_route_universe"` even
+under `pricing_mode=:station_simple`, with `cg_certified_by_relaxation=true` recording
+where the certificate came from. Requires a formulation implementing
+`cg_certification_supported`/`cg_certification_round` -- for `:relaxed_cluster` that means
+`relaxed_cluster_count` was set at build time; a mode nothing supports is rejected up
+front, never silently ignored.
+
+`BendersSolver` carries `max_iterations`, `optimality_tol`.
 
 ## Key Constraints
 
@@ -195,7 +238,7 @@ optimal" (`MOI.FEASIBLE_POINT` is a *primal* status).
 
 | Member | Prints as | Meaning |
 | --- | --- | --- |
-| `SOLVE_OPTIMAL` | `OPTIMAL` | Certified optimum. For `CGSolver` this additionally requires pricing to have exhausted (`metadata["cg_converged"]`), i.e. a provably complete pool |
+| `SOLVE_OPTIMAL` | `OPTIMAL` | Certified optimum. For `CGSolver` this additionally requires pricing to have exhausted (`metadata["cg_converged"]`), i.e. a pool complete **for the universe pricing searched** -- see the scope note below |
 | `SOLVE_FEASIBLE` | `FEASIBLE` | Valid incumbent / upper bound, optimality NOT proven: budget-stopped or pricing-inconclusive CG, or a MIP that hit a limit with an incumbent |
 | `SOLVE_INFEASIBLE` | `INFEASIBLE` | No feasible solution: solver said so, or `check_feasibility`'s gate refuted the instance before any solve |
 | `SOLVE_NOT_SOLVED` | `NOT_SOLVED` | No incumbent to report |
@@ -203,6 +246,27 @@ optimal" (`MOI.FEASIBLE_POINT` is a *primal* status).
 Member names carry the `SOLVE_` prefix because `using JuMP` re-exports bare
 `OPTIMAL`/`INFEASIBLE` from MOI into scope; the printed labels drop it so result CSVs stay
 readable. The raw MOI code is preserved as `metadata["moi_termination_status"]`.
+
+**`OPTIMAL` is scoped to the route universe that was priced.** `SOLVE_OPTIMAL` asserts "no
+improving column remains in the universe pricing searched", which for
+`pricing_mode=:station_simple` is elementary routes only -- a revisiting column can beat
+that optimum, and the status alone does not say so. Every `CGSolver` result therefore
+carries `metadata["cg_optimality_scope"]`, either `"full_route_universe"` or
+`"elementary_routes_only"`, alongside `cg_final_pricing_mode` and
+`cg_pricing_universe_restricted`. **Check `cg_optimality_scope` before pooling a certified
+objective with others or treating it as a true optimum**; filtering on
+`termination_status` alone cannot distinguish the two. A `warm_start_pricing_mode` run
+ends in the full-universe pricer, so it reports `"full_route_universe"` despite having
+priced part of the run in the restricted one.
+
+**A relaxation certificate is full-universe regardless of the pricer.** When
+`CGSolver.certification_pricing_mode = :relaxed_cluster` is what ended the solve
+(`cg_certified_by_relaxation == true`, `cg_stop_reason == "converged_by_certification"`),
+the proof came from a relaxation that lower-bounds *every* real route's reduced cost, not
+from the active pricer exhausting its own universe — so `cg_optimality_scope` reads
+`"full_route_universe"` and `cg_pricing_universe_restricted` is `false` even when
+`cg_final_pricing_mode == :station_simple`. That combination is correct, not a bug: the
+restricted pricer found the columns, the relaxation certified there are no more.
 
 `run_opt`'s `check_feasibility` hook returns `nothing` to proceed or a reason `String` to
 abort; `run_opt` converts the string into a `SOLVE_INFEASIBLE` result carrying it as

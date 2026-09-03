@@ -58,13 +58,14 @@ Elementary-route counterpart of the revisit-tolerant pricer's
 `_pricing_candidate_from_label` (`../exact/hooks.jl`): identical route-replay, since
 replay is agnostic to how the physical route was found."""
 function _pricing_candidate_from_label(ctx::JointRoutingAssignmentStationSimpleSearchContext, label::JointRoutingAssignmentStationSimpleLabel)
-    assignments, tau, reduced_cost = _joint_routing_assignment_column_from_route(
+    assignments, tau, reduced_cost, positions = _joint_routing_assignment_column_from_route(
         label.route, ctx.pricing_data; label_reduced_cost=label.reduced_cost,
     )
     isempty(assignments) && return nothing
     return (
         signature=_joint_routing_assignment_column_signature(assignments),
-        tau=tau, reduced_cost=reduced_cost, payload=(route=label.route, assignments=assignments),
+        tau=tau, reduced_cost=reduced_cost,
+        payload=(route=label.route, assignments=assignments, positions=positions),
     )
 end
 
@@ -78,6 +79,10 @@ _pricing_make_column(ctx::JointRoutingAssignmentStationSimpleSearchContext, colu
             "scenario" => ctx.pricing_data.scenario,
             "route" => Tuple(candidate.payload.route),
             "reduced_cost" => candidate.reduced_cost,
+            # The boarding/alighting stop each assignment was certified at, straight from
+            # replay. Not derivable from the column afterwards once a route revisits a
+            # station -- see `_replay_joint_routing_assignment_route`.
+            "assignment_positions" => candidate.payload.positions,
         ),
     )
 

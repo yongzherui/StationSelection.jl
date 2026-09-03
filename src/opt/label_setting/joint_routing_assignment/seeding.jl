@@ -51,9 +51,17 @@ function joint_routing_assignment_two_stop_seed_columns(
     columns = JointRoutingAssignmentRouteColumn[]
     id = next_column_id
     for (s, j, k) in sort!(collect(keys(by_route)))
+        assignments = sort!(by_route[(s, j, k)])
         push!(columns, JointRoutingAssignmentRouteColumn(
-            id, [j, k], sort!(by_route[(s, j, k)]), get_routing_cost(data, j, k);
-            metadata=Dict{String, Any}("scenario" => s, "seed" => "two_stop"),
+            id, [j, k], assignments, get_routing_cost(data, j, k);
+            metadata=Dict{String, Any}(
+                "scenario" => s, "seed" => "two_stop",
+                # Same key the priced columns carry (`exact/hooks.jl`). Trivial on a
+                # two-stop route -- board at stop 1, alight at stop 2, no revisits
+                # possible -- but recorded so the key is not silently absent on seeds.
+                "assignment_positions" =>
+                    Dict{Int, Tuple{Int, Int}}(p => (1, 2) for (p, _j, _k) in assignments),
+            ),
         ))
         id += 1
     end

@@ -128,9 +128,9 @@ function _pricing_build_scenario_context(
         return JointRoutingAssignmentDarpSearchContext(darp_pricing_data), existing
     end
 
-    pricing_mode === :exact || throw(ArgumentError(
+    pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
-        "expected :exact, :darp_modified, or :darp",
+        "expected :exact, :station_simple, :darp_modified, or :darp",
     ))
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
@@ -142,6 +142,16 @@ function _pricing_build_scenario_context(
     )
     isempty(pricing_data.opportunities) && return nothing
 
+    # Both contexts consume the identical `pricing_data`; they differ only in the label
+    # type and dominance rule, so the elementary restriction costs nothing to select here.
+    # It IS a restriction of the route universe, not just a different search of the same
+    # one: exhausting it proves only that no elementary column prices negative. Such a run
+    # still reports OPTIMAL, with the narrower scope recorded on the result as
+    # `metadata["cg_optimality_scope"] == "elementary_routes_only"` (see `CGSolver`'s
+    # `_cg_optimality_scope`).
+    if pricing_mode === :station_simple
+        return JointRoutingAssignmentStationSimpleSearchContext(pricing_data), existing
+    end
     return JointRoutingAssignmentSearchContext(pricing_data), existing
 end
 
