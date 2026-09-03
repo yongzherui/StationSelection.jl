@@ -1,0 +1,36 @@
+===== Loading modules =====
+julia version 1.12.6
+
+===== Setting up Julia depot =====
+Using existing depot: /home/yongzr/.julia
+
+warm_start  /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/experiments/2026-09-02_study8_warm_start_speedup
+exact       /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/experiments/2026-09-02_study7_route_elementarity
+writing     /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/results/2026-09-02_study8_warm_start_speedup
+
+loaded 30 warm_start rows, 30 exact rows
+paired on cell_id: 30 cells
+
+Correctness gate
+----------------------------------------------------------------------
+  cells where both arms certified: 23 / 30
+  ✓ every certified cell agrees on the objective (rtol 1e-6)
+  !! 2 warm runs did not end in the full route universe:
+     n20_p24_s3_ms10_seed43: scope=elementary_routes_only
+     n20_p24_s3_ms10_seed47: scope=elementary_routes_only
+
+Q1  Warm-start speedup (exact_wall / warm_wall; >1 means warm start is faster)
+----------------------------------------------------------------------------------------------
+  all certified    n=23  median 1.05x  range 0.44-2.05x  faster on 14/23  median wall 822s -> 711s
+  n_pairs=8        n=10  median 1.07x  range 0.55-2.05x  faster on 7/10  median wall 60s -> 54s
+  n_pairs=16       n=10  median 1.06x  range 0.78-1.66x  faster on 7/10  median wall 1203s -> 986s
+  n_pairs=24       n= 3  median 0.71x  range 0.44-0.77x  faster on 0/3  median wall 5458s -> 7076s
+
+Q2  Elementary (phase 1) exhaustion
+----------------------------------------------------------------------------------------------
+  all certified    n=23  phase1 673s (93% of warm wall)  iters 11->1  columns 9759->0
+  n_pairs=8        n=10  phase1 40s (74% of warm wall)  iters 6.5->1  columns 296->0
+  n_pairs=16       n=10  phase1 946s (95% of warm wall)  iters 15.5->1  columns 24291.5->0
+  n_pairs=24       n= 3  phase1 6793s (96% of warm wall)  iters 47->1  columns 124568->0
+
+Wrote 3 CSVs to /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/results/2026-09-02_study8_warm_start_speedup

@@ -64,7 +64,10 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         threads::Union{Nothing, Int}=nothing,
         certifying_pricing_time_limit_sec::Real=3600.0,
         total_time_limit_sec::Real=Inf,
-        parallel_scenario_pricing::Bool=false)
+        parallel_scenario_pricing::Bool=false,
+        warm_start_pricing_mode::Union{Nothing, Symbol}=nothing,
+        certification_pricing_mode::Union{Nothing, Symbol}=nothing,
+        certification_time_limit_sec::Real=300.0)
     return CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
@@ -72,6 +75,46 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         total_time_limit_sec=total_time_limit_sec,
         parallel_scenario_pricing=parallel_scenario_pricing,
         recover_integer_solution=recover_integer_solution,
+        warm_start_pricing_mode=warm_start_pricing_mode,
+        certification_pricing_mode=certification_pricing_mode,
+        certification_time_limit_sec=certification_time_limit_sec,
+    )
+end
+
+"""
+    benchmark_certification_metrics(result) -> NamedTuple
+
+The relaxation-certification columns of a `certification_pricing_mode=:relaxed_cluster`
+run (all inert -- `nothing`/`0`/`false` -- when the feature is off, so a baseline arm
+writes the same schema).
+
+`certified_by_relaxation` is the headline: did the cheap relaxed round ever prove pricing
+was done, i.e. did the run skip the exhaustive certifying search entirely?
+`certification_sec` is what the attempts cost in total, including every failed one, so
+`certification_sec` against a baseline arm's `wall_sec` is the honest price of the
+feature. `certification_rounds` counts attempts, one per CG iteration that reached
+pricing, and the `refuted`/`inconclusive` counts split the failures by which fix they call
+for -- a relaxation that was too loose, versus one that ran out of budget.
+"""
+function benchmark_certification_metrics(result)
+    metadata = result.metadata
+    log = get(metadata, "cg_iteration_log", NamedTuple[])
+    return (
+        certification_pricing_mode=string(something(
+            get(metadata, "cg_certification_pricing_mode", nothing), "none")),
+        certified_by_relaxation=Bool(get(metadata, "cg_certified_by_relaxation", false)),
+        certification_rounds=Int(get(metadata, "cg_certification_rounds", 0)),
+        # The two failure modes call for opposite fixes: `refuted` means the relaxation was
+        # too loose (raise K), `inconclusive` means the attempt ran out of its budget
+        # (raise certification_time_limit_sec).
+        certification_refuted_rounds=Int(get(metadata, "cg_certification_refuted_rounds", 0)),
+        certification_inconclusive_rounds=Int(get(metadata, "cg_certification_inconclusive_rounds", 0)),
+        certification_sec=Float64(get(metadata, "cg_certification_sec", 0.0)),
+        # Wall spent on attempts that did NOT certify -- the pure overhead of the feature.
+        failed_certification_sec=sum(
+            (Float64(r.certification_sec) for r in log
+             if !Bool(get(r, :certification_certified, false))); init=0.0),
+        certifying_rounds=Int(get(metadata, "cg_certifying_rounds", 0)),
     )
 end
 

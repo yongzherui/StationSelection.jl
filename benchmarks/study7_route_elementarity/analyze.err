@@ -1,0 +1,39 @@
+Precompiling packages...
+   1476.1 ms  ✓ UUIDs
+   1160.0 ms  ✓ Zlib_jll
+   1451.8 ms  ✓ Unicode
+   1054.1 ms  ✓ Printf
+   1320.4 ms  ✓ CodecZlib
+   3819.5 ms  ✓ Dates
+   1188.1 ms  ✓ TOML
+   3534.6 ms  ✓ SentinelArrays
+   3006.0 ms  ✓ Preferences
+   3320.9 ms  ✓ Compat
+   1052.1 ms  ✓ PrecompileTools
+    925.8 ms  ✓ Compat → CompatLinearAlgebraExt
+   3341.2 ms  ✓ FilePathsBase
+   3006.0 ms  ✓ FilePathsBase → FilePathsBaseMmapExt
+  21710.8 ms  ✓ Parsers
+    630.6 ms  ✓ InlineStrings → ParsersExt
+   1008.8 ms  ✓ WeakRefStrings
+  24644.2 ms  ✓ CSV
+  18 dependencies successfully precompiled in 61 seconds. 12 already precompiled.
+Precompiling packages...
+   2767.5 ms  ✓ Serialization
+   1549.8 ms  ✓ Base64
+   8008.9 ms  ✓ StringManipulation
+  14926.0 ms  ✓ SparseArrays
+  36712.6 ms  ✓ Markdown
+   2629.4 ms  ✓ InteractiveUtils
+  74697.7 ms  ✓ REPL
+  44906.5 ms  ✓ PrettyTables
+  70110.4 ms  ✓ DataFrames
+  9 dependencies successfully precompiled in 233 seconds. 28 already precompiled.
+Precompiling packages...
+   1102.6 ms  ✓ Logging
+   2086.9 ms  ✓ StructUtils
+   6483.2 ms  ✓ JSON
+  3 dependencies successfully precompiled in 9 seconds. 8 already precompiled.
+Precompiling packages...
+    499.9 ms  ✓ StructUtils → StructUtilsTablesExt
+  1 dependency successfully precompiled in 1 seconds. 11 already precompiled.

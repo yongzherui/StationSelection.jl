@@ -1,0 +1,35 @@
+===== Loading modules =====
+julia version 1.12.6
+
+===== Setting up Julia depot =====
+Using existing depot: /home/yongzr/.julia
+
+Reading  /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/experiments/2026-09-02_study7_route_elementarity
+Writing  /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/results/2026-09-02_study7_route_elementarity
+
+Loaded 30 job rows
+Loaded 115 selected route columns from 30 jobs
+
+Export self-checks   coverage shortfall max 0.000e+00   objective residual max 1.455e-11
+
+Certified columns 95   uncertified (reported separately) 20
+
+Elementarity of selected route columns
+--------------------------------------------------------------------------------------------
+certified (all)         n=  95  elementary  96.8%   multi-stop(>=3) n=  80 elementary  96.2%   mean stops 3.51  max revisits 2
+certified n_pairs=8     n=  30  elementary 100.0%   multi-stop(>=3) n=  29 elementary 100.0%   mean stops 3.33  max revisits 0
+certified n_pairs=16    n=  38  elementary 100.0%   multi-stop(>=3) n=  29 elementary 100.0%   mean stops 3.58  max revisits 0
+certified n_pairs=24    n=  27  elementary  88.9%   multi-stop(>=3) n=  22 elementary  86.4%   mean stops 3.59  max revisits 2
+uncertified             n=  20  elementary 100.0%   multi-stop(>=3) n=  17 elementary 100.0%   mean stops 3.80  max revisits 0
+
+Instances whose entire certified selection is elementary: 24 / 26 (92.3%)
+
+Selected-column stop-count distribution (certified)
+   2 stops:   15 columns   100.0% elementary
+   3 stops:   34 columns   100.0% elementary
+   4 stops:   32 columns   100.0% elementary
+   5 stops:   12 columns    83.3% elementary
+   6 stops:    1 columns     0.0% elementary
+   7 stops:    1 columns   100.0% elementary
+
+Wrote 5 CSVs to /orcd/home/002/yongzr/2025-09-JacqWang-Microtransit/StationSelection.jl/benchmarks/results/2026-09-02_study7_route_elementarity
