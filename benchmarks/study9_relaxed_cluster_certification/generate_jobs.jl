@@ -48,11 +48,18 @@ early-exit probe, then run it again for real", which is a different run from the
 and strictly slower than it.
 
 It earns its 5 jobs as the **ceiling control**, because it separates the two ways a K can
-fail. If K=15 certifies and K=6 does not, the relaxation is too loose at K=6 and the fix is
-a larger K. If even K=15 does not certify, the fix is a larger
-`certification_time_limit_sec` and no K would have worked. Without that control a sweep
-where nothing certifies cannot be read at all. `cg_certification_refuted_rounds` vs
-`cg_certification_inconclusive_rounds` records which of the two happened per run.
+fail. If K=15 certifies and K=6 does not, K=6's partition was too coarse and some finer
+partition might do. If even K=15 does not certify, `certification_time_limit_sec` was the
+binding constraint and no partition would have worked at that budget. Without that control
+a sweep where nothing certifies cannot be read at all.
+`cg_certification_refuted_rounds` vs `cg_certification_inconclusive_rounds` records which
+of the two happened per run.
+
+Note the arms are **not** a monotone ladder. Tightness improves under partition
+*refinement*, but two independent k-medoids runs at different K need not be nested, so a
+larger K is not guaranteed to give a tighter bound. The only ordering that always holds is
+that K = n is refined by nothing and is therefore tightest -- which is exactly why it, and
+not "the largest K that certified", is the control.
 """
 
 const SEEDS = 42:46

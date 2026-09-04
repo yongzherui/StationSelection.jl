@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=free_cg_ms5_core
-#SBATCH --partition=mit_normal
+#SBATCH --partition=mit_preemptable
+# mit_preemptable, not mit_normal: mit_normal queues behind whatever else this
+# account is running (a short job was estimated 29 h out during a large array),
+# while preemptable nodes start in minutes and preemption is rare in practice.
+# A preempted job shows as CANCELLED/PREEMPTED with truncated output -- check the
+# sacct state before reading missing results as a failure.
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1

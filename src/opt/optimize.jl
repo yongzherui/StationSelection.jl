@@ -170,22 +170,22 @@ include("label_setting/joint_routing_assignment/pricing_round.jl")
 # (never `pricing_mode`), and only for a formulation built with `relaxed_cluster_count`.
 # See relaxed_cluster/types.jl for the bound it rests on.
 #
-# Load order: clustering.jl is standalone; types.jl needs it (struct field) plus
-# ../types.jl's RewardLayerBitset; data.jl needs both; seed.jl/extend.jl/replay.jl need
-# types.jl only (labels, dominance and the reward bound are ../exact/'s, already loaded);
-# context.jl is self-contained beyond that; hooks.jl loads after it, needing the context
-# struct in every method signature; certify.jl loads last -- it is the only file here that
-# reaches out to the formulation/mapping/CGSolver layer, and it uses pricing_round.jl's
-# candidate extraction, so it sits after both.
+# Only four files: the relaxation is a *graph*, not a pricer, so there is no relaxed
+# label/seed/extend/dominate/replay -- `../exact/`'s search runs on it unchanged (see
+# relaxed_cluster/types.jl). clustering.jl is standalone; types.jl needs it (struct field);
+# data.jl needs both; certify.jl and guide.jl reach out to the formulation/mapping/CGSolver
+# layer and use pricing_round.jl's candidate extraction, so they load after it.
 include("label_setting/joint_routing_assignment/relaxed_cluster/clustering.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/types.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/data.jl")
-include("label_setting/joint_routing_assignment/relaxed_cluster/seed.jl")
-include("label_setting/joint_routing_assignment/relaxed_cluster/extend.jl")
-include("label_setting/joint_routing_assignment/relaxed_cluster/replay.jl")
-include("label_setting/joint_routing_assignment/relaxed_cluster/context.jl")
-include("label_setting/joint_routing_assignment/relaxed_cluster/hooks.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/certify.jl")
+# guide.jl loads last: it builds an EXACT context (exact/context.jl) out of a relaxed
+# search, so it needs both pricers plus certify.jl's clustering accessor.
+include("label_setting/joint_routing_assignment/relaxed_cluster/guide.jl")
+# cuts.jl adds the no-good-cut resource (its own label + context); nogood_certify.jl
+# is the loop around it and needs guide.jl's subset extraction, so it loads last.
+include("label_setting/joint_routing_assignment/relaxed_cluster/cuts.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/nogood_certify.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
 # master CGSolver's build (above) solves, seeded with the exhaustive pool

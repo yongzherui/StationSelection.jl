@@ -14,10 +14,13 @@ Three questions, in the order they should be answered:
 2. **Certification rate per K** -- the go/no-go. The share of cells where
    `certified_by_relaxation` fired, per cluster count, followed by the failure mode of
    every attempt that did not. That second table is what makes an all-zero rate readable:
-   *refuted* means the relaxation was too loose (raise K), *inconclusive* means the attempt
-   ran out of its own budget (raise `certification_time_limit_sec`). The `K = n` arm is the
-   ceiling control -- the tightest possible relaxation -- so whatever it achieves bounds
-   what any smaller K can.
+   *refuted* means that arm's partition was too coarse, *inconclusive* means the attempt
+   ran out of `certification_time_limit_sec` -- the first is a fact about the arm, the
+   second is a budget that could be raised. The `K = n` arm is the ceiling control: it is
+   refined by nothing, so it is the tightest partition available and whatever it achieves
+   bounds every other arm. Do NOT read the middle arms as a monotone ladder -- independent
+   k-medoids runs at different `K` need not be nested, so tightness is not guaranteed to
+   increase with `K`.
 
 3. **What it cost and what it saved, per K.** Paired against baseline on the same cell:
    `wall_sec` speedup, plus the two numbers that explain it -- `certification_sec` (what
@@ -129,11 +132,12 @@ end
 CSV.write(joinpath(output_dir, "certification_rate_by_k.csv"), DataFrame(rate_rows))
 
 # Why the failures failed. This is what makes an all-zero certification column readable:
-# "refuted" means the relaxation found an improving cluster route, so it was too loose and
-# the fix is a larger K; "inconclusive" means the attempt ran out of its own budget, so the
-# fix is a larger certification_time_limit_sec and no K would have helped. The K = n arm is
-# the control here -- it is the tightest possible relaxation, so if even it is refuted
-# something is wrong with the relaxation itself rather than with K.
+# "refuted" means the relaxation found an improving cluster route, so that arm's partition
+# was too coarse; "inconclusive" means the attempt ran out of its own budget, so
+# certification_time_limit_sec was the binding constraint and no partition would have
+# helped at that budget. The K = n arm is the control -- the tightest partition available
+# -- so if even it is refuted, the problem is the relaxation itself rather than the
+# partition.
 println("\n--- failure mode of the attempts that did not certify ---")
 @printf("%-6s %10s %12s %14s\n", "K", "attempts", "refuted", "inconclusive")
 mode_rows = NamedTuple[]

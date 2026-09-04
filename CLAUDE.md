@@ -28,7 +28,9 @@ opt/
 ├── optimize/               # build_model methods, one per (problem × formulation × solver)
 ├── label_setting/          # pricing/column-enumeration engine for the AggregateODRoute formulations
 │                          #   joint_routing_assignment/{exact,station_simple,darp,darp_modified}/ price columns;
-│                          #   joint_routing_assignment/relaxed_cluster/ prices none — it CERTIFIES (see below)
+│                          #   joint_routing_assignment/relaxed_cluster/ is a relaxed GRAPH, not
+│                          #   a pricer: the exact search runs on it. Two uses — certify (no-good
+│                          #   cut loop) and guide (station subset for the exact pricer)
 ├── variables/               # shared variable-creation building blocks (y, z, x, θ, f, walk)
 ├── constraints/             # shared constraint-creation building blocks
 └── objectives/               # shared objective-assembly building blocks
@@ -120,7 +122,8 @@ each route column's cost), `walk_cost_weight` (multiplies every walking-cost ter
 `compensated_dominance` (default `true`; only affects `CGSolver`'s label-setting pricer
 dominance test — inert for `DirectMIPSolver`'s enumeration, which never runs dominance),
 `pricing_mode` (Joint only; `:exact` default, plus `:station_simple`, `:darp_modified`,
-`:darp`), `relaxed_cluster_count` (Joint only; default `nothing`).
+`:darp`, `:relaxed_cluster_guided`), `relaxed_cluster_count` /
+`relaxed_cluster_guide_routes` / `relaxed_cluster_guide_time_limit_sec` (Joint only).
 `:exact`/`:darp_modified`/`:darp` all search the full revisit-tolerant route
 universe and are exhaustive-equivalent; `:station_simple` searches elementary routes only
 and is therefore a *restriction* of the universe, not just a different search of it — its
@@ -132,9 +135,39 @@ optimum is scoped, see the `cg_optimality_scope` note under "Solve status".
 formulation field rather than a solver one precisely because the cells must be identical
 across every CG iteration of a run, which is what makes `K` a meaningful swept parameter.
 Setting it alone changes nothing — it takes effect only when
-`CGSolver.certification_pricing_mode = :relaxed_cluster` asks for it. Note `:relaxed_cluster`
-is deliberately **not** a `pricing_mode` value: that pricer searches a relaxed cluster
-graph, so its routes are not real routes and can never become columns.
+`CGSolver.certification_pricing_mode` asks for it, or `pricing_mode = :relaxed_cluster_guided`
+uses it to pick a station subset. Note the bare relaxation is deliberately **not** a
+`pricing_mode`: its routes are cluster routes, not real routes, and can never become columns.
+
+**Two uses of the relaxation, with opposite requirements.**
+
+`pricing_mode = :relaxed_cluster_guided` (`relaxed_cluster/guide.jl`) prices the cluster
+graph, takes the winning cluster routes' members as a **station subset**, and runs the
+ordinary *exact* pricer restricted to it. Columns are real routes over real stations, so
+`round.jl` needs no special case and `_pricing_verify_column` still cross-checks each one.
+Restricting stations restricts the route universe, so it cannot certify --
+`cg_optimality_scope = "relaxed_cluster_station_subset_only"`, and
+`warm_start_pricing_mode` is how to still get a certificate. `relaxed_cluster_guide_routes`
+(default 5) is how many relaxed routes contribute clusters to the subset;
+`relaxed_cluster_guide_time_limit_sec` (default 10) bounds the guiding search. MEASURED at
+n=15: 72/72 containment and recovery, subset down to 43% of stations at K=12.
+
+`certification_pricing_mode = :relaxed_cluster_nogood`
+(`relaxed_cluster/{cuts,nogood_certify}.jl`) is the loop that actually certifies. The plain
+`:relaxed_cluster` mode gives up the moment the relaxation finds any improving cluster
+route, which it always does (0/31 measured), because a converged master's exact minimum is
+exactly 0 while the relaxation's slack is 10^2--10^3. The no-good loop instead verifies:
+take the winning route's cluster support `T`, search `stations(T)` **exhaustively** with the
+exact pricer, and if that finds nothing improving, `T` is barren -- add the cut *"every
+route must visit at least one cluster outside T"* and search again. MEASURED: certifies at
+K=9 and K=12 with 5/4/1 and 10/6/1 cuts, same LP objective as baseline.
+
+**The cut direction matters and the obvious stronger form is invalid.** `|route ∩ T| ≤ |T|-1`
+is unsound: a real improving route touching `A,B,C,D` was never examined by the exact search
+over `stations({A,B,C})`, yet that cut deletes its image -- a false certificate. Only an
+*exhausted* subset search may be cut on. And because the exact pricer's candidate generation
+is reward-driven, the cut search must additionally propose nodes that merely *escape* a cut
+(see `cuts.jl`) -- without that it under-reports and certifies falsely.
 
 **Solver-level:** `SolverOptions` (`silent`, `mip_gap`, `time_limit_sec`) shared by every
 `AbstractSolver`. `CGSolver` additionally carries `max_iterations`,
@@ -147,7 +180,8 @@ share one master and one column pool. Requires a formulation with a selectable p
 mode both phases) or that has nothing to hand off to is rejected, never silently ignored.
 
 `CGSolver` also carries `certification_pricing_mode` (default `nothing`; `:relaxed_cluster`
-today) and `certification_time_limit_sec` (default 300) -- **certify-first**, a different
+or `:relaxed_cluster_nogood`), `certification_max_rounds` (default 32, the no-good loop's
+round cap) and `certification_time_limit_sec` (default 300) -- **certify-first**, a different
 axis from `warm_start_pricing_mode`. A warm start changes *which pricer finds columns*; a
 certification pricer finds none at all. When set, every iteration first runs a
 **relaxation** of the pricing problem whose minimum reduced cost lower-bounds the real
@@ -160,8 +194,8 @@ the **full** route universe (it bounds every real route, not just the ones the a
 pricer searches), so such a run reports `cg_optimality_scope="full_route_universe"` even
 under `pricing_mode=:station_simple`, with `cg_certified_by_relaxation=true` recording
 where the certificate came from. Requires a formulation implementing
-`cg_certification_supported`/`cg_certification_round` -- for `:relaxed_cluster` that means
-`relaxed_cluster_count` was set at build time; a mode nothing supports is rejected up
+`cg_certification_supported`/`cg_certification_round` -- for both relaxed-cluster modes that
+means `relaxed_cluster_count` was set at build time; a mode nothing supports is rejected up
 front, never silently ignored.
 
 `BendersSolver` carries `max_iterations`, `optimality_tol`.
@@ -260,7 +294,7 @@ ends in the full-universe pricer, so it reports `"full_route_universe"` despite 
 priced part of the run in the restricted one.
 
 **A relaxation certificate is full-universe regardless of the pricer.** When
-`CGSolver.certification_pricing_mode = :relaxed_cluster` is what ended the solve
+`CGSolver.certification_pricing_mode` is what ended the solve
 (`cg_certified_by_relaxation == true`, `cg_stop_reason == "converged_by_certification"`),
 the proof came from a relaxation that lower-bounds *every* real route's reduced cost, not
 from the active pricer exhausting its own universe — so `cg_optimality_scope` reads

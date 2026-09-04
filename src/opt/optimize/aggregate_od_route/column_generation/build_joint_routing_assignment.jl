@@ -133,10 +133,19 @@ function _build_joint_routing_assignment_model(
     # the formulation did not ask for one, in which case
     # `CGSolver(certification_pricing_mode=:relaxed_cluster)` is rejected rather than
     # silently ignored.
+    m[:joint_routing_assignment_relaxed_cluster_guide_routes] = formulation.relaxed_cluster_guide_routes
+    m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec] =
+        formulation.relaxed_cluster_guide_time_limit_sec
     if !isnothing(formulation.relaxed_cluster_count)
         m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
             m[:joint_routing_assignment_nodes], travel_cost, formulation.relaxed_cluster_count,
         )
+        # Per-(round x scenario) guide diagnostics -- how big a station subset the relaxation
+        # actually handed the exact pricer. Phase 1 of `_run_pricing_round` is threaded over
+        # scenarios, so the lock is not optional: `push!` onto a shared Vector from several
+        # threads is a data race.
+        m[:relaxed_cluster_guide_stats] = Any[]
+        m[:relaxed_cluster_guide_lock] = ReentrantLock()
     end
     # Empty pool containers: real entries arrive from the seed pass below and (for the
     # LP master) from every later CG iteration (`add_columns!`, routing_and_assignment.jl).
@@ -232,6 +241,9 @@ function _aggregate_od_route_integer_recovery_build(
         compensated_dominance = m[:joint_routing_assignment_compensated_dominance],
         pricing_mode = m[:joint_routing_assignment_pricing_mode],
         relaxed_cluster_count = _joint_routing_assignment_rebuilt_cluster_count(m),
+        relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
+        relaxed_cluster_guide_time_limit_sec =
+            Float64(m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec]),
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(

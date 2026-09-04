@@ -30,7 +30,8 @@ Full argument: `src/opt/label_setting/joint_routing_assignment/relaxed_cluster/t
 
 ## What is measured
 
-`K` is the entire tightness knob and the only thing swept:
+`K` is the only thing swept, and the partition it produces is what sets the relaxation's
+tightness:
 
 - small `K` — the relaxed search is trivially cheap and hopelessly loose (it will find
   improving "routes" that correspond to nothing real, every round);
@@ -48,8 +49,9 @@ Three outcomes per arm, in the order `analyze.jl` reports them:
    a bug, not a result.
 2. **Certification rate** — the share of cells where the relaxation actually ended the
    solve, per `K`, followed by the failure mode of every attempt that did not. A `K` that
-   never fires is dead weight regardless of its timings, and the failure-mode split is
-   what says whether the fix is a bigger `K` or a bigger certification budget.
+   never fires is dead weight regardless of its timings, and the failure-mode split says
+   whether that arm's partition was too coarse or whether the certification budget was the
+   binding constraint for every arm.
 3. **Cost vs. saving** — paired wall-clock speedup against baseline, alongside
    `certification_sec` (what all attempts cost) and `failed_certification_sec` (pure
    overhead — the attempts that proved nothing). An arm can certify often and still lose
@@ -103,13 +105,20 @@ fail:
 
 | observation | conclusion |
 | --- | --- |
-| `K=15` certifies, `K=6` does not | the relaxation is too loose at `K=6` → raise `K` |
-| even `K=15` does not certify | the 60 s certification budget is too small → no `K` would have worked |
+| `K=15` certifies, `K=6` does not | `K=6`'s partition is too coarse; some finer partition may work |
+| even `K=15` does not certify | the 60 s certification budget is the binding constraint; no partition would have worked |
 
 Without it, a sweep where nothing certifies cannot be read at all. It also doubles as the
 worst-case overhead measurement. Per run, `certification_refuted_rounds` vs
 `certification_inconclusive_rounds` records which of the two failure modes actually
 occurred.
+
+The arms are **not** a monotone ladder, and shouldn't be read as one. Tightness improves
+under partition *refinement*, but two independent k-medoids runs at different `K` need not be
+nested, so a larger `K` is not guaranteed to be tighter. The only ordering that always
+holds is that `K = n` is refined by nothing and is therefore the tightest available —
+which is precisely why the ceiling control is `K = n` rather than "the largest `K` that
+certified".
 
 ## Running
 

@@ -14,8 +14,9 @@ certifying round), `failed_certification_sec` (what the attempts that did *not* 
 cost), and the `refuted`/`inconclusive` split of those failures. A run can be slower than
 baseline while still certifying, if the attempts were expensive; a run can be faster
 without ever certifying, only by noise. And a run that never certifies is only
-interpretable once you know whether its attempts were refuted (relaxation too loose --
-raise K) or inconclusive (out of budget -- raise `certification_time_limit_sec`).
+interpretable once you know whether its attempts were refuted (this arm's partition was
+too coarse) or inconclusive (out of `certification_time_limit_sec`) -- the first is a fact
+about the arm, the second a budget that could be raised.
 """
 
 using StationSelection

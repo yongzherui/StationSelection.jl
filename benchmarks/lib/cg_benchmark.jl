@@ -67,7 +67,8 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         parallel_scenario_pricing::Bool=false,
         warm_start_pricing_mode::Union{Nothing, Symbol}=nothing,
         certification_pricing_mode::Union{Nothing, Symbol}=nothing,
-        certification_time_limit_sec::Real=300.0)
+        certification_time_limit_sec::Real=300.0,
+        certification_max_rounds::Int=32)
     return CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
@@ -78,6 +79,7 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         warm_start_pricing_mode=warm_start_pricing_mode,
         certification_pricing_mode=certification_pricing_mode,
         certification_time_limit_sec=certification_time_limit_sec,
+        certification_max_rounds=certification_max_rounds,
     )
 end
 
@@ -104,9 +106,10 @@ function benchmark_certification_metrics(result)
             get(metadata, "cg_certification_pricing_mode", nothing), "none")),
         certified_by_relaxation=Bool(get(metadata, "cg_certified_by_relaxation", false)),
         certification_rounds=Int(get(metadata, "cg_certification_rounds", 0)),
-        # The two failure modes call for opposite fixes: `refuted` means the relaxation was
-        # too loose (raise K), `inconclusive` means the attempt ran out of its budget
-        # (raise certification_time_limit_sec).
+        # The two failure modes point at different places: `refuted` means the partition
+        # this run was built with was too coarse (an observation across arms -- the
+        # partition is fixed at build time), `inconclusive` means the attempt ran out of
+        # `certification_time_limit_sec` (a solver setting).
         certification_refuted_rounds=Int(get(metadata, "cg_certification_refuted_rounds", 0)),
         certification_inconclusive_rounds=Int(get(metadata, "cg_certification_inconclusive_rounds", 0)),
         certification_sec=Float64(get(metadata, "cg_certification_sec", 0.0)),

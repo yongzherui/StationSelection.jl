@@ -72,7 +72,7 @@ end
 # default, so asking for certification is rejected rather than silently ignored.
 function cg_certification_supported(build_result::BuildResult, mapping::AggregateODRouteMap,
         m::JuMP.Model, mode::Symbol)
-    mode === :relaxed_cluster || return false
+    mode in (:relaxed_cluster, :relaxed_cluster_nogood) || return false
     m[:aggregate_od_route_formulation] isa AggregateODRouteJointRoutingAssignmentFormulation ||
         return false
     return haskey(m.obj_dict, :joint_routing_assignment_station_clustering)
@@ -80,9 +80,17 @@ end
 
 function cg_certification_round(build_result::BuildResult, mapping::AggregateODRouteMap,
         m::JuMP.Model, duals, solver::CGSolver, mode::Symbol; time_limit_sec::Real)
+    if mode === :relaxed_cluster_nogood
+        # Same contract, different loop: cut a barren cluster support and retry instead of
+        # giving up the moment the relaxation finds an improving cluster route.
+        return _run_relaxed_cluster_nogood_certification_round(
+            m[:aggregate_od_route_formulation], mapping, m, duals, solver;
+            time_limit=Float64(time_limit_sec),
+        )
+    end
     mode === :relaxed_cluster || throw(ArgumentError(
         "unknown certification_pricing_mode $(repr(mode)) for an AggregateODRoute model -- " *
-        "expected :relaxed_cluster",
+        "expected :relaxed_cluster or :relaxed_cluster_nogood",
     ))
     return _run_relaxed_cluster_certification_round(
         m[:aggregate_od_route_formulation], mapping, m, duals, solver;

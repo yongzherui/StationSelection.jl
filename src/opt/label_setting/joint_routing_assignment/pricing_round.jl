@@ -128,9 +128,22 @@ function _pricing_build_scenario_context(
         return JointRoutingAssignmentDarpSearchContext(darp_pricing_data), existing
     end
 
+    if pricing_mode === :relaxed_cluster_guided
+        # Two stages, both inside context construction: price the cluster graph for a guide,
+        # read its winning clusters back as a station subset, and hand phase 2 an ORDINARY
+        # exact context restricted to that subset. Everything downstream -- accept, dedupe,
+        # merge, materialize, verify -- is unchanged, because the columns are real routes.
+        # See `relaxed_cluster/guide.jl`.
+        ctx = _build_relaxed_cluster_guided_context(
+            m, s, candidates, _joint_routing_assignment_station_clustering(m),
+        )
+        isnothing(ctx) && return nothing
+        return ctx, existing
+    end
+
     pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
-        "expected :exact, :station_simple, :darp_modified, or :darp",
+        "expected :exact, :station_simple, :darp_modified, :darp, or :relaxed_cluster_guided",
     ))
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;

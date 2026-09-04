@@ -197,6 +197,7 @@ struct CGSolver <: AbstractSolver
     warm_start_pricing_mode::Union{Nothing, Symbol}
     certification_pricing_mode::Union{Nothing, Symbol}
     certification_time_limit_sec::Float64
+    certification_max_rounds::Int
 
     function CGSolver(;
             config::SolverOptions=SolverOptions(),
@@ -211,6 +212,7 @@ struct CGSolver <: AbstractSolver
             warm_start_pricing_mode::Union{Nothing, Symbol}=nothing,
             certification_pricing_mode::Union{Nothing, Symbol}=nothing,
             certification_time_limit_sec::Number=300.0,
+            certification_max_rounds::Int=32,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         reduced_cost_tol >= 0 || throw(ArgumentError("reduced_cost_tol must be non-negative"))
@@ -225,17 +227,23 @@ struct CGSolver <: AbstractSolver
         total_time_limit_sec > 0 || throw(ArgumentError("total_time_limit_sec must be positive"))
         certification_time_limit_sec > 0 ||
             throw(ArgumentError("certification_time_limit_sec must be positive"))
-        isnothing(certification_pricing_mode) || certification_pricing_mode === :relaxed_cluster ||
+        isnothing(certification_pricing_mode) ||
+            certification_pricing_mode in (:relaxed_cluster, :relaxed_cluster_nogood) ||
             throw(ArgumentError(
-                "certification_pricing_mode must be :relaxed_cluster or nothing, got " *
+                "certification_pricing_mode must be :relaxed_cluster, " *
+                ":relaxed_cluster_nogood, or nothing, got " *
                 "$(repr(certification_pricing_mode))",
             ))
+        certification_max_rounds >= 1 || throw(ArgumentError(
+            "certification_max_rounds must be >= 1, got $(certification_max_rounds)",
+        ))
         new(
             config, max_iterations, Float64(reduced_cost_tol),
             Float64(pricing_time_limit_sec), Float64(certifying_pricing_time_limit_sec),
             Float64(total_time_limit_sec), parallel_scenario_pricing,
             initial_columns, recover_integer_solution, warm_start_pricing_mode,
             certification_pricing_mode, Float64(certification_time_limit_sec),
+            certification_max_rounds,
         )
     end
 end
@@ -302,11 +310,13 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         ))
     end
     certification_rounds = 0
-    # Why the failed attempts failed, which is the only way to read a sweep where nothing
+    # Why the failed attempts failed, which is the only way to read a run that never
     # certifies: "refuted" means an improving relaxed solution existed, so the relaxation
-    # is too loose (raise its tightness knob); "inconclusive" means the search ran out of
-    # its budget without settling either way (raise `certification_time_limit_sec`). Those
-    # call for opposite fixes, and the bare attempt count cannot tell them apart.
+    # is too loose as configured -- a between-runs observation, since a certification
+    # pricer's tightness is fixed before the solve starts and nothing here can react to it;
+    # "inconclusive" means the search ran out of `certification_time_limit_sec` without
+    # settling either way, which IS a knob on this solver. The bare attempt count cannot
+    # tell the two apart, and they point at different places.
     certification_refuted_rounds = 0
     certification_inconclusive_rounds = 0
     certification_sec = 0.0
@@ -572,6 +582,11 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         "cg_integer_recovery_sec" => 0.0,
         "cg_pricing_stats" => copy(get(JuMP.object_dictionary(m),
             :label_setting_pricing_stats, Any[])),
+        # Copied off the model HERE, before integer recovery below replaces `m` with a
+        # freshly built one -- the rebuilt model carries an empty stats vector, so anything
+        # left only on the model is invisible to exactly the runs that use recovery.
+        "cg_relaxed_cluster_guide_stats" => copy(get(JuMP.object_dictionary(m),
+            :relaxed_cluster_guide_stats, Any[])),
     )
     if solver.recover_integer_solution && JuMP.termination_status(m) == MOI.OPTIMAL
         metadata["cg_lp_objective_value"] = JuMP.objective_value(m)
@@ -644,10 +659,18 @@ case). These two functions exist so that scope travels with every result instead
 something the reader has to infer from the formulation, and `cg_optimality_scope` is the
 key to grep for when auditing whether a certified number is a full-universe optimum.
 """
-_cg_pricing_universe_is_restricted(mode::Union{Nothing, Symbol}) = mode === :station_simple
+_cg_pricing_universe_is_restricted(mode::Union{Nothing, Symbol}) =
+    mode === :station_simple || mode === :relaxed_cluster_guided
 
-_cg_optimality_scope(mode::Union{Nothing, Symbol}) =
-    _cg_pricing_universe_is_restricted(mode) ? "elementary_routes_only" : "full_route_universe"
+function _cg_optimality_scope(mode::Union{Nothing, Symbol})
+    mode === :station_simple && return "elementary_routes_only"
+    # The relaxation-guided pricer searches only the stations inside the clusters its
+    # relaxed optimum visited, and that subset is re-derived from the duals every round --
+    # so exhausting it says nothing about the stations left out, and says it about a
+    # different subset each iteration.
+    mode === :relaxed_cluster_guided && return "relaxed_cluster_station_subset_only"
+    return "full_route_universe"
+end
 
 function price_columns(build_result::BuildResult, mapping, m::JuMP.Model, duals, solver::CGSolver;
         time_limit_sec::Real=solver.pricing_time_limit_sec)

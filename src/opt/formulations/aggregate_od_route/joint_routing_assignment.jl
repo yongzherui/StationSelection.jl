@@ -119,6 +119,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     compensated_dominance::Bool
     pricing_mode::Symbol
     relaxed_cluster_count::Union{Nothing, Int}
+    relaxed_cluster_guide_routes::Int
+    relaxed_cluster_guide_time_limit_sec::Float64
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -130,18 +132,34 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             compensated_dominance::Bool=true,
             pricing_mode::Symbol=:exact,
             relaxed_cluster_count::Union{Nothing, Int}=nothing,
+            relaxed_cluster_guide_routes::Int=5,
+            relaxed_cluster_guide_time_limit_sec::Number=10.0,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
         )
-        pricing_mode in (:exact, :station_simple, :darp_modified, :darp) || throw(ArgumentError(
-            "pricing_mode must be :exact, :station_simple, :darp_modified, or :darp, " *
-            "got $(repr(pricing_mode)). :relaxed_cluster is NOT a pricing_mode: it produces " *
-            "no columns, and is enabled via CGSolver's certification_pricing_mode instead",
-        ))
+        pricing_mode in (:exact, :station_simple, :darp_modified, :darp, :relaxed_cluster_guided) ||
+            throw(ArgumentError(
+                "pricing_mode must be :exact, :station_simple, :darp_modified, :darp, or " *
+                ":relaxed_cluster_guided, got $(repr(pricing_mode)). Note :relaxed_cluster " *
+                "(the pure relaxation) is NOT a pricing_mode: it produces no columns, and is " *
+                "enabled via CGSolver's certification_pricing_mode instead",
+            ))
         isnothing(relaxed_cluster_count) || relaxed_cluster_count >= 1 || throw(ArgumentError(
             "relaxed_cluster_count must be >= 1 (or nothing), got $(relaxed_cluster_count)",
+        ))
+        pricing_mode !== :relaxed_cluster_guided || !isnothing(relaxed_cluster_count) ||
+            throw(ArgumentError(
+                "pricing_mode=:relaxed_cluster_guided needs a station partition to guide it -- " *
+                "set relaxed_cluster_count = K",
+            ))
+        relaxed_cluster_guide_routes >= 1 || throw(ArgumentError(
+            "relaxed_cluster_guide_routes must be >= 1, got $(relaxed_cluster_guide_routes)",
+        ))
+        relaxed_cluster_guide_time_limit_sec > 0 || throw(ArgumentError(
+            "relaxed_cluster_guide_time_limit_sec must be positive, got " *
+            "$(relaxed_cluster_guide_time_limit_sec)",
         ))
         new(
             Float64(route_regularization_weight),
@@ -153,6 +171,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             compensated_dominance,
             pricing_mode,
             relaxed_cluster_count,
+            relaxed_cluster_guide_routes,
+            Float64(relaxed_cluster_guide_time_limit_sec),
         )
     end
 end

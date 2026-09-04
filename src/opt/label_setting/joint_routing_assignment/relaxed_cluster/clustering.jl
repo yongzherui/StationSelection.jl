@@ -20,6 +20,15 @@ lon/lat, since travel time is the quantity the relaxation actually
 underestimates; the matrix is symmetrized (`(tau_uv + tau_vu)/2`) purely so
 k-medoids has a symmetric distance to work with -- the *pricer's* travel matrix
 (`data.jl`) keeps the raw directed costs.
+
+**Tightness is not guaranteed monotone in `n_clusters`.** It *is* monotone
+under refinement -- if every cell of `P'` sits inside a cell of `P`, then `P'`
+takes its minima over smaller sets and its maxima over smaller sets, so every
+one of the relaxation's quantities moves toward reality -- but two independent
+k-medoids runs at different `K` need not be nested, so a larger `K` can in
+principle give a looser bound. The one ordering that always holds is that
+`K = n` (one station per cell) is refined by nothing and therefore tightest.
+Read a `K` sweep as a set of separate partitions, not as a ladder.
 """
 
 export StationClustering

@@ -2,49 +2,37 @@
 The relaxed-cluster pricer's data type, plus the relaxation argument the whole
 directory exists to make good on. See `clustering.jl` for the partition this is
 built over, `data.jl` for how an exact scenario's candidates are turned into
-the relaxed ones, `seed.jl`/`extend.jl` for the label search's two deviations
-from `../exact/`, and `certify.jl` for what a finished search is actually used
-for.
+the relaxed ones, `certify.jl` for the (measured-hopeless) certification use,
+and `guide.jl` for the station-subset use that survived measurement.
 
-# What this pricer is for -- and what it is NOT
+# There is no relaxed pricer
 
-**It never produces columns.** Every other pricer under
-`joint_routing_assignment/` searches the real route universe and hands the
-master real, replayable routes. This one searches a *relaxed* universe whose
-"routes" are sequences of station clusters, and its answer is a single bit:
+Only a relaxed *graph*. `RelaxedClusterPricingData.inner` is an ordinary
+`JointRoutingAssignmentPricingData` whose "stations" are cluster-graph nodes,
+so the search that runs on it is `JointRoutingAssignmentSearchContext` --
+`../exact/`'s, unmodified. Seeding, extension, dominance, the remaining-reward
+bound and route replay are all inherited. Everything the relaxation *is* lives
+in `data.jl`, in what goes into that graph.
 
-    every relaxed route has reduced cost >= -tol
-        =>  every real route has reduced cost >= -tol
-        =>  pricing is done, the restricted master LP is optimal for the FULL
-            column set.
-
-So it is a **certificate**, not a harvester -- a cheap way to end a CG
-iteration without paying for the exhaustive exact search that would otherwise
-be needed to prove the same thing. When it fails (some relaxed route prices
-negative) it has proved nothing at all, because that route need not correspond
-to any real one; the loop then falls back to the exact pricer, which is the
-only thing that can find actual columns (`solvers/cg_solver.jl`'s
-`certification_pricing_mode`).
-
-That asymmetry is why this pricer is deliberately **not** a
-`pricing_mode` value on `AggregateODRouteJointRoutingAssignmentFormulation`:
-plugging it into `_run_pricing_round` would ask it to materialize columns out
-of cluster routes, which is meaningless. Its round-level hooks
-(`hooks.jl`) refuse rather than improvise.
+(An earlier version carried its own label type, seeder, extender, context and
+replay in order to credit intra-cluster passengers on arrival as a special
+case. Making intra service an explicit optional arc -- see below -- removed the
+special case and with it all five files.)
 
 # The relaxation
 
 Fix any partition `C = {C_1, ..., C_K}` of the stations (`clustering.jl`; any
 partition is valid -- see that file). The relaxed pricing graph has one node
-per cluster, and:
+per cluster, plus one *service* node per cluster that has intra-cluster
+passengers, and:
 
 **Travel is optimistic.** For clusters `C != D`,
 
     tau_hat(C, D) = shortest path, over the graph whose arcs are
                     min{ tau(j, k) : j in C, k in D }
 
-and `tau_hat(C, C) = 0`. Both steps only ever *decrease* a cost, so for every
-real arc `(j, k)` with `j in C`, `k in D`,
+Both steps only ever *decrease* a cost, so for every real arc `(j, k)` with
+`j in C`, `k in D`,
 
     tau_hat(C, D) <= min over the cluster pair <= tau(j, k).                (1)
 
@@ -65,151 +53,119 @@ combined by `+`. For a cluster pair,
     R_bar(p, C, D)   = max{ R(p, j, k)   : (j,k) in A_p, j in C, k in D }    (3)
 
 (taking the two maxima independently only relaxes further). The running
-per-passenger maximum across cluster pairs is then exactly what
-`../data.jl`'s reward-layer prefix encoding already does, so the relaxed
-candidates go through `create_joint_routing_assignment_pricing_data`
-unchanged and the "sum over passengers of each one's best" accounting is
-inherited rather than rewritten.
+per-passenger maximum across cluster pairs is exactly what `../data.jl`'s
+reward-layer prefix encoding already does, so the relaxed candidates go through
+`create_joint_routing_assignment_pricing_data` unchanged.
 
-**Intra-cluster rewards must not disappear.** A real route serving `j, k in C`
-collapses to a relaxed route that visits `C` once, and there is no `C -> C` arc
-to certify it on. If that reward vanished, a real route could earn something
-its relaxed image cannot and the bound would break -- so a `C = D` candidate is
-credited **on arrival at `C`** (`extend.jl`, and at `t = 0` in `seed.jl`),
-with no arc and no travel time, i.e.
+**Intra-cluster passengers get an optional service arc.** A real route serving
+`j, k in C` collapses to a relaxed route that visits `C` once, and there is no
+`C -> C` arc to certify it on. Rather than crediting it for free, cluster `C`
+gets a second node `C'` reachable only by paying
 
-    rho_bar_intra(p, C) = max{ rho(p, j, k) : (j,k) in A_p, j, k in C }.     (4)
+    tau_intra(C) = min over j != k in C of tau(j, k),                       (4)
 
-`intra_layer_mask` below is that credit, pre-reduced to the layer prefixes it
-activates. Charging zero internal travel is a further relaxation, and a
-deliberate one.
+and the intra candidate becomes an ordinary `(p, C, C')`. See `data.jl` for why
+the arc must be *optional* -- charging on arrival instead breaks the bound
+outright.
 
 # Why every real route maps to a relaxed one that is at least as good
 
-Take any real route `j_1 -> ... -> j_m` the exact pricer could build, and map
-it to the cluster sequence `C(j_1), ..., C(j_m)` with consecutive repeats
-collapsed. Write `t_i` for the real arrival times and `t'_i` for the relaxed
-ones.
+Take any real route `j_1 -> ... -> j_m`, map it to the cluster sequence
+`C(j_1), ..., C(j_m)` with consecutive repeats collapsed into blocks, and
+insert `C'` after any block that serves an intra-cluster passenger. Write `t_i`
+for the real arrival times, `t'_i` for the relaxed ones, and `W_q` for the real
+travel inside block `q`.
 
 - *Times only shrink.* Each surviving arc costs at most its real counterpart by
-  (1), and each collapsed arc drops a non-negative cost entirely, so `t'_i <=
-  t_i` position by position. The pickup window is therefore no harder to meet.
-- *Elapsed spans only shrink.* This is the part that needs the position-by-
-  position statement rather than the endpoint one: `t'_D - t'_C` and `t_k -
-  t_j` sum over the *same* contiguous run of arcs, and the relaxed summands are
-  pointwise smaller, so `t'_D - t'_C <= t_k - t_j <= R(p,j,k) <= R_bar(p,C,D)`
-  by (3). Every ride-limit test the real route passes, the relaxed image passes
-  too. (If `C` is revisited, the relaxed clock is even fresher, which only
-  helps.)
+  (1); each collapsed block contributes `tau_intra(C_q) <= W_q` if it took the
+  service arc (a block serving an intra passenger visits two distinct stations
+  of `C_q`, so `W_q >= tau_intra(C_q)`) and `0 <= W_q` otherwise. So
+  `t'_i <= t_i` position by position, and the pickup window is no harder to
+  meet.
+- *Elapsed spans only shrink.* `t'_D - t'_C` and `t_k - t_j` sum over the same
+  contiguous run of arcs with pointwise smaller summands, so
+  `t'_D - t'_C <= t_k - t_j <= R(p,j,k) <= R_bar(p,C,D)` by (3). Every
+  ride-limit test the real route passes, its image passes. (A revisited cluster
+  gives an even fresher clock, which only helps.)
 - *Reward only grows.* Whatever `(p, j, k)` the real route certifies, its image
-  certifies `(p, C, D)` -- worth at least as much by (2), or by (4) when
-  `j, k in C` -- and per-passenger maxima are taken on both sides.
-- *Stop count only shrinks*, so the same `max_stops` cap is valid.
+  certifies `(p, C, D)` -- worth at least as much by (2), or `(p, C, C')` by
+  (4) -- and per-passenger maxima are taken on both sides.
+- *Stop count only shrinks*, except for service arcs, which are only inserted
+  for blocks of two or more real stops -- so the same `max_stops` cap is valid.
 - *Cost only shrinks*: the same `repositioning_time`, plus a travel sum bounded
-  by (1).
+  as above.
 
 Hence `rc_relaxed(image) <= rc_exact(route)` for every real route, and
 
     min over relaxed routes  <=  min over real routes.                       (5)
 
-An exhausted relaxed search that found nothing below `-tol` therefore certifies
-that nothing real is below `-tol` either. Note (5) runs over the **full
-revisit-tolerant** universe, not just the elementary one -- so a relaxed
-certificate is a full-universe certificate even in a run whose column-finding
-pricer is `:station_simple`.
+Note (5) runs over the **full revisit-tolerant** universe, not just the
+elementary one.
 
-# Reuse
+# What (5) is and is not good for
 
-Labels, bitsets, dominance filters, the dominance predicate and the
-remaining-reward bound are `../exact/`'s, verbatim: the relaxed search is the
-same search over a different graph. Only three things are this pricer's own --
-the data construction (`data.jl`), the intra-cluster credit in
-`seed.jl`/`extend.jl`, and the certification driver (`certify.jl`).
+*Certification* -- an exhausted relaxed search finding nothing below `-tol`
+proves no real improving column exists -- is sound but was **measured useless**:
+at a converged master the exact minimum is exactly 0 (any column the master
+uses has reduced cost 0 at every optimal dual, by complementary slackness on
+`theta >= 0`), so certification needs the relaxation tight to within `tol`, and
+it is off by 10^2-10^3. See `certify.jl` and
+`benchmarks/diagnostics/relaxed_cluster_certification_probe.jl` (0/31).
+
+*Guiding* -- taking the winning cluster route's members as a station subset and
+running the exact pricer on that subset -- needs only the argmin to land in the
+right neighbourhood, not tightness, so it can pay where certification cannot.
+See `guide.jl`.
 """
 
 export RelaxedClusterPricingData
 export relaxed_cluster_n_clusters
 
 """
-    RelaxedClusterPricingData(scenario, clustering, inner, intra_layer_mask, n_relaxed_candidates)
+    RelaxedClusterPricingData(scenario, clustering, inner, service_node, intra_travel, n_relaxed_candidates)
 
 One scenario's relaxed pricing problem.
 
-`inner` is an ordinary `JointRoutingAssignmentPricingData` whose "stations" are
-cluster indices `1:K` -- that is what lets every piece of `../exact/`'s search
-machinery run against it untouched. It carries the relaxed candidates from (2)
-and (3) above, with **one deliberate edit** made by `data.jl` after
-construction: intra-cluster (`C = D`) opportunities are removed from
-`assignments_by_origin`/`assignments_by_destination` while being *kept* in
-`opportunities`/`origin_layer_mask`/the layer tables.
+`inner` is an ordinary `JointRoutingAssignmentPricingData` over the augmented
+node set -- cluster nodes `1:K` first, then one service node per cluster in
+`service_node` -- which is what lets `../exact/`'s search machinery run against
+it untouched.
 
-That split is what keeps the intra credit both sound and cheap:
-
-- kept in `origin_layer_mask`, so candidate generation still proposes visiting
-  `C` for an intra-only reward, and in `opportunities`, so `prune.jl`'s
-  remaining-reward bound (which reads the search index built from
-  `opportunities`) still counts intra reward as reachable -- an admissible
-  bound must not miss it;
-- removed from `assignments_by_destination`, so the ordinary
-  destination-certification path cannot also grant intra reward on a *revisit*
-  past the pickup window (harmless for validity, since over-crediting only
-  loosens the bound, but pointless);
-- removed from `assignments_by_origin`, so a live clock at `C` does not make
-  the search propose revisiting `C` purely to certify a reward it already
-  banked on arrival -- that is pure branching factor with nothing to gain.
-
-`intra_layer_mask[C]` is the union of the layer prefixes every intra candidate
-at `C` activates; `seed.jl`/`extend.jl` union it into a label's activated set
-on arrival, within the pickup window.
+- `service_node[C]` -- the node id of cluster `C`'s intra-cluster service node,
+  present only for clusters that have intra-cluster passengers;
+- `intra_travel[C]` -- `tau_intra(C)` from (4), the cheapest within-cell hop,
+  present for every cluster with two or more members (so it can be non-empty
+  where `service_node` is not);
+- `n_relaxed_candidates` -- how many candidates the aggregation produced, i.e.
+  how much the cluster collapse compressed the pricing problem.
 """
 struct RelaxedClusterPricingData
     scenario::Int
     clustering::StationClustering
     inner::JointRoutingAssignmentPricingData
-    intra_layer_mask::Dict{Int, RewardLayerBitset}
+    service_node::Dict{Int, Int}
+    intra_travel::Dict{Int, Float64}
     n_relaxed_candidates::Int
 end
 
 relaxed_cluster_n_clusters(data::RelaxedClusterPricingData) = data.clustering.n_clusters
 
-"""Shared empty mask, so the common "this cluster has no intra-cluster
-passenger" case allocates nothing on the extension hot path. Never mutated --
-`extend.jl`/`seed.jl` only ever read it and `union` (non-mutating) from it."""
-const EMPTY_RELAXED_CLUSTER_LAYER_MASK = RewardLayerBitset()
+"""Number of nodes the relaxed search actually runs on: one per cluster plus one
+per intra-cluster service arc. This, not `n_clusters`, is what sets the search's
+cost."""
+relaxed_cluster_n_nodes(data::RelaxedClusterPricingData) = length(data.inner.nodes)
 
 """
-    _relaxed_cluster_intra_mask(data, node) -> RewardLayerBitset
+    relaxed_cluster_of_node(data, node) -> Int
 
-The intra-cluster credit available at cluster `node`, or the shared empty mask.
+The cluster a relaxed graph node belongs to -- itself for a cluster node, and
+the served cluster for a service node. Needed to read a relaxed route back as a
+set of clusters (`guide.jl`), since a route may pass through service nodes.
 """
-_relaxed_cluster_intra_mask(data::RelaxedClusterPricingData, node::Int) =
-    get(data.intra_layer_mask, node, EMPTY_RELAXED_CLUSTER_LAYER_MASK)
-
-"""
-    _relaxed_cluster_collect_intra(data, node, arrival_time, activated) -> (activated', reward)
-
-Grant cluster `node`'s intra-cluster reward (4) to a label arriving at
-`arrival_time` with `activated` already banked, returning the widened layer set
-and the incremental reward.
-
-Gated on the pickup window: a real intra-cluster assignment needs its pickup
-`j` inside `max_wait_time`, and the relaxed image arrives at `C` no later than
-that pickup (`t'_C <= t_j`), so a route that reaches `C` only after the cutoff
-is never the image of a real route that earns this. Past the cutoff the credit
-is therefore withheld -- which the remaining-reward bound agrees with, since
-past the cutoff its refreshable-origins branch (the only one that counts intra
-layers) is switched off too.
-"""
-function _relaxed_cluster_collect_intra(
-    data::RelaxedClusterPricingData,
-    node::Int,
-    arrival_time::Float64,
-    activated::RewardLayerBitset,
-)
-    arrival_time <= data.inner.max_wait_time + 1e-9 || return activated, 0.0
-    mask = _relaxed_cluster_intra_mask(data, node)
-    isempty(mask) && return activated, 0.0
-    new_layers = setdiff(mask, activated)
-    isempty(new_layers) && return activated, 0.0
-    return union(activated, new_layers), _sum_layer_weights(data.inner, new_layers)
+function relaxed_cluster_of_node(data::RelaxedClusterPricingData, node::Int)::Int
+    node <= data.clustering.n_clusters && return node
+    for (cluster, service) in data.service_node
+        service == node && return cluster
+    end
+    throw(ArgumentError("node $node is not a node of this relaxed cluster graph"))
 end

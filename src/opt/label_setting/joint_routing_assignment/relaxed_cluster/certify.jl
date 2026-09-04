@@ -49,8 +49,11 @@ Outcome of one certification round, over every scenario.
 - `exhausted` -- every scenario that was searched ran dry rather than hitting
   its time limit, and none was skipped. `certified == exhausted &&
   !improving_found`, kept separately so a failure can be attributed to
-  looseness (`improving_found`) or to budget (`!exhausted`) -- the difference
-  between "raise `n_clusters`" and "raise the time limit".
+  looseness (`improving_found`) or to budget (`!exhausted`). Those point at
+  different places: the budget is a solver setting this run could be given more
+  of, while the partition is fixed at build time, so looseness is only ever
+  something to observe *across* runs -- see `clustering.jl`, and note tightness
+  is not guaranteed monotone in the cluster count either.
 - `scenarios_certified` / `n_scenarios` -- how far it got before the first
   scenario refuted it. A scenario with nothing to price counts as certified
   (the real pricer skips it on the same test); one the serial early exit never
@@ -81,7 +84,7 @@ dominator's reduced cost to be no larger (`_add_pricing_label_to_state!`), so
 an evicted label never had the smaller reduced cost.
 """
 function _relaxed_cluster_certify_scenario(
-    ctx::JointRoutingAssignmentRelaxedClusterSearchContext, solver::CGSolver, time_limit::Float64,
+    ctx::JointRoutingAssignmentSearchContext, solver::CGSolver, time_limit::Float64,
 )
     improving = Ref(false)
     function stop_if(label)
@@ -97,7 +100,7 @@ end
 
 """
     _relaxed_cluster_scenario_context(formulation, mapping, m, duals, s, clustering)
-        -> Union{Nothing, JointRoutingAssignmentRelaxedClusterSearchContext}
+        -> Union{Nothing, JointRoutingAssignmentSearchContext}
 
 Build one scenario's relaxed search context from the current RMP duals, or
 `nothing` when the scenario has nothing to price at all -- which is itself a
@@ -133,7 +136,8 @@ function _relaxed_cluster_scenario_context(
         compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
     )
     isempty(pricing_data.inner.opportunities) && return nothing
-    return JointRoutingAssignmentRelaxedClusterSearchContext(pricing_data)
+    # The relaxation is a graph, not a pricer: the search over it is the exact one.
+    return JointRoutingAssignmentSearchContext(pricing_data.inner)
 end
 
 """
