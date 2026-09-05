@@ -32,8 +32,39 @@ for `CGSolver`.
   small-instance regression tests enforce that invariant. It exists to measure how much
   `exact/`'s reward-layer running-max trick is worth computationally against
   a search that makes the same choice explicit via branching instead.
+  Start with `joint_routing_assignment/exact/README.md` for a compact
+  label-state table, search flow, and dominance rule.
   `station_simple/` is the same elementary-route alternative as
   `route_covering/`'s, not currently reachable from any `build_model`.
+  `relaxed_cluster/` is the odd one out — see below.
+
+`joint_routing_assignment/relaxed_cluster/` is **not** a fifth way to find
+columns. It builds a *relaxation* of the pricing problem, over a graph whose
+nodes are clusters of stations rather than stations, constructed so that its
+minimum reduced cost lower-bounds the real one. Exhausting it therefore proves
+no improving column exists anywhere in the full route universe — without ever
+producing one. Its two uses pull in opposite directions and are selected
+differently:
+
+- **certification**, via `CGSolver.certification_pricing_mode` (never
+  `pricing_mode`) — `certify.jl` is the one-shot form, measured hopeless;
+  `nogood_certify.jl` is the no-good-cut loop that does certify.
+- **guiding**, via `pricing_mode = :relaxed_cluster_guided` — `guide.jl` prices
+  the cluster graph only to pick a station subset, then runs the ordinary
+  `exact/` pricer on it. The columns are real routes, so nothing downstream
+  changes.
+
+Its file layout differs from the pricer directories below because most of it is
+a *graph*, not a search: `clustering.jl`/`types.jl`/`data.jl` build the relaxed
+`JointRoutingAssignmentPricingData`, and `exact/`'s search then runs on it
+unchanged — no relaxed label, seed, extension, dominance or replay. The
+exception is the cut-aware search the no-good loop needs (`cuts.jl` compiles the
+cuts; `cut_types.jl`/`cut_seed.jl`/`cut_extend.jl`/`cut_context.jl`/`cut_hooks.jl`
+are a genuine pricer, following the file roles below minus
+`dominate.jl`/`prune.jl`/`accept.jl`, which stay `exact/`'s). A no-good cut
+constrains the *finished* route, so it cannot be a post-hoc filter over results
+— the satisfied-cuts mask has to be on the label, in the state key and in the
+best-so-far signature, which is exactly what `exact/`'s label cannot carry.
 
 Every pricer directory below `route_covering/`/`joint_routing_assignment/`
 (`route_covering/exact/`, `route_covering/station_simple/`,

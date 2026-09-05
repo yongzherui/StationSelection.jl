@@ -219,12 +219,29 @@ function _run_pricing_round(
         formulation, mapping, reduce(vcat, candidates_by_scenario; init=Any[]), max_new_columns,
     )
 
-    # Turn each surviving candidate into a real column, then re-derive its
-    # reduced cost from the master's own duals as a cross-check that the
-    # pricer's model of the master hasn't drifted from the master itself.
+    return _materialize_pricing_columns(formulation, mapping, m, duals, merged)
+end
+
+"""
+    _materialize_pricing_columns(formulation, mapping, m, duals, candidates) -> Vector
+
+Turn each surviving candidate into a real column, then re-derive its reduced cost from
+the master's own duals as a cross-check that the pricer's model of the master hasn't
+drifted from the master itself.
+
+Split out of `_run_pricing_round` because it is not specific to a pricing *round*: the
+no-good certification loop (`joint_routing_assignment/relaxed_cluster/nogood_certify.jl`)
+harvests candidates from the exhaustive subset searches it runs to refute the relaxation,
+and those become columns by exactly this path -- same id allocation, same verification
+against the master. Sharing the code is what guarantees a harvested column is
+indistinguishable from a priced one.
+"""
+function _materialize_pricing_columns(
+    formulation::AbstractFormulation, mapping, m::JuMP.Model, duals, candidates,
+)
     next_id = _pricing_next_column_id(formulation, mapping, m)
     columns = Any[]
-    for (offset, candidate) in enumerate(merged)
+    for (offset, candidate) in enumerate(candidates)
         column = _pricing_make_column(candidate.ctx, next_id + offset - 1, candidate)
         ok, pricer_rc, master_rc = _pricing_verify_column(candidate.ctx, column, m, mapping, duals)
         ok || error(

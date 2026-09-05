@@ -32,9 +32,9 @@ function _has_useful_live_joint_routing_assignment_origin(
 end
 
 """
-    is_useful_destination(label, k)
+    _joint_routing_assignment_candidate_next_nodes(label, pricing_data)
 
-A station `k` is worth visiting next as a destination if some *currently live*
+A station is worth visiting next as a destination if some *currently live*
 origin age can still certify a currently-inactive layer there. A station `j` is
 worth visiting as an origin (only while still inside the pickup window) if
 visiting it could open a live clock that later unlocks a currently-inactive

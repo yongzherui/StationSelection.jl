@@ -206,10 +206,7 @@ itself. Only `JointRoutingAssignmentSearchContext` overrides it today, for
 `julia scripts/diagnose.jl split_census`."""
 _pricing_on_label_inserted(ctx::AbstractPricingSearchContext, label) = nothing
 
-"""Optional hook, called once right before the search loop starts, with its
-start time and time budget. The default is a no-op; only
-`JointRoutingAssignmentSearchContext` overrides it, stashing both into mutable
-fields so its post-`W` completion bound (computed inside `_pricing_label_priority`,
-which has no other way to see the search's remaining time budget) can size its
-own sub-search's `time_limit`."""
+"""Optional hook called immediately before the search loop, with the search
+start time and time budget. The default is a no-op. It remains part of the
+generic context contract for pricers that need time-aware setup."""
 _pricing_search_started!(ctx::AbstractPricingSearchContext, t_start::Float64, time_limit::Float64) = nothing

@@ -2,22 +2,31 @@
 The relaxed-cluster pricer's data type, plus the relaxation argument the whole
 directory exists to make good on. See `clustering.jl` for the partition this is
 built over, `data.jl` for how an exact scenario's candidates are turned into
-the relaxed ones, `certify.jl` for the (measured-hopeless) certification use,
-and `guide.jl` for the station-subset use that survived measurement.
+the relaxed ones, `certify.jl` for the one-shot (measured-hopeless)
+certification use, `nogood_certify.jl` + `cuts.jl`/`cut_*.jl` for the no-good-cut
+loop that does certify, and `guide.jl` for the station-subset use.
 
-# There is no relaxed pricer
+# The relaxation itself is a graph, not a pricer
 
-Only a relaxed *graph*. `RelaxedClusterPricingData.inner` is an ordinary
+`RelaxedClusterPricingData.inner` is an ordinary
 `JointRoutingAssignmentPricingData` whose "stations" are cluster-graph nodes,
 so the search that runs on it is `JointRoutingAssignmentSearchContext` --
 `../exact/`'s, unmodified. Seeding, extension, dominance, the remaining-reward
 bound and route replay are all inherited. Everything the relaxation *is* lives
-in `data.jl`, in what goes into that graph.
+in `data.jl`, in what goes into that graph. That is what `certify.jl` and
+`guide.jl` both drive.
 
 (An earlier version carried its own label type, seeder, extender, context and
 replay in order to credit intra-cluster passengers on arrival as a special
 case. Making intra service an explicit optional arc -- see below -- removed the
 special case and with it all five files.)
+
+The one exception is the **cut-aware** search (`cuts.jl` + `cut_*.jl`) that the
+no-good certification loop drives. A no-good cut is a condition on the finished
+route, so it has to ride on the label, in the search state and in the
+best-so-far signature -- none of which `../exact/`'s label can carry. That
+search is therefore a real pricer over this graph, split by the usual file
+roles; it still borrows `../exact/`'s dominance, bound and arithmetic verbatim.
 
 # The relaxation
 
@@ -104,22 +113,29 @@ elementary one.
 
 # What (5) is and is not good for
 
-*Certification* -- an exhausted relaxed search finding nothing below `-tol`
-proves no real improving column exists -- is sound but was **measured useless**:
-at a converged master the exact minimum is exactly 0 (any column the master
-uses has reduced cost 0 at every optimal dual, by complementary slackness on
-`theta >= 0`), so certification needs the relaxation tight to within `tol`, and
-it is off by 10^2-10^3. See `certify.jl` and
+*One-shot certification* -- an exhausted relaxed search finding nothing below
+`-tol` proves no real improving column exists -- is sound but was **measured
+useless**: at a converged master the exact minimum is exactly 0 (any column the
+master uses has reduced cost 0 at every optimal dual, by complementary slackness
+on `theta >= 0`), so certification needs the relaxation tight to within `tol`,
+and it is off by 10^2-10^3. See `certify.jl` and
 `benchmarks/diagnostics/relaxed_cluster_certification_probe.jl` (0/31).
+
+*No-good-cut certification* recovers it, and is the mode that actually works:
+when the relaxation names an improving cluster route, search its cluster support
+exhaustively with the exact pricer, and if the support is barren, cut it and ask
+again. Each cut only removes supports already proven barren, so the certificate
+still covers the full route universe. MEASURED to certify at K=9 and K=12. See
+`nogood_certify.jl` and `cuts.jl`.
 
 *Guiding* -- taking the winning cluster route's members as a station subset and
 running the exact pricer on that subset -- needs only the argmin to land in the
-right neighbourhood, not tightness, so it can pay where certification cannot.
-See `guide.jl`.
+right neighbourhood, not tightness, so it can pay without any certification at
+all. See `guide.jl`.
 """
 
 export RelaxedClusterPricingData
-export relaxed_cluster_n_clusters
+export relaxed_cluster_n_clusters, relaxed_cluster_n_nodes, relaxed_cluster_of_node
 
 """
     RelaxedClusterPricingData(scenario, clustering, inner, service_node, intra_travel, n_relaxed_candidates)
@@ -159,8 +175,10 @@ relaxed_cluster_n_nodes(data::RelaxedClusterPricingData) = length(data.inner.nod
     relaxed_cluster_of_node(data, node) -> Int
 
 The cluster a relaxed graph node belongs to -- itself for a cluster node, and
-the served cluster for a service node. Needed to read a relaxed route back as a
-set of clusters (`guide.jl`), since a route may pass through service nodes.
+the served cluster for a service node. The single-node form, for callers that
+need one answer; anything that maps a whole route (or every node) back to
+clusters should build `_relaxed_cluster_node_clusters` once instead, since this
+scans `service_node` linearly.
 """
 function relaxed_cluster_of_node(data::RelaxedClusterPricingData, node::Int)::Int
     node <= data.clustering.n_clusters && return node
@@ -168,4 +186,22 @@ function relaxed_cluster_of_node(data::RelaxedClusterPricingData, node::Int)::In
         service == node && return cluster
     end
     throw(ArgumentError("node $node is not a node of this relaxed cluster graph"))
+end
+
+"""
+    _relaxed_cluster_node_clusters(data) -> Vector{Int}
+
+`relaxed_cluster_of_node` for every node at once, as a dense vector: cluster
+nodes map to themselves, service nodes to the cluster they serve. Built once by
+callers that map many nodes back -- reading a relaxed route as a cluster
+sequence (`guide.jl`), taking a route's cluster support (`nogood_certify.jl`),
+compiling the cut masks (`cuts.jl`) -- so none of them pays the single-node
+form's linear scan per node.
+"""
+function _relaxed_cluster_node_clusters(data::RelaxedClusterPricingData)::Vector{Int}
+    clusters = collect(1:length(data.inner.nodes))
+    for (cluster, node) in data.service_node
+        clusters[node] = cluster
+    end
+    return clusters
 end

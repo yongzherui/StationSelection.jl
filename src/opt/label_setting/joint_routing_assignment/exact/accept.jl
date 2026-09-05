@@ -2,7 +2,7 @@
 Route replay: how a finished label's physical route is turned into concrete
 per-passenger assignments -- the only place concrete `(j, k)` pairs are
 recovered, since the label itself only tracks a cheap reward-layer proxy
-during search (`types.jl`, section 16). Pure logic, no `ctx` and no hook
+during search (see `types.jl`). Pure logic, no `ctx` and no hook
 methods -- `hooks.jl`'s `_pricing_candidate_from_label` is what calls
 `_joint_routing_assignment_column_from_route` once per surviving label; this
 file has no role in *deciding* dominance or termination, only in turning an
@@ -27,7 +27,7 @@ pickup is the *most recent* prior visit to the origin -- the freshest clock, sin
 after the fact from the station pair alone (e.g. `findfirst`/`findlast` over `route`) gets
 both ends wrong in general, and can only agree by coincidence on an elementary route.
 This is the only place concrete `(j, k)` pairs are recovered -- label expansion
-never materializes them (section 16), since only a small number of finished
+never materializes them (see `types.jl`), since only a small number of finished
 candidate routes ever need this, not every intermediate label.
 
 Ties on reward are broken lexicographically by `(origin, destination)` for
@@ -86,7 +86,7 @@ end
 """
     _joint_routing_assignment_column_from_route(route, pricing_data)
 
-Route replay plus per-passenger argmax selection (spec section 13): returns
+Route replay plus per-passenger argmax selection: returns
 `(assignments, tau, reduced_cost, positions)` where `assignments` is
 `[(p, j_p*, k_p*), ...]` for every passenger with a positive certified reward,
 `positions` maps each such `p` to the `(pickup_position, dropoff_position)` indices into
@@ -96,7 +96,7 @@ three-way destructurings of this function keep working unchanged,
 `tau` is the route's physical travel time, and `reduced_cost` is recomputed
 directly from the selected assignments' rewards (not copied from any label).
 When `label_reduced_cost` is supplied, asserts the two agree within tolerance
--- the correctness invariant from spec section 7/13, checked on every finished
+-- the search/replay consistency invariant, checked on every finished
 route rather than only in tests, since replay is cheap relative to the search
 that produced the route in the first place.
 """

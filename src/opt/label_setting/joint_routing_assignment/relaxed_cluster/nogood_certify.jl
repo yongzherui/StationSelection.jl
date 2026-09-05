@@ -39,14 +39,57 @@ clusters there are `2^K` supports, so it terminates; `max_rounds` and
 `RELAXED_CLUSTER_MAX_CUTS` bound it well below that in practice, at the cost of
 reporting inconclusive.
 
+# Cuts are per attempt, and caching them across CG iterations would be UNSOUND
+
+`cluster_sets` starts empty on every call, i.e. once per (CG iteration x
+scenario), and the cuts are thrown away when the call returns. That is not a
+missed optimization -- it is required.
+
+A cut records "`stations(T)` holds no improving route", which is a statement
+about the reduced costs *at the duals this attempt was given*. The next CG
+iteration solves a master with new columns and therefore new duals, under which
+a support that was barren can hold an improving route. Carrying the cut forward
+would delete that route's image from the relaxed search while it is genuinely
+improving, and the loop would then certify with an improving column still
+outstanding -- the same false-certificate failure mode `cuts.jl` describes for
+the over-strong cut form, reached by a different route.
+
+So a run's cut counts only make sense *per attempt*. Summed over a solve they
+measure how many times the loop ran, not how deep any one of them went; the
+depth of a single loop is its round count, which is what `max_rounds` bounds.
+
+# Harvesting: a refuted attempt is a pricing round, not waste
+
+Step 4 runs the **real** exact pricer over `stations(T)` -- real stations, real duals, real
+reward structure -- so when it refutes, the labels it just found ARE improving columns for
+the master. This loop originally discarded them, and that is what made certification look
+expensive: across Study 10, **753 of 788 attempts (96%) were refuted**, each one throwing
+away a completed pricing search. `failed_certification_sec` was most of
+`certification_sec` in every arm, and at n=25/K=10 it was 100% of it.
+
+So step 4 now scores its labels through `_pricing_accept_closure` (`../../round.jl`),
+exactly as a pricing round's phase 2 does, and the survivors ride out on the result's
+`candidates`. They are deduped against the scenario's existing pool the same way,
+materialized by the same `_materialize_pricing_columns`, and cross-checked against the
+master by the same `_pricing_verify_column` -- a harvested column is indistinguishable
+from a priced one.
+
+**This does not weaken the certificate**, and the distinction from `guide.jl` matters.
+Restricting the *pricer* to a station subset would restrict the route universe and cost
+the run its full-universe claim (which is why `:relaxed_cluster_guided` reports
+`cg_optimality_scope = "relaxed_cluster_station_subset_only"`). Harvesting does not do
+that: these columns are never the reason CG stops. Convergence is still declared only by
+a full-universe certificate (the relaxed search exhausting under the cuts) or by a
+full-universe pricing round exhausting. Adding more valid columns to a master can never
+make either claim weaker.
+
 # The cost model, honestly
 
-Every round pays one relaxed search plus one exact search over `stations(T)`.
-The exact search is the expensive half, and it is exactly the work `guide.jl`
-already does -- so on rounds where step 4 finds a column this loop costs what
-guided pricing costs and returns the same column. The extra spend is only on
-barren supports, and only near convergence, which is where certification is the
-thing that matters.
+Every round pays one relaxed search plus one exact search over `stations(T)`. The exact
+search is the expensive half, and it is exactly the work `guide.jl` already does -- so on
+rounds where step 4 finds a column this loop costs what guided pricing costs and, with
+harvesting, returns that column too. The remaining unrecovered spend is the barren
+supports, which is the work the certificate is actually made of.
 """
 
 export RelaxedClusterNoGoodResult
@@ -76,6 +119,9 @@ an empirical observation but a property: each cut only ever removes relaxed
 routes, so the minimum over the survivors can only rise. A trace that dips is a
 bug in the cut machinery -- the search would have to be finding a route a
 previous round's cut should already have excluded.
+
+`candidates` carries the improving columns the loop's step-4 searches found on the way --
+see the module docstring's "Harvesting" section.
 """
 struct RelaxedClusterNoGoodResult
     outcome::Symbol          # :certified, :refuted, :inconclusive
@@ -83,6 +129,7 @@ struct RelaxedClusterNoGoodResult
     cuts_added::Int
     last_subset_size::Int
     trace::Vector{NamedTuple}
+    candidates::Vector{Any}
 end
 
 """
@@ -112,13 +159,25 @@ function _relaxed_cluster_nogood_certify_scenario(
     )
     # Nothing to price in the relaxation means nothing to price at all (the bound).
     isempty(relaxed.inner.opportunities) &&
-        return RelaxedClusterNoGoodResult(:certified, 0, 0, 0, NamedTuple[])
+        return RelaxedClusterNoGoodResult(:certified, 0, 0, 0, NamedTuple[], Any[])
 
     node_clusters = _relaxed_cluster_node_clusters(relaxed)
     cluster_sets = Set{Int}[]
     tol = solver.reduced_cost_tol
     last_subset_size = 0
     trace = NamedTuple[]
+
+    # Harvesting state, shared across this scenario's rounds (see the module docstring).
+    # `best_pool_tau` mirrors `_prepare_pricing_scenario`: a candidate only counts as novel
+    # if it beats the best tau already in the master's pool for its signature, so a round
+    # cannot re-offer a column the master already has. `harvested` is keyed by signature
+    # like a pricing round's `scored`, so several rounds (each with its own subset context)
+    # accumulate into one deduped set.
+    existing_columns = JointRoutingAssignmentRouteColumn[
+        c for c in values(m[:joint_routing_assignment_columns])
+        if Int(get(c.metadata, "scenario", 0)) == s
+    ]
+    harvested = Dict{Any, Any}()
     _trace_row!(round, relaxed_rc, support_size, subset_size, subset_rc, subset_checked) =
         push!(trace, (
             round=round, relaxed_rc=relaxed_rc, support_size=support_size,
@@ -128,7 +187,8 @@ function _relaxed_cluster_nogood_certify_scenario(
     for round in 1:max_rounds
         remaining = deadline - time()
         remaining > 0 || return RelaxedClusterNoGoodResult(
-            :inconclusive, round - 1, length(cluster_sets), last_subset_size, trace)
+            :inconclusive, round - 1, length(cluster_sets),
+            last_subset_size, trace, collect(values(harvested)))
 
         # (1) the relaxed search, respecting every cut so far.
         ctx = RelaxedClusterCutSearchContext(relaxed, cluster_sets)
@@ -147,8 +207,8 @@ function _relaxed_cluster_nogood_certify_scenario(
             surviving_min = isempty(labels) ? Inf : minimum(l.reduced_cost for l in labels)
             _trace_row!(round, surviving_min, 0, 0, Inf, false)
             return RelaxedClusterNoGoodResult(
-                exhausted ? :certified : :inconclusive,
-                round, length(cluster_sets), last_subset_size, trace)
+                exhausted ? :certified : :inconclusive, round, length(cluster_sets),
+                last_subset_size, trace, collect(values(harvested)))
         end
 
         # (3) the cluster support of the best surviving relaxed route.
@@ -172,10 +232,25 @@ function _relaxed_cluster_nogood_certify_scenario(
             else
                 remaining = deadline - time()
                 remaining > 0 || return RelaxedClusterNoGoodResult(
-                    :inconclusive, round, length(cluster_sets), last_subset_size, trace)
+                    :inconclusive, round, length(cluster_sets),
+                    last_subset_size, trace, collect(values(harvested)))
+                # Harvest while refuting. The accept closure is a pricing round's, so a
+                # kept candidate is deduped against the pool and against earlier rounds
+                # exactly as phase 2 would do it. It must NOT stop the search early
+                # (`n_candidates = typemax`): this search's other job is to prove the
+                # support barren, and a truncated search proves nothing, so a cut may only
+                # be added after it runs to exhaustion.
+                sub_ctx = JointRoutingAssignmentSearchContext(subset_pricing)
+                sub_best_pool_tau = Dict{Any, Float64}()
+                for column in existing_columns
+                    sig = _pricing_pool_signature(sub_ctx, column)
+                    sub_best_pool_tau[sig] = min(get(sub_best_pool_tau, sig, Inf), column.tau)
+                end
+                accept! = _pricing_accept_closure(
+                    sub_ctx, s, sub_best_pool_tau, harvested, solver, typemax(Int) ÷ 2,
+                )
                 sub_labels, sub_exhausted, _ = _run_label_setting(
-                    JointRoutingAssignmentSearchContext(subset_pricing);
-                    time_limit=remaining, reduced_cost_tol=tol,
+                    sub_ctx; time_limit=remaining, reduced_cost_tol=tol, stop_if=accept!,
                 )
                 (isempty(sub_labels) ? Inf : minimum(l.reduced_cost for l in sub_labels)),
                     sub_exhausted
@@ -190,36 +265,102 @@ function _relaxed_cluster_nogood_certify_scenario(
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.
         subset_rc < -tol && return RelaxedClusterNoGoodResult(
-            :refuted, round, length(cluster_sets), last_subset_size, trace)
+            :refuted, round, length(cluster_sets),
+            last_subset_size, trace, collect(values(harvested)))
         # Only an EXHAUSTED subset search proves the support barren. Cutting on a
         # timed-out one would remove a support that may well hold an improving route,
         # and the loop could then certify falsely.
         subset_exhausted || return RelaxedClusterNoGoodResult(
-            :inconclusive, round, length(cluster_sets), last_subset_size, trace)
+            :inconclusive, round, length(cluster_sets),
+            last_subset_size, trace, collect(values(harvested)))
 
         length(cluster_sets) < RELAXED_CLUSTER_MAX_CUTS || return RelaxedClusterNoGoodResult(
-            :inconclusive, round, length(cluster_sets), last_subset_size, trace)
+            :inconclusive, round, length(cluster_sets),
+            last_subset_size, trace, collect(values(harvested)))
         push!(cluster_sets, support)
     end
     return RelaxedClusterNoGoodResult(
-        :inconclusive, max_rounds, length(cluster_sets), last_subset_size, trace)
+        :inconclusive, max_rounds, length(cluster_sets),
+        last_subset_size, trace, collect(values(harvested)))
+end
+
+"""
+    _relaxed_cluster_nogood_scenario_pass(formulation, mapping, m, duals, solver, s,
+        clustering; deadline) -> Union{Nothing, RelaxedClusterNoGoodResult}
+
+One scenario's whole contribution to a round: duals -> candidates -> the no-good loop ->
+its diagnostic row. `nothing` when the scenario has nothing to price, which is itself a
+certification for it (the real pricer skips it on the same test).
+
+Factored out of the round below so the serial and concurrent branches share one body and
+cannot drift. Safe to call from several threads at once: it only READS the model, and the
+one write it makes -- the guide/stat row -- goes through `_record_relaxed_cluster_stat!`,
+which takes the model's lock.
+"""
+function _relaxed_cluster_nogood_scenario_pass(
+    formulation::AggregateODRouteJointRoutingAssignmentFormulation,
+    mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver,
+    s::Int, clustering::StationClustering; deadline::Float64,
+)
+    alpha, gamma_o, gamma_d = duals
+    data = m[:joint_routing_assignment_data]
+    candidates = joint_routing_assignment_pricing_candidates(
+        data, mapping, alpha, gamma_o, gamma_d,
+        Float64(m[:joint_routing_assignment_walk_cost_weight]),
+        Float64(m[:joint_routing_assignment_detour_factor]), s,
+    )
+    # Nothing to price: vacuously certified for this scenario, and it harvests nothing.
+    isempty(candidates) && return nothing
+
+    result = _relaxed_cluster_nogood_certify_scenario(
+        m, s, candidates, clustering, solver;
+        deadline=deadline, max_rounds=solver.certification_max_rounds,
+    )
+    _record_relaxed_cluster_stat!(m, (
+        scenario=s, guide_routes=result.rounds, subset_size=result.last_subset_size,
+        n_stations=length(m[:joint_routing_assignment_nodes]),
+        relaxed_exhausted=(result.outcome !== :inconclusive), fell_back=false,
+        nogood_outcome=result.outcome, nogood_rounds=result.rounds,
+        nogood_cuts=result.cuts_added,
+        # How the bound moved cut by cut -- non-decreasing by construction.
+        nogood_rc_trace=[r.relaxed_rc for r in result.trace],
+        nogood_subset_rc_trace=[r.subset_rc for r in result.trace],
+        nogood_subset_size_trace=[r.subset_size for r in result.trace],
+        nogood_subset_checked_trace=[r.subset_checked for r in result.trace],
+    ))
+    return result
 end
 
 """
     _run_relaxed_cluster_nogood_certification_round(formulation, mapping, m, duals, solver;
         time_limit) -> RelaxedClusterCertificationResult
 
-The `cg_certification_round` body for `:relaxed_cluster_nogood`. Same contract
-and same reporting shape as `certify.jl`'s plain round, so `CGSolver` needs no
-special case: `certified` only when EVERY scenario certified, and the
-refuted/inconclusive split still says which fix a failure calls for.
+The `cg_certification_round` body for `:relaxed_cluster_nogood`. Same contract and same
+reporting shape as `certify.jl`'s plain round, so `CGSolver` needs no special case:
+`certified` only when EVERY scenario certified, and the refuted/inconclusive split still
+says which fix a failure calls for.
 
-Scenarios are searched serially even when pricing is threaded. The loop is
-adaptive -- how long a scenario needs depends on how many barren supports it
-walks through -- so a shared deadline consumed in order lets a scenario that
-certifies in one round hand its slack to a harder one, which a fixed per-scenario
-split cannot. It also stops at the first refutation, since one refuted scenario
-already settles the round.
+# Scenarios run CONCURRENTLY, and every scenario is always searched
+
+Both of those changed when harvesting landed, and both were the opposite before.
+
+The round used to walk scenarios serially and `break` at the first refutation, on the
+reasoning that one refuted scenario already settles the round so the rest is wasted work.
+That reasoning died with harvesting: a refuted scenario is now a *pricing round*, so the
+scenarios after it are not wasted work -- skipping them forfeits their columns. Every
+scenario is therefore searched, and the round's conclusion is reduced afterwards.
+
+Serial execution died with it for a blunter reason. Harvesting moved essentially the whole
+solve inside this round -- MEASURED at 97-99% of total wall across n=20/25/30 -- while the
+pricing round it displaced was already threaded. A serial round therefore left
+`n_scenarios - 1` cores idle for ~99% of the run. Concurrency follows the same two switches
+as pricing (`solver.parallel_scenario_pricing` or the formulation's own opt-in), so a run
+cannot silently thread one round shape and not the other.
+
+`time_limit` is budgeted the way `_run_pricing_round` budgets a pricing round's, and for
+the same reason: divided across scenarios when they run serially (their searches sum),
+given in full to each when they run concurrently (their searches overlap). Both honour the
+same round wall.
 """
 function _run_relaxed_cluster_nogood_certification_round(
     formulation::AggregateODRouteJointRoutingAssignmentFormulation,
@@ -230,53 +371,78 @@ function _run_relaxed_cluster_nogood_certification_round(
     deadline = t_start + time_limit
     clustering = _joint_routing_assignment_station_clustering(m)
     scenarios = _pricing_scenarios(formulation, mapping, m)
-    alpha, gamma_o, gamma_d = duals
-    data = m[:joint_routing_assignment_data]
+    parallel = (solver.parallel_scenario_pricing || _pricing_parallel_scenarios(formulation)) &&
+        length(scenarios) > 1 && Threads.nthreads() > 1
+
+    # `nothing` marks a scenario with nothing to price -- vacuously certified, no harvest.
+    results = Vector{Any}(undef, length(scenarios))
+    fill!(results, nothing)
+    if parallel
+        # Concurrent searches overlap, so each scenario may have the WHOLE round budget and
+        # the round still finishes within its wall -- exactly `_run_pricing_round`'s rule.
+        Threads.@threads for i in eachindex(scenarios)
+            results[i] = _relaxed_cluster_nogood_scenario_pass(
+                formulation, mapping, m, duals, solver, scenarios[i], clustering;
+                deadline=deadline,
+            )
+        end
+    else
+        # Serial: re-divide the REMAINING budget before each scenario, so one that finishes
+        # early hands its slack to those after it rather than losing it.
+        for (position, i) in enumerate(eachindex(scenarios))
+            remaining_scenarios = length(scenarios) - position + 1
+            slice_deadline = time() + max(0.0, (deadline - time()) / remaining_scenarios)
+            results[i] = _relaxed_cluster_nogood_scenario_pass(
+                formulation, mapping, m, duals, solver, scenarios[i], clustering;
+                deadline=slice_deadline,
+            )
+        end
+    end
 
     certified_count = 0
     any_refuted = false
     all_conclusive = true
-    for (position, s) in enumerate(scenarios)
-        candidates = joint_routing_assignment_pricing_candidates(
-            data, mapping, alpha, gamma_o, gamma_d,
-            Float64(m[:joint_routing_assignment_walk_cost_weight]),
-            Float64(m[:joint_routing_assignment_detour_factor]), s,
-        )
-        if isempty(candidates)
+    harvested = Any[]
+    for r in results
+        if isnothing(r)
             certified_count += 1     # nothing to price: vacuously certified
             continue
         end
-        remaining_scenarios = length(scenarios) - position + 1
-        slice_deadline = min(deadline, time() + max(0.0, (deadline - time()) / remaining_scenarios))
-        result = _relaxed_cluster_nogood_certify_scenario(
-            m, s, candidates, clustering, solver;
-            deadline=slice_deadline, max_rounds=solver.certification_max_rounds,
-        )
-        _record_relaxed_cluster_guide_stat!(m, (
-            scenario=s, guide_routes=result.rounds, subset_size=result.last_subset_size,
-            n_stations=length(m[:joint_routing_assignment_nodes]),
-            relaxed_exhausted=(result.outcome !== :inconclusive), fell_back=false,
-            nogood_outcome=result.outcome, nogood_rounds=result.rounds,
-            nogood_cuts=result.cuts_added,
-            # How the bound moved cut by cut -- non-decreasing by construction.
-            nogood_rc_trace=[r.relaxed_rc for r in result.trace],
-            nogood_subset_rc_trace=[r.subset_rc for r in result.trace],
-            nogood_subset_size_trace=[r.subset_size for r in result.trace],
-            nogood_subset_checked_trace=[r.subset_checked for r in result.trace],
-        ))
-        if result.outcome === :certified
+        append!(harvested, r.candidates)
+        if r.outcome === :certified
             certified_count += 1
-        elseif result.outcome === :refuted
+        elseif r.outcome === :refuted
             any_refuted = true
-            break                     # one refuted scenario settles the round
         else
             all_conclusive = false
         end
     end
 
     certified = !any_refuted && all_conclusive && certified_count == length(scenarios)
+    # `exhausted` carries `certify.jl`'s meaning: every scenario reached a conclusion AND
+    # none was skipped. Now that no scenario is ever skipped, this is exactly "nothing came
+    # back inconclusive, and nothing was refuted".
+    conclusive_and_complete = all_conclusive && !any_refuted
+    # A certified round's harvest is dropped on purpose: CG is about to stop, and adding
+    # columns to a master that has just been proved optimal would only churn it.
     return RelaxedClusterCertificationResult(
-        certified, any_refuted, all_conclusive, certified_count, length(scenarios),
-        clustering.n_clusters, time() - t_start,
+        certified, any_refuted, conclusive_and_complete, certified_count, length(scenarios),
+        clustering.n_clusters, time() - t_start, certified ? Any[] : harvested,
     )
 end
+
+"""
+Every other `AggregateODRouteMap` formulation, mirroring `certify.jl`'s fallback:
+the no-good loop relaxes the joint routing+assignment pricing problem's
+per-passenger reward structure specifically, so there is nothing to fall back to.
+`cg_certification_supported` already refuses these up front -- this method is what
+turns a hypothetical direct call into the same explanation rather than a
+`MethodError`.
+"""
+_run_relaxed_cluster_nogood_certification_round(
+    formulation::AbstractFormulation, mapping, m::JuMP.Model, duals, solver::CGSolver;
+    time_limit::Float64,
+) = throw(ArgumentError(
+    "relaxed-cluster no-good certification is only implemented for " *
+    "AggregateODRouteJointRoutingAssignmentFormulation, not $(typeof(formulation))",
+))

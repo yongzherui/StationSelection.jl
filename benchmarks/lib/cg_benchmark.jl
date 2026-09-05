@@ -92,9 +92,10 @@ writes the same schema).
 
 `certified_by_relaxation` is the headline: did the cheap relaxed round ever prove pricing
 was done, i.e. did the run skip the exhaustive certifying search entirely?
-`certification_sec` is what the attempts cost in total, including every failed one, so
-`certification_sec` against a baseline arm's `wall_sec` is the honest price of the
-feature. `certification_rounds` counts attempts, one per CG iteration that reached
+`certification_sec` is what the attempts cost in total, including every one that did not
+end the solve. Under `:relaxed_cluster_nogood` that is NOT overhead -- a refuted attempt
+harvests columns and displaces a pricing round -- so pair it with
+`certification_harvested_columns` rather than reading it as cost. `certification_rounds` counts attempts, one per CG iteration that reached
 pricing, and the `refuted`/`inconclusive` counts split the failures by which fix they call
 for -- a relaxation that was too loose, versus one that ran out of budget.
 """
@@ -113,11 +114,19 @@ function benchmark_certification_metrics(result)
         certification_refuted_rounds=Int(get(metadata, "cg_certification_refuted_rounds", 0)),
         certification_inconclusive_rounds=Int(get(metadata, "cg_certification_inconclusive_rounds", 0)),
         certification_sec=Float64(get(metadata, "cg_certification_sec", 0.0)),
-        # Wall spent on attempts that did NOT certify -- the pure overhead of the feature.
-        failed_certification_sec=sum(
+        # Wall spent in attempts that did not END the solve. NOT the same as waste, and it
+        # was renamed from `failed_certification_sec` precisely because that reading is now
+        # wrong: under `:relaxed_cluster_nogood` a refuted attempt harvests real columns and
+        # replaces the pricing round, so this time is where the pricing HAPPENS. Measured at
+        # 84-97% of the wall of runs that finished 4x faster than baseline. Read it against
+        # `certification_harvested_columns` to see what it bought.
+        non_certifying_certification_sec=sum(
             (Float64(r.certification_sec) for r in log
              if !Bool(get(r, :certification_certified, false))); init=0.0),
         certifying_rounds=Int(get(metadata, "cg_certifying_rounds", 0)),
+        # Columns recovered from attempts that did not certify -- what the time above
+        # bought. Zero for the plain `:relaxed_cluster` mode, which cannot harvest.
+        certification_harvested_columns=Int(get(metadata, "cg_certification_harvested_columns", 0)),
     )
 end
 

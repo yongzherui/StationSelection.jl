@@ -93,11 +93,12 @@ function _relaxed_cluster_guide_routes(
     # A relaxed route can step through intra-cluster SERVICE nodes, which are not clusters.
     # Map them back to the cluster they serve, and drop the consecutive duplicate that
     # `C -> C'` then becomes, so the caller sees a plain cluster sequence.
+    node_clusters = _relaxed_cluster_node_clusters(pricing_data)
     routes = Vector{Int}[]
     for label in kept
         clusters = Int[]
         for node in label.route
-            cluster = relaxed_cluster_of_node(pricing_data, node)
+            cluster = node_clusters[node]
             (isempty(clusters) || clusters[end] != cluster) && push!(clusters, cluster)
         end
         push!(routes, clusters)
@@ -152,17 +153,33 @@ function _restrict_candidates_to_subset(
 end
 
 """
-    _record_relaxed_cluster_guide_stat!(m, stat)
+    _record_relaxed_cluster_stat!(m, stat)
 
-Append one `(scenario, ...)` row to `m[:relaxed_cluster_guide_stats]`.
+Append one `(scenario, ...)` row to `m[:relaxed_cluster_guide_stats]`, which
+surfaces on the result as `metadata["cg_relaxed_cluster_guide_stats"]`.
+
+**Two row schemas share this channel**, so a consumer must discriminate rather
+than assume:
+
+- *guided pricing* (this file) writes
+  `(scenario, guide_routes, subset_size, n_stations, relaxed_exhausted, fell_back)`;
+- *no-good certification* (`nogood_certify.jl`) writes those same six fields --
+  reading `guide_routes` as the round count and `relaxed_exhausted` as "the loop
+  reached a conclusion" -- plus the `nogood_*` fields carrying the outcome, the
+  cut count and the per-round traces. Presence of `nogood_outcome` is what tells
+  the two apart.
+
+The key keeps the `guide` name it was introduced with because it is part of
+`OptResult.metadata` and therefore of every study's `metrics.json`; renaming it
+would silently break analysis scripts reading historical runs.
 
 Phase 1 of `_run_pricing_round` is `Threads.@threads` over scenarios, so this
-takes the model's guide lock: `push!` onto a shared `Vector` from several
-threads is a data race, and the stats are the whole point of the mode (they are
-how "did the guide contain the real optimum" gets answered), so dropping them
-under threading is not an option either.
+takes the model's lock: `push!` onto a shared `Vector` from several threads is a
+data race, and the stats are the whole point of the guided mode (they are how
+"did the guide contain the real optimum" gets answered), so dropping them under
+threading is not an option either.
 """
-function _record_relaxed_cluster_guide_stat!(m::JuMP.Model, stat)
+function _record_relaxed_cluster_stat!(m::JuMP.Model, stat)
     haskey(m.obj_dict, :relaxed_cluster_guide_stats) || return nothing
     lock(m[:relaxed_cluster_guide_lock]) do
         push!(m[:relaxed_cluster_guide_stats], stat)
@@ -215,7 +232,7 @@ function _build_relaxed_cluster_guided_context(
         # improving real route exists either and skipping the scenario is a genuine
         # (if rare) certificate. If it merely ran out of time it has proved nothing, so
         # fall back to the unrestricted exact pricer rather than silently skipping work.
-        _record_relaxed_cluster_guide_stat!(m, (
+        _record_relaxed_cluster_stat!(m, (
             scenario=s, guide_routes=0, subset_size=relaxed_exhausted ? 0 : length(all_nodes),
             n_stations=length(all_nodes), relaxed_exhausted=relaxed_exhausted,
             fell_back=!relaxed_exhausted,
@@ -230,7 +247,7 @@ function _build_relaxed_cluster_guided_context(
 
     subset = relaxed_cluster_station_subset(clustering, cluster_routes)
     subset_candidates = _restrict_candidates_to_subset(candidates, subset)
-    _record_relaxed_cluster_guide_stat!(m, (
+    _record_relaxed_cluster_stat!(m, (
         scenario=s, guide_routes=length(cluster_routes), subset_size=length(subset),
         n_stations=length(all_nodes), relaxed_exhausted=relaxed_exhausted, fell_back=false,
     ))

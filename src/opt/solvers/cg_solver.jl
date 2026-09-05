@@ -42,8 +42,17 @@ used.
 
 The two-tier escalation above is the expensive way to prove pricing is done: it re-prices
 the identical duals under a much longer budget, and on hard instances that certifying
-round dominates the whole solve. `certification_pricing_mode` (default `nothing`; only
-`:relaxed_cluster` today) adds a cheap way to *try* proving it first.
+round dominates the whole solve. `certification_pricing_mode` (default `nothing`) adds a
+cheap way to *try* proving it first. Two modes today, both relaxed-cluster:
+
+- `:relaxed_cluster` -- the one-shot form. Gives up the moment the relaxation finds any
+  improving cluster route, which at a converged master it essentially always does (0/31
+  measured), so it is kept for comparison rather than for use.
+- `:relaxed_cluster_nogood` -- the no-good-cut loop, and the mode that actually certifies.
+  When the relaxation names an improving cluster route, it searches that route's cluster
+  support exhaustively with the real pricer; a barren support becomes a cut and the
+  relaxation is asked again. `certification_max_rounds` (default 32) caps the cuts per
+  scenario per round.
 
 When set, every iteration -- before the real pricing round -- runs a **relaxation** of the
 pricing problem under `certification_time_limit_sec` (default 300 s). The relaxation is
@@ -54,8 +63,13 @@ either: the loop stops with `cg_converged=true` and
 certifying round. If it fails -- either it found an improving *relaxed* solution (the
 relaxation is too loose, or an improving column genuinely exists) or it ran out of time --
 it has proved nothing and the iteration proceeds to `price_columns` exactly as if the
-feature were off. A failed attempt is cheap: the relaxed search early-exits at the first
-improving solution, which is the common case in every iteration but the last.
+feature were off.
+
+Cost differs sharply between the two modes. A failed `:relaxed_cluster` attempt is nearly
+free: the relaxed search early-exits at the first improving solution, which is the common
+case in every iteration but the last. `:relaxed_cluster_nogood` instead pays one
+exhaustive real-pricer search per cut it adds, so a failing attempt can cost as much as a
+pricing round -- budget `certification_time_limit_sec` accordingly.
 
 The certificate covers the **full route universe**, because the relaxation bounds every
 real route rather than only the ones the active pricer searches. So a certified run
@@ -64,14 +78,17 @@ reports `cg_optimality_scope="full_route_universe"` even when its column-finding
 from the relaxation rather than from exhausted pricing.
 `metadata["cg_certification_rounds"]`/`["cg_certification_sec"]` cost it, and
 `["cg_certification_refuted_rounds"]`/`["cg_certification_inconclusive_rounds"]` split the
-failures into the two kinds that call for opposite fixes -- *refuted* (an improving
-relaxed solution existed, so the relaxation is too loose) versus *inconclusive* (the
-attempt ran out of `certification_time_limit_sec`). Each iteration log row carries
-`certification_sec`, `certification_certified` and `certification_outcome`.
+failures into the two kinds that call for opposite fixes -- *refuted* versus
+*inconclusive* (the attempt ran out of `certification_time_limit_sec`, or hit the round or
+cut cap). What *refuted* means depends on the mode: under `:relaxed_cluster` an improving
+relaxed solution existed, so the relaxation is too loose; under
+`:relaxed_cluster_nogood` an exhaustive real search found a genuinely improving column, so
+it is a true negative and says nothing against the relaxation. Each iteration log row
+carries `certification_sec`, `certification_certified` and `certification_outcome`.
 
 Requires a formulation implementing `cg_certification_supported`/`cg_certification_round`;
-a mode that nothing supports is rejected up front, never silently ignored. For
-`:relaxed_cluster` that means building
+a mode that nothing supports is rejected up front, never silently ignored. For both
+relaxed-cluster modes that means building
 `AggregateODRouteJointRoutingAssignmentFormulation(relaxed_cluster_count = K)`, whose
 station partition is fixed at build time -- see
 `label_setting/joint_routing_assignment/relaxed_cluster/`.
@@ -320,6 +337,9 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     certification_refuted_rounds = 0
     certification_inconclusive_rounds = 0
     certification_sec = 0.0
+    # Columns recovered from FAILED certification attempts (see the harvest branch below).
+    # Reported so the feature's cost can be read net of what it gave back.
+    certification_harvested_columns = 0
     certified_by_relaxation = false
     # One row per CG iteration, exposed as metadata["cg_iteration_log"]. Wall time is
     # split into the master LP solve, the pricing call, and column insertion, so a run
@@ -339,6 +359,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         # Declared before the master solve because the non-OPTIMAL early-exit below logs
         # them too (as a zero-cost, uncertified round -- certification never got to run).
         iteration_certification_sec = 0.0
+        certification_candidates = Any[]
         iteration_certified = false
         iteration_certification_outcome = "none"
 
@@ -382,6 +403,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 iteration_certification_sec = time() - t_cert
                 certification_sec += iteration_certification_sec
                 iteration_certified = certification.certified
+                certification_candidates = certification.candidates
                 iteration_certification_outcome = if certification.certified
                     "certified"
                 elseif certification.improving_found
@@ -412,6 +434,43 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 certification_outcome=iteration_certification_outcome,
             ))
             break
+        end
+
+        # A FAILED certification attempt is not wasted work. `:relaxed_cluster_nogood`
+        # refutes the relaxation by running the real exact pricer over a station subset,
+        # and hands back the improving columns that search found. Taking them as this
+        # iteration's pricing result skips the regular round entirely -- the expensive
+        # full-station search -- for the price of an attempt that had to run anyway.
+        #
+        # Soundness: these columns are ordinary priced columns (same materialization, same
+        # `_pricing_verify_column` cross-check), but the subset they came from is a
+        # RESTRICTED route universe, so their absence would prove nothing. That is why this
+        # branch only ever *skips* a pricing round when it has columns to show for it --
+        # convergence is still declared only by a full-universe certificate above, or by a
+        # full-universe pricing round exhausting below. `cg_pricing_exhausted` is left
+        # untouched here for the same reason: this round proved no exhaustion of anything.
+        harvested_columns = _cg_materialize_certification_columns(
+            build_result, mapping, m, duals, certification_candidates,
+        )
+        if !isempty(harvested_columns)
+            t_add = time()
+            accepted = add_columns!(build_result, mapping, m, harvested_columns)
+            add_sec = time() - t_add
+            cumulative_columns_added += accepted
+            certification_harvested_columns += accepted
+            push!(iteration_log, (
+                iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
+                add_columns_sec=add_sec, columns_added=length(harvested_columns),
+                columns_accepted=accepted,
+                cumulative_columns_added=cumulative_columns_added,
+                master_objective=master_objective, master_status=string(status),
+                pricing_limit_sec=0.0, certifying_pricing=false,
+                pricing_mode=_mode_label(),
+                certification_sec=iteration_certification_sec, certification_certified=false,
+                certification_outcome=iteration_certification_outcome,
+            ))
+            accepted == 0 && break   # nothing entered the master: no progress is possible
+            continue
         end
 
         t0 = time()
@@ -565,6 +624,10 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         "cg_certification_rounds" => certification_rounds,
         "cg_certification_refuted_rounds" => certification_refuted_rounds,
         "cg_certification_inconclusive_rounds" => certification_inconclusive_rounds,
+        # Columns recovered from failed certification attempts. Read against
+        # `cg_certification_sec` to judge the feature's NET cost: a failed attempt that
+        # hands back columns replaced a pricing round rather than adding to one.
+        "cg_certification_harvested_columns" => certification_harvested_columns,
         "cg_certification_sec" => certification_sec,
         "cg_certified_by_relaxation" => certified_by_relaxation,
         "cg_pricing_universe_restricted" => !certified_by_relaxation &&
@@ -709,6 +772,28 @@ cg_certification_supported(build_result::BuildResult, mapping, m::JuMP.Model, mo
 function cg_certification_round(build_result::BuildResult, mapping, m::JuMP.Model, duals,
         solver::CGSolver, mode::Symbol; time_limit_sec::Real)
     throw(MethodError(cg_certification_round, (build_result, mapping, m, duals, solver, mode)))
+end
+
+"""
+    _cg_materialize_certification_columns(build_result, mapping, m, duals, candidates)
+
+Turn the candidates a failed certification attempt harvested into real columns, via the
+same path a pricing round uses (`_materialize_pricing_columns` -- same id allocation, same
+`_pricing_verify_column` cross-check against the master's own duals), so a harvested column
+is indistinguishable from a priced one.
+
+Empty in, empty out: the plain `:relaxed_cluster` round never harvests, and neither does a
+successful attempt, so this is a no-op unless `:relaxed_cluster_nogood` actually refuted
+something. Generic over formulations rather than dispatched, because the candidates already
+carry the search context that knows how to build their columns.
+"""
+function _cg_materialize_certification_columns(
+    build_result::BuildResult, mapping, m::JuMP.Model, duals, candidates,
+)
+    isempty(candidates) && return Any[]
+    return _materialize_pricing_columns(
+        m[:aggregate_od_route_formulation], mapping, m, duals, candidates,
+    )
 end
 
 """

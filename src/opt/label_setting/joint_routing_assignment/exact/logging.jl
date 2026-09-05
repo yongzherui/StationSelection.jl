@@ -33,6 +33,17 @@ const JOINT_ROUTING_ASSIGNMENT_DOMINANCE_CONDITIONS = (
 )
 const JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS = zeros(Int, length(JOINT_ROUTING_ASSIGNMENT_DOMINANCE_CONDITIONS))
 
+# Named indices keep the instrumented hot loop readable while retaining the
+# zero-allocation integer indexing used by the counters.
+const JRA_REJECT_TIME = 1
+const JRA_REJECT_LIVE_CLOCK_SUPPORT = 2
+const JRA_REJECT_ROUTE_LENGTH = 3
+const JRA_REJECT_REDUCED_COST = 4
+const JRA_REJECT_STATION_AGE = 5
+const JRA_REJECT_COMPENSATION = 6
+const JRA_DOMINATES = 7
+const JRA_REJECT_AGE_MASK = 8
+
 """
 Read out and reset the rejection census. Returns
 `condition => count` pairs in evaluation order.

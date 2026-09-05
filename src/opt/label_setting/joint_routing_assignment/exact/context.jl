@@ -12,14 +12,11 @@ wired into `_run_label_setting` (`engine.jl`) and `round.jl`.
 Context for the revisit-tolerant `JointRoutingAssignmentCG` search: bundles
 `pricing_data`, the once-built `dominates` closure, the precomputed
 `search_index`/`bound_workspace` the remaining-reward bound (`prune.jl`)
-needs, and one optional production knob:
+needs, and one optional diagnostic hook:
 
   - `label_observer` -- an optional diagnostic callback invoked via
     `_pricing_on_label_inserted` (`hooks.jl`).
 
-(The post-`W` exact completion bound this context used to also support has been
-removed along with `post_w_completion.jl` -- peripheral to the base search, not
-part of it.)
 """
 struct JointRoutingAssignmentSearchContext{D<:Function, O} <: AbstractPricingSearchContext{
     JointRoutingAssignmentDominanceFilters, JointRoutingAssignmentPricingLabel, JointRoutingAssignmentLabelBitsets,

@@ -58,6 +58,13 @@ Outcome of one certification round, over every scenario.
   scenario refuted it. A scenario with nothing to price counts as certified
   (the real pricer skips it on the same test); one the serial early exit never
   reached does not.
+
+**Shared with the no-good loop.** `nogood_certify.jl` reports through this same
+struct so `CGSolver` needs no second shape, and each field keeps its meaning
+under the obvious translation: `improving_found` is "some scenario was *refuted*
+by an exhaustive exact search", and `exhausted` is "every scenario reached a
+conclusion (none went `:inconclusive`) and none was skipped" -- which the
+refutation early-exit makes `false`, exactly as `settled_early` does here.
 """
 struct RelaxedClusterCertificationResult
     certified::Bool
@@ -67,7 +74,23 @@ struct RelaxedClusterCertificationResult
     n_scenarios::Int
     n_clusters::Int
     elapsed_sec::Float64
+    # Improving columns found while FAILING to certify, for `CGSolver` to add to the
+    # master. Always empty for the plain round below -- its searches run on the relaxed
+    # cluster graph, whose routes are not real routes and can never become columns. Only
+    # `nogood_certify.jl` fills this, from the real exact searches it runs over
+    # `stations(T)`; see its module docstring's "Harvesting" section.
+    candidates::Vector{Any}
 end
+
+"""Plain-round constructor: the relaxed-graph round never harvests, so it is spelled
+without the field rather than passing `Any[]` at each of its call sites."""
+RelaxedClusterCertificationResult(
+    certified::Bool, improving_found::Bool, exhausted::Bool, scenarios_certified::Int,
+    n_scenarios::Int, n_clusters::Int, elapsed_sec::Float64,
+) = RelaxedClusterCertificationResult(
+    certified, improving_found, exhausted, scenarios_certified, n_scenarios, n_clusters,
+    elapsed_sec, Any[],
+)
 
 """
     _relaxed_cluster_certify_scenario(ctx, solver, time_limit) -> (improving_found, exhausted)
@@ -181,15 +204,16 @@ function _run_relaxed_cluster_certification_round(
     searched = fill(false, length(scenarios))
     settled_early = false
     if parallel
-        scenario_time_limit = time_limit
         Threads.@threads for i in eachindex(scenarios)
             ctx = _relaxed_cluster_scenario_context(
                 formulation, mapping, m, duals, scenarios[i], clustering,
             )
             isnothing(ctx) && continue  # nothing to price: certified for this scenario
             searched[i] = true
+            # The whole round's budget, not a slice: concurrent searches overlap, so
+            # they all finish within `time_limit` of each other.
             improving[i], exhausted[i] =
-                _relaxed_cluster_certify_scenario(ctx, solver, scenario_time_limit)
+                _relaxed_cluster_certify_scenario(ctx, solver, time_limit)
         end
     else
         round_deadline = time() + time_limit

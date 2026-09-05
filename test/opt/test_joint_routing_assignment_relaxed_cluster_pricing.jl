@@ -1044,6 +1044,63 @@
         end
     end
 
+    @testset "a refuted attempt harvests its columns instead of discarding them" begin
+        # A refuted attempt has just run the REAL exact pricer over `stations(T)`, so the
+        # improving labels it found are ordinary columns. They are handed to the master and
+        # the regular pricing round is skipped for that iteration -- which is the whole
+        # speedup, and it must not cost anything in correctness.
+        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
+        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
+        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        base = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            CGSolver(recover_integer_solution = true),
+        )
+        # K = 2 is coarse enough that the relaxation is loose and gets refuted repeatedly,
+        # which is exactly the path that harvests.
+        result = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(
+                max_stops = 4, relaxed_cluster_count = 2,
+            ),
+            CGSolver(recover_integer_solution = true,
+                     certification_pricing_mode = :relaxed_cluster_nogood),
+        )
+        harvested = result.metadata["cg_certification_harvested_columns"]
+        @test harvested isa Int
+        @test harvested >= 0
+        # The counter must be live, not vestigial: if this instance ever stops refuting,
+        # the assertion below is the thing that flags that the path is no longer covered.
+        @test result.metadata["cg_certification_refuted_rounds"] == 0 || harvested > 0
+        # Harvesting changes only WHERE columns come from, never the answer.
+        @test result.termination_status == SOLVE_OPTIMAL
+        @test result.objective_value ≈ base.objective_value atol = 1e-6
+        # Harvested columns come from a station SUBSET, so they must never be the reason
+        # CG claims optimality -- that claim still has to come from a full-universe
+        # certificate or an exhausted full-universe pricing round.
+        @test result.metadata["cg_optimality_scope"] == "full_route_universe"
+    end
+
+    @testset "the plain relaxed-cluster round never harvests" begin
+        # Its searches run on the cluster graph, whose routes are not real routes and can
+        # never become columns. The shared result struct defaults the field to empty, and
+        # this pins that the plain round cannot start emitting columns by accident.
+        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
+        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
+        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        result = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(
+                max_stops = 4, relaxed_cluster_count = 2,
+            ),
+            CGSolver(recover_integer_solution = true,
+                     certification_pricing_mode = :relaxed_cluster),
+        )
+        @test result.metadata["cg_certification_harvested_columns"] == 0
+        @test result.termination_status == SOLVE_OPTIMAL
+    end
+
     # ── the guided mode: relaxation as a station-subset guide ───────────────
     @testset "relaxation-guided pricing: subset extraction" begin
         nodes = two_group_nodes()

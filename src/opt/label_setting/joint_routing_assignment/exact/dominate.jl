@@ -66,7 +66,7 @@ The cheap bookkeeping signature used by the label search itself (dedup within
 signature. Two labels can share this signature (same running per-passenger
 maxima) while representing different physical routes with different concrete
 `(p, j, k)` assignments and therefore different station-linking coefficients;
-only route replay on a finished, accepted route (section 13, `accept.jl`)
+only route replay on a finished, accepted route (`accept.jl`)
 resolves which concrete assignment each passenger actually gets.
 """
 _joint_routing_assignment_layer_signature(label::JointRoutingAssignmentPricingLabel) = label.activated_reward_layers
@@ -216,16 +216,16 @@ end
 function _dominates_joint_routing_assignment_label(
     a::JointRoutingAssignmentPricingLabel,
     b::JointRoutingAssignmentPricingLabel,
-    abs::JointRoutingAssignmentLabelBitsets,
-    bbs::JointRoutingAssignmentLabelBitsets,
+    a_bitsets::JointRoutingAssignmentLabelBitsets,
+    b_bitsets::JointRoutingAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
     bounded_max_stops::Bool,
     compensated_dominance::Bool=true,
 )::Bool
     _joint_routing_assignment_state(a) == _joint_routing_assignment_state(b) || return false
     return _pricing_dominates_at_state(
-        JointRoutingAssignmentDominanceFilters(a, abs), abs,
-        JointRoutingAssignmentDominanceFilters(b, bbs), bbs,
+        JointRoutingAssignmentDominanceFilters(a, a_bitsets), a_bitsets,
+        JointRoutingAssignmentDominanceFilters(b, b_bitsets), b_bitsets,
         layer_weight,
         _joint_routing_assignment_dominance_rules(
             bounded_max_stops, compensated_dominance,
@@ -302,30 +302,32 @@ one-instruction guard for callers outside that walk and because the
 compensation's early bail is defined against a non-negative budget.
 """
 @inline function _pricing_dominates_at_state(
-    af::JointRoutingAssignmentDominanceFilters, abs::JointRoutingAssignmentLabelBitsets,
-    bf::JointRoutingAssignmentDominanceFilters, bbs::JointRoutingAssignmentLabelBitsets,
+    a_filters::JointRoutingAssignmentDominanceFilters,
+    a_bitsets::JointRoutingAssignmentLabelBitsets,
+    b_filters::JointRoutingAssignmentDominanceFilters,
+    b_bitsets::JointRoutingAssignmentLabelBitsets,
     layer_weight::Vector{Float64},
     ::JointRoutingAssignmentDominanceRules{BoundedStops, Compensated, Instrumented},
 )::Bool where {BoundedStops, Compensated, Instrumented}
     @inline _reject(i::Int) = (Instrumented && (@inbounds JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS[i] += 1); false)
 
-    af.time <= bf.time + 1e-9 || return _reject(1)
+    a_filters.time <= b_filters.time + 1e-9 || return _reject(JRA_REJECT_TIME)
 
     # `dom(age_b) subseteq dom(age_a)` is required below, so `a` cannot have fewer
     # live clocks than `b`. Both counts ride inline in the filters, ahead of
     # everything that has to look at set contents.
     age_rejection = _sparse_station_age_support_rejection(
-        abs.age_idx, af.age_mask, bbs.age_idx, bf.age_mask,
+        a_bitsets.age_idx, a_filters.age_mask, b_bitsets.age_idx, b_filters.age_mask,
     )
-    age_rejection == 1 && return _reject(2)
-    age_rejection == 2 && return _reject(8)
+    age_rejection == 1 && return _reject(JRA_REJECT_LIVE_CLOCK_SUPPORT)
+    age_rejection == 2 && return _reject(JRA_REJECT_AGE_MASK)
 
     if BoundedStops
-        af.route_length <= bf.route_length || return _reject(3)
+        a_filters.route_length <= b_filters.route_length || return _reject(JRA_REJECT_ROUTE_LENGTH)
     end
 
-    budget = bf.reduced_cost - af.reduced_cost + 1e-9
-    budget >= 0.0 || return _reject(4)
+    budget = b_filters.reduced_cost - a_filters.reduced_cost + 1e-9
+    budget >= 0.0 || return _reject(JRA_REJECT_REDUCED_COST)
 
     # `dom(age_b) subseteq dom(age_a)` and `age_a(j) <= age_b(j)` for all j in
     # dom(age_b) -- exactly equivalent to the dense "all stations, missing = Inf"
@@ -333,17 +335,17 @@ compensation's early bail is defined against a non-negative budget.
     # absent from `b` compares as <= Inf and always passes), but costs O(#live)
     # instead of O(n_nodes). Both arrays are sorted, so one merge walk suffices.
     _sparse_station_age_values_dominate(
-        abs.age_idx, abs.age_val, bbs.age_idx, bbs.age_val,
-    ) || return _reject(5)
+        a_bitsets.age_idx, a_bitsets.age_val, b_bitsets.age_idx, b_bitsets.age_val,
+    ) || return _reject(JRA_REJECT_STATION_AGE)
 
     # See the 6-argument method for why the reward test is a compensated
     # reduced-cost budget rather than `issubset`. There is no `length` prefilter
     # here: `a` holding *more* layers than `b` is a legitimate domination whenever
     # `a`'s reduced-cost advantage covers their weight.
     _joint_routing_assignment_compensation(
-        abs.activated_bits, bbs.activated_bits, layer_weight, budget, Val(Compensated),
-    ) <= budget || return _reject(6)
+        a_bitsets.activated_bits, b_bitsets.activated_bits, layer_weight, budget, Val(Compensated),
+    ) <= budget || return _reject(JRA_REJECT_COMPENSATION)
 
-    Instrumented && (@inbounds JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS[7] += 1)
+    Instrumented && (@inbounds JOINT_ROUTING_ASSIGNMENT_DOMINANCE_REJECTIONS[JRA_DOMINATES] += 1)
     return true
 end

@@ -170,21 +170,34 @@ include("label_setting/joint_routing_assignment/pricing_round.jl")
 # (never `pricing_mode`), and only for a formulation built with `relaxed_cluster_count`.
 # See relaxed_cluster/types.jl for the bound it rests on.
 #
-# Only four files: the relaxation is a *graph*, not a pricer, so there is no relaxed
-# label/seed/extend/dominate/replay -- `../exact/`'s search runs on it unchanged (see
-# relaxed_cluster/types.jl). clustering.jl is standalone; types.jl needs it (struct field);
-# data.jl needs both; certify.jl and guide.jl reach out to the formulation/mapping/CGSolver
-# layer and use pricing_round.jl's candidate extraction, so they load after it.
+# The directory has two halves. The RELAXED GRAPH (clustering.jl/types.jl/data.jl) is a
+# graph, not a pricer: `../exact/`'s search runs on it unchanged, so there is no relaxed
+# label/seed/extend/dominate/replay of its own. clustering.jl is standalone; types.jl needs
+# it (struct field); data.jl needs both; certify.jl and guide.jl reach out to the
+# formulation/mapping/CGSolver layer and use pricing_round.jl's candidate extraction, so
+# they load after it.
 include("label_setting/joint_routing_assignment/relaxed_cluster/clustering.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/types.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/data.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/certify.jl")
-# guide.jl loads last: it builds an EXACT context (exact/context.jl) out of a relaxed
-# search, so it needs both pricers plus certify.jl's clustering accessor.
+# guide.jl loads last of the graph half: it builds an EXACT context (exact/context.jl) out
+# of a relaxed search, so it needs both pricers plus certify.jl's clustering accessor.
 include("label_setting/joint_routing_assignment/relaxed_cluster/guide.jl")
-# cuts.jl adds the no-good-cut resource (its own label + context); nogood_certify.jl
-# is the loop around it and needs guide.jl's subset extraction, so it loads last.
+# The CUT-AWARE SEARCH (cut_*.jl) IS a real pricer over that graph -- the no-good-cut loop
+# needs a satisfied-cuts mask on the label, in the state and in the best-so-far signature
+# (cuts.jl explains why none of that can be a post-hoc filter), which `../exact/`'s label
+# cannot carry. So it is split by the same file roles as every other pricer directory
+# (see ../../README.md), minus dominate/prune/accept, which are `../exact/`'s verbatim.
+# Load order follows the standard one: the cut resource first (cut_seed/cut_extend take it
+# as an argument), then types, the logic files, context, and hooks last.
 include("label_setting/joint_routing_assignment/relaxed_cluster/cuts.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/cut_types.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/cut_seed.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/cut_extend.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/cut_context.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/cut_hooks.jl")
+# nogood_certify.jl is the loop around that search; it needs guide.jl's subset extraction
+# and the cut context, so it loads last of all.
 include("label_setting/joint_routing_assignment/relaxed_cluster/nogood_certify.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta

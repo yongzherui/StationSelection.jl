@@ -51,10 +51,6 @@ _pricing_extend_label(ctx::JointRoutingAssignmentSearchContext, label::JointRout
 
 _pricing_dominates_fn(ctx::JointRoutingAssignmentSearchContext) = ctx.dominates
 
-function _pricing_search_started!(::JointRoutingAssignmentSearchContext, ::Float64, ::Float64)
-    return nothing
-end
-
 function _pricing_on_label_inserted(ctx::JointRoutingAssignmentSearchContext, label)
     isnothing(ctx.label_observer) || ctx.label_observer(label)
     return nothing
@@ -64,7 +60,7 @@ end
 """
 Route-replay (`accept.jl`) is what makes this pricer's `_pricing_candidate_from_label`
 different from the trivial projection every other pricer uses: the label only
-tracks a cheap reward-layer proxy during search (section 16), so the real,
+tracks a cheap reward-layer proxy during search (see `types.jl`), so the real,
 concrete `(p, j, k)` assignments -- and the real dedup signature over them,
 not the search's proxy signature (`_joint_routing_assignment_layer_signature`,
 `dominate.jl`) -- only exist after replaying the finished route.
