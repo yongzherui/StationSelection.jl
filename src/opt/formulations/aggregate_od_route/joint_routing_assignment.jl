@@ -121,6 +121,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     relaxed_cluster_count::Union{Nothing, Int}
     relaxed_cluster_guide_routes::Int
     relaxed_cluster_guide_time_limit_sec::Float64
+    relaxed_cluster_max_count::Union{Nothing, Int}
+    relaxed_cluster_refine_recurrence::Int
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -134,6 +136,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             relaxed_cluster_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_guide_routes::Int=5,
             relaxed_cluster_guide_time_limit_sec::Number=10.0,
+            relaxed_cluster_max_count::Union{Nothing, Int}=nothing,
+            relaxed_cluster_refine_recurrence::Int=2,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
@@ -161,6 +165,26 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             "relaxed_cluster_guide_time_limit_sec must be positive, got " *
             "$(relaxed_cluster_guide_time_limit_sec)",
         ))
+        # `relaxed_cluster_max_count` turns the partition from a fixed input into a
+        # STARTING point: witness-guided refinement (`relaxed_cluster/refine.jl`) may split
+        # cells up to this ceiling. `nothing` keeps the historical fixed-partition
+        # behaviour, which is why it is the default -- see the note above about why the
+        # partition is otherwise built once and never re-derived.
+        if !isnothing(relaxed_cluster_max_count)
+            isnothing(relaxed_cluster_count) && throw(ArgumentError(
+                "relaxed_cluster_max_count needs a starting partition -- set " *
+                "relaxed_cluster_count = K as well",
+            ))
+            relaxed_cluster_max_count > relaxed_cluster_count || throw(ArgumentError(
+                "relaxed_cluster_max_count ($(relaxed_cluster_max_count)) must exceed " *
+                "relaxed_cluster_count ($(relaxed_cluster_count)); equal means no " *
+                "refinement is possible, which is what `nothing` already expresses",
+            ))
+        end
+        relaxed_cluster_refine_recurrence >= 1 || throw(ArgumentError(
+            "relaxed_cluster_refine_recurrence must be >= 1, got " *
+            "$(relaxed_cluster_refine_recurrence)",
+        ))
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
@@ -173,6 +197,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             relaxed_cluster_count,
             relaxed_cluster_guide_routes,
             Float64(relaxed_cluster_guide_time_limit_sec),
+            relaxed_cluster_max_count,
+            relaxed_cluster_refine_recurrence,
         )
     end
 end

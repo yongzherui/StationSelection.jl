@@ -153,7 +153,11 @@ it untouched.
   present for every cluster with two or more members (so it can be non-empty
   where `service_node` is not);
 - `n_relaxed_candidates` -- how many candidates the aggregation produced, i.e.
-  how much the cluster collapse compressed the pricing problem.
+  how much the cluster collapse compressed the pricing problem;
+- `reward_witness[(p, origin_node, dest_node)]` -- the real `(j, k)` whose reward the
+  `rho_bar` maximum actually came from, keyed by the ROUTED nodes so a lookup after route
+  replay works directly. This is what makes the relaxation's optimism attributable to a
+  specific cell and station: see `refine.jl`.
 """
 struct RelaxedClusterPricingData
     scenario::Int
@@ -162,6 +166,7 @@ struct RelaxedClusterPricingData
     service_node::Dict{Int, Int}
     intra_travel::Dict{Int, Float64}
     n_relaxed_candidates::Int
+    reward_witness::Dict{Tuple{Int, Int, Int}, Tuple{Int, Int}}
 end
 
 relaxed_cluster_n_clusters(data::RelaxedClusterPricingData) = data.clustering.n_clusters

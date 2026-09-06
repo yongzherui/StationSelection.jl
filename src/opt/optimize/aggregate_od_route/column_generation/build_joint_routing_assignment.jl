@@ -126,10 +126,16 @@ function _build_joint_routing_assignment_model(
     end
     m[:joint_routing_assignment_travel_cost] = travel_cost
     # Station partition for the relaxed-cluster certification pricer
-    # (`label_setting/joint_routing_assignment/relaxed_cluster/`). Computed HERE, once,
-    # and never re-derived per pricing round: the relaxation is valid for any partition,
-    # but only a partition that is constant for the whole solve makes `relaxed_cluster_count`
-    # a meaningful swept parameter and successive rounds' bounds comparable. Absent when
+    # (`label_setting/joint_routing_assignment/relaxed_cluster/`). Computed HERE, once: the
+    # relaxation is valid for any partition, but a partition constant for the whole solve
+    # is what makes `relaxed_cluster_count` a meaningful swept parameter and successive
+    # rounds' bounds comparable.
+    #
+    # `relaxed_cluster_max_count` deliberately RELAXES that. With it set, this partition is
+    # a starting point and each scenario refines its own copy (see below and
+    # `relaxed_cluster/refine.jl`), so `K` becomes a trajectory rather than a scalar and
+    # cross-round bounds are no longer comparable. That is the trade refinement makes, and
+    # it is why refinement is opt-in and off by default. Absent when
     # the formulation did not ask for one, in which case
     # `CGSolver(certification_pricing_mode=:relaxed_cluster)` is rejected rather than
     # silently ignored.
@@ -146,7 +152,34 @@ function _build_joint_routing_assignment_model(
         # threads is a data race.
         m[:relaxed_cluster_guide_stats] = Any[]
         m[:relaxed_cluster_guide_lock] = ReentrantLock()
+        # Witness-guided refinement state, live only when a ceiling was asked for.
+        #
+        # PER SCENARIO, deliberately: each scenario prices its own duals, so a cell that is
+        # a fiction in one may be perfectly tight in another, and refining globally would
+        # over-split for scenarios that never complained. It also removes the need for a
+        # lock -- the certification round threads over scenarios and each writes only its
+        # own index of these vectors (`_pricing_scenarios` is `1:length(scenarios)`, so the
+        # scenario id IS the index).
+        #
+        # Both start as copies of the one build-time partition, so a run with refinement
+        # off behaves exactly as before.
+        if !isnothing(formulation.relaxed_cluster_max_count)
+            n_s = length(mapping.scenarios)
+            m[:joint_routing_assignment_scenario_clusterings] =
+                StationClustering[m[:joint_routing_assignment_station_clustering] for _ in 1:n_s]
+            # cluster -> how many barren rounds have implicated it, per scenario. The
+            # recurrence threshold reads this; cuts already neutralise a single barren
+            # support, so splitting on first sight risks chasing a symptom.
+            m[:joint_routing_assignment_scenario_disagreements] =
+                [Dict{Int, Int}() for _ in 1:n_s]
+            m[:joint_routing_assignment_scenario_splits] = zeros(Int, n_s)
+            # Why each barren round split or did not -- see `refine.jl`'s `_relaxed_cluster_refine!`.
+            m[:joint_routing_assignment_scenario_refine_stats] = [Dict{Symbol, Int}() for _ in 1:n_s]
+        end
     end
+    m[:joint_routing_assignment_relaxed_cluster_max_count] = formulation.relaxed_cluster_max_count
+    m[:joint_routing_assignment_relaxed_cluster_refine_recurrence] =
+        formulation.relaxed_cluster_refine_recurrence
     # Empty pool containers: real entries arrive from the seed pass below and (for the
     # LP master) from every later CG iteration (`add_columns!`, routing_and_assignment.jl).
     m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()

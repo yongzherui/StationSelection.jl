@@ -60,6 +60,22 @@ rows = reduce((a, b) -> vcat(a, b; cols=:union),
               [DataFrame(CSV.File(joinpath(study_dir, f))) for f in files])
 println("loaded $(nrow(rows)) rows across $(length(unique(rows.arm))) arms")
 
+# ── schema normalisation across runs ────────────────────────────────────────
+# Runs from different days span metric renames and additions, and comparing them is the
+# whole point of keeping the old directories. `cols=:union` above handles a column missing
+# from SOME rows; this handles one missing from ALL of them, which is what a rename or a
+# newly added metric looks like in an older run.
+if !hasproperty(rows, :non_certifying_certification_sec)
+    # Renamed once the metric stopped meaning "wasted": under harvesting a refuted attempt
+    # returns columns and displaces a pricing round, so that time is productive.
+    rows.non_certifying_certification_sec =
+        hasproperty(rows, :failed_certification_sec) ? rows.failed_certification_sec :
+        fill(missing, nrow(rows))
+end
+for (col, default) in ((:certification_harvested_columns, 0),)
+    hasproperty(rows, col) || (rows[!, col] = fill(default, nrow(rows)))
+end
+
 errored = filter(r -> !ismissing(r.error_message) && !isempty(string(r.error_message)), rows)
 if nrow(errored) > 0
     println("\n!! $(nrow(errored)) job(s) errored:")

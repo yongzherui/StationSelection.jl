@@ -43,9 +43,14 @@ to *any subset* of `T` at once, so each cut removes a downward-closed family
 and the loop cannot revisit ground it has covered. With at most `2^K` cluster
 supports, it terminates.
 
-**A cut may only be added after an EXHAUSTED exact search.** One that merely ran
-out of time has proved nothing about `stations(T)`, and cutting on it would be
-the same false certificate by a different route.
+**A cut may only be added on a support PROVED barren.** The usual proof is an exhausted
+exact search over `stations(T)`; one that merely ran out of time has proved nothing, and
+cutting on it would be the same false certificate by a different route.
+
+There is exactly one other admissible proof, and it reduces to that one: the barren-support
+cache in `nogood_certify.jl` infers `T'` barren from an already-exhausted `T ⊆ T'` when
+every cluster in between is reward-free. That is still a cut on a proved-barren support --
+it just borrows the proof instead of repeating the search. No other shortcut is sound.
 
 # Why the mask has to live inside the search
 

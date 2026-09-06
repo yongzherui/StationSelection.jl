@@ -46,6 +46,10 @@ A partition of `nodes` (station ids) into `n_clusters` non-empty cells.
   summed distance to the rest of its own cell). Kept for reporting/diagnostics
   only: nothing in the relaxation reads it, since every cluster-level travel
   cost is a *minimum over member pairs*, not a medoid-to-medoid distance.
+  **Not preserved under refinement**: `refine.jl`'s split sets the two halves'
+  medoids to the witness stations it split on, which need not minimize anything.
+  Inert today precisely because nothing reads the field -- but a future consumer
+  must not assume the medoid property holds on a refined partition.
 """
 struct StationClustering
     n_clusters::Int

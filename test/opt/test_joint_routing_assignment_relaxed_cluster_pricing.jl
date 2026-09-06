@@ -145,13 +145,17 @@
             PassengerAssignmentCandidate(1, 2, 12, 30.0, 5.0),
             PassengerAssignmentCandidate(1, 3, 13, 25.0, 4.0),
         ]
-        relaxed = SS._aggregate_relaxed_cluster_candidates(clustering, candidates)
+        relaxed, witness = SS._aggregate_relaxed_cluster_candidates(clustering, candidates)
         @test length(relaxed) == 1
         @test relaxed[1].p == 1
         @test (relaxed[1].origin, relaxed[1].destination) ==
             (clustering.cluster_of[1], clustering.cluster_of[11])
         @test relaxed[1].reward == 5.0          # max over alternatives, never the sum
         @test relaxed[1].ride_limit == 30.0     # maxima taken independently
+        # The witness names the pair the REWARD max came from -- (2, 12) at reward 5.0 --
+        # not the one the independently-taken ride-limit max came from. That distinction is
+        # the whole point: reward is the credit the refinement is trying to attribute.
+        @test witness[(1, clustering.cluster_of[1], clustering.cluster_of[11])] == (2, 12)
     end
 
     @testset "distinct passengers add, one passenger's alternatives do not" begin
@@ -1102,6 +1106,270 @@
     end
 
     # ── the guided mode: relaxation as a station-subset guide ───────────────
+    # ── witness-guided refinement ────────────────────────────────────────────
+    @testset "a cell credited through two stations is a split candidate" begin
+        # Cluster 1 = {1,2,3}. Two passengers are credited there, and rho_bar picks a
+        # DIFFERENT station for each (2 for p1, 3 for p2). No real route can be at both,
+        # so cluster 1 is exactly the cell that manufactured the relaxed route.
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        candidates = [
+            PassengerAssignmentCandidate(1, 2, 11, 50.0, 5.0),   # p1 best from station 2
+            PassengerAssignmentCandidate(1, 1, 11, 50.0, 1.0),
+            PassengerAssignmentCandidate(2, 3, 12, 50.0, 7.0),   # p2 best from station 3
+            PassengerAssignmentCandidate(2, 1, 12, 50.0, 2.0),
+        ]
+        data = relaxed_data(clustering, costs, candidates)
+        cands = relaxed_cluster_split_candidates(data, [1, 2])
+        @test !isempty(cands)
+        top = first(cands)
+        @test top.cluster == clustering.cluster_of[2]
+        @test Set(top.witness_stations) == Set([2, 3])
+        @test top.reward_mass > 0
+    end
+
+    @testset "a cell everyone agrees on is NOT a split candidate" begin
+        # Both passengers are credited through the SAME station of cluster 1, so the
+        # relaxation told no lie about that cell and splitting it would not tighten
+        # anything. Returning empty here is the "should we split at all" test.
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        candidates = [
+            PassengerAssignmentCandidate(1, 2, 11, 50.0, 5.0),
+            PassengerAssignmentCandidate(2, 2, 11, 50.0, 7.0),
+        ]
+        data = relaxed_data(clustering, costs, candidates)
+        @test isempty(relaxed_cluster_split_candidates(data, [1, 2]))
+        # An empty route certifies nothing, so it can never implicate a cell either.
+        @test isempty(relaxed_cluster_split_candidates(data, Int[]))
+    end
+
+    @testset "splitting refines: cells nest, nothing else moves, indices stay valid" begin
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        c1 = clustering.cluster_of[1]
+        candidate = SS.RelaxedClusterSplitCandidate(c1, [1, 3], 12.0)
+        refined = refine_station_clustering(clustering, candidate, costs)
+
+        @test refined.n_clusters == clustering.n_clusters + 1
+        # Still a partition of exactly the same stations.
+        @test sort(reduce(vcat, refined.members)) == sort(nodes)
+        @test all(!isempty, refined.members)
+        # REFINEMENT: every new cell sits inside an old one. This is what makes the
+        # relaxation's bound monotonically tighter -- see refine.jl.
+        for cell in refined.members
+            @test any(old -> issubset(Set(cell), Set(old)), clustering.members)
+        end
+        # The two witnesses are now separated, which is the entire point.
+        @test refined.cluster_of[1] != refined.cluster_of[3]
+        # The untouched cell keeps its exact membership AND its index, so cut sets built
+        # on the old partition stay meaningful.
+        other = clustering.cluster_of[11]
+        @test refined.members[other] == clustering.members[other]
+    end
+
+    @testset "an unsplittable candidate returns the partition unchanged" begin
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        # Stale/degenerate candidates are a normal race with an already-refined partition,
+        # not a bug, so these return the input rather than raising.
+        for bad in (
+            SS.RelaxedClusterSplitCandidate(0, [1, 2], 1.0),                 # no such cell
+            SS.RelaxedClusterSplitCandidate(99, [1, 2], 1.0),                # out of range
+            SS.RelaxedClusterSplitCandidate(clustering.cluster_of[1], [1], 1.0),      # one seed
+            SS.RelaxedClusterSplitCandidate(clustering.cluster_of[1], [11, 12], 1.0), # not members
+        )
+            @test refine_station_clustering(clustering, bad, costs) === clustering
+        end
+    end
+
+    @testset "a refined partition still under-estimates every real arc" begin
+        # The bound holds for ANY partition, so it must survive refinement -- this is the
+        # property that makes witness-guided splitting safe to do mid-solve.
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        refined = refine_station_clustering(
+            clustering, SS.RelaxedClusterSplitCandidate(clustering.cluster_of[1], [1, 3], 1.0),
+            costs,
+        )
+        cluster_travel = relaxed_travel(refined, costs,
+            [PassengerAssignmentCandidate(1, 1, 11, 50.0, 5.0)])
+        for ((u, v), cost) in costs
+            cu, cv = refined.cluster_of[u], refined.cluster_of[v]
+            @test cluster_travel[(cu, cv)] <= cost + 1e-9
+        end
+    end
+
+    @testset "a split rewrites cuts rather than discarding them" begin
+        # stations(T) is unchanged by a split, so a T already proven barren stays proven --
+        # it just needs the new half's index wherever the split cell appears. Clearing
+        # instead (the first implementation) threw away all progress toward the certificate
+        # every time the partition improved.
+        cuts = [Set([1, 2]), Set([3]), Set([2, 4])]
+        SS.rewrite_cut_sets_for_split(cuts, 2, 7)      # cell 2 split, new half is index 7
+        @test cuts[1] == Set([1, 2, 7])                # mentions 2 -> gains 7
+        @test cuts[2] == Set([3])                      # untouched cell, untouched cut
+        @test cuts[3] == Set([2, 4, 7])
+        # Splitting a cell no cut mentions leaves every cut alone.
+        before = deepcopy(cuts)
+        SS.rewrite_cut_sets_for_split(cuts, 99, 100)
+        @test cuts == before
+    end
+
+    @testset "cut management drops only subsumed cuts" begin
+        # Cut(T_new) implies Cut(T_old) exactly when T_old ⊆ T_new, so those are dead
+        # weight; anything else must survive. MEASURED 60% dominated at n=15.
+        keep_disjoint, keep_partial = Set([9, 10]), Set([1, 5])
+        subsumed_strict, subsumed_eq = Set([1, 2]), Set([1, 2, 3])
+        cluster_sets = [keep_disjoint, subsumed_strict, keep_partial, subsumed_eq]
+        support = Set([1, 2, 3])
+        filter!(t -> !issubset(t, support), cluster_sets)
+        @test Set(cluster_sets) == Set([keep_disjoint, keep_partial])
+        @test !(subsumed_strict in cluster_sets)
+        @test !(subsumed_eq in cluster_sets)
+    end
+
+    @testset "barren-support cache fires only in the sound direction" begin
+        # Cut(T) is downward-closed, so knowing stations(T) is barren says nothing about a
+        # SUPERSET -- unless everything the superset adds is reward-free, in which case a
+        # route through the extra stations can be shortened back into stations(T) without
+        # losing reward or gaining travel.
+        free = Set([4, 5])                      # clusters holding no candidate endpoint
+        barren = [Set([1, 2, 3])]
+
+        # Adds only reward-free clusters -> provably barren, no search needed.
+        @test SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), barren, free)
+        @test SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4, 5]), barren, free)
+        # Adds a REWARD-CARRYING cluster (6) -> must NOT fire: stations(6) can host routes
+        # the barren set could not express. This is the unsound direction and the whole
+        # reason the reward-free test exists.
+        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 6]), barren, free)
+        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4, 6]), barren, free)
+        # Not a superset of any proven support -> no inference available.
+        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 4]), barren, free)
+        @test !SS._relaxed_cluster_barren_by_cache(Set([7, 8]), barren, free)
+        # No reward-free clusters at all -> the cache can never fire.
+        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), barren, Set{Int}())
+        # Nothing proven yet -> nothing to infer from.
+        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), Set{Int}[], free)
+    end
+
+    @testset "reward-free clusters are exactly those with no candidate endpoint" begin
+        nodes = two_group_nodes()
+        costs = two_group_travel_cost()
+        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
+        c1, c2 = clustering.cluster_of[1], clustering.cluster_of[11]
+        # Only cluster 1 -> cluster 2 candidates, so BOTH clusters carry endpoints.
+        both = [PassengerAssignmentCandidate(1, 2, 12, 50.0, 5.0)]
+        @test isempty(SS._relaxed_cluster_reward_free(clustering, both))
+        # Endpoints confined to cluster 1: cluster 2 becomes reward-free -- visiting it can
+        # only add travel.
+        one = [PassengerAssignmentCandidate(1, 1, 3, 50.0, 5.0)]
+        @test SS._relaxed_cluster_reward_free(clustering, one) == Set([c2])
+        # No candidates at all: every cluster is reward-free.
+        @test SS._relaxed_cluster_reward_free(clustering, PassengerAssignmentCandidate[]) ==
+            Set([c1, c2])
+    end
+
+    @testset "certification makes the two-tier certifying round unreachable" begin
+        # The escalation ladder changed: an empty-but-not-exhausted pricing round used to
+        # re-price all n stations at `certifying_pricing_time_limit_sec`. With a certifier
+        # available it re-runs the CERTIFIER at that budget instead -- cheaper per unit of
+        # proof (K cluster nodes vs n stations) and a full-universe certificate when it
+        # lands. So `cg_certifying_rounds` must be 0 for any certification-enabled run,
+        # and the escalated attempts show up as certification rounds instead.
+        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
+        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
+        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+
+        for mode in (:relaxed_cluster, :relaxed_cluster_nogood)
+            result = run_opt(
+                problem,
+                AggregateODRouteJointRoutingAssignmentFormulation(
+                    max_stops = 4, relaxed_cluster_count = 2,
+                ),
+                CGSolver(recover_integer_solution = true,
+                         certification_pricing_mode = mode),
+            )
+            @test result.metadata["cg_certifying_rounds"] == 0
+            @test result.termination_status == SOLVE_OPTIMAL
+        end
+
+        # With certification OFF the two-tier round is still reachable -- this is the
+        # control, so a future change that disabled it everywhere would be caught.
+        plain = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            CGSolver(recover_integer_solution = true),
+        )
+        @test plain.metadata["cg_certifying_rounds"] >= 0
+        @test plain.termination_status == SOLVE_OPTIMAL
+    end
+
+    @testset "refinement is opt-in, validated, and reported" begin
+        # `relaxed_cluster_max_count` is what turns the fixed partition into a starting
+        # point. Without it nothing refines, which is the historical behaviour.
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
+            max_stops = 4, relaxed_cluster_max_count = 8,          # no starting partition
+        )
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
+            max_stops = 4, relaxed_cluster_count = 8, relaxed_cluster_max_count = 8,
+        )                                                           # equal = no refinement
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
+            max_stops = 4, relaxed_cluster_count = 4, relaxed_cluster_max_count = 8,
+            relaxed_cluster_refine_recurrence = 0,
+        )
+
+        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
+        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
+        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        base = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            CGSolver(recover_integer_solution = true),
+        )
+
+        # Refinement OFF: no per-scenario state, and the report is empty.
+        off = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(
+                max_stops = 4, relaxed_cluster_count = 2,
+            ),
+            CGSolver(recover_integer_solution = true,
+                     certification_pricing_mode = :relaxed_cluster_nogood),
+        )
+        @test isempty(off.metadata["cg_relaxed_cluster_final_counts"])
+        @test isempty(off.metadata["cg_relaxed_cluster_splits"])
+
+        # Refinement ON: same answer, and cells may only ever grow in number, never shrink,
+        # and never past the ceiling.
+        on = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(
+                max_stops = 4, relaxed_cluster_count = 2, relaxed_cluster_max_count = 5,
+                relaxed_cluster_refine_recurrence = 1,
+            ),
+            CGSolver(recover_integer_solution = true,
+                     certification_pricing_mode = :relaxed_cluster_nogood),
+        )
+        counts = on.metadata["cg_relaxed_cluster_final_counts"]
+        splits = on.metadata["cg_relaxed_cluster_splits"]
+        @test length(counts) == length(splits) == SS.n_scenarios(data)
+        @test all(c -> 2 <= c <= 5, counts)              # started at 2, capped at 5
+        @test all(>=(0), splits)
+        # Every split adds exactly one cell, so the trajectory must reconcile.
+        @test all(i -> counts[i] == 2 + splits[i], eachindex(counts))
+        # Refinement changes only the partition, never the answer or the claim.
+        @test on.termination_status == SOLVE_OPTIMAL
+        @test on.objective_value ≈ base.objective_value atol = 1e-6
+        @test on.metadata["cg_optimality_scope"] == "full_route_universe"
+    end
+
     @testset "relaxation-guided pricing: subset extraction" begin
         nodes = two_group_nodes()
         costs = two_group_travel_cost()

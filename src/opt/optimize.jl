@@ -198,6 +198,10 @@ include("label_setting/joint_routing_assignment/relaxed_cluster/cut_context.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/cut_hooks.jl")
 # nogood_certify.jl is the loop around that search; it needs guide.jl's subset extraction
 # and the cut context, so it loads last of all.
+# refine.jl: witness-guided cluster refinement. Needs data.jl's reward witness and
+# ../exact/accept.jl's replay, and is consumed by nogood_certify.jl's loop, so it loads
+# between them. Pure functions -- no model, no solver, no search state.
+include("label_setting/joint_routing_assignment/relaxed_cluster/refine.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/nogood_certify.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta

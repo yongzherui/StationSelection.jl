@@ -71,6 +71,23 @@ case in every iteration but the last. `:relaxed_cluster_nogood` instead pays one
 exhaustive real-pricer search per cut it adds, so a failing attempt can cost as much as a
 pricing round -- budget `certification_time_limit_sec` accordingly.
 
+**Enabling certification makes the two-tier round unreachable.** When a pricing round comes
+back empty without exhausting, a certification-enabled run escalates the CERTIFIER to
+`certifying_pricing_time_limit_sec` instead of re-pricing all `n` stations at that budget.
+The relaxed search runs on `K` cluster nodes and the exact pricer's cost is super-linear in
+node count, so the same wall buys more proof there -- and a success is a full-route-universe
+certificate rather than a pricer-scoped one. Escalating the pricer instead would abandon the
+cheaper searcher precisely when it was closest to succeeding, and would pay for the very
+round certification exists to replace. `certifying_rounds` therefore stays 0 for any run
+with `certification_pricing_mode` set; the escalated attempts appear as extra
+`certification_rounds` with `*_escalated` outcomes instead.
+
+The trade is measured, not free: across Study 10, 4 of 45 arm runs (serial) and 1 of 35
+(parallel) reached OPTIMAL *only* because the two-tier round certified where the relaxation
+did not. All but one were `K/n = 0.4`, the coarse partition refuted on every other ground.
+At `K/n` in [0.6, 0.8] the fallback was load-bearing for exactly one run in two full
+sweeps.
+
 The certificate covers the **full route universe**, because the relaxation bounds every
 real route rather than only the ones the active pricer searches. So a certified run
 reports `cg_optimality_scope="full_route_universe"` even when its column-finding pricer is
@@ -360,6 +377,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         # them too (as a zero-cost, uncertified round -- certification never got to run).
         iteration_certification_sec = 0.0
         certification_candidates = Any[]
+        escalated_certification = false
         iteration_certified = false
         iteration_certification_outcome = "none"
 
@@ -480,20 +498,90 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         certifying = false
 
         # A regular round that comes back empty is only conclusive if its label searches
-        # actually exhausted. If it merely ran out of its (short) budget, re-price the
-        # same duals at the certifying budget before concluding anything -- otherwise a
-        # cheap pricing timeout would be indistinguishable from a real optimality proof.
+        # actually exhausted. If it merely ran out of its (short) budget, the empty result
+        # is ambiguous and something must resolve it before the loop concludes anything.
+        #
+        # WHICH thing depends on whether a certification pricer is available, and the two
+        # ladders are not equivalent:
+        #
+        #   certification OFF -- re-price the same duals at `certifying_pricing_time_limit_sec`
+        #     (the historical two-tier round). Only that longer pass can turn an empty result
+        #     into `cg_pricing_exhausted`.
+        #
+        #   certification ON  -- escalate the CERTIFIER instead, at the same budget. The
+        #     relaxed search runs on K cluster nodes rather than n stations and the exact
+        #     pricer's cost is super-linear in node count, so per unit of proof it is the
+        #     cheaper buy -- and when it succeeds the certificate covers the FULL route
+        #     universe rather than just the pricer's. Escalating to the full-station
+        #     re-price would abandon the cheaper searcher exactly when it was closest to
+        #     working, and would pay for the very round certification exists to replace.
+        #     MEASURED: the first attempt failing on budget (`inconclusive`) rather than on
+        #     looseness (`refuted`) is what this rescues.
+        #
+        # The two-tier round is therefore UNREACHABLE while certification is enabled.
         if (isnothing(new_columns) || isempty(new_columns)) && !_cg_pricing_exhausted(m)
-            certifying_limit = min(solver.certifying_pricing_time_limit_sec, remaining_budget())
-            if certifying_limit > pricing_limit
+            escalated_limit = min(solver.certifying_pricing_time_limit_sec, remaining_budget())
+            if !isnothing(certification_mode)
+                if escalated_limit > iteration_certification_sec && escalated_limit > 0
+                    t_cert = time()
+                    certification_rounds += 1
+                    escalated = cg_certification_round(
+                        build_result, mapping, m, duals, solver, certification_mode;
+                        time_limit_sec=escalated_limit,
+                    )
+                    iteration_certification_sec += time() - t_cert
+                    certification_sec += time() - t_cert
+                    escalated_certification = true
+                    iteration_certified = escalated.certified
+                    certification_candidates = escalated.candidates
+                    iteration_certification_outcome = if escalated.certified
+                        "certified_escalated"
+                    elseif escalated.improving_found
+                        certification_refuted_rounds += 1
+                        "refuted_escalated"
+                    else
+                        certification_inconclusive_rounds += 1
+                        "inconclusive_escalated"
+                    end
+                end
+            elseif escalated_limit > pricing_limit
                 certifying = true
                 certifying_rounds += 1
-                pricing_limit = certifying_limit
+                pricing_limit = escalated_limit
                 new_columns = price_columns(build_result, mapping, m, duals, solver;
-                                            time_limit_sec=certifying_limit)
+                                            time_limit_sec=escalated_limit)
             end
         end
         pricing_sec = time() - t0
+
+        # An escalated certification that succeeded ends the solve exactly as a first-pass
+        # one does -- same full-universe claim, same stop reason.
+        if iteration_certified
+            converged = true
+            certified_by_relaxation = true
+            stop_reason = "converged_by_certification"
+            push!(iteration_log, (
+                iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
+                add_columns_sec=0.0, columns_added=0, columns_accepted=0,
+                cumulative_columns_added=cumulative_columns_added,
+                master_objective=master_objective, master_status=string(status),
+                pricing_limit_sec=pricing_limit, certifying_pricing=false,
+                pricing_mode=_mode_label(),
+                certification_sec=iteration_certification_sec, certification_certified=true,
+                certification_outcome=iteration_certification_outcome,
+            ))
+            break
+        end
+        # And one that merely refuted still hands back real columns, which is progress the
+        # pricing round did not find.
+        if escalated_certification && !isempty(certification_candidates)
+            escalated_columns = _cg_materialize_certification_columns(
+                build_result, mapping, m, duals, certification_candidates,
+            )
+            if !isempty(escalated_columns)
+                new_columns = escalated_columns
+            end
+        end
 
         if isnothing(new_columns) || isempty(new_columns)
             # An empty result certifies convergence only when every underlying
@@ -628,6 +716,27 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         # `cg_certification_sec` to judge the feature's NET cost: a failed attempt that
         # hands back columns replaced a pricing round rather than adding to one.
         "cg_certification_harvested_columns" => certification_harvested_columns,
+        # Witness-guided refinement, empty unless `relaxed_cluster_max_count` was set.
+        # `K` stops being a scalar once refinement is on -- it is a starting value plus a
+        # per-scenario trajectory -- so both the final cell counts and the split counts are
+        # reported, or nothing downstream can attribute a result to a partition.
+        "cg_relaxed_cluster_final_counts" => (
+            haskey(JuMP.object_dictionary(m), :joint_routing_assignment_scenario_clusterings) ?
+            [c.n_clusters for c in m[:joint_routing_assignment_scenario_clusterings]] : Int[]),
+        "cg_relaxed_cluster_splits" => copy(get(JuMP.object_dictionary(m),
+            :joint_routing_assignment_scenario_splits, Int[])),
+        # Per scenario. These are a TWO-LEVEL hierarchy, not a flat partition -- summing
+        # all six double-counts:
+        #     barren_rounds  = blocked_ceiling + census_empty + census_nonempty
+        #     census_nonempty = split + blocked_recurrence + split_stale
+        # `census_empty` vs `census_nonempty` is the "is splitting even viable" measurement,
+        # and its denominator is `census_empty + census_nonempty` -- NOT `barren_rounds`,
+        # because the ceiling is checked first and ceiling-blocked rounds never run a
+        # census. `blocked_recurrence` is what a threshold of 1 would have made splits.
+        # `split_stale` should always be 0: witnesses are always members of the cell they
+        # implicate, so a candidate is never degenerate. A nonzero value is a bug canary.
+        "cg_relaxed_cluster_refine_stats" => copy(get(JuMP.object_dictionary(m),
+            :joint_routing_assignment_scenario_refine_stats, Dict{Symbol, Int}[])),
         "cg_certification_sec" => certification_sec,
         "cg_certified_by_relaxation" => certified_by_relaxation,
         "cg_pricing_universe_restricted" => !certified_by_relaxation &&

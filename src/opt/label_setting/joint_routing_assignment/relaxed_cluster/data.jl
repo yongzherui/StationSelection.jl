@@ -72,8 +72,15 @@ function _aggregate_relaxed_cluster_candidates(
     clustering::StationClustering,
     candidates::AbstractVector{PassengerAssignmentCandidate};
     tol::Float64=1e-9,
-)::Vector{PassengerAssignmentCandidate}
+)
     best = Dict{Tuple{Int, Int, Int}, Tuple{Float64, Float64}}()
+    # Which real `(j, k)` achieved the REWARD maximum for each cell pair -- the station
+    # choice the relaxation implicitly credited. Kept because it is the witness that makes
+    # the optimism attributable: two passengers credited at one cell through DIFFERENT
+    # stations is a proof that the cell is where a fictitious route was manufactured
+    # (`refine.jl`). It follows the reward argmax specifically, not the ride-limit one --
+    # those maxima are taken independently, and reward is the credit source.
+    witness = Dict{Tuple{Int, Int, Int}, Tuple{Int, Int}}()
     for candidate in candidates
         candidate.reward > tol || continue
         origin_cluster = get(clustering.cluster_of, candidate.origin, 0)
@@ -85,6 +92,9 @@ function _aggregate_relaxed_cluster_candidates(
         ))
         key = (candidate.p, origin_cluster, dest_cluster)
         current = get(best, key, nothing)
+        if isnothing(current) || candidate.reward > current[1]
+            witness[key] = (candidate.origin, candidate.destination)
+        end
         best[key] = isnothing(current) ?
             (candidate.reward, candidate.ride_limit) :
             (max(current[1], candidate.reward), max(current[2], candidate.ride_limit))
@@ -99,7 +109,7 @@ function _aggregate_relaxed_cluster_candidates(
             p, origin_cluster, dest_cluster, ride_limit, reward,
         ))
     end
-    return relaxed
+    return relaxed, witness
 end
 
 # -- intra-cluster service arcs ----------------------------------------------
@@ -249,7 +259,9 @@ function create_joint_routing_assignment_relaxed_cluster_pricing_data(
     max_stops::Int=typemax(Int),
     compensated_dominance::Bool=true,
 )::RelaxedClusterPricingData
-    relaxed_candidates = _aggregate_relaxed_cluster_candidates(clustering, candidates)
+    relaxed_candidates, cluster_witness = _aggregate_relaxed_cluster_candidates(
+        clustering, candidates,
+    )
     intra_travel = _intra_cluster_travel(clustering, travel_cost)
 
     # A service node exists exactly where an intra-cluster candidate does AND the cell has
@@ -265,17 +277,24 @@ function create_joint_routing_assignment_relaxed_cluster_pricing_data(
     n_nodes = clustering.n_clusters + length(service_clusters)
 
     # Rewrite each intra candidate onto its service arc; inter candidates are untouched.
+    # The witness is re-keyed alongside, so a lookup after route replay -- which returns
+    # the ROUTED node ids, service nodes included -- finds it without a special case.
     routed_candidates = PassengerAssignmentCandidate[]
+    reward_witness = Dict{Tuple{Int, Int, Int}, Tuple{Int, Int}}()
     for candidate in relaxed_candidates
+        key = (candidate.p, candidate.origin, candidate.destination)
         if candidate.origin == candidate.destination
             haskey(service_node, candidate.origin) || continue
-            push!(routed_candidates, PassengerAssignmentCandidate(
+            routed = PassengerAssignmentCandidate(
                 candidate.p, candidate.origin, service_node[candidate.origin],
                 candidate.ride_limit, candidate.reward,
-            ))
+            )
         else
-            push!(routed_candidates, candidate)
+            routed = candidate
         end
+        push!(routed_candidates, routed)
+        haskey(cluster_witness, key) &&
+            (reward_witness[(routed.p, routed.origin, routed.destination)] = cluster_witness[key])
     end
 
     cluster_travel = _relaxed_cluster_travel_cost(
@@ -291,5 +310,6 @@ function create_joint_routing_assignment_relaxed_cluster_pricing_data(
     )
     return RelaxedClusterPricingData(
         scenario, clustering, inner, service_node, intra_travel, length(routed_candidates),
+        reward_witness,
     )
 end

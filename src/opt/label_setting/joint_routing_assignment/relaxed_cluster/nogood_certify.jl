@@ -85,11 +85,15 @@ make either claim weaker.
 
 # The cost model, honestly
 
-Every round pays one relaxed search plus one exact search over `stations(T)`. The exact
-search is the expensive half, and it is exactly the work `guide.jl` already does -- so on
-rounds where step 4 finds a column this loop costs what guided pricing costs and, with
-harvesting, returns that column too. The remaining unrecovered spend is the barren
-supports, which is the work the certificate is actually made of.
+A round pays one relaxed search plus, USUALLY, one exact search over `stations(T)`. The
+exact search is the expensive half, and it is exactly the work `guide.jl` already does --
+so on rounds where step 4 finds a column this loop costs what guided pricing costs and,
+with harvesting, returns that column too.
+
+Two things reduce that. Harvesting turns a refuting round's search into a pricing round.
+And the barren-support cache (`_relaxed_cluster_barren_by_cache`) skips step 4 entirely
+when the support is provably barren from one already proven -- so a round can add a cut
+having run no exact search at all. `nogood_barren_cache_hits` counts those.
 """
 
 export RelaxedClusterNoGoodResult
@@ -130,6 +134,99 @@ struct RelaxedClusterNoGoodResult
     last_subset_size::Int
     trace::Vector{NamedTuple}
     candidates::Vector{Any}
+    # Subset searches skipped because the support was provably barren from an already
+    # proven one (`_relaxed_cluster_barren_by_cache`). Each hit is one exhaustive exact
+    # search avoided, so this is the measurement of whether the cache earns its place.
+    barren_cache_hits::Int
+end
+
+
+"""
+    _relaxed_cluster_reward_free(clustering, candidates) -> Set{Int}
+
+Clusters that hold no positive-reward candidate endpoint at these duals -- no `(p, j, k)`
+has `j` or `k` among their stations.
+
+Visiting such a cluster can only add travel: it can never certify a passenger, because a
+certification needs an endpoint there. That is exactly the premise the barren-support cache
+below rests on, and it must be recomputed whenever the partition changes.
+"""
+function _relaxed_cluster_reward_free(
+    clustering::StationClustering,
+    candidates::AbstractVector{PassengerAssignmentCandidate},
+)::Set{Int}
+    touched = Set{Int}()
+    for c in candidates
+        for station in (c.origin, c.destination)
+            cluster = get(clustering.cluster_of, station, 0)
+            cluster == 0 || push!(touched, cluster)
+        end
+    end
+    return Set{Int}(c for c in 1:clustering.n_clusters if !(c in touched))
+end
+
+"""
+    _relaxed_cluster_travel_is_complete(nodes, travel_cost) -> Bool
+
+Does every ordered pair of distinct stations have a finite arc? The barren-support cache
+deletes stops from a route and needs the resulting shortcut to exist; without that its
+inference is unsound. Checked once per attempt (`O(n^2)` against label searches that are
+super-linear in `n`, so the cost is noise) and used to disable the cache rather than to
+throw -- an incomplete matrix is a legitimate instance, it just cannot support this
+shortcut.
+"""
+function _relaxed_cluster_travel_is_complete(
+    nodes::AbstractVector{Int}, travel_cost::Dict{Tuple{Int, Int}, Float64},
+)::Bool
+    for u in nodes, v in nodes
+        u == v && continue
+        haskey(travel_cost, (u, v)) || return false
+    end
+    return true
+end
+
+"""
+    _relaxed_cluster_barren_by_cache(support, barren_supports, reward_free) -> Bool
+
+Is `support` provably barren from an already-proven one, with no search?
+
+**The inference.** If `T` is barren, `T ⊆ T'`, and every cluster in `T'` that is not in
+`T` is reward-free, then `T'` is barren too. Proof: take any route `R` over `stations(T')`. If it
+avoids the extra clusters' stations it lives in `stations(T)` and is not improving. If it
+uses them, delete those stops to get `R'`. Travel does not increase (triangle inequality),
+every arrival is earlier so no pickup window or ride limit is harder to meet, and no reward
+is lost -- a reward-free cluster holds no candidate endpoint, so no certification was
+anchored there. Hence `rc(R') <= rc(R)`, and `R'` lies in the barren `stations(T)`, giving
+`rc(R) >= rc(R') >= -tol`.
+
+**The reward-free test cannot be weakened to "this route gained nothing there".** The exact
+search ranges over ALL routes in `stations(T')`, including ones that use those stations
+productively even when the relaxed route did not. The condition has to be a property of the
+candidate set, not of the witnessing route.
+
+**It requires a metric AND complete travel matrix.** Metric gives the "travel does not
+increase" step. Completeness is the subtler one: deleting stop `n2` from `n1 -> n2 -> n3`
+needs the arc `n1 -> n3` to EXIST, and `travel_cost` holds only finite arcs, so a missing
+shortcut means the shortened route `R'` is not constructible and the inference has nothing
+to land on. The pricer already assumes a metric matrix (station-age pruning does), but
+completeness is assumed nowhere and would fail silently here -- emitting false certificates
+rather than tripping an assertion. `_relaxed_cluster_travel_is_complete` therefore checks
+it once per attempt and disables the cache when it does not hold.
+
+This is the ONLY sound direction. Barren-ness is downward-closed, never upward: knowing
+`stations(T)` is barren says nothing about a superset that adds reward-carrying stations,
+since those admit routes the smaller set could not express. The downward closure itself is
+already exploited by the cut, which kills every route confined to any subset of `T`.
+"""
+function _relaxed_cluster_barren_by_cache(
+    support::Set{Int}, barren_supports::AbstractVector{Set{Int}}, reward_free::Set{Int},
+)::Bool
+    isempty(reward_free) && return false      # nothing can be added for free
+    for proven in barren_supports
+        issubset(proven, support) || continue
+        all(c -> c in reward_free, setdiff(support, proven)) && return true
+    end
+    return false
 end
 
 """
@@ -159,10 +256,25 @@ function _relaxed_cluster_nogood_certify_scenario(
     )
     # Nothing to price in the relaxation means nothing to price at all (the bound).
     isempty(relaxed.inner.opportunities) &&
-        return RelaxedClusterNoGoodResult(:certified, 0, 0, 0, NamedTuple[], Any[])
+        return RelaxedClusterNoGoodResult(:certified, 0, 0, 0, NamedTuple[], Any[], 0)
 
     node_clusters = _relaxed_cluster_node_clusters(relaxed)
+    # `cluster_sets` doubles as the attempt's list of PROVEN-BARREN supports, which is what
+    # the cache below queries -- so caching costs no extra bookkeeping.
     cluster_sets = Set{Int}[]
+    # Bumped on every refinement. Cluster indices only mean anything within one epoch, so
+    # every trace row carries the epoch it was recorded under -- without it a downstream
+    # containment analysis (the nesting probe does exactly this on `nogood_supports`) would
+    # silently compare supports drawn from two different partitions.
+    partition_epoch = 1
+    # The cache is only sound on a complete travel matrix (see its docstring), so the check
+    # gates it rather than the other way round: no completeness, no cache, no risk.
+    cache_enabled = _relaxed_cluster_travel_is_complete(
+        m[:joint_routing_assignment_nodes], travel_cost,
+    )
+    reward_free = cache_enabled ? _relaxed_cluster_reward_free(relaxed.clustering, candidates) :
+        Set{Int}()
+    barren_cache_hits = 0
     tol = solver.reduced_cost_tol
     last_subset_size = 0
     trace = NamedTuple[]
@@ -178,17 +290,25 @@ function _relaxed_cluster_nogood_certify_scenario(
         if Int(get(c.metadata, "scenario", 0)) == s
     ]
     harvested = Dict{Any, Any}()
-    _trace_row!(round, relaxed_rc, support_size, subset_size, subset_rc, subset_checked) =
+    # `support` is the actual cluster set the round cut on, not just its size. Recorded so
+    # cut redundancy is measurable: `Cut(T_new)` implies `Cut(T_i)` whenever `T_i` is a
+    # SUBSET of `T_new`, which makes the older cut dead weight -- it holds a mask bit and
+    # doubles the `(current, satisfied)` state space while excluding nothing. Whether that
+    # nesting actually occurs is an empirical question; see
+    # `benchmarks/diagnostics/nogood_cut_nesting_probe.jl`.
+    _trace_row!(round, relaxed_rc, support_size, subset_size, subset_rc, subset_checked,
+                support = Set{Int}()) =
         push!(trace, (
             round=round, relaxed_rc=relaxed_rc, support_size=support_size,
             subset_size=subset_size, subset_rc=subset_rc, subset_checked=subset_checked,
+            support=support, partition_epoch=partition_epoch,
         ))
 
     for round in 1:max_rounds
         remaining = deadline - time()
         remaining > 0 || return RelaxedClusterNoGoodResult(
             :inconclusive, round - 1, length(cluster_sets),
-            last_subset_size, trace, collect(values(harvested)))
+            last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
 
         # (1) the relaxed search, respecting every cut so far.
         ctx = RelaxedClusterCutSearchContext(relaxed, cluster_sets)
@@ -208,20 +328,32 @@ function _relaxed_cluster_nogood_certify_scenario(
             _trace_row!(round, surviving_min, 0, 0, Inf, false)
             return RelaxedClusterNoGoodResult(
                 exhausted ? :certified : :inconclusive, round, length(cluster_sets),
-                last_subset_size, trace, collect(values(harvested)))
+                last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
         end
 
         # (3) the cluster support of the best surviving relaxed route.
         best = argmin(l -> l.reduced_cost, improving)
         support = Set{Int}(node_clusters[node] for node in best.route)
-        subset = relaxed_cluster_station_subset(clustering, [sort!(collect(support))])
+        # `relaxed.clustering`, NOT the `clustering` argument: a refinement below rebuilds
+        # `relaxed` on a split partition, and the support indices name cells of whichever
+        # partition produced this route. Resolving them against the original would map the
+        # support to the wrong stations.
+        subset = relaxed_cluster_station_subset(
+            relaxed.clustering, [sort!(collect(support))],
+        )
         last_subset_size = length(subset)
 
         # (4) does that support hold a real improving route?
         subset_candidates = _restrict_candidates_to_subset(candidates, subset)
         # `subset_rc` is the best REAL reduced cost inside this support: below -tol means
         # the relaxation pointed somewhere genuine, `Inf` means barren.
-        subset_rc, subset_exhausted = if isempty(subset_candidates)
+        subset_rc, subset_exhausted = if _relaxed_cluster_barren_by_cache(
+                support, cluster_sets, reward_free)
+            # Provably barren from a support already searched, because everything this one
+            # adds is reward-free. Skips a whole exhaustive subset search.
+            barren_cache_hits += 1
+            Inf, true
+        elseif isempty(subset_candidates)
             Inf, true         # no candidates at all: vacuously barren, and provably so
         else
             subset_pricing = create_joint_routing_assignment_pricing_data(
@@ -233,7 +365,7 @@ function _relaxed_cluster_nogood_certify_scenario(
                 remaining = deadline - time()
                 remaining > 0 || return RelaxedClusterNoGoodResult(
                     :inconclusive, round, length(cluster_sets),
-                    last_subset_size, trace, collect(values(harvested)))
+                    last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
                 # Harvest while refuting. The accept closure is a pricing round's, so a
                 # kept candidate is deduped against the pool and against earlier rounds
                 # exactly as phase 2 would do it. It must NOT stop the search early
@@ -260,28 +392,71 @@ function _relaxed_cluster_nogood_certify_scenario(
         # there being no candidates in `S`). `subset_rc >= -tol` -- including `Inf`, meaning
         # no reward-carrying route exists in `S` at all -- is what "barren" actually means,
         # and it is the condition that adds a cut below.
-        _trace_row!(round, best.reduced_cost, length(support), length(subset), subset_rc, true)
+        _trace_row!(round, best.reduced_cost, length(support), length(subset), subset_rc, true,
+                    copy(support))
 
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.
         subset_rc < -tol && return RelaxedClusterNoGoodResult(
             :refuted, round, length(cluster_sets),
-            last_subset_size, trace, collect(values(harvested)))
+            last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
         # Only an EXHAUSTED subset search proves the support barren. Cutting on a
         # timed-out one would remove a support that may well hold an improving route,
         # and the loop could then certify falsely.
         subset_exhausted || return RelaxedClusterNoGoodResult(
             :inconclusive, round, length(cluster_sets),
-            last_subset_size, trace, collect(values(harvested)))
+            last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
 
+        # Drop cuts the new one subsumes. Cut(T) forbids routes confined to T, so for
+        # T_old ⊆ T_new, Cut(T_new) implies Cut(T_old) and the older cut excludes nothing
+        # further -- while still holding a bit of the UInt64 mask and doubling the
+        # (current, satisfied) state space, which weakens dominance. MEASURED at n=15:
+        # 60% of cuts were dominated this way (515 of 861), and 0 duplicates ever, which
+        # is why only this direction needs pruning.
+        filter!(t -> !issubset(t, support), cluster_sets)
         length(cluster_sets) < RELAXED_CLUSTER_MAX_CUTS || return RelaxedClusterNoGoodResult(
             :inconclusive, round, length(cluster_sets),
-            last_subset_size, trace, collect(values(harvested)))
+            last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
         push!(cluster_sets, support)
+
+        # The support is barren, so `best` is a SPURIOUS relaxed route: it priced below
+        # -tol while an exhaustive exact search over its stations found nothing. That makes
+        # it a counterexample the partition can be refined against (`refine.jl`). A split
+        # invalidates this attempt's relaxed graph and its cuts (both are indexed by the old
+        # cells), so the attempt restarts on the refined partition rather than trying to
+        # rewrite them -- the cuts are per-attempt anyway, and a barren support stays barren
+        # under refinement, so nothing proven is lost.
+        refinement = _relaxed_cluster_refine!(m, s, relaxed, best.route, travel_cost)
+        if !isnothing(refinement)
+            refined, chosen_cluster = refinement
+            relaxed = create_joint_routing_assignment_relaxed_cluster_pricing_data(
+                s, refined, travel_cost, candidates; shared...,
+            )
+            isempty(relaxed.inner.opportunities) && return RelaxedClusterNoGoodResult(
+                :certified, round, length(cluster_sets),
+                last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
+            node_clusters = _relaxed_cluster_node_clusters(relaxed)
+            reward_free = cache_enabled ?
+                _relaxed_cluster_reward_free(relaxed.clustering, candidates) : Set{Int}()
+            # Cut sets are compiled against cluster INDICES, and a split renumbers what
+            # those indices mean -- so they MUST be reconciled or they silently mis-mask,
+            # and because a wrongly applied cut EXCLUDES relaxed routes the failure mode is
+            # a false certificate rather than a crash.
+            #
+            # Reconcile by REWRITING, not clearing. `stations(T)` is unchanged by a split,
+            # so every `T` already proven barren stays proven; it just needs the new half's
+            # index added wherever the split cell appears. Clearing (the first version) was
+            # also sound but threw away every cut on each split, resetting all progress
+            # toward the certificate exactly when the partition got better.
+            rewrite_cut_sets_for_split(
+                cluster_sets, chosen_cluster, refined.n_clusters,
+            )
+            partition_epoch += 1
+        end
     end
     return RelaxedClusterNoGoodResult(
         :inconclusive, max_rounds, length(cluster_sets),
-        last_subset_size, trace, collect(values(harvested)))
+        last_subset_size, trace, collect(values(harvested)), barren_cache_hits)
 end
 
 """
@@ -291,6 +466,12 @@ end
 One scenario's whole contribution to a round: duals -> candidates -> the no-good loop ->
 its diagnostic row. `nothing` when the scenario has nothing to price, which is itself a
 certification for it (the real pricer skips it on the same test).
+
+The `clustering` argument is the round's shared build-time partition and is deliberately
+NOT used for the search: under refinement each scenario owns its own partition, so the body
+reads `_relaxed_cluster_scenario_clustering(m, s)` instead. The argument is kept only so
+the signature matches `certify.jl`'s sibling pass; do not "fix" the body to use it, which
+would reintroduce exactly the stale-partition class of bug refinement is careful to avoid.
 
 Factored out of the round below so the serial and concurrent branches share one body and
 cannot drift. Safe to call from several threads at once: it only READS the model, and the
@@ -313,7 +494,7 @@ function _relaxed_cluster_nogood_scenario_pass(
     isempty(candidates) && return nothing
 
     result = _relaxed_cluster_nogood_certify_scenario(
-        m, s, candidates, clustering, solver;
+        m, s, candidates, _relaxed_cluster_scenario_clustering(m, s), solver;
         deadline=deadline, max_rounds=solver.certification_max_rounds,
     )
     _record_relaxed_cluster_stat!(m, (
@@ -322,11 +503,19 @@ function _relaxed_cluster_nogood_scenario_pass(
         relaxed_exhausted=(result.outcome !== :inconclusive), fell_back=false,
         nogood_outcome=result.outcome, nogood_rounds=result.rounds,
         nogood_cuts=result.cuts_added,
+        # Exhaustive subset searches SKIPPED because the support was provably barren from
+        # an already-proven one. This is the cache's whole justification, so it has to
+        # reach the reported stats -- without it the hit rate is unmeasurable from a run.
+        nogood_barren_cache_hits=result.barren_cache_hits,
         # How the bound moved cut by cut -- non-decreasing by construction.
         nogood_rc_trace=[r.relaxed_rc for r in result.trace],
         nogood_subset_rc_trace=[r.subset_rc for r in result.trace],
         nogood_subset_size_trace=[r.subset_size for r in result.trace],
         nogood_subset_checked_trace=[r.subset_checked for r in result.trace],
+        # The actual cluster sets cut on, in order -- so cut redundancy is measurable
+        # (`benchmarks/diagnostics/nogood_cut_nesting_probe.jl`). Only rounds that really
+        # cut contribute; the final round records an empty support.
+        nogood_supports=[r.support for r in result.trace if !isempty(r.support)],
     ))
     return result
 end
