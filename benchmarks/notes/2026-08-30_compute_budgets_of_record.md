@@ -53,7 +53,8 @@ All on `mit_preemptable`. `TimeLimit` verified via `sacct`.
 
 ### 2026-08-30 — Study 5 serial-only run (SUPERSEDED by the two-arm rewrite)
 
-> Archived as `experiments/`/`results/2026-08-30_study5_scaling_exact_cg_SUPERSEDED_serial_only/`.
+> Was archived as `experiments/`/`results/2026-08-30_study5_scaling_exact_cg_SUPERSEDED_serial_only/`;
+> that archive was deleted 2026-09-07, so the numbers recorded below are now the record.
 > Study 5 has since been rewritten in place as a **two-arm** study (serial vs parallel
 > scenario pricing). This run remains the evidence base for the n>=30 frontier (SS3b) and
 > the budget-clamp defect (SS3), and its numbers are valid for what they measured, but it
@@ -156,8 +157,9 @@ row**. Superseded by the 2026-08-30 run above; retained for the budget compariso
 
 ### 2026-08-25 — all studies (archived)
 
-Archived under `experiments/`/`results/2026-08-25_*_SUPERSEDED_pre_dominance_fix/`, each
-with a `README_SUPERSEDED.txt`. Ran at 900 s pricing with 30 min/1 h committed walltimes
+Was archived under `experiments/`/`results/2026-08-25_*_SUPERSEDED_pre_dominance_fix/`,
+each with a `README_SUPERSEDED.txt`; those archives were deleted 2026-09-07, and since this
+run predates the dominance fix nothing should be cited from it anyway. Ran at 900 s pricing with 30 min/1 h committed walltimes
 and command-line doubled retries to 1 h/2 h. Predates the dominance-soundness corrections;
 **not comparable to anything above** and not to be cited for runtime.
 

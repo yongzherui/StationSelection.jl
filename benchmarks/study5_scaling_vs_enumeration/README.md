@@ -42,8 +42,10 @@ the axis value varies before the seed.
 
 ### Why n=40 was dropped
 
-The archived serial run
-(`experiments/2026-08-30_study5_scaling_exact_cg_SUPERSEDED_serial_only`) gave each
+The serial run that preceded this grid (archived as
+`experiments/2026-08-30_study5_scaling_exact_cg_SUPERSEDED_serial_only`, deleted
+2026-09-07; its numbers survive here and in
+`notes/2026-08-30_compute_budgets_of_record.md`) gave each
 scenario 300 s — **exactly what this study's parallel arm gives each scenario** — so it is
 a direct forecast of what the parallel arm can certify. It certified **0/10 at n=40**, with
 9/10 not even writing a row; every other value certified at least partially (stations 30:
@@ -132,9 +134,9 @@ sum-versus-max that distinguishes the arms.
 
 | Date | Design | Result |
 | --- | --- | --- |
-| 2026-08-25 | pre-dominance-fix | archived `..._SUPERSEDED_pre_dominance_fix` |
+| 2026-08-25 | pre-dominance-fix | superseded; archive deleted 2026-09-07 |
 | 2026-08-29 | 1800 s per-scenario pricing, 2 h wall, no total budget | 56/120 certified, 60 lost to walltime |
-| 2026-08-30 | 6 h total budget, serial only, per-scenario budgets | 78/120 certified — archived `..._SUPERSEDED_serial_only`; **used as the pilot for this grid** |
+| 2026-08-30 | 6 h total budget, serial only, per-scenario budgets | 78/120 certified — superseded; archive deleted 2026-09-07; **used as the pilot for this grid** |
 | — | **this two-arm rewrite** | not yet run |
 
 The 2026-08-30 run remains the evidence base for the n≥30 frontier and the budget-clamp

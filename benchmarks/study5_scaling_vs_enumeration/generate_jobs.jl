@@ -36,8 +36,10 @@ const TOTAL_TIME_LIMIT_SEC = 21600.0
 const MAX_ROUTES = 2_000_000
 const ARMS = ("serial", "parallel")
 
-# n=40 dropped 2026-08-30. The archived serial run
-# (experiments/2026-08-30_..._SUPERSEDED_serial_only) gave each scenario 300 s -- exactly
+# n=40 dropped 2026-08-30. The serial run that preceded this grid
+# (experiments/2026-08-30_..._SUPERSEDED_serial_only, archive deleted 2026-09-07 -- numbers
+# survive in this study's README and notes/2026-08-30_compute_budgets_of_record.md)
+# gave each scenario 300 s -- exactly
 # what this study's PARALLEL arm gives each scenario -- and certified 0/10 at n=40 with
 # 9/10 not even writing a row. It is the only cell in the grid with no certification at
 # all, so it is out of reach for both arms here and buys nothing but queue time. Every

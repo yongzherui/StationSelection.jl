@@ -126,7 +126,7 @@ CSV under `results/` exists solely on the filesystem that produced it.
 
 | Date | Array | Tasks | Config at that revision | Outcome |
 | --- | --- | --- | --- | --- |
-| 2026-08-25 | (4 arrays) | 110 | 900 s pricing, 30 min walltime, 8 CPU / 8G | archived `..._SUPERSEDED_pre_dominance_fix`; 110/110 certified |
+| 2026-08-25 | (4 arrays) | 110 | 900 s pricing, 30 min walltime, 8 CPU / 8G | superseded; archive deleted 2026-09-07; 110/110 certified |
 | 2026-08-29 | `21570508` `21570509` `21570510` `21570511` | 110 | **unchanged** -- 900 s pricing, 30 min walltime, 8 CPU / 8G | in flight |
 
 Study 1 was deliberately **not** re-scoped by `de5d56b`. It keeps the original grid, the

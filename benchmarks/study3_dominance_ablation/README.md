@@ -114,7 +114,7 @@ CSV under `results/` exists solely on the filesystem that produced it.
 
 | Date | Array | Tasks | Config at that revision | Outcome |
 | --- | --- | --- | --- | --- |
-| 2026-08-25 | `21243071` (re-run) | 60 | n {15,20,25}, 900 s pricing, 1 h walltime | archived `..._SUPERSEDED_pre_dominance_fix`; 53/60 certified, 7 clock-1 losses at n=25 |
+| 2026-08-25 | `21243071` (re-run) | 60 | n {15,20,25}, 900 s pricing, 1 h walltime | superseded; archive deleted 2026-09-07; 53/60 certified, 7 clock-1 losses at n=25 |
 | 2026-08-29 | `21570514` | 60 | n {10,15,20}, 1800 s pricing, 2 h walltime, 4 CPU / 8G | in flight |
 
 This study's switch (`compensated_dominance`) sits *on top of* the base station-clock

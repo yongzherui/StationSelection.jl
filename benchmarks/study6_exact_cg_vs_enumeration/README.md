@@ -4,8 +4,9 @@
 > `enumeration`. It previously ran *Base* under `CGSolver`, which compared a solver against
 > itself on a formulation nobody uses that way. Study 1 shows Base and Joint reach the same
 > integer optimum, so the comparison isolates the solve algorithm. The pre-correction runs
-> are archived under `benchmarks/experiments/2026-08-25_study6_basecg_SUPERSEDED/`; they are
-> also affected by the Base+CG livelock fixed the same day
+> were archived under `benchmarks/experiments/2026-08-25_study6_basecg_SUPERSEDED/` and
+> have since been deleted (2026-09-07); they were also affected by the Base+CG livelock
+> fixed the same day
 > (`notes/2026-08-25_study6_cg_livelock_stale_tau_columns.md`).
 
 # Study 6 — Exact column generation versus exhaustive enumeration
@@ -53,8 +54,8 @@ CSV under `results/` exists solely on the filesystem that produced it.
 
 | Date | Array | Tasks | Config at that revision | Outcome |
 | --- | --- | --- | --- | --- |
-| 2026-08-25 | (Base+CG) | 60 | superseded arm definition | archived `2026-08-25_study6_basecg_SUPERSEDED` |
-| 2026-08-25 | `21243072` (re-run) | 60 | Joint+CG vs Base+Direct, 900 s, 2 h walltime | archived `..._SUPERSEDED_pre_dominance_fix`; 55/60 certified; 5 livelock + 5 infeasible-master |
+| 2026-08-25 | (Base+CG) | 60 | superseded arm definition | superseded; archive deleted 2026-09-07 |
+| 2026-08-25 | `21243072` (re-run) | 60 | Joint+CG vs Base+Direct, 900 s, 2 h walltime | superseded; archive deleted 2026-09-07; 55/60 certified; 5 livelock + 5 infeasible-master |
 | 2026-08-29 | `21570519` | 60 | 1800 s pricing, 2 h walltime, 1 CPU / 16G | in flight |
 
 Two solver bugs blocked cells in the 2026-08-25 run and are fixed for 2026-08-29: the
