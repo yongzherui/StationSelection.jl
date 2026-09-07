@@ -1,7 +1,7 @@
 """Does the relaxation's winning CLUSTER set contain the exact pricer's winning STATION set?
 
 That is the whole premise of `pricing_mode = :relaxed_cluster_guided`
-(`relaxed_cluster/guide.jl`): if the cluster route minimizing the relaxed reduced cost is
+(`relaxed_cluster/utils/guiding/guide.jl`): if the cluster route minimizing the relaxed reduced cost is
 the image of the real route minimizing the exact one, then the stations of the real optimum
 all live inside the clusters the relaxed optimum visited, and searching only those stations
 finds the same column far more cheaply.

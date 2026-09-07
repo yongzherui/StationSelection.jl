@@ -46,25 +46,64 @@ no improving column exists anywhere in the full route universe — without ever
 producing one. Its two uses pull in opposite directions and are selected
 differently:
 
-- **certification**, via `CGSolver.certification_pricing_mode` (never
-  `pricing_mode`) — `certify.jl` is the one-shot form, measured hopeless;
-  `nogood_certify.jl` is the no-good-cut loop that does certify.
-- **guiding**, via `pricing_mode = :relaxed_cluster_guided` — `guide.jl` prices
-  the cluster graph only to pick a station subset, then runs the ordinary
-  `exact/` pricer on it. The columns are real routes, so nothing downstream
-  changes.
+- **certification**, via `CGSolver.certification_pricing_mode = :relaxed_cluster`
+  (never `pricing_mode`) — `utils/certification/certify.jl`, the no-good-cut
+  loop. It is the only mode: a cut-free round is the loop's round 1, and round 1
+  has never certified anything.
+- **guiding**, via `pricing_mode = :relaxed_cluster_guided` —
+  `utils/guiding/guide.jl` prices the cluster graph only to pick a station
+  subset, then runs the ordinary `exact/` pricer on it. The columns are real
+  routes, so nothing downstream changes.
 
-Its file layout differs from the pricer directories below because most of it is
-a *graph*, not a search: `clustering.jl`/`types.jl`/`data.jl` build the relaxed
-`JointRoutingAssignmentPricingData`, and `exact/`'s search then runs on it
-unchanged — no relaxed label, seed, extension, dominance or replay. The
-exception is the cut-aware search the no-good loop needs (`cuts.jl` compiles the
-cuts; `cut_types.jl`/`cut_seed.jl`/`cut_extend.jl`/`cut_context.jl`/`cut_hooks.jl`
-are a genuine pricer, following the file roles below minus
-`dominate.jl`/`prune.jl`/`accept.jl`, which stay `exact/`'s). A no-good cut
-constrains the *finished* route, so it cannot be a post-hoc filter over results
-— the satisfied-cuts mask has to be on the label, in the state key and in the
-best-so-far signature, which is exactly what `exact/`'s label cannot carry.
+Its top level is **label-setting core only**; everything that *drives* that core
+lives under `utils/`, one subdirectory per optimization:
+
+```
+relaxed_cluster/
+├── clustering.jl  relaxation.jl  data.jl              # the relaxed graph
+├── cuts.jl  types.jl  seed.jl  extend.jl              # the cut-aware pricer
+│           context.jl  hooks.jl
+└── utils/
+    ├── certification/certify.jl
+    ├── guiding/guide.jl
+    └── refinement/refine.jl
+```
+
+`clustering.jl`/`relaxation.jl`/`data.jl` build the relaxed
+`JointRoutingAssignmentPricingData` — a *graph*, not a search. **Two** searches
+then run on that graph, and the distinction is the whole reason the directory is
+shaped this way:
+
+- the **cut-aware** search is the directory's own pricer, and takes the
+  unprefixed file roles below (`types.jl`, `seed.jl`, `extend.jl`, `context.jl`,
+  `hooks.jl`, plus `cuts.jl` for the cut resource) because it is the only search
+  here with files of its own. It has no `dominate.jl`/`prune.jl`/`accept.jl` —
+  those stay `exact/`'s verbatim, since a cut changes which routes may be
+  *reported*, not which label is better at a state. A no-good cut constrains the
+  *finished* route, so it cannot be a post-hoc filter over results: the
+  satisfied-cuts mask has to be on the label, in the state key and in the
+  best-so-far signature, which is exactly what `exact/`'s label cannot carry.
+- the **cut-free** search is `exact/`'s context handed the relaxed graph, with no
+  files here at all — no relaxed label, seed, extension, dominance or replay.
+
+Only the cut-aware search can certify. The cut-free one is what
+`utils/guiding/guide.jl` prices to pick a station subset, and that is now its only
+job: a cut-free *certification* round is the cut loop's round 1, which certified 0
+times across ~1130 measured attempts at every size and every K, because a converged
+master's exact minimum reduced cost is exactly 0 and the relaxation's slack
+overshoots it by 10^2–10^3. The cuts are the certification mechanism, not a
+refinement of it, and the cut-free mode that used to exist for that comparison was
+removed once the answer was in.
+
+`utils/refinement/refine.jl` is the third optimization, and the only one with no
+switch of its own: witness-guided cluster refinement, turned on by the
+formulation's `relaxed_cluster_max_count` and driven from inside the no-good
+loop when a round comes back barren.
+
+Folder grouping is **not** load order — `optimize.jl` interleaves the `utils/`
+drivers with the core, because `guiding/guide.jl` needs only the relaxed graph
+while `certification/certify.jl` needs the cut-aware pricer and
+`refinement/refine.jl`, so it loads last of all.
 
 Every pricer directory below `route_covering/`/`joint_routing_assignment/`
 (`route_covering/exact/`, `route_covering/station_simple/`,

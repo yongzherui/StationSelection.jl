@@ -707,6 +707,12 @@
             relaxed_cluster_count = 0,
         )
         @test_throws ArgumentError CGSolver(certification_pricing_mode = :not_a_relaxation)
+        # The cut-free mode was removed: it is the cut loop's round 1, which certified 0
+        # times in ~1130 measured attempts. Its old name must be refused with an
+        # explanation rather than accepted or reported as an unknown symbol.
+        @test_throws ArgumentError CGSolver(
+            certification_pricing_mode = :relaxed_cluster_nogood,
+        )
         @test AggregateODRouteJointRoutingAssignmentFormulation().relaxed_cluster_count === nothing
         @test AggregateODRouteJointRoutingAssignmentFormulation(
             relaxed_cluster_count = 4,
@@ -851,7 +857,7 @@
 
     @testset "the no-good loop is wired and validated" begin
         @test_throws ArgumentError CGSolver(certification_max_rounds = 0)
-        @test CGSolver(certification_pricing_mode = :relaxed_cluster_nogood,
+        @test CGSolver(certification_pricing_mode = :relaxed_cluster,
                        certification_max_rounds = 4).certification_max_rounds == 4
         @test_throws ArgumentError CGSolver(certification_pricing_mode = :not_a_relaxation)
     end
@@ -991,7 +997,7 @@
             AggregateODRouteJointRoutingAssignmentFormulation(
                 max_stops = 4, relaxed_cluster_count = 3,
             ),
-            CGSolver(certification_pricing_mode = :relaxed_cluster_nogood),
+            CGSolver(certification_pricing_mode = :relaxed_cluster),
         )
         stats = result.metadata["cg_relaxed_cluster_guide_stats"]
         @test !isempty(stats)
@@ -1036,11 +1042,11 @@
                     max_stops = 4, relaxed_cluster_count = n_clusters,
                 ),
                 CGSolver(recover_integer_solution = true,
-                         certification_pricing_mode = :relaxed_cluster_nogood),
+                         certification_pricing_mode = :relaxed_cluster),
             )
             @test result.termination_status == SOLVE_OPTIMAL
             @test result.objective_value ≈ base.objective_value atol = 1e-6
-            @test result.metadata["cg_certification_pricing_mode"] === :relaxed_cluster_nogood
+            @test result.metadata["cg_certification_pricing_mode"] === :relaxed_cluster
             if result.metadata["cg_certified_by_relaxation"] === true
                 @test result.metadata["cg_stop_reason"] == "converged_by_certification"
                 @test result.metadata["cg_optimality_scope"] == "full_route_universe"
@@ -1069,7 +1075,7 @@
                 max_stops = 4, relaxed_cluster_count = 2,
             ),
             CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster_nogood),
+                     certification_pricing_mode = :relaxed_cluster),
         )
         harvested = result.metadata["cg_certification_harvested_columns"]
         @test harvested isa Int
@@ -1084,25 +1090,6 @@
         # CG claims optimality -- that claim still has to come from a full-universe
         # certificate or an exhausted full-universe pricing round.
         @test result.metadata["cg_optimality_scope"] == "full_route_universe"
-    end
-
-    @testset "the plain relaxed-cluster round never harvests" begin
-        # Its searches run on the cluster graph, whose routes are not real routes and can
-        # never become columns. The shared result struct defaults the field to empty, and
-        # this pins that the plain round cannot start emitting columns by accident.
-        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-        result = run_opt(
-            problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 2,
-            ),
-            CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster),
-        )
-        @test result.metadata["cg_certification_harvested_columns"] == 0
-        @test result.termination_status == SOLVE_OPTIMAL
     end
 
     # ── the guided mode: relaxation as a station-subset guide ───────────────
@@ -1287,18 +1274,16 @@
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
 
-        for mode in (:relaxed_cluster, :relaxed_cluster_nogood)
-            result = run_opt(
-                problem,
-                AggregateODRouteJointRoutingAssignmentFormulation(
-                    max_stops = 4, relaxed_cluster_count = 2,
-                ),
-                CGSolver(recover_integer_solution = true,
-                         certification_pricing_mode = mode),
-            )
-            @test result.metadata["cg_certifying_rounds"] == 0
-            @test result.termination_status == SOLVE_OPTIMAL
-        end
+        result = run_opt(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(
+                max_stops = 4, relaxed_cluster_count = 2,
+            ),
+            CGSolver(recover_integer_solution = true,
+                     certification_pricing_mode = :relaxed_cluster),
+        )
+        @test result.metadata["cg_certifying_rounds"] == 0
+        @test result.termination_status == SOLVE_OPTIMAL
 
         # With certification OFF the two-tier round is still reachable -- this is the
         # control, so a future change that disabled it everywhere would be caught.
@@ -1341,7 +1326,7 @@
                 max_stops = 4, relaxed_cluster_count = 2,
             ),
             CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster_nogood),
+                     certification_pricing_mode = :relaxed_cluster),
         )
         @test isempty(off.metadata["cg_relaxed_cluster_final_counts"])
         @test isempty(off.metadata["cg_relaxed_cluster_splits"])
@@ -1355,7 +1340,7 @@
                 relaxed_cluster_refine_recurrence = 1,
             ),
             CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster_nogood),
+                     certification_pricing_mode = :relaxed_cluster),
         )
         counts = on.metadata["cg_relaxed_cluster_final_counts"]
         splits = on.metadata["cg_relaxed_cluster_splits"]

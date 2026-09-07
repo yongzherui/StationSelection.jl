@@ -133,7 +133,7 @@ function _pricing_build_scenario_context(
         # read its winning clusters back as a station subset, and hand phase 2 an ORDINARY
         # exact context restricted to that subset. Everything downstream -- accept, dedupe,
         # merge, materialize, verify -- is unchanged, because the columns are real routes.
-        # See `relaxed_cluster/guide.jl`.
+        # See `relaxed_cluster/utils/guiding/guide.jl`.
         ctx = _build_relaxed_cluster_guided_context(
             m, s, candidates, _joint_routing_assignment_station_clustering(m),
         )

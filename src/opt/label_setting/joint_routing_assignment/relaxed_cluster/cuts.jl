@@ -2,11 +2,12 @@
 No-good cuts on cluster sets: the *resource* the cut-aware relaxed search
 carries, and how it is compiled for the hot path.
 
-This is what the no-good-cut certification loop in `nogood_certify.jl` adds to,
+This is what the no-good-cut certification loop in
+`utils/certification/certify.jl` adds to,
 one cut per barren cluster support. The search that respects them is this
 directory's second pricer, split the way every other pricer directory is
-(`../../README.md`): `cut_types.jl` (label), `cut_seed.jl`, `cut_extend.jl`,
-`cut_context.jl`, `cut_hooks.jl`. It has no `cut_dominate.jl` or `cut_prune.jl`
+(`../../README.md`): `types.jl` (label), `seed.jl`, `extend.jl`,
+`context.jl`, `hooks.jl`. It has no `dominate.jl` or `prune.jl`
 -- the dominance predicate, filters and remaining-reward bound are `../exact/`'s,
 reused verbatim, since a cut changes which routes may be *reported*, not what
 makes one label better than another at a state.
@@ -48,7 +49,8 @@ exact search over `stations(T)`; one that merely ran out of time has proved noth
 cutting on it would be the same false certificate by a different route.
 
 There is exactly one other admissible proof, and it reduces to that one: the barren-support
-cache in `nogood_certify.jl` infers `T'` barren from an already-exhausted `T ⊆ T'` when
+cache in `utils/certification/certify.jl` infers `T'` barren from an
+already-exhausted `T ⊆ T'` when
 every cluster in between is reward-free. That is still a cut on a proved-barren support --
 it just borrows the proof instead of repeating the search. No other shortcut is sound.
 
@@ -60,8 +62,8 @@ extension, and it must not be applied as a filter over the search's results
 either. `_run_label_setting` keeps only the best label per signature; if that
 label violates a cut while a slightly worse one satisfies it, the satisfying one
 is already gone and filtering afterwards silently certifies. So the
-satisfied-cuts mask is part of the label (`cut_types.jl`), part of the search
-*state* (`cut_hooks.jl`'s `_pricing_state` -- labels with different masks never
+satisfied-cuts mask is part of the label (`types.jl`), part of the search
+*state* (`hooks.jl`'s `_pricing_state` -- labels with different masks never
 dominate one another) and part of the best-so-far signature.
 
 The mask is monotone -- bits only ever turn on -- and one `UInt64` covers 64
@@ -105,7 +107,7 @@ function _relaxed_cluster_cuts(
         "at most $RELAXED_CLUSTER_MAX_CUTS cuts fit the UInt64 satisfied-mask, got " *
         "$(length(cluster_sets))",
     ))
-    # Dense node -> cluster map (`types.jl`), so compilation is
+    # Dense node -> cluster map (`relaxation.jl`), so compilation is
     # `O(nodes x cuts)` rather than re-scanning `service_node` per node.
     node_clusters = _relaxed_cluster_node_clusters(data)
     node_mask = zeros(UInt64, length(node_clusters))

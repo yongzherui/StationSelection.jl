@@ -230,7 +230,7 @@ the master's own duals as a cross-check that the pricer's model of the master ha
 drifted from the master itself.
 
 Split out of `_run_pricing_round` because it is not specific to a pricing *round*: the
-no-good certification loop (`joint_routing_assignment/relaxed_cluster/nogood_certify.jl`)
+no-good certification loop (`joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl`)
 harvests candidates from the exhaustive subset searches it runs to refute the relaxation,
 and those become columns by exactly this path -- same id allocation, same verification
 against the master. Sharing the code is what guarantees a harvested column is

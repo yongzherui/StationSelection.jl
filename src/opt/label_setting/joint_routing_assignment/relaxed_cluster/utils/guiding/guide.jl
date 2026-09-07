@@ -3,7 +3,7 @@ Using the relaxation as a **guide** rather than a certificate: price the cluster
 graph, read the winning clusters back as a *station subset*, and run the real
 exact pricer restricted to that subset.
 
-This inverts the role the relaxation plays in `certify.jl`, and it is the role
+This inverts the role the relaxation plays in `../certification/certify.jl`, and it is the role
 that survives the measurement in
 `benchmarks/diagnostics/relaxed_cluster_certification_probe.jl` (0/31
 certifications at every K < n, because a converged master's minimum reduced
@@ -41,10 +41,10 @@ certificate (harvest here cheaply, hand off to the full pricer, which certifies)
 # The one case where it certifies for free
 
 If the relaxed search **exhausts** without finding any cluster route below
-`-tol`, then by the bound (`types.jl`) no real route is below `-tol` either --
+`-tol`, then by the bound (`../../relaxation.jl`) no real route is below `-tol` either --
 so this scenario genuinely has nothing to price, and returning `nothing` is
 correct rather than merely convenient. That is the certification path from
-`certify.jl`, obtained here as a by-product. It just never fires in practice
+`../certification/certify.jl`, obtained here as a by-product. It just never fires in practice
 (see the probe).
 
 # What actually has to be true for this to pay
@@ -163,7 +163,7 @@ than assume:
 
 - *guided pricing* (this file) writes
   `(scenario, guide_routes, subset_size, n_stations, relaxed_exhausted, fell_back)`;
-- *no-good certification* (`nogood_certify.jl`) writes those same six fields --
+- *no-good certification* (`../certification/certify.jl`) writes those same six fields --
   reading `guide_routes` as the round count and `relaxed_exhausted` as "the loop
   reached a conclusion" -- plus the `nogood_*` fields carrying the outcome, the
   cut count and the per-round traces. Presence of `nogood_outcome` is what tells
@@ -195,7 +195,7 @@ The two-stage build: relaxed search for a guide, subset extraction, then an
 ordinary **exact** context restricted to that subset.
 
 Returning a plain `JointRoutingAssignmentSearchContext` is what makes this fit
-`round.jl` with no special-casing at all: phase 2 runs the same
+`../../../../round.jl` with no special-casing at all: phase 2 runs the same
 `_run_label_setting`, and the accept/dedupe/merge/materialize/verify path
 downstream is byte-for-byte the one every other pricer uses. The entire mode is
 a different choice of *which graph* to hand it.

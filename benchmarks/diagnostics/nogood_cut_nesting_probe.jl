@@ -2,7 +2,7 @@
 
 # The question
 
-`_relaxed_cluster_nogood_certify_scenario` accumulates one cut per barren cluster support
+`_relaxed_cluster_certify_scenario` accumulates one cut per barren cluster support
 `T` and never prunes the set. Two structural facts follow from the cut's own definition
 (`relaxed_cluster/cuts.jl`), and both are proved, not assumed:
 
@@ -113,7 +113,7 @@ for seed in SEEDS
             # burn its whole walltime and yield NOTHING, which is exactly what the first
             # attempt did -- a diagnostic must degrade to partial data, not to silence.
             CGSolver(recover_integer_solution=false, max_iterations=200,
-                     certification_pricing_mode=:relaxed_cluster_nogood,
+                     certification_pricing_mode=:relaxed_cluster,
                      certification_time_limit_sec=120.0,
                      pricing_time_limit_sec=120.0,
                      certifying_pricing_time_limit_sec=300.0,

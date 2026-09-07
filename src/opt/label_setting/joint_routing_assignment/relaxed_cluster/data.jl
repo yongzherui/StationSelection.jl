@@ -2,7 +2,7 @@
 Building one scenario's `RelaxedClusterPricingData`: the augmented cluster
 graph, the optimistic travel matrix over it, and the per-passenger
 per-cluster-pair reward and ride-limit maxima. Equation numbers refer to
-`types.jl`'s module docstring, which carries the relaxation argument this file
+`relaxation.jl`'s module docstring, which carries the relaxation argument this file
 implements.
 
 The output is an ordinary `JointRoutingAssignmentPricingData` whose "stations"
@@ -78,8 +78,9 @@ function _aggregate_relaxed_cluster_candidates(
     # choice the relaxation implicitly credited. Kept because it is the witness that makes
     # the optimism attributable: two passengers credited at one cell through DIFFERENT
     # stations is a proof that the cell is where a fictitious route was manufactured
-    # (`refine.jl`). It follows the reward argmax specifically, not the ride-limit one --
-    # those maxima are taken independently, and reward is the credit source.
+    # (`utils/refinement/refine.jl`). It follows the reward argmax specifically, not the
+    # ride-limit one -- those maxima are taken independently, and reward is the credit
+    # source.
     witness = Dict{Tuple{Int, Int, Int}, Tuple{Int, Int}}()
     for candidate in candidates
         candidate.reward > tol || continue
@@ -147,7 +148,7 @@ end
     _relaxed_cluster_travel_cost(clustering, travel_cost, intra_travel, service_node, n_nodes)
         -> Dict{Tuple{Int,Int}, Float64}
 
-`tau_hat` from `types.jl`, over the augmented node set: cluster nodes `1:K`
+`tau_hat` from `relaxation.jl`, over the augmented node set: cluster nodes `1:K`
 plus one service node per entry of `service_node`.
 
 Arc costs before closure:
@@ -161,7 +162,7 @@ Arc costs before closure:
 
 then a Floyd-Warshall metric closure over the whole thing.
 
-The closure is required, not an optimization -- see `types.jl` for why a
+The closure is required, not an optimization -- see `relaxation.jl` for why a
 non-metric travel matrix would let station-age pruning drop clocks the
 relaxation still needs, turning the bound the wrong way round. It cannot
 undercut a service arc (any detour `C -> v -> C'` costs

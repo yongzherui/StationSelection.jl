@@ -2,10 +2,10 @@
 How a cut-aware label grows: which nodes are legal to visit next
 (`_relaxed_cluster_cut_candidate_next_nodes`, the `_pricing_candidate_next_nodes`
 hook) and what visiting one produces (`_extend_relaxed_cluster_cut_label`, the
-`_pricing_extend_label` hook, both wired in `cut_hooks.jl`).
+`_pricing_extend_label` hook, both wired in `hooks.jl`).
 
 Both delegate to `../exact/extend.jl` through `_relaxed_cluster_base_label`
-(`cut_types.jl`) and then fold the visited node's mask word in, so the travel,
+(`types.jl`) and then fold the visited node's mask word in, so the travel,
 certification and reduced-cost arithmetic have exactly one definition. The
 candidate rule is the one place a cut genuinely changes the search -- see below.
 """

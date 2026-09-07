@@ -133,8 +133,8 @@ function _build_joint_routing_assignment_model(
     #
     # `relaxed_cluster_max_count` deliberately RELAXES that. With it set, this partition is
     # a starting point and each scenario refines its own copy (see below and
-    # `relaxed_cluster/refine.jl`), so `K` becomes a trajectory rather than a scalar and
-    # cross-round bounds are no longer comparable. That is the trade refinement makes, and
+    # `relaxed_cluster/utils/refinement/refine.jl`), so `K` becomes a trajectory rather
+    # than a scalar and cross-round bounds are no longer comparable. That is the trade refinement makes, and
     # it is why refinement is opt-in and off by default. Absent when
     # the formulation did not ask for one, in which case
     # `CGSolver(certification_pricing_mode=:relaxed_cluster)` is rejected rather than
@@ -173,7 +173,8 @@ function _build_joint_routing_assignment_model(
             m[:joint_routing_assignment_scenario_disagreements] =
                 [Dict{Int, Int}() for _ in 1:n_s]
             m[:joint_routing_assignment_scenario_splits] = zeros(Int, n_s)
-            # Why each barren round split or did not -- see `refine.jl`'s `_relaxed_cluster_refine!`.
+            # Why each barren round split or did not -- see
+            # `relaxed_cluster/utils/refinement/refine.jl`'s `_relaxed_cluster_refine!`.
             m[:joint_routing_assignment_scenario_refine_stats] = [Dict{Symbol, Int}() for _ in 1:n_s]
         end
     end

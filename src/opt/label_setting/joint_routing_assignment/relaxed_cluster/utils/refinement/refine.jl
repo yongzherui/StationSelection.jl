@@ -3,13 +3,13 @@ Witness-guided cluster refinement: using a spurious relaxed route to decide whic
 the partition manufactured it, and splitting exactly that cell.
 
 This is counterexample-guided abstraction refinement. A **barren** round of the no-good
-loop (`nogood_certify.jl`) hands over a spurious counterexample: a cluster route that
-priced below `-tol` while an exhaustive exact search over `stations(T)` found nothing
-improving. The relaxation lied, and this file works out where.
+loop (`../certification/certify.jl`) hands over a spurious counterexample: a cluster
+route that priced below `-tol` while an exhaustive exact search over `stations(T)` found
+nothing improving. The relaxation lied, and this file works out where.
 
 # Why refinement, rather than a different K
 
-`clustering.jl` records that tightness is **not** monotone in `n_clusters`: two independent
+`../../clustering.jl` records that tightness is **not** monotone in `n_clusters`: two independent
 k-medoids runs at different K need not be nested, so a larger K can give a looser bound.
 It *is* monotone under **refinement** -- if every cell of `P'` sits inside a cell of `P`,
 then `P'` takes its minima over smaller sets and its maxima over smaller sets, so every
@@ -17,7 +17,7 @@ quantity the relaxation computes moves toward reality. Splitting one cell theref
 the monotone ladder a K sweep structurally cannot, which is the whole reason to refine
 rather than re-cluster.
 
-There is no soundness exposure either way: the bound of `types.jl` holds for **any**
+There is no soundness exposure either way: the bound of `../../relaxation.jl` holds for **any**
 partition, so refinement can only change tightness, never validity. And cuts are discarded
 between CG iterations (they are valid only at the duals they were derived under), so
 refining between attempts cannot invalidate a live cut.
@@ -31,9 +31,9 @@ one cluster visit require *different* stations of that cluster -- or one passeng
 different stations at pickup and dropoff -- the cell is standing in for two places at once,
 and no real route could have done what its image did.
 
-`data.jl` records which real `(j, k)` achieved each `rho_bar` maximum
+`../../data.jl` records which real `(j, k)` achieved each `rho_bar` maximum
 (`RelaxedClusterPricingData.reward_witness`), keyed by the routed node ids. Replaying the
-spurious route through `../exact/accept.jl`'s replay -- which works unchanged, since the
+spurious route through `../../../exact/accept.jl`'s replay -- which works unchanged, since the
 relaxed `inner` is an ordinary `JointRoutingAssignmentPricingData` -- says which `(p, C, D)`
 was credited. Composing the two gives, per cluster, the set of stations the relaxation
 pretended it was.
@@ -151,11 +151,11 @@ apart, with the cell's remaining members going to whichever seed is nearer.
 
 The result is a genuine **refinement**: every new cell sits inside an old one and no other
 cell moves, which is what makes the relaxation's bound monotonically tighter
-(`types.jl`). The split cell keeps its index and the new half is appended, so existing
+(`../../relaxation.jl`). The split cell keeps its index and the new half is appended, so existing
 cluster indices stay valid -- callers holding cut sets built on the old partition can
 rewrite them by replacing the split index with itself plus the new one.
 
-Distances are the same symmetrized travel costs `clustering.jl` clusters on, so a refined
+Distances are the same symmetrized travel costs `../../clustering.jl` clusters on, so a refined
 partition is the same kind of object k-medoids would have produced. A cell that cannot be
 split -- fewer than two members, or witnesses that are not actually in it -- is returned
 unchanged rather than raising, since a stale candidate is a normal race with an

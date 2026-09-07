@@ -4,7 +4,7 @@ relaxed-cluster pricing pass is built on top of, and the deterministic
 k-medoids that produces one.
 
 The clustering is a *pure input* to the relaxation, not part of its
-correctness argument: the bound in `types.jl` holds for **any** partition of
+correctness argument: the bound in `relaxation.jl` holds for **any** partition of
 the stations, because it only ever takes minima of travel times and maxima of
 rewards over whatever cells it is given. A bad partition costs bound tightness
 (and therefore certification rate), never validity. That is exactly why the
@@ -46,7 +46,7 @@ A partition of `nodes` (station ids) into `n_clusters` non-empty cells.
   summed distance to the rest of its own cell). Kept for reporting/diagnostics
   only: nothing in the relaxation reads it, since every cluster-level travel
   cost is a *minimum over member pairs*, not a medoid-to-medoid distance.
-  **Not preserved under refinement**: `refine.jl`'s split sets the two halves'
+  **Not preserved under refinement**: `utils/refinement/refine.jl`'s split sets the two halves'
   medoids to the witness stations it split on, which need not minimize anything.
   Inert today precisely because nothing reads the field -- but a future consumer
   must not assume the medoid property holds on a refined partition.
@@ -239,4 +239,25 @@ function cluster_stations_by_travel_cost(
         end
     end
     return StationClustering(length(kept), node_list, cluster_of, members, kept_medoids)
+end
+
+"""
+    _joint_routing_assignment_station_clustering(m) -> StationClustering
+
+The partition stashed on the model at build time. Erroring here (rather than
+clustering on the spot) is deliberate: a clustering derived per round could
+differ between rounds, which would make the swept `n_clusters` meaningless and
+two rounds' bounds incomparable.
+
+Lives here rather than with either consumer because both of the relaxation's uses
+read it -- certification (`utils/certification/certify.jl`) and guiding
+(`../pricing_round.jl`, on its way into `utils/guiding/guide.jl`) -- and
+`utils/refinement/refine.jl` reads it as the un-refined starting partition.
+"""
+function _joint_routing_assignment_station_clustering(m::JuMP.Model)::StationClustering
+    haskey(m.obj_dict, :joint_routing_assignment_station_clustering) || throw(ArgumentError(
+        "this model carries no station clustering, so relaxed-cluster certification has " *
+        "nothing to run on -- build the formulation with `relaxed_cluster_count = K`",
+    ))
+    return m[:joint_routing_assignment_station_clustering]::StationClustering
 end

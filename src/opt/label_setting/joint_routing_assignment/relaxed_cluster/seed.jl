@@ -1,11 +1,11 @@
 """
 Label seeding for the cut-aware relaxed search: the depth-1 labels
 `_run_label_setting` (`../../engine.jl`) seeds its frontier from, via the
-`_pricing_initial_labels` hook (wired in `cut_hooks.jl`).
+`_pricing_initial_labels` hook (wired in `hooks.jl`).
 
 Seeding is `../exact/seed.jl`'s, with each seed's satisfied-mask initialized to
 whatever cuts its own starting node already escapes -- a route that begins
-outside every cut set owes nothing from the start. See `cut_extend.jl` for how
+outside every cut set owes nothing from the start. See `extend.jl` for how
 the mask grows from here.
 """
 

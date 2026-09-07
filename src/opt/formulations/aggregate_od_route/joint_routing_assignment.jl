@@ -95,7 +95,7 @@ asks for it. Note `:relaxed_cluster` is deliberately **not** a `pricing_mode` va
 pricer searches a relaxed cluster graph, so its routes are not real routes and cannot
 become columns; it only answers "can an improving column still exist", and a
 `no` from it is a full-route-universe optimality certificate. See
-`relaxed_cluster/types.jl` for the bound's proof.
+`relaxed_cluster/relaxation.jl` for the bound's proof.
 
 No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
@@ -166,7 +166,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             "$(relaxed_cluster_guide_time_limit_sec)",
         ))
         # `relaxed_cluster_max_count` turns the partition from a fixed input into a
-        # STARTING point: witness-guided refinement (`relaxed_cluster/refine.jl`) may split
+        # STARTING point: witness-guided refinement (`relaxed_cluster/utils/refinement/refine.jl`) may split
         # cells up to this ceiling. `nothing` keeps the historical fixed-partition
         # behaviour, which is why it is the default -- see the note above about why the
         # partition is otherwise built once and never re-derived.

@@ -1,5 +1,5 @@
 """
-The context struct: bundles what `cut_hooks.jl` needs to answer the
+The context struct: bundles what `hooks.jl` needs to answer the
 `AbstractPricingSearchContext` contract -- the relaxed graph's `pricing_data`,
 the compiled `cuts` (`cuts.jl`), the once-built `dominates` closure, and the
 `search_index`/`bound_workspace` the shared remaining-reward bound
@@ -8,7 +8,7 @@ of its own live here.
 
 Same graph and same dominance predicate as the plain relaxed search; what
 differs is that the state key carries the satisfied-cuts mask
-(`cut_hooks.jl`'s `_pricing_state`), so labels that have escaped different cut
+(`hooks.jl`'s `_pricing_state`), so labels that have escaped different cut
 sets never compete, and that only a fully-satisfying label can be an answer.
 
 Keying the state on the mask is the conservative choice: the sharper rule is

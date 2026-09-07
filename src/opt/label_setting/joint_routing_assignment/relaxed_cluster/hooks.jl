@@ -1,15 +1,16 @@
 """
 All wiring, no logic: every method that plugs `RelaxedClusterCutSearchContext`
-(`cut_context.jl`) into the `AbstractPricingSearchContext` contract
+(`context.jl`) into the `AbstractPricingSearchContext` contract
 (`../../types.jl`) that `_run_label_setting` (`../../engine.jl`) calls during the
-search -- forwarded to `cut_seed.jl` / `cut_extend.jl`, with the dominance
+search -- forwarded to `seed.jl` / `extend.jl`, with the dominance
 predicate, the label-bitsets mirror and the remaining-reward bound taken
 directly from `../exact/`.
 
 Only the search-level contract is implemented here. There are no `round.jl`
 harvest hooks (`_pricing_candidate_from_label` and friends): a cluster route is
 not a real route and can never become a column, so this context is only ever
-driven by `nogood_certify.jl`, which reads reduced costs off the returned labels
+driven by `utils/certification/certify.jl`, which reads reduced costs off the
+returned labels
 itself.
 """
 
