@@ -39,7 +39,7 @@ Threads.nthreads() == 1 || @warn "expected 1 Julia thread; idle samples may skew
 
 problem, k, _ = benchmark_problem(@__DIR__, "PROFILE", N_STATIONS, N_PAIRS, N_SCENARIOS, SEED)
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=MAX_STOPS, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=MAX_STOPS,
 )
 solver = StationSelection.CGSolver(
     config=StationSelection.SolverOptions(silent=true),

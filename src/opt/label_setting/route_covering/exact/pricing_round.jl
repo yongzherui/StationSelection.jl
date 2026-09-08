@@ -20,7 +20,7 @@ scenario has no active pairs to price at all.
 """
 function _pricing_build_scenario_context(
     ::AggregateODRouteBaseFormulation, mapping::AggregateODRouteMap, s::Int,
-    m::JuMP.Model, duals::Dict{Int, RouteCoveringPricingDuals},
+    m::JuMP.Model, duals::Dict{Int, RouteCoveringPricingDuals}; time_limit::Float64=Inf,
 )
     active_pairs = filter(!is_walk_only_pair, mapping.active_jk_s[s])
     isempty(active_pairs) && return nothing

@@ -117,7 +117,7 @@ have been found by the exhaustive search that made `T` a cut.
 
 ## Measured: guiding works, and needs no tightness at all
 
-`pricing_mode = :relaxed_cluster_guided` — price the cluster graph, take the winning
+The former guided-only pricing mode — price the cluster graph, take the winning
 routes' members as a **station subset**, run the exact pricer restricted to it. Columns are
 real, so `round.jl` is unchanged; it is a restriction, so it cannot certify
 (`cg_optimality_scope = "relaxed_cluster_station_subset_only"`; pair with

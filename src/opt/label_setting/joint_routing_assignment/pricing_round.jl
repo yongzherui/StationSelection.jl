@@ -11,7 +11,8 @@ completion order can't decide which columns enter the RMP.
 Lives at the `joint_routing_assignment/` level, not under `exact/`,
 `darp_modified/`, or `darp/`, because `_pricing_build_scenario_context` below
 is the one place that picks *between* those three pricers
-(`formulation.pricing_mode`, stashed as `m[:joint_routing_assignment_pricing_mode]`)
+(`CGSolver.pricing.mode`, resolved at build and stashed as
+`m[:joint_routing_assignment_pricing_mode]`)
 -- it isn't specific to any one of them, just the formulation-level wiring
 all three plug into. Candidate extraction
 (`joint_routing_assignment_pricing_candidates`) is mode-agnostic too: all
@@ -76,13 +77,13 @@ _pricing_next_column_id(::AggregateODRouteJointRoutingAssignmentFormulation, map
 """
 Build one scenario's pricing context: duals -> candidates -> pricing data ->
 search context (`exact/`, `darp_modified/`, or `darp/`, per
-`formulation.pricing_mode`), plus the existing column pool restricted to this
+`CGSolver.pricing.mode`), plus the existing column pool restricted to this
 scenario. `nothing` when a scenario has no positive-reward candidates (and
 therefore, for `exact/`, no opportunities) to price at all.
 """
 function _pricing_build_scenario_context(
     ::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, s::Int,
-    m::JuMP.Model, duals,
+    m::JuMP.Model, duals; time_limit::Float64=Inf,
 )
     alpha, gamma_o, gamma_d = duals
     data = m[:joint_routing_assignment_data]
@@ -98,6 +99,15 @@ function _pricing_build_scenario_context(
     ]
 
     pricing_mode = m[:joint_routing_assignment_pricing_mode]::Symbol
+
+    if pricing_mode === :cluster_guide
+        built = _build_cluster_guide_context(
+            m, s, candidates, _joint_routing_assignment_station_clustering(m), time_limit,
+        )
+        isnothing(built) && return nothing
+        ctx, guide_elapsed = built
+        return ctx, existing, max(0.0, time_limit - guide_elapsed)
+    end
 
     if pricing_mode === :darp_modified
         darp_modified_pricing_data = create_joint_routing_assignment_darp_modified_pricing_data(
@@ -128,22 +138,19 @@ function _pricing_build_scenario_context(
         return JointRoutingAssignmentDarpSearchContext(darp_pricing_data), existing
     end
 
-    if pricing_mode === :relaxed_cluster_guided
-        # Two stages, both inside context construction: price the cluster graph for a guide,
-        # read its winning clusters back as a station subset, and hand phase 2 an ORDINARY
-        # exact context restricted to that subset. Everything downstream -- accept, dedupe,
-        # merge, materialize, verify -- is unchanged, because the columns are real routes.
-        # See `relaxed_cluster/utils/guiding/guide.jl`.
-        ctx = _build_relaxed_cluster_guided_context(
-            m, s, candidates, _joint_routing_assignment_station_clustering(m),
-        )
-        isnothing(ctx) && return nothing
-        return ctx, existing
-    end
-
+    # `:relaxed_cluster` never gets here: `CGSolver` runs it as its own round
+    # (`cg_certification_round`) instead of calling `price_columns` at all, because it is a
+    # relaxation with a cut loop around it, not a label-setting context over `pricing_data`.
+    # Reached only by a direct call, which this turns into the explanation.
+    pricing_mode === :relaxed_cluster && throw(ArgumentError(
+        "pricing_mode=:relaxed_cluster has no label-setting context: it is the relaxed " *
+        "cluster round, driven by CGSolver via cg_certification_round, not by " *
+        "_run_pricing_round",
+    ))
     pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
-        "expected :exact, :station_simple, :darp_modified, :darp, or :relaxed_cluster_guided",
+        "expected :exact, :station_simple, :darp_modified, :darp, :cluster_guide, or " *
+        ":relaxed_cluster",
     ))
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;

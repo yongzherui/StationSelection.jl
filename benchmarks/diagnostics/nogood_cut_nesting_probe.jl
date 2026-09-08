@@ -18,7 +18,7 @@
    `Cut(T_new) ⟹ Cut(T_i)`: the older cut is implied and excludes nothing further.
 
 A dominated cut is not free. It holds one bit of the `UInt64` satisfied-mask (64 max) and
-one round of `certification_max_rounds` (measured binding at n=30), and -- the real cost --
+one round of `RELAXED_CLUSTER_MAX_CUT_ROUNDS` (measured binding at n=30), and -- the real cost --
 the search state is `(current, satisfied)`, so `c` cuts admit up to `2^c` mask values per
 node. A cut that excludes nothing still doubles the state space, and two labels differing
 only in a dead bit can never dominate one another. That is the same mechanism measured for
@@ -106,15 +106,13 @@ for seed in SEEDS
     for n_clusters in (round(Int, 0.6 * N_STATIONS), round(Int, 0.8 * N_STATIONS))
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops=MAX_STOPS, pricing_mode=:exact, relaxed_cluster_count=n_clusters,
-            ),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops=MAX_STOPS),
             # Every budget is bounded. An unbounded probe that prints only at the end can
             # burn its whole walltime and yield NOTHING, which is exactly what the first
             # attempt did -- a diagnostic must degrade to partial data, not to silence.
             CGSolver(recover_integer_solution=false, max_iterations=200,
-                     certification_pricing_mode=:relaxed_cluster,
-                     certification_time_limit_sec=120.0,
+                     pricing=CGPricingConfig(mode=:relaxed_cluster,
+                                             relaxed_cluster_count=n_clusters),
                      pricing_time_limit_sec=120.0,
                      certifying_pricing_time_limit_sec=300.0,
                      total_time_limit_sec=RUN_BUDGET_SEC,

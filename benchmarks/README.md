@@ -35,15 +35,15 @@ label-search metrics. Per-search label statistics are retained in
 | 1 | `study1_formulation_lp_ip_gap/` | Base vs. Joint and operating-condition LP/IP gaps | implemented — four sub-studies, 110 Zhuzhou jobs |
 | 2 | `study2_passenger_max_ablation/` | `exact` running-max pricing vs. explicit DARP-style pricing | implemented — 60-job Zhuzhou grid, n ∈ {10, 15, 20} at p=8 |
 | 3 | `study3_dominance_ablation/` | `compensated_dominance` true vs. false | implemented — 60-job grid, n ∈ {10, 15, 20} at p=16 |
-| 4 | `study4_heuristic_local_search/` | Heuristic pricing frontier (provisional name `local_search`) | placeholder — no design yet, see study README |
+| 4 | `study4_heuristic_local_search/` | `:exact` vs. the two warm-start pricers (`:station_simple`, `:cluster_guide`) ahead of it | implemented — 30 jobs, three arms on ten paired n=20/p=16/s=3 seeds; directory name predates the study's actual design |
 | 5 | `study5_scaling_vs_enumeration/` | Exact-CG runtime vs. `\|P\|`/`\|J\|`/`\|S\|` | implemented — three sub-studies, 120 single-threaded jobs |
 | 6 | `study6_exact_cg_vs_enumeration/` | Joint CG vs. Base exhaustive enumeration at `max_stops=4` | implemented — 60 single-threaded jobs; re-run 2026-08-25 after the arm correction |
 | 7 | `study7_route_elementarity/` | Are the route columns in a certified optimum elementary in their station set? | implemented — 30 jobs at n=20, p ∈ {8,16,24}; first study to export the solution itself |
-| 8 | `study8_warm_start_speedup/` | Does `warm_start_pricing_mode=:station_simple` pay, and when does phase 1 exhaust? | implemented — 30 jobs, warm_start arm only; `exact` baseline is Study 7's completed runs |
-| 9 | `study9_relaxed_cluster_certification/` | Does the relaxed-cluster relaxation ever certify (skipping the expensive certifying round), and at which cluster count `K`? | implemented — 30 jobs, baseline + K ∈ {3,6,9,12,15} at n=15/p=16/s=3; a fast probe, not a measurement grid |
+| 8 | `study8_warm_start_speedup/` | Does `pricing.warm_start_mode=:station_simple` pay, and when does phase 1 exhaust? | implemented — 30 jobs, warm_start arm only; `exact` baseline is Study 7's completed runs |
+| 9 | `study9_relaxed_cluster_scalability/` | Does the full `:relaxed_cluster` pipeline hold up as `n` grows, and where is the certification frontier? | implemented — validation at n=20,25 (`exact` vs. K/n ∈ {0.6,0.8}, 10 seeds each), then a six-hour frontier probe over n=30–84 |
 
-Studies 1–3 and 5–6 are executable end to end. Study 4 remains a placeholder as
-described above. `submit_benchmark.sh` files are pure SLURM plumbing.
+Every study is executable end to end. `submit_benchmark.sh` files are pure SLURM
+plumbing.
 
 ## Compute budgets (what "timed out" means)
 
@@ -117,18 +117,18 @@ As committed today (after `de5d56b`), which is what the 2026-08-29 re-run used:
 | 1 | `study1_formulation_lp_ip_gap` | 8 / 8G | 30 min | 900 s | no — deliberately left as-is |
 | 2 | `study2_passenger_max_ablation` | 4 / 8G | **2 h** | **1800 s** | yes, + grid n {15,20,25}→{10,15,20} |
 | 3 | `study3_dominance_ablation` | 4 / 8G | **2 h** | **1800 s** | yes, + grid n {15,20,25}→{10,15,20} |
-| 4 | `study4_heuristic_local_search` | 4 / 8G | 1 h | — (placeholder) | — |
+| 4 | `study4_heuristic_local_search` | 3 / 24G | **4 h 30 m** | **300 s regular / 3600 s certifying**, 4 h total budget | superseded 2026-09-08 when the placeholder was replaced; matched to Studies 7/8 |
 | 5 | `study5_scaling_vs_enumeration` | 1 / 16G | **6 h 30 m** | **300 s regular / 3600 s certifying**, 6 h total budget | yes; budgets revised again 2026-08-30 |
 | 6 | `study6_exact_cg_vs_enumeration` | 1 / 16G | **2 h** | **1800 s** | yes |
 | 7 | `study7_route_elementarity` | 3 / 24G | **4 h 30 m** | **300 s regular / 3600 s certifying**, 4 h total budget | yes; total budget sized from Study 5's measured walls on the same cells |
 | 8 | `study8_warm_start_speedup` | 3 / 24G | **4 h 30 m** | **300 s regular / 3600 s certifying**, 4 h total budget | matched to Study 7 exactly, since its runs are this study's baseline |
-| 9 | `study9_relaxed_cluster_certification` | 3 / 8G | **45 m** | **120 s regular / 600 s certifying**, 30 min total budget, **60 s per certification attempt** | sized off Study 3's measured n=15/p=16 walls (7–154 s), not inherited from Studies 7/8 |
+| 9 | `study9_relaxed_cluster_scalability` | 3 / 32G | **6 h 30 m** | **300 s regular / 3600 s certifying**, 6 h total budget | superseded 2026-09-08: the old certification probe was a 45 m n=15 spot-check; the scalability study runs to n=84 |
 
 The 2026-08-25 attempts ran at 900 s pricing with 30 min / 1 h original walltimes and
 needed doubled-budget retries; see the re-run history below. Those budgets are the
 *superseded* ones and no longer match any committed script.
 
-All studies run on `mit_preemptable` except Study 4 (`mit_normal`). Studies 5 and 6 pin
+All studies run on `mit_preemptable`. Studies 5 and 6 pin
 `JULIA_NUM_THREADS=1` so their timings are single-threaded and comparable.
 
 **Reporting a job as timed out** requires naming the largest budget it was actually

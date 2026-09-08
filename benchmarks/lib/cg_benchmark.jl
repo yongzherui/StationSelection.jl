@@ -54,21 +54,24 @@ equally across scenarios. `parallel_scenario_pricing` prices those scenarios con
 (needs `Threads.nthreads() > 1`); `threads` is Gurobi's own limit and is independent of it.
 `certifying_pricing_time_limit_sec` (default `3600.0`) is the longer budget the loop
 escalates to when a regular round returns no columns without exhausting -- only that
-round can certify. `total_time_limit_sec` (default `Inf`) is a strict wall cap on the CG
+round can certify. Under `pricing_mode = :relaxed_cluster` the same two budgets drive the
+relaxed round instead: `pricing_time_limit_sec` for the ordinary attempt,
+`certifying_pricing_time_limit_sec` for the escalated one. `total_time_limit_sec` (default `Inf`) is a strict wall cap on the CG
 loop: on expiry the run stops and reports `cg_stop_reason="total_budget"` with
 `cg_converged=false`, so a censored job still writes a row instead of being killed by the
 scheduler. The recovery MIP afterwards is bounded separately by `config.time_limit_sec`
 (300 s), so budget a job's walltime for `total_time_limit_sec + 300 s` plus start-up.
+
+`pricing` is the whole pricer choice -- mode, warm start, relaxed-cluster settings -- as a
+`CGPricingConfig`. A mode-sweep arm therefore varies this one argument and reuses the
+formulation, which is what makes the arms comparable by construction.
 """
 function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solution::Bool=false,
         threads::Union{Nothing, Int}=nothing,
         certifying_pricing_time_limit_sec::Real=3600.0,
         total_time_limit_sec::Real=Inf,
         parallel_scenario_pricing::Bool=false,
-        warm_start_pricing_mode::Union{Nothing, Symbol}=nothing,
-        certification_pricing_mode::Union{Nothing, Symbol}=nothing,
-        certification_time_limit_sec::Real=300.0,
-        certification_max_rounds::Int=32)
+        pricing::CGPricingConfig=CGPricingConfig())
     return CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
@@ -76,19 +79,16 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         total_time_limit_sec=total_time_limit_sec,
         parallel_scenario_pricing=parallel_scenario_pricing,
         recover_integer_solution=recover_integer_solution,
-        warm_start_pricing_mode=warm_start_pricing_mode,
-        certification_pricing_mode=certification_pricing_mode,
-        certification_time_limit_sec=certification_time_limit_sec,
-        certification_max_rounds=certification_max_rounds,
+        pricing=pricing,
     )
 end
 
 """
     benchmark_certification_metrics(result) -> NamedTuple
 
-The relaxation-certification columns of a `certification_pricing_mode=:relaxed_cluster`
-run (all inert -- `nothing`/`0`/`false` -- when the feature is off, so a baseline arm
-writes the same schema).
+The relaxation-certification columns of a `pricing_mode=:relaxed_cluster` run (all inert
+-- `nothing`/`0`/`false` -- under any other pricing mode, so a baseline arm writes the same
+schema).
 
 `certified_by_relaxation` is the headline: did the cheap relaxed round ever prove pricing
 was done, i.e. did the run skip the exhaustive certifying search entirely?
@@ -118,7 +118,8 @@ function benchmark_certification_metrics(result)
         # The two failure modes point at different places: `refuted` means the partition
         # this run was built with was too coarse (an observation across arms -- the
         # partition is fixed at build time), `inconclusive` means the attempt ran out of
-        # `certification_time_limit_sec` (a solver setting).
+        # its round budget (`pricing_time_limit_sec`, or
+        # `certifying_pricing_time_limit_sec` on the escalated attempt).
         certification_refuted_rounds=Int(get(metadata, "cg_certification_refuted_rounds", 0)),
         certification_inconclusive_rounds=Int(get(metadata, "cg_certification_inconclusive_rounds", 0)),
         certification_sec=Float64(get(metadata, "cg_certification_sec", 0.0)),

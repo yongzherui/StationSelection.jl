@@ -138,13 +138,20 @@ function _run_pricing_round(
     # `_run_label_setting`. `nothing` for a scenario with nothing to
     # price.
     prepared = Vector{Any}(undef, length(scenarios))
+    prepare_limit = parallel ? scenario_time_limit : scenario_time_limit / max(1, length(scenarios))
     if parallel
         Threads.@threads for i in eachindex(scenarios)
-            prepared[i] = _prepare_pricing_scenario(formulation, mapping, scenarios[i], m, duals, solver, n_candidates)
+            prepared[i] = _prepare_pricing_scenario(
+                formulation, mapping, scenarios[i], m, duals, solver, n_candidates,
+                prepare_limit,
+            )
         end
     else
         for i in eachindex(scenarios)
-            prepared[i] = _prepare_pricing_scenario(formulation, mapping, scenarios[i], m, duals, solver, n_candidates)
+            prepared[i] = _prepare_pricing_scenario(
+                formulation, mapping, scenarios[i], m, duals, solver, n_candidates,
+                prepare_limit,
+            )
         end
     end
 
@@ -161,7 +168,8 @@ function _run_pricing_round(
             else
                 t_scenario = time()
                 _labels, exhausted, stats = _run_label_setting(
-                    p.ctx; time_limit=scenario_time_limit, reduced_cost_tol=solver.reduced_cost_tol,
+                    p.ctx; time_limit=min(scenario_time_limit, p.search_time_limit),
+                    reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
                 search_sec = time() - t_scenario
@@ -171,7 +179,8 @@ function _run_pricing_round(
                 # is what distinguishes a serial round from a parallel one, and it must be
                 # available on ordinary benchmark runs.
                 stats_by_scenario[i] = (; scenario=scenarios[i], search_sec=search_sec,
-                                        slice_sec=scenario_time_limit, stats...)
+                                        slice_sec=min(scenario_time_limit, p.search_time_limit),
+                                        thread_id=Threads.threadid(), stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
@@ -193,13 +202,15 @@ function _run_pricing_round(
                 slice = max(0.0, (round_deadline - time()) / remaining_scenarios)
                 t_scenario = time()
                 _labels, exhausted, stats = _run_label_setting(
-                    p.ctx; time_limit=slice, reduced_cost_tol=solver.reduced_cost_tol,
+                    p.ctx; time_limit=min(slice, p.search_time_limit),
+                    reduced_cost_tol=solver.reduced_cost_tol,
                     profile=profile, stop_if=p.accept,
                 )
                 search_sec = time() - t_scenario
                 exhausted_by_scenario[i] = exhausted
                 stats_by_scenario[i] = (; scenario=scenarios[i], search_sec=search_sec,
-                                        slice_sec=slice, stats...)
+                                        slice_sec=min(slice, p.search_time_limit),
+                                        thread_id=Threads.threadid(), stats...)
                 candidates_by_scenario[i] = collect(values(p.scored))
             end
         end
@@ -243,6 +254,11 @@ function _materialize_pricing_columns(
     columns = Any[]
     for (offset, candidate) in enumerate(candidates)
         column = _pricing_make_column(candidate.ctx, next_id + offset - 1, candidate)
+        if hasproperty(column, :metadata)
+            column.metadata["pricing_mode"] = get(
+                JuMP.object_dictionary(m), :joint_routing_assignment_pricing_mode, :default,
+            )
+        end
         ok, pricer_rc, master_rc = _pricing_verify_column(candidate.ctx, column, m, mapping, duals)
         ok || error(
             "label-setting pricing reduced cost $(pricer_rc) disagrees with the master's " *
@@ -272,11 +288,14 @@ against every valid station pair -- so it needs the same
 sequential just because it happens to run first."""
 function _prepare_pricing_scenario(
     formulation::AbstractFormulation, mapping, scenario, m::JuMP.Model, duals,
-    solver::CGSolver, n_candidates::Int,
+    solver::CGSolver, n_candidates::Int, time_limit::Float64,
 )
-    built = _pricing_build_scenario_context(formulation, mapping, scenario, m, duals)
+    built = _pricing_build_scenario_context(
+        formulation, mapping, scenario, m, duals; time_limit=time_limit,
+    )
     isnothing(built) && return nothing  # nothing to price for this scenario
-    ctx, existing_columns = built
+    ctx, existing_columns, search_time_limit = length(built) == 2 ?
+        (built[1], built[2], Inf) : built
 
     # For every column already in this scenario's pool, remember the best
     # (lowest) tau seen per signature. A freshly searched candidate only
@@ -292,7 +311,7 @@ function _prepare_pricing_scenario(
     # search against `ctx`.
     scored = Dict{Any, Any}()
     accept! = _pricing_accept_closure(ctx, scenario, best_pool_tau, scored, solver, n_candidates)
-    return (ctx=ctx, accept=accept!, scored=scored)
+    return (ctx=ctx, accept=accept!, scored=scored, search_time_limit=search_time_limit)
 end
 
 """
@@ -347,7 +366,8 @@ _pricing_scenarios(formulation::AbstractFormulation, mapping, m::JuMP.Model) =
 Build the search context and existing-column pool for one scenario, or
 `nothing` to skip a scenario with nothing to price (e.g. no active
 pairs/candidates)."""
-_pricing_build_scenario_context(formulation::AbstractFormulation, mapping, scenario, m::JuMP.Model, duals) =
+_pricing_build_scenario_context(formulation::AbstractFormulation, mapping, scenario,
+        m::JuMP.Model, duals; time_limit::Float64=Inf) =
     error("_pricing_build_scenario_context not implemented for $(typeof(formulation))")
 
 """Whether scenarios may be priced concurrently (`Threads.@threads`). Default: sequential."""

@@ -257,7 +257,7 @@ read it -- certification (`utils/certification/certify.jl`) and guiding
 function _joint_routing_assignment_station_clustering(m::JuMP.Model)::StationClustering
     haskey(m.obj_dict, :joint_routing_assignment_station_clustering) || throw(ArgumentError(
         "this model carries no station clustering, so relaxed-cluster certification has " *
-        "nothing to run on -- build the formulation with `relaxed_cluster_count = K`",
+        "nothing to run on -- set `CGSolver.pricing.relaxed_cluster_count = K`",
     ))
     return m[:joint_routing_assignment_station_clustering]::StationClustering
 end

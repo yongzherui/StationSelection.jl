@@ -42,7 +42,7 @@ const TOTAL_TIME_LIMIT_SEC = 14400.0
 # Only the warm-start arm is run here; the `exact` baseline is Study 7's completed runs
 # (see the module docstring). The arm column is kept in the schema so a baseline arm can be
 # added later without changing the row format or the analysis join.
-# `warm_start` = CGSolver(warm_start_pricing_mode=:station_simple): elementary pricing until
+# `warm_start` = CGSolver(pricing=CGPricingConfig(warm_start_mode=:station_simple)): elementary pricing until
 # that universe exhausts, then the formulation's own exact pricer, which is the phase that
 # certifies. It must reach the SAME certified optimum as Study 7's exact run on the same
 # cell -- analyze.jl checks that per cell and treats a mismatch as a correctness failure,

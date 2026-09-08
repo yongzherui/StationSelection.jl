@@ -241,7 +241,8 @@ function enumerate_joint_routing_assignment_columns(
             max_wait_time=formulation.max_wait_time,
             repositioning_time=formulation.repositioning_time,
             max_stops=formulation.max_stops,
-            compensated_dominance=formulation.compensated_dominance,
+            # This exhaustive replay does not run label dominance.
+            compensated_dominance=false,
         )
 
         for raw in physical_routes

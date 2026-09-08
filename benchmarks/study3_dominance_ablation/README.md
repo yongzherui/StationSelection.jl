@@ -6,7 +6,7 @@ How much does compensated dominance reduce the end-to-end work of exact Joint Ro
 Assignment column generation relative to plain subset dominance?
 
 The only experimental switch is
-`AggregateODRouteJointRoutingAssignmentFormulation(compensated_dominance=...)`:
+`CGPricingConfig(compensated_dominance=...)`:
 
 - `true`: the compensated/catch-up dominance rule;
 - `false`: plain subset dominance.

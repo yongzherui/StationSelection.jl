@@ -41,7 +41,7 @@ It cannot certify, and nothing asks it to any more. A cut-free certification
 round is the cut loop's round 1, and round 1 certified 0 times across ~1130
 measured attempts at every size and every K -- because a converged master's exact
 minimum reduced cost is exactly 0 and the relaxation's slack overshoots it by
-10^2-10^3. A `certification_pricing_mode` selecting it existed for that
+10^2-10^3. A cut-free mode selecting it existed for that
 comparison and was removed once the answer was in. Certification is the cut
 loop's alone: the cuts are the mechanism, not a refinement of it (`cuts.jl`).
 

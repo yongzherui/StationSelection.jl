@@ -119,7 +119,7 @@ include("label_setting/joint_routing_assignment/station_simple/context.jl")
 include("label_setting/joint_routing_assignment/station_simple/hooks.jl")
 # darp_modified/ and darp/ are two controlled comparison points against
 # exact/'s running-max passenger crediting, both selectable per solve via
-# `AggregateODRouteJointRoutingAssignmentFormulation`'s `pricing_mode` field
+# `CGSolver.pricing.mode` (a `CGPricingConfig`)
 # (`:exact`/`:darp_modified`/`:darp`), branched on in
 # `joint_routing_assignment/pricing_round.jl`'s `_pricing_build_scenario_context`
 # (below). Both need `joint_routing_assignment/duals.jl` for
@@ -166,8 +166,8 @@ include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
 # relaxed_cluster/: NOT a fourth column-producing pricer -- a relaxation of the pricing
 # problem, whose exhaustion certifies that no improving column exists in the FULL route
-# universe without ever finding one. Selected via `CGSolver.certification_pricing_mode`
-# (never `pricing_mode`), and only for a formulation built with `relaxed_cluster_count`.
+# universe without ever finding one -- and, via harvesting, a pricer too. Selected as
+# `CGSolver.pricing.mode = :relaxed_cluster`, which requires a `relaxed_cluster_count`.
 # See relaxed_cluster/relaxation.jl for the bound it rests on.
 #
 # The directory splits into label-setting CORE at its top level and the drivers that use
@@ -207,7 +207,7 @@ include("label_setting/joint_routing_assignment/relaxed_cluster/hooks.jl")
 # witness and ../exact/accept.jl's replay, and is consumed by the certification loop, so it
 # loads between them. Pure functions -- no model, no solver, no search state.
 # utils/certification/certify.jl is the loop around the cut-aware search -- the whole of
-# `certification_pricing_mode = :relaxed_cluster`. It needs guiding/guide.jl's subset
+# `pricing.mode = :relaxed_cluster`. It needs guiding/guide.jl's subset
 # extraction, the cut context and refine.jl, so it loads last of all.
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/refinement/refine.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl")

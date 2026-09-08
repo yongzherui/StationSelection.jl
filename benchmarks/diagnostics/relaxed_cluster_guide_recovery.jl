@@ -1,6 +1,6 @@
 """Does the relaxation's winning CLUSTER set contain the exact pricer's winning STATION set?
 
-That is the whole premise of `pricing_mode = :relaxed_cluster_guided`
+This measures the cluster-guidance stage inside `CGSolver.pricing.mode = :relaxed_cluster`
 (`relaxed_cluster/utils/guiding/guide.jl`): if the cluster route minimizing the relaxed reduced cost is
 the image of the real route minimizing the exact one, then the stations of the real optimum
 all live inside the clusters the relaxed optimum visited, and searching only those stations
@@ -12,7 +12,7 @@ where certification failed 0/31, and it is worth measuring separately.
 
 # Method
 
-The dual trajectory has to be the REAL one, so CG is run unguided (`pricing_mode = :exact`)
+The dual trajectory has to be the REAL one, so CG is run unguided (the default pricer)
 and stopped after `max_iterations = t` for a ladder of `t`. That gives dual vectors from
 early (far from convergence) to final. At each one, three searches on the same duals:
 
@@ -72,11 +72,13 @@ end
 
 for n_clusters in cluster_counts, max_iterations in iteration_ladder
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-        ; BENCHMARK_BASELINE..., max_stops=10, pricing_mode=:exact,
-        relaxed_cluster_count=n_clusters,
+        ; BENCHMARK_BASELINE..., max_stops=10,
     )
+    # A partition with no mode reading it: CG prices with the ordinary pricer, so the duals
+    # below are the real ones, and the cells are there purely for the offline measurement.
     solver = CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=1),
+        pricing=CGPricingConfig(relaxed_cluster_count=n_clusters),
         max_iterations=max_iterations, reduced_cost_tol=1e-6,
         pricing_time_limit_sec=120.0, certifying_pricing_time_limit_sec=600.0,
         total_time_limit_sec=1800.0, parallel_scenario_pricing=true,
@@ -118,7 +120,7 @@ for n_clusters in cluster_counts, max_iterations in iteration_ladder
         )
         cluster_routes, _relaxed_exhausted = SS._relaxed_cluster_guide_routes(
             relaxed, Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
-            Float64(m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec]),
+            0.5 * solver.pricing_time_limit_sec,
         )
         subset = isempty(cluster_routes) ? Int[] :
             relaxed_cluster_station_subset(clustering, cluster_routes)

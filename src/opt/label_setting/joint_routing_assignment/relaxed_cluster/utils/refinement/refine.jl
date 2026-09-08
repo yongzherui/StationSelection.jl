@@ -143,6 +143,19 @@ function relaxed_cluster_split_candidates(
     return out
 end
 
+"""Strongest witness disagreement across every retained cluster guide route."""
+function _relaxed_cluster_best_split_candidate(
+    data::RelaxedClusterPricingData, routes::AbstractVector{<:AbstractVector{Int}},
+)::Union{Nothing, RelaxedClusterSplitCandidate}
+    candidates = RelaxedClusterSplitCandidate[]
+    for route in routes
+        append!(candidates, relaxed_cluster_split_candidates(data, collect(Int, route)))
+    end
+    isempty(candidates) && return nothing
+    sort!(candidates; by = c -> (-c.reward_mass, c.cluster))
+    return first(candidates)
+end
+
 """
     refine_station_clustering(clustering, candidate, travel_cost) -> StationClustering
 
@@ -231,22 +244,20 @@ function _relaxed_cluster_scenario_clustering(m::JuMP.Model, s::Int)::StationClu
 end
 
 """
-    _relaxed_cluster_refine!(m, s, data, route, travel_cost)
+    _relaxed_cluster_refine!(m, s, data, routes, travel_cost)
         -> Union{Nothing, Tuple{StationClustering, Int}}
 
-Fold one barren round's witness census into scenario `s`'s refinement state, and split if
-the trigger fires. Returns `(refined partition, index of the cell that was split)`, or
+Inspect every retained relaxed guide route from one barren round, then split the strongest
+witness disagreement in scenario `s` if the trigger fires. Returns `(refined partition,
+index of the cell that was split)`, or
 `nothing` when nothing was split. The caller needs the split index to rewrite its cut sets
 (`rewrite_cut_sets_for_split`) rather than discard them.
 
 The trigger is a conjunction, and each clause exists for a different reason:
 
-  1. **the route implicates a cell at all** -- `relaxed_cluster_split_candidates` empty
+  1. **at least one route implicates a cell** -- `relaxed_cluster_split_candidates` empty
      means the slack was not `rho_bar`'s doing, so splitting cannot tighten it;
-  2. **that cell has been implicated `recurrence` times for this scenario** -- a cut
-     already neutralises the specific barren support, so splitting on first sight chases a
-     symptom rather than the cause;
-  3. **the scenario is below `relaxed_cluster_max_count`** -- refinement makes the relaxed
+  2. **the scenario is below `relaxed_cluster_max_count`** -- refinement makes the relaxed
      graph bigger, and the exact pricer's cost is super-linear in node count, so an
      unbounded ladder ends up costing what it was meant to save.
 
@@ -255,7 +266,8 @@ scenario `s`'s own index (`_pricing_scenarios` yields `1:n_scenarios`, so the sc
 is the index), so concurrent scenarios never touch the same slot.
 """
 function _relaxed_cluster_refine!(
-    m::JuMP.Model, s::Int, data::RelaxedClusterPricingData, route::Vector{Int},
+    m::JuMP.Model, s::Int, data::RelaxedClusterPricingData,
+    routes::AbstractVector{<:AbstractVector{Int}},
     travel_cost::Dict{Tuple{Int, Int}, Float64},
 )
     key = :joint_routing_assignment_scenario_clusterings
@@ -264,10 +276,9 @@ function _relaxed_cluster_refine!(
     isnothing(max_count) && return nothing
 
     # Why a barren round did or did not split. This is the measurement that decides the
-    # recurrence threshold: `census_empty` counts rounds where refinement provably CANNOT
+    # refinement policy: `census_empty` counts rounds where refinement provably CANNOT
     # help (no cell disagreed, so the slack was travel optimism or the ride-limit max, not
-    # `rho_bar`), while `blocked_recurrence` counts rounds a threshold of 1 would have
-    # split. If `census_empty` dominates, the witness premise is wrong for this instance
+    # `rho_bar`). If `census_empty` dominates, the witness premise is wrong for this instance
     # family and no threshold saves it.
     stats = m[:joint_routing_assignment_scenario_refine_stats][s]
     _bump!(k) = (stats[k] = get(stats, k, 0) + 1)
@@ -279,26 +290,12 @@ function _relaxed_cluster_refine!(
         return nothing
     end
 
-    candidates = relaxed_cluster_split_candidates(data, route)
-    if isempty(candidates)
+    chosen = _relaxed_cluster_best_split_candidate(data, routes)
+    if isnothing(chosen)
         _bump!(:census_empty)
         return nothing
     end
     _bump!(:census_nonempty)
-
-    counts = m[:joint_routing_assignment_scenario_disagreements][s]
-    recurrence = m[:joint_routing_assignment_relaxed_cluster_refine_recurrence]
-    for candidate in candidates
-        counts[candidate.cluster] = get(counts, candidate.cluster, 0) + 1
-    end
-    # Candidates arrive worst-first by reward mass, so the first one that has recurred
-    # enough is also the heaviest such -- no second sort needed.
-    idx = findfirst(c -> counts[c.cluster] >= recurrence, candidates)
-    if isnothing(idx)
-        _bump!(:blocked_recurrence)
-        return nothing
-    end
-    chosen = candidates[idx]
 
     refined = refine_station_clustering(clustering, chosen, travel_cost)
     if refined === clustering
@@ -308,8 +305,11 @@ function _relaxed_cluster_refine!(
     m[key][s] = refined
     m[:joint_routing_assignment_scenario_splits][s] += 1
     _bump!(:split)
-    # The split cell keeps its index and the new half is appended, so counts keyed on other
-    # cells stay meaningful; only the split cell's own tally is retired.
-    delete!(counts, chosen.cluster)
     return refined, chosen.cluster
 end
+
+# Convenience for direct callers and focused tests of a single witness route.
+_relaxed_cluster_refine!(
+    m::JuMP.Model, s::Int, data::RelaxedClusterPricingData, route::Vector{Int},
+    travel_cost::Dict{Tuple{Int, Int}, Float64},
+) = _relaxed_cluster_refine!(m, s, data, [route], travel_cost)

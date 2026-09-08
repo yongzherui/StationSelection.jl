@@ -60,12 +60,13 @@ function build_model(
         data, mapping, problem.k, formulation;
         relax_integrality = true,
         initial_columns = initial_columns,
+        pricing = solver.pricing,
     )
 end
 
 """
     _build_joint_routing_assignment_model(data, mapping, l, formulation;
-        relax_integrality, initial_columns) -> BuildResult
+        relax_integrality, initial_columns, pricing) -> BuildResult
 
 Shared master-construction body -- everything `build_model` above needs for the
 LP-relaxed CG master, and everything `integer_recovery_build` below needs to rebuild the
@@ -94,6 +95,7 @@ function _build_joint_routing_assignment_model(
         formulation::AggregateODRouteJointRoutingAssignmentFormulation;
         relax_integrality::Bool,
         initial_columns,
+        pricing::CGPricingConfig=CGPricingConfig(),
     )::BuildResult
     m = Model(() -> Gurobi.Optimizer())
 
@@ -112,8 +114,14 @@ function _build_joint_routing_assignment_model(
     m[:joint_routing_assignment_max_wait_time] = formulation.max_wait_time
     m[:joint_routing_assignment_max_stops] = formulation.max_stops
     m[:joint_routing_assignment_detour_factor] = formulation.detour_factor
-    m[:joint_routing_assignment_compensated_dominance] = formulation.compensated_dominance
-    m[:joint_routing_assignment_pricing_mode] = formulation.pricing_mode
+    m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
+    # The pricer is the SOLVER's choice (`CGSolver.pricing`, a `CGPricingConfig`), resolved
+    # to a concrete symbol here and stashed so every later pricing call -- and
+    # `metadata["cg_final_pricing_mode"]` -- reads one settled value rather than
+    # re-resolving a `nothing` default. `DirectMIPSolver`'s own build of this same master
+    # passes no config and lands on `:exact`, which is inert there: it enumerates its pool
+    # up front and never prices.
+    m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -135,16 +143,17 @@ function _build_joint_routing_assignment_model(
     # a starting point and each scenario refines its own copy (see below and
     # `relaxed_cluster/utils/refinement/refine.jl`), so `K` becomes a trajectory rather
     # than a scalar and cross-round bounds are no longer comparable. That is the trade refinement makes, and
-    # it is why refinement is opt-in and off by default. Absent when
-    # the formulation did not ask for one, in which case
-    # `CGSolver(certification_pricing_mode=:relaxed_cluster)` is rejected rather than
-    # silently ignored.
-    m[:joint_routing_assignment_relaxed_cluster_guide_routes] = formulation.relaxed_cluster_guide_routes
-    m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec] =
-        formulation.relaxed_cluster_guide_time_limit_sec
-    if !isnothing(formulation.relaxed_cluster_count)
+    # it is why refinement is opt-in and off by default. `CGPricingConfig` rejects a
+    # relaxed-cluster mode without a count (and a count without such a mode), so an absent
+    # partition here means no relaxed-cluster mode was asked for.
+    m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
+    m[:joint_routing_assignment_relaxed_cluster_barren_cache] =
+        pricing.relaxed_cluster_barren_cache
+    m[:joint_routing_assignment_relaxed_cluster_cut_management] =
+        pricing.relaxed_cluster_cut_management
+    if !isnothing(pricing.relaxed_cluster_count)
         m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
-            m[:joint_routing_assignment_nodes], travel_cost, formulation.relaxed_cluster_count,
+            m[:joint_routing_assignment_nodes], travel_cost, pricing.relaxed_cluster_count,
         )
         # Per-(round x scenario) guide diagnostics -- how big a station subset the relaxation
         # actually handed the exact pricer. Phase 1 of `_run_pricing_round` is threaded over
@@ -163,24 +172,17 @@ function _build_joint_routing_assignment_model(
         #
         # Both start as copies of the one build-time partition, so a run with refinement
         # off behaves exactly as before.
-        if !isnothing(formulation.relaxed_cluster_max_count)
+        if !isnothing(pricing.relaxed_cluster_max_count)
             n_s = length(mapping.scenarios)
             m[:joint_routing_assignment_scenario_clusterings] =
                 StationClustering[m[:joint_routing_assignment_station_clustering] for _ in 1:n_s]
-            # cluster -> how many barren rounds have implicated it, per scenario. The
-            # recurrence threshold reads this; cuts already neutralise a single barren
-            # support, so splitting on first sight risks chasing a symptom.
-            m[:joint_routing_assignment_scenario_disagreements] =
-                [Dict{Int, Int}() for _ in 1:n_s]
             m[:joint_routing_assignment_scenario_splits] = zeros(Int, n_s)
             # Why each barren round split or did not -- see
             # `relaxed_cluster/utils/refinement/refine.jl`'s `_relaxed_cluster_refine!`.
             m[:joint_routing_assignment_scenario_refine_stats] = [Dict{Symbol, Int}() for _ in 1:n_s]
         end
     end
-    m[:joint_routing_assignment_relaxed_cluster_max_count] = formulation.relaxed_cluster_max_count
-    m[:joint_routing_assignment_relaxed_cluster_refine_recurrence] =
-        formulation.relaxed_cluster_refine_recurrence
+    m[:joint_routing_assignment_relaxed_cluster_max_count] = pricing.relaxed_cluster_max_count
     # Empty pool containers: real entries arrive from the seed pass below and (for the
     # LP master) from every later CG iteration (`add_columns!`, routing_and_assignment.jl).
     m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()
@@ -272,34 +274,41 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time = m[:joint_routing_assignment_max_wait_time],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
-        compensated_dominance = m[:joint_routing_assignment_compensated_dominance],
-        pricing_mode = m[:joint_routing_assignment_pricing_mode],
-        relaxed_cluster_count = _joint_routing_assignment_rebuilt_cluster_count(m),
-        relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
-        relaxed_cluster_guide_time_limit_sec =
-            Float64(m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec]),
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(
         data, mapping, l, formulation;
         relax_integrality = false,
         initial_columns = initial_columns,
+        pricing = _joint_routing_assignment_rebuilt_pricing_config(m),
     )
 end
 
 """
-    _joint_routing_assignment_rebuilt_cluster_count(m) -> Union{Nothing, Int}
+    _joint_routing_assignment_rebuilt_pricing_config(m) -> CGPricingConfig
 
-The `relaxed_cluster_count` an `integer_recovery_build` rebuild should carry, read back
-off the clustering the original build stashed (the scalar itself is not stashed
-separately -- the partition is the authoritative record, and its `n_clusters` is what
-`cluster_stations_by_travel_cost` actually produced after dropping any empty cell).
+The `CGPricingConfig` an `integer_recovery_build` rebuild should carry, read back off what
+the original build stashed. The cluster count comes from the *partition* rather than a
+stashed scalar: the partition is the authoritative record, and its `n_clusters` is what
+`cluster_stations_by_travel_cost` actually produced after dropping any empty cell.
 
-Recovery does no pricing at all, so the rebuilt model never uses this; it is reconstructed
-only so the rebuilt `formulation` compares equal to the original one, which callers and
-tests rely on.
+Recovery does no pricing at all, so the rebuilt model never uses any of this; it is
+reconstructed only so the rebuilt model carries the same pricing state as the original,
+rather than silently reverting to defaults. `warm_start_mode` is deliberately dropped --
+it describes a phase of the CG loop that has already finished.
 """
-function _joint_routing_assignment_rebuilt_cluster_count(m::JuMP.Model)::Union{Nothing, Int}
-    haskey(m.obj_dict, :joint_routing_assignment_station_clustering) || return nothing
-    return m[:joint_routing_assignment_station_clustering].n_clusters
+function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPricingConfig
+    count = haskey(m.obj_dict, :joint_routing_assignment_station_clustering) ?
+        m[:joint_routing_assignment_station_clustering].n_clusters : nothing
+    return CGPricingConfig(
+        mode = m[:joint_routing_assignment_pricing_mode]::Symbol,
+        compensated_dominance = Bool(m[:joint_routing_assignment_compensated_dominance]),
+        relaxed_cluster_count = count,
+        relaxed_cluster_max_count = m[:joint_routing_assignment_relaxed_cluster_max_count],
+        relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
+        relaxed_cluster_barren_cache =
+            Bool(m[:joint_routing_assignment_relaxed_cluster_barren_cache]),
+        relaxed_cluster_cut_management =
+            Bool(m[:joint_routing_assignment_relaxed_cluster_cut_management]),
+    )
 end

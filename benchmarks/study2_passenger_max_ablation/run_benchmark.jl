@@ -31,10 +31,13 @@ pricing_time_limit_sec = parse(Float64, fields[9])
 
 problem, k, instance_meta = benchmark_problem(@__DIR__, "STUDY2", n_stations, n_pairs, n_scenarios, seed)
 output_dir = benchmark_output_dir(@__DIR__, "STUDY2", "study2_passenger_max_ablation")
+# One formulation for both arms: the pricer is a CGSolver setting, so the two arms are
+# two searches of the identical model -- which is what makes their optima comparable.
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., pricing_mode=Symbol(mode_string), max_stops=max_stops,
+    ; BENCHMARK_BASELINE..., max_stops=max_stops,
 )
-solver = benchmark_cg_solver(pricing_time_limit_sec; recover_integer_solution=true)
+solver = benchmark_cg_solver(pricing_time_limit_sec; recover_integer_solution=true,
+                             pricing=CGPricingConfig(mode=Symbol(mode_string)))
 
 result = run_opt(problem, formulation, solver)
 metrics = benchmark_cg_metrics(result, :joint_routing_assignment_columns)

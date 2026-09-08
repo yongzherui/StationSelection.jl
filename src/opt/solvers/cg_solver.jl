@@ -7,6 +7,15 @@ Column-generation outer loop: repeatedly solve the restricted master (`build_res
 model), price new columns against its duals, and add any improving ones back into the
 master, until pricing finds nothing improving or `max_iterations` is reached.
 
+## Which pricer (`pricing::CGPricingConfig`)
+
+*Which* search finds those columns -- the pricer, its warm-start phasing, and every
+relaxed-cluster setting -- lives on `pricing`, a `CGPricingConfig`
+(`opt/solvers/cg_pricing_config.jl`), which documents each field. It is a solver concern
+rather than a formulation one because a pricer is a search algorithm: two runs differing
+only in `pricing.mode` solve the identical model. The fields below are about *budgets* --
+how long each search may run -- and are orthogonal to it.
+
 `pricing_time_limit_sec` is the wall-clock budget for **one whole pricing round**, across
 every scenario. Under serial pricing `_run_pricing_round` divides it equally, so each
 scenario's label search gets `pricing_time_limit_sec / n_scenarios`; under
@@ -38,52 +47,50 @@ the answer. `metadata["cg_certifying_rounds"]` counts how often it fired, and ea
 iteration log row carries `certifying_pricing` plus the `pricing_limit_sec` actually
 used.
 
-## Certify-first (`certification_pricing_mode`)
+## The `:relaxed_cluster` pricing mode
 
-The two-tier escalation above is the expensive way to prove pricing is done: it re-prices
-the identical duals under a much longer budget, and on hard instances that certifying
-round dominates the whole solve. `certification_pricing_mode` (default `nothing`) adds a
-cheap way to *try* proving it first. One mode today, `:relaxed_cluster`: the
-relaxed-cluster no-good-cut loop. When the relaxation names an improving cluster route,
-the loop searches that route's cluster support exhaustively with the real pricer; a barren
-support becomes a cut and the relaxation is asked again. `certification_max_rounds`
-(default 32) caps the cuts per scenario per round.
+`pricing.mode = :relaxed_cluster` (with `pricing.relaxed_cluster_count = K`, which it
+requires) is a pricer in its own right. It is *both* halves of an iteration at once: it
+finds columns, and it is the only search that can prove there are none left. Available
+only on `AggregateODRouteJointRoutingAssignmentFormulation`, which is what implements the
+hooks below.
+
+Each iteration it runs the relaxed-cluster no-good-cut loop instead of an ordinary pricing
+round, under the same `pricing_time_limit_sec`. The loop prices a **relaxation** of the
+pricing problem whose minimum reduced cost lower-bounds the real one, on `K` cluster nodes
+rather than `n` stations. Three things can come back:
+
+  *certified* -- the relaxation exhausted with nothing below `-reduced_cost_tol`, so no
+    real improving column exists either. The loop stops with `cg_converged=true` and
+    `cg_stop_reason="converged_by_certification"`.
+
+  *refuted* -- the relaxation named an improving cluster route, so the loop searched that
+    route's cluster support exhaustively with the real exact pricer. A barren support
+    becomes a no-good cut ("every route must visit at least one cluster outside T") and the
+    relaxation is asked again; a productive one yields real, verified columns. Those
+    columns ARE this iteration's pricing result -- the round doubles as the pricing round
+    rather than being wasted (MEASURED: 96% of attempts are refuted --
+    `notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`).
+
+  *inconclusive* -- the loop ran out of its budget (or of cut rounds) without settling
+    either way, and harvested nothing. This is the only case that escalates: the same round
+    is re-run at `certifying_pricing_time_limit_sec`, exactly as an inconclusive ordinary
+    pricing round escalates to the certifying round above. A second inconclusive result
+    ends the loop with `cg_stop_reason="pricing_inconclusive"` -- nothing was proved.
 
 **The cuts are the mechanism, not a refinement of it.** A cut-free round -- which is
 exactly this loop's round 1 -- certified 0 times across ~1130 measured attempts at every
 size and every K, because a converged master's exact minimum reduced cost is 0 while the
 relaxation's slack is 10^2-10^3. A cut-free mode used to exist alongside the loop for
-exactly that comparison, under these two names; it was removed once the answer was in, and
-`:relaxed_cluster_nogood` is now rejected with a message pointing at `:relaxed_cluster`.
+exactly that comparison, under the name `:relaxed_cluster_nogood`; it was removed once the
+answer was in, and that name is now rejected with a message pointing here.
 
-When set, every iteration -- before the real pricing round -- runs a **relaxation** of the
-pricing problem under `certification_time_limit_sec` (default 300 s). The relaxation is
-built so that its minimum reduced cost lower-bounds the real one, so if it exhausts
-without finding anything below `-reduced_cost_tol`, no real improving column exists
-either: the loop stops with `cg_converged=true` and
-`cg_stop_reason="converged_by_certification"`, having skipped both the regular and the
-certifying round. If it fails -- either it found an improving *relaxed* solution (the
-relaxation is too loose, or an improving column genuinely exists) or it ran out of time --
-it has proved nothing and the iteration proceeds to `price_columns` exactly as if the
-feature were off.
-
-A failing attempt is not cheap: the loop pays one exhaustive real-pricer search per cut it
-adds, so it can cost as much as a pricing round -- budget `certification_time_limit_sec`
-accordingly. What makes that affordable is harvesting: a refuted search ran the real pricer
-on real duals, so its labels ARE improving columns and ride out on the result rather than
-being discarded (MEASURED: 96% of attempts were refuted --
-`notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`).
-
-**Enabling certification makes the two-tier round unreachable.** When a pricing round comes
-back empty without exhausting, a certification-enabled run escalates the CERTIFIER to
-`certifying_pricing_time_limit_sec` instead of re-pricing all `n` stations at that budget.
-The relaxed search runs on `K` cluster nodes and the exact pricer's cost is super-linear in
-node count, so the same wall buys more proof there -- and a success is a full-route-universe
-certificate rather than a pricer-scoped one. Escalating the pricer instead would abandon the
-cheaper searcher precisely when it was closest to succeeding, and would pay for the very
-round certification exists to replace. `certifying_rounds` therefore stays 0 for any run
-with `certification_pricing_mode` set; the escalated attempts appear as extra
-`certification_rounds` with `*_escalated` outcomes instead.
+**The two-tier certifying re-price is unreachable in this mode**, and deliberately so.
+When a round comes back empty, escalating the CERTIFIER is the cheaper buy: the relaxed
+search runs on `K` cluster nodes, the exact pricer's cost is super-linear in node count,
+and a success is a full-route-universe certificate rather than a pricer-scoped one.
+`cg_certifying_rounds` therefore stays 0 for a `:relaxed_cluster` run; its escalated
+attempts appear as extra `cg_certification_rounds` with `*_escalated` outcomes instead.
 
 The trade is measured, not free: 4 of 45 arm runs (serial) and 1 of 35
 (parallel) reached OPTIMAL *only* because the two-tier round certified where the relaxation
@@ -91,26 +98,24 @@ did not. All but one were `K/n = 0.4`, the coarse partition refuted on every oth
 At `K/n` in [0.6, 0.8] the fallback was load-bearing for exactly one run in two full
 sweeps.
 
-The certificate covers the **full route universe**, because the relaxation bounds every
-real route rather than only the ones the active pricer searches. So a certified run
-reports `cg_optimality_scope="full_route_universe"` even when its column-finding pricer is
-`:station_simple`, and `cg_certified_by_relaxation=true` records that the certificate came
-from the relaxation rather than from exhausted pricing.
+A certificate from here covers the **full route universe**, because the relaxation bounds
+every real route rather than only the ones the active pricer searches. So a run that
+certified reports `cg_optimality_scope="full_route_universe"` even when a
+`pricing.warm_start_mode=:station_simple` phase found most of its columns, and
+`cg_certified_by_relaxation=true` records that the certificate came from the relaxation
+rather than from exhausted pricing.
 `metadata["cg_certification_rounds"]`/`["cg_certification_sec"]` cost it, and
 `["cg_certification_refuted_rounds"]`/`["cg_certification_inconclusive_rounds"]` split the
-failures into the two kinds that call for opposite fixes -- *refuted* versus
-*inconclusive* (the attempt ran out of `certification_time_limit_sec`, or hit the round or
-cut cap). *Refuted* means an exhaustive real search over some cluster support found a
-genuinely improving column -- a true negative, which says nothing against the relaxation.
-Each iteration log row
-carries `certification_sec`, `certification_certified` and `certification_outcome`.
+non-certifying rounds into the two kinds that call for opposite fixes. *Refuted* means an
+exhaustive real search over some cluster support found a genuinely improving column -- a
+true negative, which says nothing against the relaxation, and which is where the columns
+come from. *Inconclusive* is the budget one, and the only one
+`pricing_time_limit_sec`/`certifying_pricing_time_limit_sec` can move. Each iteration log
+row carries `certification_sec`, `certification_certified` and `certification_outcome`.
 
 Requires a formulation implementing `cg_certification_supported`/`cg_certification_round`;
-a mode that nothing supports is rejected up front, never silently ignored. For
-`:relaxed_cluster` that means building
-`AggregateODRouteJointRoutingAssignmentFormulation(relaxed_cluster_count = K)`, whose
-station partition is fixed at build time -- see
-`label_setting/joint_routing_assignment/relaxed_cluster/`.
+a `:relaxed_cluster` pricing mode on a formulation that supports neither is rejected up
+front, never silently ignored.
 
 ## Total budget (`total_time_limit_sec`)
 
@@ -222,6 +227,7 @@ solve (`0.0` when recovery is off), so the two can be reported separately even t
 """
 struct CGSolver <: AbstractSolver
     config::SolverOptions
+    pricing::CGPricingConfig
     max_iterations::Int
     reduced_cost_tol::Float64
     pricing_time_limit_sec::Float64
@@ -230,13 +236,10 @@ struct CGSolver <: AbstractSolver
     parallel_scenario_pricing::Bool
     initial_columns::Union{Nothing, AbstractVector}
     recover_integer_solution::Bool
-    warm_start_pricing_mode::Union{Nothing, Symbol}
-    certification_pricing_mode::Union{Nothing, Symbol}
-    certification_time_limit_sec::Float64
-    certification_max_rounds::Int
 
     function CGSolver(;
             config::SolverOptions=SolverOptions(),
+            pricing::CGPricingConfig=CGPricingConfig(),
             max_iterations::Int=1_000,
             reduced_cost_tol::Number=1e-6,
             pricing_time_limit_sec::Number=300.0,
@@ -245,10 +248,6 @@ struct CGSolver <: AbstractSolver
             parallel_scenario_pricing::Bool=false,
             initial_columns::Union{Nothing, AbstractVector}=nothing,
             recover_integer_solution::Bool=false,
-            warm_start_pricing_mode::Union{Nothing, Symbol}=nothing,
-            certification_pricing_mode::Union{Nothing, Symbol}=nothing,
-            certification_time_limit_sec::Number=300.0,
-            certification_max_rounds::Int=32,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         reduced_cost_tol >= 0 || throw(ArgumentError("reduced_cost_tol must be non-negative"))
@@ -261,34 +260,11 @@ struct CGSolver <: AbstractSolver
             "an inconclusive regular round MORE time, never less",
         ))
         total_time_limit_sec > 0 || throw(ArgumentError("total_time_limit_sec must be positive"))
-        certification_time_limit_sec > 0 ||
-            throw(ArgumentError("certification_time_limit_sec must be positive"))
-        # `:relaxed_cluster_nogood` named the cut loop back when a cut-free
-        # `:relaxed_cluster` also existed. The cut-free one was removed -- it is this
-        # loop's round 1, and round 1 certified 0 times in ~1130 measured attempts -- so
-        # the two names collapsed onto `:relaxed_cluster`. Named here only to say that
-        # rather than report it as an unknown symbol.
-        certification_pricing_mode === :relaxed_cluster_nogood && throw(ArgumentError(
-            ":relaxed_cluster_nogood was merged into :relaxed_cluster -- relaxed-cluster " *
-            "certification is always the no-good-cut loop now, since the cut-free round " *
-            "is its round 1 and never certifies. Use :relaxed_cluster",
-        ))
-        isnothing(certification_pricing_mode) ||
-            certification_pricing_mode === :relaxed_cluster ||
-            throw(ArgumentError(
-                "certification_pricing_mode must be :relaxed_cluster or nothing, got " *
-                "$(repr(certification_pricing_mode))",
-            ))
-        certification_max_rounds >= 1 || throw(ArgumentError(
-            "certification_max_rounds must be >= 1, got $(certification_max_rounds)",
-        ))
         new(
-            config, max_iterations, Float64(reduced_cost_tol),
+            config, pricing, max_iterations, Float64(reduced_cost_tol),
             Float64(pricing_time_limit_sec), Float64(certifying_pricing_time_limit_sec),
             Float64(total_time_limit_sec), parallel_scenario_pricing,
-            initial_columns, recover_integer_solution, warm_start_pricing_mode,
-            certification_pricing_mode, Float64(certification_time_limit_sec),
-            certification_max_rounds,
+            initial_columns, recover_integer_solution,
         )
     end
 end
@@ -311,12 +287,11 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     stop_reason = "max_iterations"
 
     # Warm-start phasing. `active_pricing_mode` is the pricer in force right now; the loop
-    # runs phase 1 in `warm_start_pricing_mode` until that universe is exhausted, then
-    # hands off to the formulation's own pricer for phase 2, which is the only phase that
-    # can certify. Both phases share one column pool and one master -- the handoff changes
+    # runs phase 1 in `pricing.warm_start_mode` until that universe is exhausted, then
+    # hands off to `pricing.mode` for phase 2, which is the only phase that can certify. Both phases share one column pool and one master -- the handoff changes
     # what pricing searches, nothing else, so every column phase 1 harvested stays.
     final_pricing_mode = cg_pricing_mode(build_result, mapping, m)
-    warm_start_mode = solver.warm_start_pricing_mode
+    warm_start_mode = solver.pricing.warm_start_mode
     warm_start_active = false
     warm_start_iterations = 0
     # Wall seconds spent in phase 1, i.e. how long the restricted universe took to exhaust.
@@ -326,13 +301,13 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     warm_start_sec = 0.0
     if !isnothing(warm_start_mode)
         isnothing(final_pricing_mode) && throw(ArgumentError(
-            "warm_start_pricing_mode=$(repr(warm_start_mode)) was requested, but this " *
+            "pricing.warm_start_mode=$(repr(warm_start_mode)) was requested, but this " *
             "formulation has no selectable pricer (no `cg_pricing_mode` method), so there " *
             "is nothing to warm-start from and nothing to hand off to",
         ))
         warm_start_mode === final_pricing_mode && throw(ArgumentError(
-            "warm_start_pricing_mode=$(repr(warm_start_mode)) equals the formulation's own " *
-            "pricing_mode: a warm-start phase that hands off to itself is a no-op, and " *
+            "pricing.warm_start_mode=$(repr(warm_start_mode)) equals the pricer it would " *
+            "hand off to: a warm-start phase that hands off to itself is a no-op, and " *
             "would silently halve max_iterations",
         ))
         set_cg_pricing_mode!(build_result, mapping, m, warm_start_mode)
@@ -341,17 +316,18 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     active_pricing_mode = warm_start_active ? warm_start_mode : final_pricing_mode
     _mode_label() = string(something(active_pricing_mode, :default))
 
-    # Relaxation-based certification. When enabled, every iteration asks the cheap relaxed
-    # pricer "can an improving column still exist?" BEFORE paying for the real one; a `no`
-    # is a full-route-universe optimality certificate and ends the solve on the spot, a
-    # `yes` proves nothing and the loop falls through to the real pricer unchanged. See
+    # `pricing.mode = :relaxed_cluster` replaces the ordinary pricing round with the
+    # relaxed-cluster no-good-cut loop, which both harvests real columns and is the only
+    # search that can certify: exhausting the relaxation bounds EVERY real route, not just
+    # the ones a pricer would search. See
     # `label_setting/joint_routing_assignment/relaxed_cluster/relaxation.jl` for the bound.
-    certification_mode = solver.certification_pricing_mode
-    if !isnothing(certification_mode)
-        cg_certification_supported(build_result, mapping, m, certification_mode) || throw(ArgumentError(
-            "certification_pricing_mode=$(repr(certification_mode)) was requested, but this " *
-            "model has no such certification pricer available -- for :relaxed_cluster, build " *
-            "the formulation with `relaxed_cluster_count = K`",
+    # Read off `active_pricing_mode` per iteration, not once, because a warm start can
+    # switch modes mid-solve.
+    if final_pricing_mode === :relaxed_cluster
+        cg_certification_supported(build_result, mapping, m) || throw(ArgumentError(
+            "pricing.mode=:relaxed_cluster was requested, but this model has no " *
+            "relaxed-cluster pricer available -- it needs a formulation that implements " *
+            "one, built from a CGPricingConfig carrying relaxed_cluster_count",
         ))
     end
     certification_rounds = 0
@@ -359,7 +335,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     # certifies: "refuted" means an improving relaxed solution existed, so the relaxation
     # is too loose as configured -- a between-runs observation, since a certification
     # pricer's tightness is fixed before the solve starts and nothing here can react to it;
-    # "inconclusive" means the search ran out of `certification_time_limit_sec` without
+    # "inconclusive" means the search ran out of its time (or cut-round) budget without
     # settling either way, which IS a knob on this solver. The bare attempt count cannot
     # tell the two apart, and they point at different places.
     certification_refuted_rounds = 0
@@ -416,17 +392,18 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
 
         duals = extract_duals(build_result, mapping, m)
 
-        # Certify-first: a successful relaxed round makes the real pricing round
-        # unnecessary, so it runs before it rather than as a fallback after it. It is
-        # bounded by its own (short) budget, and a round that is going to fail early-exits
-        # at the first improving relaxed route, so the cost of a failed attempt is small.
-        if !isnothing(certification_mode)
-            certification_limit = min(solver.certification_time_limit_sec, remaining_budget())
+        # `:relaxed_cluster` IS this iteration's pricing round: it certifies, or it
+        # harvests real columns, or it comes back inconclusive and escalates below. It runs
+        # under the ordinary `pricing_time_limit_sec` for exactly that reason -- it is
+        # doing the pricing, not sitting in front of it.
+        relaxed_cluster_pricing = active_pricing_mode === :relaxed_cluster
+        if relaxed_cluster_pricing
+            certification_limit = min(solver.pricing_time_limit_sec, remaining_budget())
             if certification_limit > 0
                 t_cert = time()
                 certification_rounds += 1
                 certification = cg_certification_round(
-                    build_result, mapping, m, duals, solver, certification_mode;
+                    build_result, mapping, m, duals, solver;
                     time_limit_sec=certification_limit,
                 )
                 iteration_certification_sec = time() - t_cert
@@ -503,41 +480,47 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         end
 
         t0 = time()
-        pricing_limit = min(solver.pricing_time_limit_sec, remaining_budget())
-        new_columns = price_columns(build_result, mapping, m, duals, solver;
-                                    time_limit_sec=pricing_limit)
+        pricing_limit = 0.0
+        new_columns = nothing
+        # Under `:relaxed_cluster` the round above WAS the pricing round -- it certified,
+        # or it harvested (and `continue`d), or it came back inconclusive, which is the one
+        # case that reaches here. There is no second pricer to call: the escalation below
+        # re-runs the same round at the longer budget.
+        if !relaxed_cluster_pricing
+            pricing_limit = min(solver.pricing_time_limit_sec, remaining_budget())
+            new_columns = price_columns(build_result, mapping, m, duals, solver;
+                                        time_limit_sec=pricing_limit)
+        end
         certifying = false
 
-        # A regular round that comes back empty is only conclusive if its label searches
-        # actually exhausted. If it merely ran out of its (short) budget, the empty result
-        # is ambiguous and something must resolve it before the loop concludes anything.
+        # A round that comes back empty is only conclusive if its label searches actually
+        # exhausted. If it merely ran out of its (short) budget, the empty result is
+        # ambiguous and something must resolve it before the loop concludes anything.
         #
-        # WHICH thing depends on whether a certification pricer is available, and the two
-        # ladders are not equivalent:
+        # WHICH thing depends on the active pricing mode, and the two ladders are not
+        # equivalent:
         #
-        #   certification OFF -- re-price the same duals at `certifying_pricing_time_limit_sec`
+        #   ordinary pricer -- re-price the same duals at `certifying_pricing_time_limit_sec`
         #     (the historical two-tier round). Only that longer pass can turn an empty result
         #     into `cg_pricing_exhausted`.
         #
-        #   certification ON  -- escalate the CERTIFIER instead, at the same budget. The
-        #     relaxed search runs on K cluster nodes rather than n stations and the exact
-        #     pricer's cost is super-linear in node count, so per unit of proof it is the
-        #     cheaper buy -- and when it succeeds the certificate covers the FULL route
-        #     universe rather than just the pricer's. Escalating to the full-station
-        #     re-price would abandon the cheaper searcher exactly when it was closest to
-        #     working, and would pay for the very round certification exists to replace.
-        #     MEASURED: the first attempt failing on budget (`inconclusive`) rather than on
-        #     looseness (`refuted`) is what this rescues.
+        #   :relaxed_cluster -- re-run the relaxed round at the same budget. The relaxed
+        #     search runs on K cluster nodes rather than n stations and the exact pricer's
+        #     cost is super-linear in node count, so per unit of proof it is the cheaper
+        #     buy -- and when it succeeds the certificate covers the FULL route universe
+        #     rather than just the pricer's. MEASURED: the first attempt failing on budget
+        #     (`inconclusive`) rather than on looseness (`refuted`) is what this rescues.
         #
-        # The two-tier round is therefore UNREACHABLE while certification is enabled.
-        if (isnothing(new_columns) || isempty(new_columns)) && !_cg_pricing_exhausted(m)
+        # The two-tier round is therefore UNREACHABLE under `:relaxed_cluster`.
+        if (isnothing(new_columns) || isempty(new_columns)) &&
+                (relaxed_cluster_pricing || !_cg_pricing_exhausted(m))
             escalated_limit = min(solver.certifying_pricing_time_limit_sec, remaining_budget())
-            if !isnothing(certification_mode)
+            if relaxed_cluster_pricing
                 if escalated_limit > iteration_certification_sec && escalated_limit > 0
                     t_cert = time()
                     certification_rounds += 1
                     escalated = cg_certification_round(
-                        build_result, mapping, m, duals, solver, certification_mode;
+                        build_result, mapping, m, duals, solver;
                         time_limit_sec=escalated_limit,
                     )
                     iteration_certification_sec += time() - t_cert
@@ -599,7 +582,13 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             # label search exhausted its frontier. A time-limited pricing pass
             # can also return no columns; treating that as exhaustion silently
             # turns a pricing timeout into a false optimality certificate.
-            converged = _cg_pricing_exhausted(m)
+            #
+            # `:relaxed_cluster` never reaches here having exhausted anything -- its only
+            # certificate is the one taken above -- and it did not call `price_columns` at
+            # all, so the model's exhaustion flag is stale (from a warm-start phase, or
+            # absent, in which case `_cg_pricing_exhausted` defaults to `true`). Reading it
+            # would manufacture a certificate out of a timed-out relaxation.
+            converged = !relaxed_cluster_pricing && _cg_pricing_exhausted(m)
 
             # Phase 1 exhausting its own universe is a phase boundary, not the end of the
             # solve. Hand off to the formulation's real pricer and keep going against the
@@ -715,11 +704,14 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         # stopped inside phase 1) -- `cg_warm_start_iterations` distinguishes those two.
         "cg_warm_start_sec" => warm_start_sec,
         "cg_final_pricing_mode" => active_pricing_mode,
-        # Which certification pricer ran (if any), how many rounds it cost, and whether it
-        # is what ended the solve. A relaxation certificate bounds EVERY real route, so it
-        # is a full-route-universe certificate regardless of which pricer was finding
-        # columns -- which is why it overrides the two scope keys below.
-        "cg_certification_pricing_mode" => certification_mode,
+        # Whether the relaxed-cluster round was configured at all, how many rounds it cost,
+        # and whether it is what ended the solve. A relaxation certificate bounds EVERY
+        # real route, so it is a full-route-universe certificate regardless of which pricer
+        # found the columns -- which is why it overrides the two scope keys below.
+        # Kept as its own key (rather than left to `cg_final_pricing_mode`) so a run that
+        # stopped inside a warm-start phase still records that it was going to certify.
+        "cg_certification_pricing_mode" =>
+            (final_pricing_mode === :relaxed_cluster ? :relaxed_cluster : nothing),
         "cg_certification_rounds" => certification_rounds,
         "cg_certification_refuted_rounds" => certification_refuted_rounds,
         "cg_certification_inconclusive_rounds" => certification_inconclusive_rounds,
@@ -737,13 +729,13 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         "cg_relaxed_cluster_splits" => copy(get(JuMP.object_dictionary(m),
             :joint_routing_assignment_scenario_splits, Int[])),
         # Per scenario. These are a TWO-LEVEL hierarchy, not a flat partition -- summing
-        # all six double-counts:
+        # all five double-counts:
         #     barren_rounds  = blocked_ceiling + census_empty + census_nonempty
-        #     census_nonempty = split + blocked_recurrence + split_stale
+        #     census_nonempty = split + split_stale
         # `census_empty` vs `census_nonempty` is the "is splitting even viable" measurement,
         # and its denominator is `census_empty + census_nonempty` -- NOT `barren_rounds`,
         # because the ceiling is checked first and ceiling-blocked rounds never run a
-        # census. `blocked_recurrence` is what a threshold of 1 would have made splits.
+        # census. Every nonempty census attempts its strongest split immediately.
         # `split_stale` should always be 0: witnesses are always members of the cell they
         # implicate, so a candidate is never degenerate. A nonzero value is a bug canary.
         "cg_relaxed_cluster_refine_stats" => copy(get(JuMP.object_dictionary(m),
@@ -810,11 +802,11 @@ end
     cg_pricing_mode(build_result, mapping, m) -> Union{Nothing, Symbol}
     set_cg_pricing_mode!(build_result, mapping, m, mode::Symbol)
 
-Optional hook pair supporting `CGSolver.warm_start_pricing_mode`. A formulation whose
+Optional hook pair supporting `CGSolver.pricing.warm_start_mode`. A formulation whose
 pricer is selectable implements both: the getter returns the mode currently in force, the
 setter switches it mid-solve. The defaults make the feature inert -- `cg_pricing_mode`
 returns `nothing`, meaning "this formulation has no selectable pricer", and the loop then
-refuses a `warm_start_pricing_mode` rather than silently ignoring it.
+refuses a `warm_start_mode` rather than silently ignoring it.
 
 The switch has to reach the *model*, not the formulation object: hooks only ever receive
 `build_result`/`mapping`/`m`, and the pricer is chosen per pricing call from state stashed
@@ -842,16 +834,14 @@ case). These two functions exist so that scope travels with every result instead
 something the reader has to infer from the formulation, and `cg_optimality_scope` is the
 key to grep for when auditing whether a certified number is a full-universe optimum.
 """
+# `:relaxed_cluster` is deliberately absent: it never reports its own exhaustion, so the
+# only way it ends a solve is with a certificate that bounds every real route.
 _cg_pricing_universe_is_restricted(mode::Union{Nothing, Symbol}) =
-    mode === :station_simple || mode === :relaxed_cluster_guided
+    mode === :station_simple || mode === :cluster_guide
 
 function _cg_optimality_scope(mode::Union{Nothing, Symbol})
     mode === :station_simple && return "elementary_routes_only"
-    # The relaxation-guided pricer searches only the stations inside the clusters its
-    # relaxed optimum visited, and that subset is re-derived from the duals every round --
-    # so exhausting it says nothing about the stations left out, and says it about a
-    # different subset each iteration.
-    mode === :relaxed_cluster_guided && return "relaxed_cluster_station_subset_only"
+    mode === :cluster_guide && return "cluster_guided_station_subset_only"
     return "full_route_universe"
 end
 
@@ -861,37 +851,40 @@ function price_columns(build_result::BuildResult, mapping, m::JuMP.Model, duals,
 end
 
 """
-    cg_certification_supported(build_result, mapping, m, mode) -> Bool
-    cg_certification_round(build_result, mapping, m, duals, solver, mode; time_limit_sec)
-        -> (; certified::Bool, ...)
+    cg_certification_supported(build_result, mapping, m) -> Bool
+    cg_certification_round(build_result, mapping, m, duals, solver; time_limit_sec)
+        -> (; certified::Bool, improving_found::Bool, candidates, ...)
 
-Optional hook pair supporting `CGSolver.certification_pricing_mode`: a *relaxation*
-pricer, whose only job is to answer "can an improving column still exist for these duals?"
+Optional hook pair backing the `:relaxed_cluster` pricing mode: a *relaxation* round that
+answers "can an improving column still exist for these duals?", and harvests the real
+columns its refutation searches turn up on the way.
 
-This is a different contract from `price_columns`, not a variant of it. A certification
-pricer searches a relaxed problem whose solutions need not correspond to real columns, so
-it returns no columns at all -- only a bit. What makes that bit worth having is the
-direction of the relaxation: it must lower-bound the real pricing problem's minimum
-reduced cost, so
+This is a wider contract than `price_columns`, not a narrower one. The round searches a
+relaxed problem whose solutions need not correspond to real columns, so on its own it
+returns only a bit -- but the direction of the relaxation is what makes that bit worth
+having: it must lower-bound the real pricing problem's minimum reduced cost, so
 
     no relaxed solution below -reduced_cost_tol  =>  no real column below it either
 
 and the loop can stop *certified* without ever running the expensive exhaustive search
-that would otherwise be needed to prove the same thing. A `false` proves nothing (the
-relaxation may simply be loose), and the loop falls through to `price_columns` unchanged.
+that would otherwise be needed to prove the same thing. `certified=false` proves nothing
+(the relaxation may simply be loose); what it does carry is `candidates`, the improving
+columns the exhaustive sub-searches behind a refutation found, which the loop materializes
+as that iteration's pricing result.
 
-The result must have a `certified::Bool` field; anything else on it is the pricer's own
-diagnostics. The defaults make the feature inert: `cg_certification_supported` returns
-`false`, so the loop refuses a `certification_pricing_mode` rather than silently ignoring
-it. Only `AggregateODRouteJointRoutingAssignmentFormulation` implements the pair today,
-for `:relaxed_cluster`
-(`label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl`).
+The result must have `certified::Bool`, `improving_found::Bool` and `candidates`; anything
+else on it is the pricer's own diagnostics. The defaults make the mode unavailable:
+`cg_certification_supported` returns `false`, so the loop refuses
+`pricing.mode=:relaxed_cluster` rather than silently ignoring it. Only
+`AggregateODRouteJointRoutingAssignmentFormulation` implements the pair today
+(`label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl`),
+and only when the solver's `CGPricingConfig` carried a `relaxed_cluster_count`.
 """
-cg_certification_supported(build_result::BuildResult, mapping, m::JuMP.Model, mode::Symbol) = false
+cg_certification_supported(build_result::BuildResult, mapping, m::JuMP.Model) = false
 
 function cg_certification_round(build_result::BuildResult, mapping, m::JuMP.Model, duals,
-        solver::CGSolver, mode::Symbol; time_limit_sec::Real)
-    throw(MethodError(cg_certification_round, (build_result, mapping, m, duals, solver, mode)))
+        solver::CGSolver; time_limit_sec::Real)
+    throw(MethodError(cg_certification_round, (build_result, mapping, m, duals, solver)))
 end
 
 """

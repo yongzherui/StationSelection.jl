@@ -31,10 +31,13 @@ pricing_time_limit_sec = parse(Float64, fields[9])
 problem, k, instance_meta = benchmark_problem(@__DIR__, "STUDY3", n_stations, n_pairs, n_scenarios, seed)
 output_dir = benchmark_output_dir(@__DIR__, "STUDY3", "study3_dominance_ablation")
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., pricing_mode=:exact, max_stops=max_stops,
-    compensated_dominance=compensated_dominance,
+    ; BENCHMARK_BASELINE..., max_stops=max_stops,
 )
-solver = benchmark_cg_solver(pricing_time_limit_sec; recover_integer_solution=true)
+solver = benchmark_cg_solver(
+    pricing_time_limit_sec;
+    recover_integer_solution=true,
+    pricing=CGPricingConfig(compensated_dominance=compensated_dominance),
+)
 result = run_opt(problem, formulation, solver)
 metrics = benchmark_cg_metrics(result, :joint_routing_assignment_columns)
 bounds = benchmark_lp_ip(result)

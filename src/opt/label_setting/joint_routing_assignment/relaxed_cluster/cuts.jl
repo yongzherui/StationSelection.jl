@@ -14,7 +14,7 @@ makes one label better than another at a state.
 
 The loop's step is:
 
-    relaxed search  ->  best improving cluster route, support T
+    relaxed search  ->  best improving cluster routes, combined support T
     exact search over stations(T)
         found an improving real column  ->  refuted, stop
         exhausted with nothing          ->  T is BARREN; cut it and search again
@@ -93,6 +93,14 @@ certification loop stops adding cuts here and reports itself inconclusive
 rather than silently dropping one (which would re-admit an already-refuted
 cluster support and could loop forever)."""
 const RELAXED_CLUSTER_MAX_CUTS = 64
+
+"""Cap on cut rounds in one certification attempt, i.e. per (CG iteration x scenario).
+
+Not a solver knob: the loop is bounded by the caller's wall-clock deadline and by
+`RELAXED_CLUSTER_MAX_CUTS`. The extra round permits one final search with all 64 cuts
+active; it can certify, while finding another barren support reports inconclusive because
+no additional mask bit exists."""
+const RELAXED_CLUSTER_MAX_CUT_ROUNDS = RELAXED_CLUSTER_MAX_CUTS + 1
 
 """
     _relaxed_cluster_cuts(data, cluster_sets) -> RelaxedClusterNoGoodCuts

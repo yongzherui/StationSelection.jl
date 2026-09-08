@@ -44,19 +44,17 @@ include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
 problem, k, _meta = benchmark_problem(@__DIR__, "PROBE", n_stations, n_pairs, n_scenarios, seed)
 @printf("instance: n=%d p=%d s=%d seed=%d (k=%d)\n\n", n_stations, n_pairs, n_scenarios, seed, k)
 
+# One formulation for every arm: only the solver's pricer changes across the K sweep.
 formulation(K) = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=10, pricing_mode=:exact,
-    relaxed_cluster_count=K,
+    ; BENCHMARK_BASELINE..., max_stops=10,
 )
-certification_mode = Symbol(get(ENV, "PROBE_CERT_MODE", "relaxed_cluster"))
 solver(K) = benchmark_cg_solver(
-    120.0; recover_integer_solution=false, threads=1,
+    parse(Float64, get(ENV, "PROBE_CERT_LIMIT", "60.0"));
+    recover_integer_solution=false, threads=1,
     certifying_pricing_time_limit_sec=600.0, total_time_limit_sec=1800.0,
-    certification_pricing_mode=(isnothing(K) ? nothing : certification_mode),
-    certification_time_limit_sec=parse(Float64, get(ENV, "PROBE_CERT_LIMIT", "60.0")),
-    certification_max_rounds=parse(Int, get(ENV, "PROBE_CERT_ROUNDS", "32")),
+    pricing=(isnothing(K) ? CGPricingConfig() :
+             CGPricingConfig(mode=:relaxed_cluster, relaxed_cluster_count=K)),
 )
-@printf("certification mode: %s\n\n", string(certification_mode))
 
 """
 Minimum reduced cost the exact pricer and the relaxation each see at `m`'s CURRENT duals

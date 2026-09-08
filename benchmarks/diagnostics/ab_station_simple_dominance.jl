@@ -69,7 +69,7 @@ end
 
 problem, k, _ = benchmark_problem(@__DIR__, "AB", N_STATIONS, N_PAIRS, N_SCENARIOS, SEED)
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=MAX_STOPS, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=MAX_STOPS,
 )
 solver = S.CGSolver(config=S.SolverOptions(silent=true),
                     pricing_time_limit_sec=900.0, parallel_scenario_pricing=false)

@@ -241,26 +241,22 @@
             scenarios=[("2026-01-01 08:00:00", "2026-01-01 09:00:00")],
         )
         problem = StationSelectionProblem(data, 2; max_walking_distance=250.0)
-        solver = CGSolver(max_iterations=100, reduced_cost_tol=1e-7)
-        exact_formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-                pricing_mode=:exact,
+        # ONE formulation, two solvers: the pricer is a search algorithm, so the
+        # exhaustive-equivalence claim below is about two searches of the *same* model.
+        formulation = AggregateODRouteJointRoutingAssignmentFormulation(
                 route_regularization_weight=1.0,
                 walk_cost_weight=1.0,
                 repositioning_time=0.0,
                 max_wait_time=10.0,
                 max_stops=5,
         )
-        darp_formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-                pricing_mode=:darp,
-                route_regularization_weight=1.0,
-                walk_cost_weight=1.0,
-                repositioning_time=0.0,
-                max_wait_time=10.0,
-                max_stops=5,
-        )
+        exact_solver = CGSolver(max_iterations=100, reduced_cost_tol=1e-7,
+                                pricing=CGPricingConfig(mode=:exact))
+        darp_solver = CGSolver(max_iterations=100, reduced_cost_tol=1e-7,
+                               pricing=CGPricingConfig(mode=:darp))
 
-        exact_build = StationSelection.build_model(problem, exact_formulation, solver)
-        darp_build = StationSelection.build_model(problem, darp_formulation, solver)
+        exact_build = StationSelection.build_model(problem, formulation, exact_solver)
+        darp_build = StationSelection.build_model(problem, formulation, darp_solver)
         exact_seed_routes = sort([
             Tuple(column.route) for column in values(exact_build.model[:joint_routing_assignment_columns])
         ])
@@ -271,8 +267,8 @@
         @test exact_seed_routes == darp_seed_routes
         @test all(length(route) == 2 for route in exact_seed_routes)
 
-        exact_result = run_opt(problem, exact_formulation, solver)
-        darp_result = run_opt(problem, darp_formulation, solver)
+        exact_result = run_opt(problem, formulation, exact_solver)
+        darp_result = run_opt(problem, formulation, darp_solver)
 
         @test exact_result.termination_status == SOLVE_OPTIMAL
         @test darp_result.termination_status == SOLVE_OPTIMAL
@@ -288,10 +284,11 @@
         # must escalate to the certifying budget, which here is long enough to exhaust.
         escalated = run_opt(
             problem,
-            darp_formulation,
+            formulation,
             CGSolver(
                 max_iterations=100,
                 reduced_cost_tol=1e-7,
+                pricing=CGPricingConfig(mode=:darp),
                 pricing_time_limit_sec=1e-9,
                 certifying_pricing_time_limit_sec=600.0,
             ),
@@ -308,10 +305,11 @@
         # pricing timeout never becomes a false optimality certificate still holds.
         timed_out = run_opt(
             problem,
-            darp_formulation,
+            formulation,
             CGSolver(
                 max_iterations=100,
                 reduced_cost_tol=1e-7,
+                pricing=CGPricingConfig(mode=:darp),
                 pricing_time_limit_sec=1e-9,
                 certifying_pricing_time_limit_sec=1e-9,
             ),
@@ -330,10 +328,11 @@
         # result -- flagged uncertified -- rather than running past it or throwing.
         budget_bound = run_opt(
             problem,
-            darp_formulation,
+            formulation,
             CGSolver(
                 max_iterations=100,
                 reduced_cost_tol=1e-7,
+                pricing=CGPricingConfig(mode=:darp),
                 pricing_time_limit_sec=600.0,
                 certifying_pricing_time_limit_sec=600.0,
                 total_time_limit_sec=1e-6,

@@ -1,7 +1,7 @@
 """Run one Study 8 job: `exact` or `warm_start`, on Study 7's grid and budgets.
 
 The arms differ in exactly one constructor argument,
-`CGSolver(warm_start_pricing_mode=...)`. Everything else -- formulation, budgets, threads,
+`CGSolver(pricing=CGPricingConfig(warm_start_mode=...))`. Everything else -- formulation, budgets, threads,
 Gurobi settings, instance -- is identical, so the wall-clock difference isolates the
 elementary-first phase and nothing else.
 
@@ -38,17 +38,19 @@ problem, k, instance_meta = benchmark_problem(
     @__DIR__, "STUDY8", n_stations, n_pairs, n_scenarios, seed,
 )
 output_dir = benchmark_output_dir(@__DIR__, "STUDY8", "study8_warm_start_speedup")
-# Identical on both arms: the warm start is a CGSolver setting, not a formulation one, so
-# `pricing_mode` stays :exact here and the warm-start arm's phase 2 uses exactly this pricer.
+# Identical on both arms: the warm start is a CGSolver setting, not a formulation one, and
+# both arms' phase 2 uses this formulation's default (:exact) pricer.
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=max_stops, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=max_stops,
 )
 solver = benchmark_cg_solver(
     time_limit_sec; recover_integer_solution=true, threads=1,
     certifying_pricing_time_limit_sec=certifying_time_limit_sec,
     total_time_limit_sec=total_time_limit_sec,
     parallel_scenario_pricing=true,
-    warm_start_pricing_mode=(arm == "warm_start" ? :station_simple : nothing),
+    pricing=CGPricingConfig(
+        warm_start_mode=(arm == "warm_start" ? :station_simple : nothing),
+    ),
 )
 
 let

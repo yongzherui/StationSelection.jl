@@ -35,7 +35,7 @@ exactly like `station_simple`'s elementary-route restriction: exhausting the
 subset proves nothing about the stations left out, so a run finishing in this
 mode cannot certify. It is handled the same way -- the run still reports
 `SOLVE_OPTIMAL` when pricing exhausts, with `cg_optimality_scope` recording the
-narrower claim, and `CGSolver.warm_start_pricing_mode` is the way to get a real
+narrower claim, and `CGSolver.pricing.warm_start_mode` is the way to get a real
 certificate (harvest here cheaply, hand off to the full pricer, which certifies).
 
 # The one case where it certifies for free
@@ -119,7 +119,7 @@ The union over several routes rather than just the best one is deliberate: the
 relaxed optimum is a guess, and one extra cluster route typically adds only a
 cell or two while giving the exact search a materially better chance of
 containing the real optimum. How many routes contribute is
-`relaxed_cluster_guide_routes` on the formulation.
+`CGSolver.pricing.relaxed_cluster_guide_routes`.
 """
 function relaxed_cluster_station_subset(
     clustering::StationClustering, cluster_routes::AbstractVector{<:AbstractVector{Int}},
@@ -153,62 +153,13 @@ function _restrict_candidates_to_subset(
 end
 
 """
-    _record_relaxed_cluster_stat!(m, stat)
-
-Append one `(scenario, ...)` row to `m[:relaxed_cluster_guide_stats]`, which
-surfaces on the result as `metadata["cg_relaxed_cluster_guide_stats"]`.
-
-**Two row schemas share this channel**, so a consumer must discriminate rather
-than assume:
-
-- *guided pricing* (this file) writes
-  `(scenario, guide_routes, subset_size, n_stations, relaxed_exhausted, fell_back)`;
-- *no-good certification* (`../certification/certify.jl`) writes those same six fields --
-  reading `guide_routes` as the round count and `relaxed_exhausted` as "the loop
-  reached a conclusion" -- plus the `nogood_*` fields carrying the outcome, the
-  cut count and the per-round traces. Presence of `nogood_outcome` is what tells
-  the two apart.
-
-The key keeps the `guide` name it was introduced with because it is part of
-`OptResult.metadata` and therefore of every study's `metrics.json`; renaming it
-would silently break analysis scripts reading historical runs.
-
-Phase 1 of `_run_pricing_round` is `Threads.@threads` over scenarios, so this
-takes the model's lock: `push!` onto a shared `Vector` from several threads is a
-data race, and the stats are the whole point of the guided mode (they are how
-"did the guide contain the real optimum" gets answered), so dropping them under
-threading is not an option either.
+Build the warm-start-only `:cluster_guide` context. The relaxed guide receives half of the
+scenario's pricing slice; the returned elapsed time is deducted from the exact subset
+search, so both stages share the ordinary pricing-round budget.
 """
-function _record_relaxed_cluster_stat!(m::JuMP.Model, stat)
-    haskey(m.obj_dict, :relaxed_cluster_guide_stats) || return nothing
-    lock(m[:relaxed_cluster_guide_lock]) do
-        push!(m[:relaxed_cluster_guide_stats], stat)
-    end
-    return nothing
-end
-
-"""
-    _build_relaxed_cluster_guided_context(mapping, m, s, candidates, clustering)
-        -> Union{Nothing, JointRoutingAssignmentSearchContext}
-
-The two-stage build: relaxed search for a guide, subset extraction, then an
-ordinary **exact** context restricted to that subset.
-
-Returning a plain `JointRoutingAssignmentSearchContext` is what makes this fit
-`../../../../round.jl` with no special-casing at all: phase 2 runs the same
-`_run_label_setting`, and the accept/dedupe/merge/materialize/verify path
-downstream is byte-for-byte the one every other pricer uses. The entire mode is
-a different choice of *which graph* to hand it.
-
-`nothing` is returned in three cases, all meaning "nothing to price here":
-the relaxed problem is empty; the relaxed search exhausted with no improving
-cluster route (which by the bound means no real improving route exists either);
-or the extracted subset supports no candidate pairs.
-"""
-function _build_relaxed_cluster_guided_context(
-    m::JuMP.Model, s::Int,
-    candidates::AbstractVector{PassengerAssignmentCandidate},
-    clustering::StationClustering,
+function _build_cluster_guide_context(
+    m::JuMP.Model, s::Int, candidates::AbstractVector{PassengerAssignmentCandidate},
+    clustering::StationClustering, time_limit::Float64,
 )
     shared = (
         route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
@@ -222,40 +173,65 @@ function _build_relaxed_cluster_guided_context(
     )
     isempty(relaxed.inner.opportunities) && return nothing
 
-    n_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes])
-    time_limit = Float64(m[:joint_routing_assignment_relaxed_cluster_guide_time_limit_sec])
-    cluster_routes, relaxed_exhausted = _relaxed_cluster_guide_routes(relaxed, n_routes, time_limit)
-
+    started = time()
+    cluster_routes, relaxed_exhausted = _relaxed_cluster_guide_routes(
+        relaxed, Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
+        0.5 * time_limit,
+    )
+    guide_elapsed = time() - started
     all_nodes = m[:joint_routing_assignment_nodes]
     if isempty(cluster_routes)
-        # No improving cluster route. If the relaxed search EXHAUSTED, the bound says no
-        # improving real route exists either and skipping the scenario is a genuine
-        # (if rare) certificate. If it merely ran out of time it has proved nothing, so
-        # fall back to the unrestricted exact pricer rather than silently skipping work.
         _record_relaxed_cluster_stat!(m, (
-            scenario=s, guide_routes=0, subset_size=relaxed_exhausted ? 0 : length(all_nodes),
+            scenario=s, guide_routes=0,
+            subset_size=relaxed_exhausted ? 0 : length(all_nodes),
             n_stations=length(all_nodes), relaxed_exhausted=relaxed_exhausted,
-            fell_back=!relaxed_exhausted,
+            warm_start=true, thread_id=Threads.threadid(),
         ))
         relaxed_exhausted && return nothing
-        return JointRoutingAssignmentSearchContext(
-            create_joint_routing_assignment_pricing_data(
-                s, all_nodes, m[:joint_routing_assignment_travel_cost], candidates; shared...,
-            ),
+        # Preserve the timeout signal without spending the subset stage on an unrestricted
+        # exact fallback. A zero remaining budget makes the ordinary engine report
+        # non-exhaustion, so the warm-start phase retries rather than handing off falsely.
+        full = create_joint_routing_assignment_pricing_data(
+            s, all_nodes, m[:joint_routing_assignment_travel_cost], candidates; shared...,
         )
+        return JointRoutingAssignmentSearchContext(full), time_limit
     end
 
     subset = relaxed_cluster_station_subset(clustering, cluster_routes)
     subset_candidates = _restrict_candidates_to_subset(candidates, subset)
     _record_relaxed_cluster_stat!(m, (
         scenario=s, guide_routes=length(cluster_routes), subset_size=length(subset),
-        n_stations=length(all_nodes), relaxed_exhausted=relaxed_exhausted, fell_back=false,
+        n_stations=length(all_nodes), relaxed_exhausted=relaxed_exhausted,
+        warm_start=true, thread_id=Threads.threadid(),
     ))
     isempty(subset_candidates) && return nothing
-
-    subset_pricing = create_joint_routing_assignment_pricing_data(
+    pricing = create_joint_routing_assignment_pricing_data(
         s, subset, m[:joint_routing_assignment_travel_cost], subset_candidates; shared...,
     )
-    isempty(subset_pricing.opportunities) && return nothing
-    return JointRoutingAssignmentSearchContext(subset_pricing)
+    isempty(pricing.opportunities) && return nothing
+    return JointRoutingAssignmentSearchContext(pricing), guide_elapsed
+end
+
+"""
+    _record_relaxed_cluster_stat!(m, stat)
+
+Append one `(scenario, ...)` row to `m[:relaxed_cluster_guide_stats]`, which
+surfaces on the result as `metadata["cg_relaxed_cluster_guide_stats"]`.
+
+Both the `:cluster_guide` warm start and the no-good pricing loop write rows here.
+`warm_start=true` identifies the former; `nogood_outcome` identifies the latter.
+
+The key keeps the `guide` name it was introduced with because it is part of
+`OptResult.metadata` and therefore of every study's `metrics.json`; renaming it
+would silently break analysis scripts reading historical runs.
+
+Certification is threaded over scenarios, so this takes the model's lock: `push!` onto a
+shared `Vector` from several threads is a data race.
+"""
+function _record_relaxed_cluster_stat!(m::JuMP.Model, stat)
+    haskey(m.obj_dict, :relaxed_cluster_guide_stats) || return nothing
+    lock(m[:relaxed_cluster_guide_lock]) do
+        push!(m[:relaxed_cluster_guide_stats], stat)
+    end
+    return nothing
 end

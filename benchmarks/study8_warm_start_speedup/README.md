@@ -2,8 +2,8 @@
 
 Two questions, one arm:
 
-1. **Is elementary-first faster end to end?** `CGSolver(warm_start_pricing_mode =
-   :station_simple)` versus the plain exact pricer.
+1. **Is elementary-first faster end to end?** `CGSolver(pricing =
+   CGPricingConfig(warm_start_mode = :station_simple))` versus the plain exact pricer.
 2. **How fast does the elementary phase exhaust?** i.e. how much of the run is phase 1,
    and how much work is left for phase 2 afterwards.
 

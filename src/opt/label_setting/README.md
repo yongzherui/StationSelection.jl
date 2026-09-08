@@ -22,7 +22,7 @@ for `CGSolver`.
 - `joint_routing_assignment/` — the passenger free-assignment pricer
   (`AggregateODRouteJointRoutingAssignmentFormulation`). `exact/`,
   `darp_modified/`, and `darp/` are wired into production, selectable per solve
-  via the formulation's `pricing_mode` field (`:exact`, the default,
+  via `CGSolver.pricing.mode` (a `CGPricingConfig`: `:exact`, the default,
   `:darp_modified`, or `:darp`) --
   `pricing_round.jl` (this directory's own, not either subdirectory's) is
   where `_pricing_build_scenario_context` branches between them. `darp/` is a
@@ -43,17 +43,16 @@ columns. It builds a *relaxation* of the pricing problem, over a graph whose
 nodes are clusters of stations rather than stations, constructed so that its
 minimum reduced cost lower-bounds the real one. Exhausting it therefore proves
 no improving column exists anywhere in the full route universe — without ever
-producing one. Its two uses pull in opposite directions and are selected
-differently:
+producing one. Cluster guidance and certification now form one pricing mode:
 
-- **certification**, via `CGSolver.certification_pricing_mode = :relaxed_cluster`
-  (never `pricing_mode`) — `utils/certification/certify.jl`, the no-good-cut
-  loop. It is the only mode: a cut-free round is the loop's round 1, and round 1
-  has never certified anything.
-- **guiding**, via `pricing_mode = :relaxed_cluster_guided` —
-  `utils/guiding/guide.jl` prices the cluster graph only to pick a station
-  subset, then runs the ordinary `exact/` pricer on it. The columns are real
-  routes, so nothing downstream changes.
+- **`CGSolver.pricing.mode = :relaxed_cluster`** —
+  `utils/certification/certify.jl`, the no-good-cut loop. It is the only mode: a
+  cut-free round is the loop's round 1, and round 1 has never certified anything.
+  Unlike the bare relaxation, the loop *does* produce columns, harvested from the
+  exhaustive subset searches behind each refutation.
+  Every cut round keeps several promising cluster routes, unions their clusters into a
+  station subset, and runs the ordinary exact pricer there. Those searches return real
+  columns when they refute the relaxation and prove supports barren otherwise.
 
 Its top level is **label-setting core only**; everything that *drives* that core
 lives under `utils/`, one subdirectory per optimization:
@@ -95,10 +94,19 @@ overshoots it by 10^2–10^3. The cuts are the certification mechanism, not a
 refinement of it, and the cut-free mode that used to exist for that comparison was
 removed once the answer was in.
 
-`utils/refinement/refine.jl` is the third optimization, and the only one with no
-switch of its own: witness-guided cluster refinement, turned on by the
-formulation's `relaxed_cluster_max_count` and driven from inside the no-good
+`utils/refinement/refine.jl` is witness-guided cluster refinement, turned on by
+`CGPricingConfig.relaxed_cluster_max_count` and driven from inside the no-good
 loop when a round comes back barren.
+
+Two other experimental optimizations are off by default:
+`CGPricingConfig.relaxed_cluster_barren_cache` reuses compatible subset proofs, while
+`CGPricingConfig.relaxed_cluster_cut_management` removes active cuts subsumed by a newly
+proven larger one. These switches do not disable core no-good cut generation.
+
+The same cut-free cluster search is also available as the warm-start-only
+`CGPricingConfig(warm_start_mode=:cluster_guide, relaxed_cluster_count=K)`. It selects a
+station subset and exact-prices only that subset for real columns, then hands off to the
+final pricer. It is not a valid final `mode` and cannot certify by itself.
 
 Folder grouping is **not** load order — `optimize.jl` interleaves the `utils/`
 drivers with the core, because `guiding/guide.jl` needs only the relaxed graph

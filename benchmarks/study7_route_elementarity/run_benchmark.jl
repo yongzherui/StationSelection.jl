@@ -42,7 +42,7 @@ problem, k, instance_meta = benchmark_problem(
 )
 output_dir = benchmark_output_dir(@__DIR__, "STUDY7", "study7_route_elementarity")
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=max_stops, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=max_stops,
 )
 # recover_integer_solution=true is load-bearing, not a default carried over from Study 5:
 # without it `result.model` is the LP master and every exported theta is fractional, so

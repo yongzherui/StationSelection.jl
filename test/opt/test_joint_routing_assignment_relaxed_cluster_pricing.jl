@@ -699,25 +699,41 @@
 
     # ── formulation / solver wiring ──────────────────────────────────────────
     @testset "wiring rejects the configurations that cannot work" begin
-        # :relaxed_cluster is not a pricing_mode -- it produces no columns.
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            pricing_mode = :relaxed_cluster,
+        # The pricer and its partition are BOTH solver settings now -- the formulation
+        # carries neither, so a config that pairs them wrongly must fail at CGPricingConfig
+        # construction, before any model exists.
+        @test_throws ArgumentError CGPricingConfig(mode = :relaxed_cluster)
+        @test CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_count = 4,
+        ).mode === :relaxed_cluster
+        @test_throws ArgumentError CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_count = 0,
         )
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            relaxed_cluster_count = 0,
-        )
-        @test_throws ArgumentError CGSolver(certification_pricing_mode = :not_a_relaxation)
+        # The reverse is allowed on purpose: a partition with no mode reading it is what
+        # the guide-recovery diagnostics build, so they can measure the guide offline
+        # against duals an ordinary pricer produced.
+        @test CGPricingConfig(relaxed_cluster_count = 4).relaxed_cluster_count == 4
+        @test CGPricingConfig().compensated_dominance
+        @test !CGPricingConfig(compensated_dominance = false).compensated_dominance
+        @test_throws ArgumentError CGPricingConfig(mode = :not_a_relaxation)
         # The cut-free mode was removed: it is the cut loop's round 1, which certified 0
         # times in ~1130 measured attempts. Its old name must be refused with an
         # explanation rather than accepted or reported as an unknown symbol.
-        @test_throws ArgumentError CGSolver(
-            certification_pricing_mode = :relaxed_cluster_nogood,
+        @test_throws ArgumentError CGPricingConfig(
+            mode = :relaxed_cluster_nogood, relaxed_cluster_count = 4,
         )
-        @test AggregateODRouteJointRoutingAssignmentFormulation().relaxed_cluster_count === nothing
-        @test AggregateODRouteJointRoutingAssignmentFormulation(
-            relaxed_cluster_count = 4,
-        ).relaxed_cluster_count == 4
+        # A warm start in :relaxed_cluster can never hand off -- phase 2 would be dead.
+        @test_throws ArgumentError CGPricingConfig(
+            warm_start_mode = :relaxed_cluster, relaxed_cluster_count = 4,
+        )
+        @test CGPricingConfig().relaxed_cluster_count === nothing
     end
+
+    # Every relaxed-cluster arm below is the same formulation under a different solver.
+    rc_solver(K; kwargs...) = CGSolver(
+        pricing = CGPricingConfig(mode = :relaxed_cluster, relaxed_cluster_count = K);
+        kwargs...,
+    )
 
     @testset "end to end: certify-first reaches the same certified optimum" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
@@ -737,11 +753,8 @@
         @test all(r -> r.certification_outcome == "none", base.metadata["cg_iteration_log"])
 
         for n_clusters in (2, 4, data.n_stations)
-            formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = n_clusters,
-            )
-            result = run_opt(problem, formulation,
-                             CGSolver(certification_pricing_mode = :relaxed_cluster))
+            formulation = AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4)
+            result = run_opt(problem, formulation, rc_solver(n_clusters))
             # Whether the relaxation certifies or not, the answer must not move: a failed
             # certification only wastes a round, it never changes which columns are priced.
             @test result.termination_status == SOLVE_OPTIMAL
@@ -782,10 +795,8 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = data.n_stations,
-            ),
-            CGSolver(certification_pricing_mode = :relaxed_cluster),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            rc_solver(data.n_stations),
         )
         @test result.termination_status == SOLVE_OPTIMAL
         @test result.metadata["cg_certified_by_relaxation"] === true
@@ -793,14 +804,21 @@
     end
 
     @testset "certification is refused without a clustering, never silently skipped" begin
+        # `CGPricingConfig` is the first gate. The solver-side gate below it is what
+        # catches a model that lost its partition some other way -- exercised here by
+        # configuring it legally and stripping the clustering off the built model.
+        @test_throws ArgumentError CGPricingConfig(mode = :relaxed_cluster)
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-        @test_throws ArgumentError run_opt(
+        solver = rc_solver(3)
+        build = StationSelection.build_model(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
-            CGSolver(certification_pricing_mode = :relaxed_cluster),
+            solver,
         )
+        delete!(build.model.obj_dict, :joint_routing_assignment_station_clustering)
+        @test_throws ArgumentError StationSelection.optimize_model(build, solver)
     end
 
     # ── combinatorial-no-good certification ─────────────────────────────────
@@ -856,10 +874,10 @@
     end
 
     @testset "the no-good loop is wired and validated" begin
-        @test_throws ArgumentError CGSolver(certification_max_rounds = 0)
-        @test CGSolver(certification_pricing_mode = :relaxed_cluster,
-                       certification_max_rounds = 4).certification_max_rounds == 4
-        @test_throws ArgumentError CGSolver(certification_pricing_mode = :not_a_relaxation)
+        # One final search is allowed with every UInt64 cut bit active.
+        @test StationSelection.RELAXED_CLUSTER_MAX_CUT_ROUNDS ==
+            StationSelection.RELAXED_CLUSTER_MAX_CUTS + 1
+        @test_throws ArgumentError CGPricingConfig(mode = :not_a_relaxation)
     end
 
     @testset "randomized: the cut search equals brute force over cut-satisfying routes" begin
@@ -994,10 +1012,8 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 3,
-            ),
-            CGSolver(certification_pricing_mode = :relaxed_cluster),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            rc_solver(3),
         )
         stats = result.metadata["cg_relaxed_cluster_guide_stats"]
         @test !isempty(stats)
@@ -1038,11 +1054,8 @@
         for n_clusters in (2, 4, data.n_stations)
             result = run_opt(
                 problem,
-                AggregateODRouteJointRoutingAssignmentFormulation(
-                    max_stops = 4, relaxed_cluster_count = n_clusters,
-                ),
-                CGSolver(recover_integer_solution = true,
-                         certification_pricing_mode = :relaxed_cluster),
+                AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+                rc_solver(n_clusters; recover_integer_solution = true),
             )
             @test result.termination_status == SOLVE_OPTIMAL
             @test result.objective_value ≈ base.objective_value atol = 1e-6
@@ -1071,11 +1084,8 @@
         # which is exactly the path that harvests.
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 2,
-            ),
-            CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            rc_solver(2; recover_integer_solution = true),
         )
         harvested = result.metadata["cg_certification_harvested_columns"]
         @test harvested isa Int
@@ -1114,6 +1124,10 @@
         @test top.cluster == clustering.cluster_of[2]
         @test Set(top.witness_stations) == Set([2, 3])
         @test top.reward_mass > 0
+        # Refinement inspects all retained guide routes, not only the first one.
+        across_routes = SS._relaxed_cluster_best_split_candidate(data, [Int[], [1, 2]])
+        @test !isnothing(across_routes)
+        @test across_routes.cluster == top.cluster
     end
 
     @testset "a cell everyone agrees on is NOT a split candidate" begin
@@ -1219,6 +1233,13 @@
         @test Set(cluster_sets) == Set([keep_disjoint, keep_partial])
         @test !(subsumed_strict in cluster_sets)
         @test !(subsumed_eq in cluster_sets)
+
+        unmanaged = [Set([1, 2]), Set([9])]
+        @test SS._relaxed_cluster_add_cut!(unmanaged, support; manage=false)
+        @test Set([1, 2]) in unmanaged                 # experimental pruning is off
+        managed = [Set([1, 2]), Set([9])]
+        @test SS._relaxed_cluster_add_cut!(managed, support; manage=true)
+        @test !(Set([1, 2]) in managed)               # explicitly enabled
     end
 
     @testset "barren-support cache fires only in the sound direction" begin
@@ -1244,6 +1265,36 @@
         @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), barren, Set{Int}())
         # Nothing proven yet -> nothing to infer from.
         @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), Set{Int}[], free)
+
+        # Active-cut pruning must not prune the independent proof cache. The larger cut
+        # subsumes the smaller one for search, but the smaller proof can still establish a
+        # different reward-free extension barren later.
+        active_cuts = [Set([1, 2])]
+        barren_proofs = deepcopy(active_cuts)
+        larger = Set([1, 2, 3])
+        filter!(t -> !issubset(t, larger), active_cuts)
+        push!(active_cuts, larger)
+        push!(barren_proofs, larger)
+        @test active_cuts == [larger]
+        @test SS._relaxed_cluster_barren_by_cache(
+            Set([1, 2, 4]), barren_proofs, Set([4]),
+        )
+    end
+
+    @testset "barren cache requires complete metric travel" begin
+        nodes = [1, 2, 3]
+        metric = Dict{Tuple{Int, Int}, Float64}(
+            (i, j) => abs(i - j) for i in nodes for j in nodes if i != j
+        )
+        @test SS._relaxed_cluster_travel_supports_cache(nodes, metric)
+
+        incomplete = copy(metric)
+        delete!(incomplete, (1, 3))
+        @test !SS._relaxed_cluster_travel_supports_cache(nodes, incomplete)
+
+        nonmetric = copy(metric)
+        nonmetric[(1, 3)] = 10.0
+        @test !SS._relaxed_cluster_travel_supports_cache(nodes, nonmetric)
     end
 
     @testset "reward-free clusters are exactly those with no candidate endpoint" begin
@@ -1263,29 +1314,26 @@
             Set([c1, c2])
     end
 
-    @testset "certification makes the two-tier certifying round unreachable" begin
-        # The escalation ladder changed: an empty-but-not-exhausted pricing round used to
-        # re-price all n stations at `certifying_pricing_time_limit_sec`. With a certifier
-        # available it re-runs the CERTIFIER at that budget instead -- cheaper per unit of
-        # proof (K cluster nodes vs n stations) and a full-universe certificate when it
-        # lands. So `cg_certifying_rounds` must be 0 for any certification-enabled run,
-        # and the escalated attempts show up as certification rounds instead.
+    @testset ":relaxed_cluster makes the two-tier certifying round unreachable" begin
+        # The escalation ladder differs by mode: an empty-but-not-exhausted ordinary
+        # pricing round re-prices all n stations at `certifying_pricing_time_limit_sec`,
+        # while `:relaxed_cluster` re-runs the RELAXED round at that budget instead --
+        # cheaper per unit of proof (K cluster nodes vs n stations) and a full-universe
+        # certificate when it lands. So `cg_certifying_rounds` must be 0 for any
+        # :relaxed_cluster run, and its escalated attempts show up as certification rounds.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
 
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 2,
-            ),
-            CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            rc_solver(2; recover_integer_solution = true),
         )
         @test result.metadata["cg_certifying_rounds"] == 0
         @test result.termination_status == SOLVE_OPTIMAL
 
-        # With certification OFF the two-tier round is still reachable -- this is the
+        # Under an ordinary pricer the two-tier round is still reachable -- this is the
         # control, so a future change that disabled it everywhere would be caught.
         plain = run_opt(
             problem,
@@ -1299,17 +1347,13 @@
     @testset "refinement is opt-in, validated, and reported" begin
         # `relaxed_cluster_max_count` is what turns the fixed partition into a starting
         # point. Without it nothing refines, which is the historical behaviour.
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            max_stops = 4, relaxed_cluster_max_count = 8,          # no starting partition
+        @test_throws ArgumentError CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_max_count = 8,  # no starting partition
         )
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            max_stops = 4, relaxed_cluster_count = 8, relaxed_cluster_max_count = 8,
+        @test_throws ArgumentError CGPricingConfig(
+            mode = :relaxed_cluster,
+            relaxed_cluster_count = 8, relaxed_cluster_max_count = 8,
         )                                                           # equal = no refinement
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            max_stops = 4, relaxed_cluster_count = 4, relaxed_cluster_max_count = 8,
-            relaxed_cluster_refine_recurrence = 0,
-        )
-
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
@@ -1322,11 +1366,8 @@
         # Refinement OFF: no per-scenario state, and the report is empty.
         off = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 2,
-            ),
-            CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster),
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            rc_solver(2; recover_integer_solution = true),
         )
         @test isempty(off.metadata["cg_relaxed_cluster_final_counts"])
         @test isempty(off.metadata["cg_relaxed_cluster_splits"])
@@ -1335,12 +1376,14 @@
         # and never past the ceiling.
         on = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 2, relaxed_cluster_max_count = 5,
-                relaxed_cluster_refine_recurrence = 1,
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            CGSolver(
+                recover_integer_solution = true,
+                pricing = CGPricingConfig(
+                    mode = :relaxed_cluster, relaxed_cluster_count = 2,
+                    relaxed_cluster_max_count = 5,
+                ),
             ),
-            CGSolver(recover_integer_solution = true,
-                     certification_pricing_mode = :relaxed_cluster),
         )
         counts = on.metadata["cg_relaxed_cluster_final_counts"]
         splits = on.metadata["cg_relaxed_cluster_splits"]
@@ -1381,99 +1424,25 @@
         @test only(kept).reward == 9.0   # rewards pass through untouched
     end
 
-    @testset "relaxation-guided pricing is wired and validated" begin
-        @test AggregateODRouteJointRoutingAssignmentFormulation(
-            pricing_mode = :relaxed_cluster_guided, relaxed_cluster_count = 3,
-        ).pricing_mode === :relaxed_cluster_guided
-        # The guide needs a partition to guide it.
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            pricing_mode = :relaxed_cluster_guided,
+    @testset "cluster-route guidance is part of :relaxed_cluster" begin
+        config = CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_count = 3,
+            relaxed_cluster_guide_routes = 2,
         )
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            relaxed_cluster_count = 3, relaxed_cluster_guide_routes = 0,
+        @test config.relaxed_cluster_guide_routes == 2
+        @test !config.relaxed_cluster_barren_cache
+        @test !config.relaxed_cluster_cut_management
+        experimental = CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_count = 3,
+            relaxed_cluster_barren_cache = true,
+            relaxed_cluster_cut_management = true,
         )
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(
-            relaxed_cluster_count = 3, relaxed_cluster_guide_time_limit_sec = 0.0,
+        @test experimental.relaxed_cluster_barren_cache
+        @test experimental.relaxed_cluster_cut_management
+        @test_throws ArgumentError CGPricingConfig(
+            mode = :relaxed_cluster, relaxed_cluster_count = 3,
+            relaxed_cluster_guide_routes = 0,
         )
-        # Restricting the station set restricts the route universe, so it cannot certify --
-        # the scope has to say so, exactly as :station_simple's does.
-        @test SS._cg_pricing_universe_is_restricted(:relaxed_cluster_guided) === true
-        @test SS._cg_optimality_scope(:relaxed_cluster_guided) ==
-            "relaxed_cluster_station_subset_only"
-    end
-
-    @testset "guided pricing produces REAL columns and a valid solution" begin
-        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-        exact = run_opt(
-            problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
-            CGSolver(recover_integer_solution = true),
-        )
-        @test exact.termination_status == SOLVE_OPTIMAL
-
-        for n_clusters in (3, 5, data.n_stations)
-            guided = run_opt(
-                problem,
-                AggregateODRouteJointRoutingAssignmentFormulation(
-                    max_stops = 4, pricing_mode = :relaxed_cluster_guided,
-                    relaxed_cluster_count = n_clusters,
-                ),
-                CGSolver(recover_integer_solution = true),
-            )
-            # Every column it found is a genuine route over genuine stations -- the master's
-            # own dual cross-check (`_pricing_verify_column`) runs on each one and would
-            # have errored otherwise, so reaching a solution at all is the assertion.
-            @test guided.objective_value !== nothing
-            # Restricting stations can only lose columns, never invent better ones, so the
-            # guided optimum is never BETTER than the unrestricted one.
-            @test guided.objective_value >= exact.objective_value - 1e-6
-            @test guided.metadata["cg_optimality_scope"] ==
-                "relaxed_cluster_station_subset_only"
-            @test guided.metadata["cg_pricing_universe_restricted"] === true
-
-            # The guide recorded what it actually handed the exact pricer. Read from the
-            # METADATA, not the model: `recover_integer_solution` rebuilds the model, so
-            # `result.model` is the recovery model and its stats vector is empty.
-            stats = guided.metadata["cg_relaxed_cluster_guide_stats"]
-            @test !isempty(stats)
-            @test all(r -> 0 <= r.subset_size <= r.n_stations, stats)
-            # At K = n every cell is a singleton, so the subset is exactly the stations of
-            # the winning cluster routes -- never the whole instance unless the routes
-            # really do span it.
-            @test all(r -> r.n_stations == data.n_stations, stats)
-        end
-    end
-
-    @testset "guided pricing warm-starts into a real certificate" begin
-        # The intended production shape: harvest cheaply on station subsets, then hand off
-        # to the unrestricted pricer, which is the phase that certifies. The optimum must
-        # match a pure exact run -- if the handoff dropped the pool or left the restricted
-        # scope in place, this is where it shows.
-        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-        exact = run_opt(
-            problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
-            CGSolver(recover_integer_solution = true),
-        )
-        warm = run_opt(
-            problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(
-                max_stops = 4, relaxed_cluster_count = 4,
-            ),
-            CGSolver(recover_integer_solution = true,
-                     warm_start_pricing_mode = :relaxed_cluster_guided),
-        )
-        @test warm.termination_status == SOLVE_OPTIMAL
-        @test warm.objective_value ≈ exact.objective_value atol = 1e-6
-        @test warm.metadata["cg_warm_start_pricing_mode"] === :relaxed_cluster_guided
-        @test warm.metadata["cg_final_pricing_mode"] === :exact
-        # Phase 2 is the unrestricted pricer, so the certificate is full-universe again.
-        @test warm.metadata["cg_optimality_scope"] == "full_route_universe"
-        @test warm.metadata["cg_pricing_universe_restricted"] === false
     end
 
 end

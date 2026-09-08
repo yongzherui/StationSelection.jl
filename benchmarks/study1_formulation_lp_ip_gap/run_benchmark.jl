@@ -87,7 +87,7 @@ if comparison == "formulation"
         n_columns=[build.counts.extras[n_columns_key]], seed_columns_added=[0],
     ))
 else
-    formulation = AggregateODRouteJointRoutingAssignmentFormulation(; common..., pricing_mode=:exact)
+    formulation = AggregateODRouteJointRoutingAssignmentFormulation(; common...)
     solver = benchmark_cg_solver(pricing_time_limit_sec; recover_integer_solution=true)
 
     result = run_opt(problem, formulation, solver)

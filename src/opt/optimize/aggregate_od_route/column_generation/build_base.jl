@@ -41,6 +41,20 @@ function build_model(
         solver::CGSolver,
     )::BuildResult
     data = problem.data
+    # This formulation has exactly one pricer (`label_setting/route_covering/exact/`), so
+    # there is nothing for `CGSolver.pricing` to select. Anything but the default would be
+    # silently ignored, which is the failure mode the whole config exists to avoid --
+    # `nothing` mode is "whatever pricer this formulation has", and that is all it offers.
+    isnothing(solver.pricing.mode) || throw(ArgumentError(
+        "CGSolver.pricing.mode=$(repr(solver.pricing.mode)) was requested, but " *
+        "AggregateODRouteBaseFormulation has no selectable pricer -- leave `mode` unset, " *
+        "or use AggregateODRouteJointRoutingAssignmentFormulation, which does",
+    ))
+    isnothing(solver.pricing.warm_start_mode) || throw(ArgumentError(
+        "CGSolver.pricing.warm_start_mode=$(repr(solver.pricing.warm_start_mode)) was " *
+        "requested, but AggregateODRouteBaseFormulation has no selectable pricer to warm " *
+        "up or hand off to",
+    ))
     mapping = create_aggregate_od_route_map(
         problem, formulation, data; initial_columns=AggregateODRouteColumn[],
     )
@@ -51,7 +65,7 @@ function build_model(
         _aggregate_od_route_base_seed_columns(data, mapping),
     )
     return _build_aggregate_od_route_base_cg_model(
-        data, mapping, problem.k, formulation, true, seed_columns,
+        data, mapping, problem.k, formulation, true, seed_columns, solver.pricing,
     )
 end
 
@@ -110,6 +124,7 @@ function _build_aggregate_od_route_base_cg_model(
         formulation::AggregateODRouteBaseFormulation,
         relax_integrality::Bool,
         seed_columns::AbstractVector{AggregateODRouteColumn},
+        pricing::CGPricingConfig=CGPricingConfig(),
     )::BuildResult
     m = Model(() -> Gurobi.Optimizer())
 
@@ -125,7 +140,7 @@ function _build_aggregate_od_route_base_cg_model(
     m[:aggregate_od_route_base_max_wait_time] = formulation.max_wait_time
     m[:aggregate_od_route_base_max_stops] = formulation.max_stops
     m[:aggregate_od_route_base_detour_factor] = formulation.detour_factor
-    m[:aggregate_od_route_base_compensated_dominance] = formulation.compensated_dominance
+    m[:aggregate_od_route_base_compensated_dominance] = pricing.compensated_dominance
     m[:aggregate_od_route_base_nodes] = collect(1:n)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
@@ -208,7 +223,6 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time=m[:aggregate_od_route_base_max_wait_time],
         detour_factor=m[:aggregate_od_route_base_detour_factor],
         max_stops=m[:aggregate_od_route_base_max_stops],
-        compensated_dominance=m[:aggregate_od_route_base_compensated_dominance],
     )
     columns_by_id = m[:aggregate_od_route_base_columns_by_id]
     discovered = AggregateODRouteColumn[]
@@ -220,5 +234,6 @@ function _aggregate_od_route_integer_recovery_build(
     end
     return _build_aggregate_od_route_base_cg_model(
         data, mapping, l, formulation, false, discovered,
+        CGPricingConfig(compensated_dominance=Bool(m[:aggregate_od_route_base_compensated_dominance])),
     )
 end

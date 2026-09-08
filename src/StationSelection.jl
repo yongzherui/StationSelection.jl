@@ -54,6 +54,7 @@ include("opt/abstract.jl")
 include("opt/solvers/utils/abstract.jl")
 include("opt/solvers/utils/common.jl")
 include("opt/solvers/direct_solver.jl")
+include("opt/solvers/cg_pricing_config.jl")
 include("opt/solvers/cg_solver.jl")
 include("opt/solvers/benders_solver.jl")
 # heuristic_solver.jl (HeuristicDispatchSolver) removed -- generic run_heuristic! hook

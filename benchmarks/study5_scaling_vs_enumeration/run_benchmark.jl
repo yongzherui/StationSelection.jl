@@ -46,7 +46,7 @@ problem, k, instance_meta = benchmark_problem(
 )
 output_dir = benchmark_output_dir(@__DIR__, "STUDY5", "study5_scaling_exact_cg")
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=max_stops, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=max_stops,
 )
 solver = benchmark_cg_solver(
     time_limit_sec; recover_integer_solution=true, threads=1,  # Gurobi: 1 thread in BOTH arms

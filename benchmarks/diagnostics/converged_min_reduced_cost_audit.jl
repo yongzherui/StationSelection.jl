@@ -45,7 +45,7 @@ problem, k, _meta = benchmark_problem(@__DIR__, "AUDIT", n_stations, n_pairs, n_
 @printf("instance: n=%d p=%d s=%d seed=%d (k=%d)\n\n", n_stations, n_pairs, n_scenarios, seed, k)
 
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-    ; BENCHMARK_BASELINE..., max_stops=10, pricing_mode=:exact,
+    ; BENCHMARK_BASELINE..., max_stops=10,
 )
 solver = benchmark_cg_solver(
     120.0; recover_integer_solution=false, threads=1,
