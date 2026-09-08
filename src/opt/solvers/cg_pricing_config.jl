@@ -68,10 +68,11 @@ their clusters to each exact station-subset search in `:relaxed_cluster`. The re
 search receives half of the pricing round's remaining time; there is no independent guide
 time limit.
 
-`relaxed_cluster_barren_cache` (default `false`) enables inference of a new barren support
-from a retained proof plus reward-free added clusters. `relaxed_cluster_cut_management`
-(default `false`) enables removal of active cuts subsumed by a newly proven larger cut.
-Both are experimental, opt-in optimizations; neither changes which cuts are sound.
+Two further experimental switches used to live here -- a barren-support cache and active-cut
+subsumption pruning. Both were removed: the measured cut load is far too small for either
+to pay for itself (0.5-0.75 cuts per scenario attempt at n=30/40, 11 inner rounds at
+worst). They are written up as possible future work in
+`label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
 """
 struct CGPricingConfig
     mode::Union{Nothing, Symbol}
@@ -80,8 +81,6 @@ struct CGPricingConfig
     relaxed_cluster_count::Union{Nothing, Int}
     relaxed_cluster_max_count::Union{Nothing, Int}
     relaxed_cluster_guide_routes::Int
-    relaxed_cluster_barren_cache::Bool
-    relaxed_cluster_cut_management::Bool
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -90,8 +89,6 @@ struct CGPricingConfig
             relaxed_cluster_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_max_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_guide_routes::Int=5,
-            relaxed_cluster_barren_cache::Bool=false,
-            relaxed_cluster_cut_management::Bool=false,
         )
         _cg_validate_pricing_mode(mode, "mode")
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
@@ -139,8 +136,7 @@ struct CGPricingConfig
         new(
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
-            relaxed_cluster_guide_routes, relaxed_cluster_barren_cache,
-            relaxed_cluster_cut_management,
+            relaxed_cluster_guide_routes,
         )
     end
 end

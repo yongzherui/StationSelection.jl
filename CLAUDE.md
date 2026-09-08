@@ -141,7 +141,6 @@ run_opt(problem,
 which for Joint resolves to `:exact`; plus `:station_simple`, `:darp_modified`, `:darp`,
 `:relaxed_cluster`), `warm_start_mode`, `relaxed_cluster_count`,
 `relaxed_cluster_max_count`, `relaxed_cluster_guide_routes`,
-`relaxed_cluster_barren_cache`, `relaxed_cluster_cut_management`,
 `compensated_dominance`.
 `AggregateODRouteBaseFormulation` has no selectable pricer, so it rejects any non-default
 `mode`/`warm_start_mode` at build time rather than ignoring it. Its single CG pricer still
@@ -179,10 +178,13 @@ cluster routes, and exact-prices that real-station subset. It verifies: take sup
 search again. MEASURED: certifies at K=9 and K=12 with 5/4/1 and 10/6/1 cuts, same LP
 objective as baseline.
 
-The experimental optimizations are opt-in: `relaxed_cluster_barren_cache=true` reuses
-compatible barren-support proofs, `relaxed_cluster_cut_management=true` prunes active cuts
-subsumed by a larger cut, and `relaxed_cluster_max_count` enables refinement. Core no-good
-cut generation remains mandatory because it is the certification mechanism itself.
+The one experimental optimization still exposed is `relaxed_cluster_max_count`, which
+enables refinement. Core no-good cut generation remains mandatory because it is the
+certification mechanism itself. Two other switches -- a barren-support cache and active-cut
+subsumption pruning -- were removed as unnecessary at the measured cut load (0.5-0.75 cuts
+per scenario attempt at n=30/40, 11 active cuts at worst against a cap of 64); both are
+written up as possible future work in
+`src/opt/label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
 
 **The cuts are the mechanism, not an optimization on top of a working relaxation.** A
 cut-free round is exactly this loop's round 1, and round 1 certified 0 times across ~1130

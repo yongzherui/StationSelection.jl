@@ -1222,96 +1222,25 @@
         @test cuts == before
     end
 
-    @testset "cut management drops only subsumed cuts" begin
-        # Cut(T_new) implies Cut(T_old) exactly when T_old ⊆ T_new, so those are dead
-        # weight; anything else must survive. MEASURED 60% dominated at n=15.
-        keep_disjoint, keep_partial = Set([9, 10]), Set([1, 5])
-        subsumed_strict, subsumed_eq = Set([1, 2]), Set([1, 2, 3])
-        cluster_sets = [keep_disjoint, subsumed_strict, keep_partial, subsumed_eq]
-        support = Set([1, 2, 3])
-        filter!(t -> !issubset(t, support), cluster_sets)
-        @test Set(cluster_sets) == Set([keep_disjoint, keep_partial])
-        @test !(subsumed_strict in cluster_sets)
-        @test !(subsumed_eq in cluster_sets)
+    @testset "adding a cut appends until the mask is full" begin
+        # Subsumed cuts are deliberately NOT pruned: Cut(T_new) does imply Cut(T_old) for
+        # T_old ⊆ T_new, but the pruning that exploited it was removed as unnecessary at
+        # the measured cut load (see relaxed_cluster/README.md), so the older cut stays.
+        cluster_sets = [Set([1, 2]), Set([9])]
+        @test SS._relaxed_cluster_add_cut!(cluster_sets, Set([1, 2, 3]))
+        @test Set([1, 2]) in cluster_sets
+        @test Set([1, 2, 3]) in cluster_sets
+        # The cut is copied in, so later mutation of the caller's support cannot corrupt it.
+        support = Set([4, 5])
+        @test SS._relaxed_cluster_add_cut!(cluster_sets, support)
+        push!(support, 6)
+        @test Set([4, 5]) in cluster_sets
 
-        unmanaged = [Set([1, 2]), Set([9])]
-        @test SS._relaxed_cluster_add_cut!(unmanaged, support; manage=false)
-        @test Set([1, 2]) in unmanaged                 # experimental pruning is off
-        managed = [Set([1, 2]), Set([9])]
-        @test SS._relaxed_cluster_add_cut!(managed, support; manage=true)
-        @test !(Set([1, 2]) in managed)               # explicitly enabled
-    end
-
-    @testset "barren-support cache fires only in the sound direction" begin
-        # Cut(T) is downward-closed, so knowing stations(T) is barren says nothing about a
-        # SUPERSET -- unless everything the superset adds is reward-free, in which case a
-        # route through the extra stations can be shortened back into stations(T) without
-        # losing reward or gaining travel.
-        free = Set([4, 5])                      # clusters holding no candidate endpoint
-        barren = [Set([1, 2, 3])]
-
-        # Adds only reward-free clusters -> provably barren, no search needed.
-        @test SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), barren, free)
-        @test SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4, 5]), barren, free)
-        # Adds a REWARD-CARRYING cluster (6) -> must NOT fire: stations(6) can host routes
-        # the barren set could not express. This is the unsound direction and the whole
-        # reason the reward-free test exists.
-        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 6]), barren, free)
-        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4, 6]), barren, free)
-        # Not a superset of any proven support -> no inference available.
-        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 4]), barren, free)
-        @test !SS._relaxed_cluster_barren_by_cache(Set([7, 8]), barren, free)
-        # No reward-free clusters at all -> the cache can never fire.
-        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), barren, Set{Int}())
-        # Nothing proven yet -> nothing to infer from.
-        @test !SS._relaxed_cluster_barren_by_cache(Set([1, 2, 3, 4]), Set{Int}[], free)
-
-        # Active-cut pruning must not prune the independent proof cache. The larger cut
-        # subsumes the smaller one for search, but the smaller proof can still establish a
-        # different reward-free extension barren later.
-        active_cuts = [Set([1, 2])]
-        barren_proofs = deepcopy(active_cuts)
-        larger = Set([1, 2, 3])
-        filter!(t -> !issubset(t, larger), active_cuts)
-        push!(active_cuts, larger)
-        push!(barren_proofs, larger)
-        @test active_cuts == [larger]
-        @test SS._relaxed_cluster_barren_by_cache(
-            Set([1, 2, 4]), barren_proofs, Set([4]),
-        )
-    end
-
-    @testset "barren cache requires complete metric travel" begin
-        nodes = [1, 2, 3]
-        metric = Dict{Tuple{Int, Int}, Float64}(
-            (i, j) => abs(i - j) for i in nodes for j in nodes if i != j
-        )
-        @test SS._relaxed_cluster_travel_supports_cache(nodes, metric)
-
-        incomplete = copy(metric)
-        delete!(incomplete, (1, 3))
-        @test !SS._relaxed_cluster_travel_supports_cache(nodes, incomplete)
-
-        nonmetric = copy(metric)
-        nonmetric[(1, 3)] = 10.0
-        @test !SS._relaxed_cluster_travel_supports_cache(nodes, nonmetric)
-    end
-
-    @testset "reward-free clusters are exactly those with no candidate endpoint" begin
-        nodes = two_group_nodes()
-        costs = two_group_travel_cost()
-        clustering = cluster_stations_by_travel_cost(nodes, costs, 2)
-        c1, c2 = clustering.cluster_of[1], clustering.cluster_of[11]
-        # Only cluster 1 -> cluster 2 candidates, so BOTH clusters carry endpoints.
-        both = [PassengerAssignmentCandidate(1, 2, 12, 50.0, 5.0)]
-        @test isempty(SS._relaxed_cluster_reward_free(clustering, both))
-        # Endpoints confined to cluster 1: cluster 2 becomes reward-free -- visiting it can
-        # only add travel.
-        one = [PassengerAssignmentCandidate(1, 1, 3, 50.0, 5.0)]
-        @test SS._relaxed_cluster_reward_free(clustering, one) == Set([c2])
-        # No candidates at all: every cluster is reward-free.
-        @test SS._relaxed_cluster_reward_free(clustering, PassengerAssignmentCandidate[]) ==
-            Set([c1, c2])
+        # A full UInt64 mask refuses the cut rather than dropping an existing one, which is
+        # what the caller reports as inconclusive.
+        full = [Set([i]) for i in 1:SS.RELAXED_CLUSTER_MAX_CUTS]
+        @test !SS._relaxed_cluster_add_cut!(full, Set([1000]))
+        @test length(full) == SS.RELAXED_CLUSTER_MAX_CUTS
     end
 
     @testset ":relaxed_cluster makes the two-tier certifying round unreachable" begin
@@ -1430,15 +1359,6 @@
             relaxed_cluster_guide_routes = 2,
         )
         @test config.relaxed_cluster_guide_routes == 2
-        @test !config.relaxed_cluster_barren_cache
-        @test !config.relaxed_cluster_cut_management
-        experimental = CGPricingConfig(
-            mode = :relaxed_cluster, relaxed_cluster_count = 3,
-            relaxed_cluster_barren_cache = true,
-            relaxed_cluster_cut_management = true,
-        )
-        @test experimental.relaxed_cluster_barren_cache
-        @test experimental.relaxed_cluster_cut_management
         @test_throws ArgumentError CGPricingConfig(
             mode = :relaxed_cluster, relaxed_cluster_count = 3,
             relaxed_cluster_guide_routes = 0,

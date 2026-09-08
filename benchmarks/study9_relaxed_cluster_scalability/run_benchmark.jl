@@ -17,8 +17,13 @@ Threads.nthreads() == n_threads || error(
     "job requests $n_threads Julia threads, process has $(Threads.nthreads())")
 (arm == "exact") == (k0 == 0) || error("exact iff cluster_count=0")
 kmax == 0 || error("cluster refinement is excluded from Study 9")
-!barren_cache || error("barren cache is excluded from Study 9")
-!cut_management || error("cut management is excluded from Study 9")
+# The barren-support cache and active-cut subsumption pruning were REMOVED from
+# `:relaxed_cluster` (see `relaxed_cluster/README.md`): unnecessary at the measured cut
+# load. Study 9 already excluded both, so its arms are unchanged. The two job columns and
+# the two result columns stay, pinned to `false`, so rows written before the removal share
+# one schema with rows written after it -- this study is mid-flight.
+!barren_cache || error("barren cache no longer exists; this column must be false")
+!cut_management || error("cut management no longer exists; this column must be false")
 
 problem, selection_k, instance_meta = benchmark_problem(@__DIR__, "STUDY9", n, p, s, seed)
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
@@ -28,8 +33,6 @@ pricing = arm == "exact" ? CGPricingConfig(mode=:exact) : CGPricingConfig(
     relaxed_cluster_count=k0,
     relaxed_cluster_max_count=(kmax == 0 ? nothing : kmax),
     relaxed_cluster_guide_routes=guide_routes,
-    relaxed_cluster_barren_cache=barren_cache,
-    relaxed_cluster_cut_management=cut_management,
 )
 solver = benchmark_cg_solver(pricing_limit;
     recover_integer_solution=true, threads=1,
@@ -42,13 +45,12 @@ function trace_summary(result)
     rows = [r for r in get(result.metadata, "cg_relaxed_cluster_guide_stats", Any[])
             if hasproperty(r, :nogood_outcome)]
     isempty(rows) && return (attempts=0, cuts=0, max_rounds=0,
-        median_subset=missing, cache_hits=0, thread_ids="")
+        median_subset=missing, thread_ids="")
     subsets = [Int(x) for r in rows for x in r.nogood_subset_size_trace if Int(x) > 0]
     tids = sort!(unique(Int(r.thread_id) for r in rows if hasproperty(r, :thread_id)))
     return (attempts=length(rows), cuts=sum(Int(r.nogood_cuts) for r in rows),
         max_rounds=maximum(Int(r.nogood_rounds) for r in rows),
         median_subset=isempty(subsets) ? missing : median(subsets),
-        cache_hits=sum(Int(r.nogood_barren_cache_hits) for r in rows),
         thread_ids=join(tids, ';'))
 end
 
@@ -103,7 +105,7 @@ else
         certified_by_relaxation=[cert.certified_by_relaxation],
         exact_certifying_rounds=[cert.certifying_rounds], nogood_attempts=[trace.attempts],
         nogood_total_cuts=[trace.cuts], nogood_max_rounds=[trace.max_rounds],
-        nogood_median_subset_size=[trace.median_subset], barren_cache_hits=[trace.cache_hits],
+        nogood_median_subset_size=[trace.median_subset], barren_cache_hits=[0],
         final_cluster_counts=[join(final_counts, ';')], cluster_splits=[join(splits, ';')],
         pricing_thread_ids=[join(pricing_tids, ';')], certification_thread_ids=[trace.thread_ids],
         error_message=[error_message])

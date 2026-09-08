@@ -10,6 +10,14 @@ This is an experiment/design handoff. The main hypothesis is that the current bo
 is exhaustive harvesting inside a *productive* exact subset search, not the number of
 no-good cuts handled by relaxed label setting.
 
+**Amended after writing:** that hypothesis was acted on. The barren cache and cut
+management were *removed* from `:relaxed_cluster` outright, since the cut load this note
+measures below is far too small for either to pay for itself. Every
+`barren_cache = false` / `cut_management = false` line in the plan below is therefore no
+longer a setting to pass -- it is simply how the pricer now works. Both are written up as
+possible future work in
+`src/opt/label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
+
 ## Current benchmark and evidence
 
 Study scaffold:

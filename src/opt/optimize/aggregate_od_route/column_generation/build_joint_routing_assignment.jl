@@ -147,10 +147,6 @@ function _build_joint_routing_assignment_model(
     # relaxed-cluster mode without a count (and a count without such a mode), so an absent
     # partition here means no relaxed-cluster mode was asked for.
     m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
-    m[:joint_routing_assignment_relaxed_cluster_barren_cache] =
-        pricing.relaxed_cluster_barren_cache
-    m[:joint_routing_assignment_relaxed_cluster_cut_management] =
-        pricing.relaxed_cluster_cut_management
     if !isnothing(pricing.relaxed_cluster_count)
         m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
             m[:joint_routing_assignment_nodes], travel_cost, pricing.relaxed_cluster_count,
@@ -306,9 +302,5 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_count = count,
         relaxed_cluster_max_count = m[:joint_routing_assignment_relaxed_cluster_max_count],
         relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
-        relaxed_cluster_barren_cache =
-            Bool(m[:joint_routing_assignment_relaxed_cluster_barren_cache]),
-        relaxed_cluster_cut_management =
-            Bool(m[:joint_routing_assignment_relaxed_cluster_cut_management]),
     )
 end

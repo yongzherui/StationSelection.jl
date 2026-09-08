@@ -10,10 +10,15 @@ The validation table covers `n=20,25`, ten matched seeds, and three arms:
 - `relaxed_k60`: current `:relaxed_cluster` with fixed `K/n=0.6`.
 - `relaxed_k80`: current `:relaxed_cluster` with fixed `K/n=0.8`.
 
-All unconfirmed features are explicitly disabled: `relaxed_cluster_max_count=nothing`,
-`relaxed_cluster_barren_cache=false`, and `relaxed_cluster_cut_management=false`. The
+Unconfirmed features are explicitly disabled: `relaxed_cluster_max_count=nothing`. The
 confirmed no-good certification, harvested subset columns, parallel scenario pass, and
 five-route cluster guidance remain part of `:relaxed_cluster` itself.
+
+The barren-support cache and active-cut subsumption pruning, which this study also excluded,
+have since been removed from the package outright (unnecessary at the measured cut load --
+see `relaxed_cluster/README.md`). Their `barren_cache`/`cut_management` job columns and
+`barren_cache_hits` result column are retained, pinned to `false`/`0`, so rows written
+before and after the removal share one schema.
 
 The six-hour frontier probe queues anchor sizes `n=30,40,50,60,70,80,84`. Each size runs
 both confirmed fixed-K settings on ten seeds (20 tasks) with the same 21,600-second CG

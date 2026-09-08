@@ -98,10 +98,11 @@ removed once the answer was in.
 `CGPricingConfig.relaxed_cluster_max_count` and driven from inside the no-good
 loop when a round comes back barren.
 
-Two other experimental optimizations are off by default:
-`CGPricingConfig.relaxed_cluster_barren_cache` reuses compatible subset proofs, while
-`CGPricingConfig.relaxed_cluster_cut_management` removes active cuts subsumed by a newly
-proven larger one. These switches do not disable core no-good cut generation.
+Two further experimental optimizations of that loop — a barren-support cache and
+active-cut subsumption pruning — were implemented, measured, and removed: both are sound,
+but the measured cut load per attempt is far too small for either to pay for itself.
+`relaxed_cluster/README.md` carries the write-ups and the numbers, for the day a workload
+pushes cut counts up.
 
 The same cut-free cluster search is also available as the warm-start-only
 `CGPricingConfig(warm_start_mode=:cluster_guide, relaxed_cluster_count=K)`. It selects a
