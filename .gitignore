@@ -39,6 +39,11 @@ experiments/
 slurm-*.out
 slurm-*.err
 slurm_logs/
+# Diagnostic scripts under benchmarks/diagnostics/ are submitted with `-o <name>.out`
+# rather than into slurm_logs/, so their job output lands beside the scripts. The scripts
+# are tracked; their run output is not.
+benchmarks/diagnostics/*.out
+benchmarks/diagnostics/*.err
 tmp_ss_bench/*.out
 tmp_ss_bench/*.err
 
