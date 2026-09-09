@@ -27,6 +27,70 @@ is a valid underestimator of scenario `s`'s second-stage cost everywhere, tight 
 `yhat` it was derived at. `Gamma[s,j]` is the same per-station dual aggregate the
 station-fixing work calls `Gamma_j`.
 
+# WHY THE CUT IS VALID -- the static argument, in full
+
+Validity does not rest on any measurement. It rests on one structural property of the model
+plus weak duality, and the property is checkable by reading the build.
+
+Write the scenario-s second stage at a fixed `yhat` as `Q_s(yhat)` (the LP above). Its dual is
+
+    Q_s(yhat) = max  sum_p alpha_p - sum_j Gamma_j yhat_j
+                s.t. alpha_p <= c_walk[s,p]                                  for each p
+                     sum_{p in c} alpha_p - sum_{(p,j) in c} gammaO_{pj}
+                                          - sum_{(p,k) in c} gammaD_{pk} <= f_c   for each column c
+                     alpha, gamma >= 0
+
+**`yhat` appears in the dual OBJECTIVE and nowhere in the dual CONSTRAINTS.** Call the dual
+feasible set `D_s`; it is determined by the column pool, the cost coefficients and the
+incidence structure, and is the same set for every `y`. Therefore, for any
+`(alpha, gamma)` in `D_s` and any `y` whatsoever,
+
+    sum_p alpha_p - sum_j Gamma_j y_j  <=  Q_s(y)
+
+because the left-hand side is the value of one particular *feasible* dual solution at `y`,
+while `Q_s(y)` is the *maximum* over `D_s`. That single inequality is the whole validity
+proof, and it holds globally -- not just near `yhat`.
+
+Two further facts pin down what the cut actually is:
+
+- **Tightness at the anchor.** At the `yhat` we derive from, `Q_s(yhat)` is finite (feasible
+  by the master's endpoint rows, bounded below since all costs are non-negative), so strong
+  duality gives an optimal `(alpha*, gamma*)` in `D_s` with
+  `sum alpha* - sum Gamma* yhat = Q_s(yhat)`. The cut passes exactly through the value
+  function at its anchor.
+- **It is the strongest linear cut available at that anchor.** `Q_s` is a maximum of finitely
+  many linear functions of `y` (one per vertex of `D_s`), hence convex and piecewise linear;
+  the cut is the supporting hyperplane at `yhat` given by the optimal dual vertex, i.e. a
+  subgradient cut. No valid linear inequality anchored at `yhat` dominates it.
+
+## The four preconditions -- all statically checkable, one of them a future hazard
+
+1. **`y` occurs only as the right-hand side of the linking rows, and with zero objective
+   coefficient.** This is what puts `yhat` in the dual objective rather than the dual
+   constraints, and it is the load-bearing assumption. Verifiable by reading
+   `add_joint_routing_assignment_station_linking_constraints!` (writes `-y[j] <= 0`, theta
+   coefficients patched in later) together with `set_joint_routing_assignment_objective!`
+   (touches only `x_walk`) and `add_joint_routing_assignment_column!` (`set_objective_coefficient`
+   on theta only). If `y` ever gained an objective term or appeared in a constraint
+   coefficient, `D_s` would move with `y` and every cut here would become unsound.
+2. **The subproblem is solved to optimality.** Only then is the extracted `(alpha, gamma)`
+   actually in `D_s`. A truncated solve can return a vector outside it, and the "cut" built
+   from that bounds nothing -- which is why `_solve_one_joint_routing_assignment_benders_subproblem`
+   raises instead of proceeding.
+3. **The dual signs match the convention.** `alpha = dual(>= row)`, `gamma = -dual(<= row)`.
+   Checked numerically on EVERY solve by the strong-duality assertion below, which is exactly
+   the identity from the tightness argument.
+4. **The column pool must be FIXED for the whole run.** `D_s` depends on the pool: adding a
+   column adds a dual constraint, which can only SHRINK `D_s` and therefore lower `Q_s`. A cut
+   derived against a smaller pool bounds the LARGER `Q_s` of that pool, so once the pool grows
+   the old cut may over-estimate the new `Q_s` -- i.e. become invalid, and prune the true
+   optimum. Under `:direct_enumeration` the pool is enumerated once at build time and never
+   changes, so this is free. **It is precisely what breaks under a `:column_generation`
+   oracle**: cuts derived before a column is priced in are not valid afterwards. That oracle
+   needs either a from-scratch cut rebuild after each pool change, a pool complete for the
+   second stage before any cut is taken, or Lagrangian/optimality-cut machinery that accounts
+   for it. Naming it here so it is not discovered by a wrong answer later.
+
 # Two things that make this simpler than textbook Benders
 
 **No feasibility cuts** -- but NOT because of `x_walk`, and the distinction matters.

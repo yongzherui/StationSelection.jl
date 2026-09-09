@@ -64,7 +64,10 @@ Stashed on the master model:
 - `:benders_subproblem_formulation` -- the derived subproblem formulation, for reporting.
 - `:benders_cut_variables` -- the `Theta` map, keyed by cut group (`benders_cut_group`).
 - `:benders_cut_signatures` -- the dedup set behind `add_benders_cut!`'s "was this cut
-  new" count (see `cuts.jl`).
+  new" count (see `cuts.jl`). Rounded to 6 decimals, so it is a dedup key ONLY.
+- `:benders_cuts` -- `(group, ConstraintRef)` for every cut actually added. This is what an
+  auditor must read: a cut rebuilt from its rounded signature is stronger than the real one
+  and reports violations the real cut does not have.
 
 **One `mapping`, shared.** The map is created once here and handed to every subproblem
 build. It must be the same object: the `(s,p)` demand-group keys and the `valid_jk_pairs`
@@ -121,6 +124,10 @@ function build_model(
     # `Theta`'s lower bound is what keeps iteration 1 bounded.
     constraint_counts["benders_cuts"] = 0
     m[:benders_cut_signatures] = Set{Any}()
+    # The cuts actually added, as (cut group, ConstraintRef). Distinct from the signature set
+    # above, which is rounded for dedup and therefore unusable for auditing validity -- see
+    # `cuts.jl`. Keeping the refs also makes the accumulated cuts inspectable after a solve.
+    m[:benders_cuts] = Tuple{Int, ConstraintRef}[]
 
     # ---- 4. Objective ----
     set_benders_master_objective!(m, theta_cuts)

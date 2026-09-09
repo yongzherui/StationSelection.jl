@@ -250,6 +250,13 @@ checks = Tuple{String, Bool, String}[]
 push_check!(name, ok, detail) = push!(checks, (name, ok, detail))
 
 for r in rows
+    # Guard FIRST: a reference that hit its own time limit reports an incumbent, not an
+    # optimum, and would make the equality check below fail as though Benders were wrong.
+    # Attributing a reference timeout to the thing under test is the worst way to read this
+    # script, so it gets its own check rather than being folded into the comparison.
+    push_check!("$(r.arm): references are optima",
+        string(r.ref.mixed.status) == "OPTIMAL" && string(r.ref.direct.status) == "OPTIMAL",
+        "mixed $(r.ref.mixed.status) / direct $(r.ref.direct.status)")
     push_check!("$(r.arm): == mixed_mono",
         isapprox(r.obj, r.ref.mixed.objective; rtol=1e-6, atol=1e-6),
         @sprintf("%.6f vs %.6f (diff %.3e)", r.obj, r.ref.mixed.objective,

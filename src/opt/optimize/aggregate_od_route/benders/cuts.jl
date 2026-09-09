@@ -6,6 +6,15 @@ The row itself is the generic `add_benders_optimality_cut!`
 lands on (`benders_cut_group`, so `SingleCut` aggregates and `MultiCut` does not) and the
 deduplication that makes `add_benders_cut!`'s return value meaningful.
 
+# Two records of each cut, for two different jobs
+
+`m[:benders_cut_signatures]` is the ROUNDED (6-decimal) dedup key -- rounding is required
+there, since an exact-equality test on raw `Float64` duals would miss the repeats the set
+exists to catch. `m[:benders_cuts]` is the list of `(group, ConstraintRef)` actually added.
+The two are not interchangeable: anything auditing cut VALIDITY must read the ConstraintRefs,
+because a cut rebuilt from its rounded signature is stronger than the real one by up to
+~5e-7 per term and will report violations that the real cut does not have.
+
 # Why deduplicate
 
 The subproblem is a covering LP with a great deal of symmetry, so its optimal duals are
@@ -34,6 +43,7 @@ function _add_joint_routing_assignment_benders_cuts!(
     )::Int
     theta_cuts = m[:benders_cut_variables]::Dict{Int, VariableRef}
     signatures = m[:benders_cut_signatures]::Set{Any}
+    added_rows = m[:benders_cuts]::Vector{Tuple{Int, ConstraintRef}}
     y = m[:y]
 
     grouped = Dict{Int, Tuple{Float64, Dict{Int, Float64}}}()
@@ -55,7 +65,14 @@ function _add_joint_routing_assignment_benders_cuts!(
         signature = _benders_cut_signature(group, constant, coefficients)
         signature in signatures && continue
         push!(signatures, signature)
-        add_benders_optimality_cut!(m, theta_cuts[group], constant, y, coefficients)
+        row = add_benders_optimality_cut!(m, theta_cuts[group], constant, y, coefficients)
+        # Keep the real ConstraintRef, not just the signature. The signature is ROUNDED to 6
+        # decimals for dedup, so reconstructing a cut from it is not the cut that was added --
+        # rounding the constant up and each coefficient down strengthens the reconstruction by
+        # up to ~5e-7 per term, which is enough to fake a validity violation in an audit at
+        # objective magnitudes of 1e4. An auditor needs the exact row: `normalized_rhs` gives
+        # the constant and `normalized_coefficient(row, y[j])` the coefficients.
+        push!(added_rows, (group, row))
         n_added += 1
     end
     return n_added

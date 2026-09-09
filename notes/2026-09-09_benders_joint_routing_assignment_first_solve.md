@@ -354,7 +354,90 @@ one run and 9 in another at identical configuration. The master is a MIP with ma
 `y` (21 of 86 sets tie at the optimum at n=10), so which optimum Gurobi returns varies with
 threading, and the cut sequence follows. Compare objectives across runs, never cut counts.
 
-## Comparison with the 2026-07/08 Benders work
+### Cut validity: what it means, how it is measured, and the results
+
+A cut `Theta_g >= c - sum_j Gamma_j y_j` is VALID iff its right-hand side never exceeds the
+true second-stage cost anywhere the master could go:
+
+    for all master-feasible y:   c - sum_j Gamma_j y_j  <=  Q_g(y)
+
+The failure it guards against is specific: if a cut's RHS exceeded `Q_g` at the true optimum,
+the master would price that optimum above its real cost and could REJECT it -- converging
+with `LB == UB` on a wrong answer, with nothing raising. A cut that only ever understates cost
+can slow convergence but cannot delete the optimum.
+
+The audit therefore reports, over every (cut x audited `y`) pair,
+
+    violation = (cut RHS at y) - Q_g(y)          worst = max over all pairs
+
+with `Q_g(y)` obtained by actually FIXING `y` and solving that scenario's LP to optimality,
+not from any formula. **`worst ~ 0` from above is the expected result, not a suspicious one**:
+each cut is derived tight at its own anchor by strong duality, and the anchors are in the
+audit domain. A strongly NEGATIVE worst would be the concerning outcome -- it would mean no
+cut is tight anywhere, i.e. the derivation is too weak.
+
+| size | audit domain | worst violation |
+| --- | --- | --- |
+| n=10 s=1 | exhaustive, 86 of 252 sets | (rounded-signature audit; see below) |
+| n=10 s=3 | exhaustive, 86 of 252 sets | (rounded-signature audit; see below) |
+| n=15 s=3 | **exhaustive, 4,437 of 6,435 sets** | **+1.819e-12** |
+| n=20 s=3 | 400 targeted+random per seed, 9 seeds | **+5.457e-12** worst of any seed |
+
+n=20, ten seeds (42-51), one SLURM array task each -- 36 checks, 0 failed:
+
+| seed | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 | 51 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| iters | 7 | 3 | 4 | 4 | * | 4 | 5 | 4 | 4 | 3 |
+| cuts | 12 | 6 | 8 | 8 | * | 9 | 11 | 9 | 8 | 6 |
+
+`*` seed 46's first task died in Julia startup (see the depot note below) and was rerun.
+Cuts 6-12 and iterations 3-7 across seeds, consistent with the flatness explanation.
+
+#### A measurement bug that looked exactly like the thing being tested
+
+The first n=15 exhaustive audit reported `+1.353e-06` against a `1e-6` tolerance -- a FAIL.
+It was the audit, not the cuts. The script rebuilt each cut from
+`m[:benders_cut_signatures]`, which is **rounded to 6 decimals** because it is a dedup key;
+rounding the constant up and each coefficient down strengthens the reconstruction by up to
+~5e-7 per term, which at 7 nonzero coefficients is more than enough to manufacture the
+violation. Relative size was `4.8e-11` of an objective of 28,384.
+
+The fix was to the measurement, not the tolerance -- loosening a tolerance to pass a failing
+validity check would have been precisely the wrong move. `add_benders_optimality_cut!`'s
+`ConstraintRef`s were being discarded, so the master now keeps `m[:benders_cuts]` as
+`(group, ConstraintRef)` and the audit reads exact `normalized_rhs`/`normalized_coefficient`
+values, asserting the `Theta` coefficient is 1 so a future change to the row shape cannot be
+misread silently. Same audit, exact rows: `1.353e-06` -> `1.819e-12`.
+
+The n=10 figures in the table above (`6.4e-07`) predate the fix and are inflated the same
+way; they passed regardless, but they are not comparable to the n=15/n=20 numbers.
+
+#### What the audit does NOT establish
+
+- n=20 is sampled (400 of 184,756 sets), so evidence, not proof. n=10 and n=15 are complete.
+- It audits only the cuts a given run actually generated. The STATIC argument in
+  `benders/subproblem.jl` is what covers all possible cuts; the audit checks the
+  implementation on the ones it produced.
+- It cannot detect a wrong MODEL. `Q_g` is computed from the same subproblem the cut came
+  from, so if that subproblem is wrong, cut and audit agree and are both wrong. The shared
+  pieces across every arm remain `AggregateODRouteMap`,
+  `joint_routing_assignment_column_cost` and the objective assembly.
+
+#### Infrastructure note: do not share a Julia depot across a concurrent array
+
+Task 5 of the first array died with `Bus error (signal 7)` in `gc_mark_outrefs` 47 s in
+(MaxRSS 2 GB of 64 GB -- not OOM), before reaching any Benders code. Four of the ten tasks
+entered precompilation simultaneously against the SHARED depot and three rewrote
+`StationSelection.ji`; that invalidates the mmap of any sibling holding the old file, and the
+next GC touch faults. Two corrections to what this note's author believed at the time:
+Julia's pidfile lock serialises WRITERS and does nothing for a reader whose mapping is
+replaced; and the caches were not "already warm" -- `src/` had been edited immediately before
+submitting, making every task rebuild. The per-seed `try/catch` also cannot contain this:
+SIGBUS kills the process rather than raising. The array script now defaults to a per-task
+depot, and documents the safe fast path (warm the shared depot with ONE job first, then
+submit).
+
+### Comparison with the 2026-07/08 Benders work
 
 `notes/2026-08-04_zhuzhou_benders_cut_ms5_scaling_results.md` measured the previous
 (pre-split, now removed) Benders implementations on the same instance family. Its best
