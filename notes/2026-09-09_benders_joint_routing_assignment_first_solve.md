@@ -54,10 +54,16 @@ linking rows (`extract_joint_routing_assignment_duals`' own convention, reused):
 valid for every `y` because the dual feasible region does not mention `ŷ`. Two
 simplifications are structural, not conveniences:
 
-- **No feasibility cuts, ever.** `x_walk` covers every demand group with no `y` linking, so
-  the subproblem is feasible at every incumbent. `solve_subproblem` raises on a
-  non-optimal subproblem instead of deriving a weak cut, which is what would surface a
-  future variant that dropped walk-only coverage.
+- **No feasibility cuts needed -- but the reason is the master, not `x_walk`.** I first
+  wrote that `x_walk` covers every demand group so the subproblem is feasible at any `y`.
+  That is FALSE: `x_walk` exists only for groups within `2 * max_walking_distance`, and a
+  group beyond that needs a route column with both stations built. The real guarantee is the
+  master's `add_aggregate_od_route_endpoint_feasibility_constraints!` rows -- the same rows
+  the CG master carries -- so a `y` that fails them is never an incumbent. Those rows are a
+  *necessary* condition only, so the guarantee is empirical: 0 of 86 endpoint-feasible sets
+  have an infeasible subproblem (n=10 seed 42, s=1 and s=3), while 166 of the 252 sets
+  outside the master's feasible set do. The brute-force audit found this by feeding
+  unrestricted `y` and crashing, which is how the wrong claim surfaced.
 - **No bound-dual term.** Neither `θ` nor `x_walk` has an upper bound in the relaxed build
   (`lower_bound = 0.0` only; the coverage rows are what hold them near 1). If anyone adds
   `θ ≤ 1`, this derivation needs a third term and silently under-cuts without it.
@@ -165,6 +171,49 @@ measured -- n=10 s=1/s=3 seeds 42/43/45, n=15 s=1 -- the mixed optimum equals th
 all-binary one, and `benders <= direct_mip` has never yet been a discriminating check. The
 mixed-vs-integral question therefore remains open, not resolved: these instances are simply
 too small/easy to exhibit the hub-route effect that shows a 21.6% gap at n=40.
+
+### Independent verification: brute force + CGSolver cross-check
+
+The monolithic `mixed_mono` comparison shares the model DEFINITION with Benders (same map,
+same enumerated pool, same cost weights), so it validates the ALGORITHM and not the model.
+Two further checks close that gap.
+
+**Brute force over the master's feasible set** (`benders_brute_force_certificate.jl`).
+At n=10/k=5 only 86 of the 252 station sets satisfy the master's endpoint-feasibility rows.
+Evaluating the second stage exactly at each gives the true value function with no master,
+no cuts and no monolithic MIP:
+
+| s | brute-force min | Benders | ties at optimum | worst set | spread |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 12249.400939 | 12249.400939 | 21 of 86 | 16538.302954 (+35.0%) | 4288.90 |
+| 3 | 25771.187908 | 25771.187908 | 21 of 86 | 34862.882745 (+35.3%) | 9091.69 |
+
+**Pointwise cut audit.** Every cut checked against the true `Q_s(y)` at every one of the 86
+sets -- a valid cut must underestimate `Q_s` everywhere, not just at the `yhat` it came
+from. Worst violation across all cuts x all sets: `+6.4e-07`, i.e. float noise. Every cut
+is also *tight somewhere* (largest tightest-slack `6.4e-07`), so none is slack everywhere
+and merely decorative. This is the check that would actually catch a too-strong cut, and it
+matters precisely because converging in 3-5 cuts is the signature an invalid cut would
+produce.
+
+**CGSolver cross-check** (`benders_vs_cg_crosscheck.jl`) -- the only check with an
+independent COLUMN SOURCE, since CG prices by label-setting and never enumerates. At n=10
+s=1 seed 42, with CG converged and `cg_optimality_scope == "full_route_universe"`:
+
+    cg_lp = benders = mixed_mono = cg_ip = direct_mip = 12249.400939
+
+All five collapse to one number. `cg_lp` is a lower bound on the true mixed optimum
+*whatever the enumerated pool contains* (pricing searched the full universe and `y` is
+relaxed on top), so `cg_lp == direct_mip` says the enumerated pool is complete for the
+optimum AND the `y`-relaxation is tight here. `cg_ip == direct_mip` is the pool-agreement
+check specifically: two all-binary optima over two independently built pools. A route the
+enumerator missed would show up there and nowhere else. CG reached it in 3 iterations
+against a 16,320-column enumeration.
+
+Note the precondition is not optional: on a budget-stopped CG run `cg_lp` bounds nothing and
+a mismatch would prove nothing while looking exactly like a bug in one of the two
+implementations. The script checks `cg_converged` and the scope first, before reporting any
+comparison as meaningful.
 
 ### Infeasibility reporting (k=1)
 

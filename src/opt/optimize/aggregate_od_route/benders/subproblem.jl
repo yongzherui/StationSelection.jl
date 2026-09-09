@@ -29,14 +29,35 @@ station-fixing work calls `Gamma_j`.
 
 # Two things that make this simpler than textbook Benders
 
-**No feasibility cuts.** `x_walk` exists for every positive-demand group and carries no
-`y` linking whatsoever, so "walk everybody, activate nothing" is feasible for any `y` --
-the subproblem is feasible and bounded at every incumbent, and only optimality cuts are
-ever needed. (Ultimately this rests on
-`_aggregate_od_route_allow_walk_only` being unconditionally `true` for this family; a
-variant without direct walking would need feasibility cuts, and `solve_subproblem`
-raising on an infeasible subproblem is what would surface that rather than silently
-producing an invalid cut.)
+**No feasibility cuts** -- but NOT because of `x_walk`, and the distinction matters.
+`x_walk` exists only for groups whose `walking_cost(o, d) <= 2 * max_walking_distance`
+(`compute_valid_jk_pairs`); a group beyond that has a coverage row `sum(theta) >= 1` with
+no walk term at all, so it needs a route column whose two stations are BUILT. "Walk
+everybody" is therefore not universally available and cannot be the guarantee.
+
+What actually guarantees feasibility at every incumbent is the MASTER's
+`add_aggregate_od_route_endpoint_feasibility_constraints!` rows
+(`constraints/endpoint_feasibility.jl`, the same rows the CG master carries): for every
+location required by a group with no walk fallback, some station within
+`max_walking_distance` of it must be built. A `y` that fails this cannot be an incumbent,
+because the master will not produce it.
+
+**That condition is necessary, not sufficient**, so this is an empirical guarantee rather
+than a theorem: the rows place a station near each endpoint, but do not by themselves
+promise a physically feasible route column linking a built `(j, k)` pair for a given group.
+MEASURED at n=10 seed 42, exhaustively over the master's whole feasible set: 0 of 86
+endpoint-feasible station sets have an infeasible subproblem, at s=1 and s=3 alike
+(`benchmarks/diagnostics/benders_brute_force_certificate.jl`, which checks exactly this).
+Outside the master's feasible set infeasibility is easy to hit -- 166 of the 252 station
+sets at that instance violate the endpoint rows -- which is why that script filters to the
+master's domain and why `Q(y)` is only defined there.
+
+`solve_subproblem` therefore keeps its `error()` on a non-optimal subproblem as a live
+guard, not a can't-happen branch: an instance where some master-feasible `y` leaves a group
+unserviceable would raise mid-loop rather than silently deriving a cut from a meaningless
+dual. Adding genuine feasibility cuts (or strengthening the master with per-GROUP pickup/
+dropoff rows, which are tighter than the per-location consolidation) is the fix if that ever
+fires.
 
 **No bound duals in the cut.** Neither `theta` nor `x_walk` carries an upper bound in the
 relaxed build -- both are created with `lower_bound = 0.0` only, the coverage rows being

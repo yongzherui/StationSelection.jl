@@ -154,12 +154,20 @@ cost. `SOLVE_OPTIMAL` requires the two to have met inside `optimality_tol`; a ru
 by `max_iterations`/`total_time_limit_sec` reports `SOLVE_FEASIBLE`, and the reported
 objective is always the UB — a lower bound is not a solution.
 
-No feasibility cuts exist or are needed: `x_walk` covers every demand group with no `y`
-linking, so the subproblem is feasible at every incumbent. `solve_subproblem` raises on a
-non-optimal subproblem rather than deriving a weak cut from it, and every solve asserts the
-strong-duality identity `Σα − Σ Γⱼ ŷⱼ == objective` before its cut is built — one line that
-catches a wrong dual sign, a dropped linking family, or a subproblem whose `mapping`
-disagrees with the master's.
+No feasibility cuts are needed — but **not** because `x_walk` covers everything. `x_walk`
+exists only for groups within `2 × max_walking_distance`; beyond that a group's coverage row
+has no walk term and needs a route column with both stations built. The actual guarantee is
+the master's `add_aggregate_od_route_endpoint_feasibility_constraints!` rows (the same ones
+the CG master carries): a `y` failing them is never an incumbent. That condition is
+*necessary, not sufficient*, so this is measured rather than proven — 0 of 86
+endpoint-feasible station sets have an infeasible subproblem at n=10 seed 42, s=1 and s=3
+(`benders_brute_force_certificate.jl`), while 166 of the 252 sets *outside* the master's
+feasible set do. `solve_subproblem` accordingly keeps its raise as a live guard rather than
+a can't-happen branch.
+
+Every solve asserts the strong-duality identity `Σα − Σ Γⱼ ŷⱼ == objective` before its cut
+is built — one line that catches a wrong dual sign, a dropped linking family, or a
+subproblem whose `mapping` disagrees with the master's.
 
 ## Kept-but-unwired scaffolding
 
