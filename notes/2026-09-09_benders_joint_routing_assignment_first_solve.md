@@ -84,10 +84,13 @@ project.
 `:direct_enumeration`; its pool is exponential in `max_stops` on two axes, so
 `BendersSubproblemConfig.max_stops` defaults to 4 and narrows the formulation's own value
 when larger. `metadata["benders_optimality_scope"]` then reads `"max_stops_restricted"`,
-in the same spirit as `cg_optimality_scope`. Untested path so far — every cell below was
-run at formulation `max_stops = 4`, so the scope came back `"full_route_universe"`.
+in the same spirit as `cg_optimality_scope`. Exercised by the `restricted_scope` arm below,
+which relies on the master carrying no `max_stops` dependence to make the narrowing
+testable without enumerating the wider universe.
 
-## Measured (Zhuzhou n=10, p=8, 1 scenario, k=5, max_stops=4)
+## Measured
+
+### Seed sweep (Zhuzhou n=10, p=8, 1 scenario, k=5, max_stops=4)
 
 | seed | objective | iters | cuts | cols | loop wall | enum wall |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -95,19 +98,69 @@ run at formulation `max_stops = 4`, so the scope came back `"full_route_universe
 | 43 | 8758.928834 | 3 | 2 | 7500 | 2.19 s | 2.88 s |
 | 45 | 8398.668920 | 2 | 1 | 1823 | 1.30 s | 2.02 s |
 
+### Arm sweep (seed 42, `benders_joint_n10.jl`, 25/25 checks)
+
+| arm | objective | iters | cuts | cols | scope |
+| --- | --- | --- | --- | --- | --- |
+| multicut_s1 | 12249.400939 | 4 | 3 | 16320 | full_route_universe |
+| singlecut_s1 | 12249.400939 | 4 | 3 | 16320 | full_route_universe |
+| restricted_scope | 12249.400939 | 4 | 3 | 16320 | **max_stops_restricted** |
+| multicut_s3 | 25771.187908 | 4 | 5 | 21635 | full_route_universe |
+| singlecut_s3 | 25771.187908 | 4 | 3 | 21635 | full_route_universe |
+
+Two things the arm sweep established that the seed sweep could not:
+
+**The cut dedup is load-bearing, not defensive.** `multicut_s3` added **5** cuts over 4
+iterations with 3 scenarios; an un-deduplicated `MultiCut` would have added up to 12. So
+the degenerate-dual repeat that `add_benders_cut!`'s return count exists to detect is a
+real occurrence at the smallest interesting size, not a theoretical concern. Without the
+count the loop still terminates here (the gap closes), but a case where it does not is
+clearly reachable.
+
+**A prediction that was wrong: `SingleCut` did NOT need more iterations.** The expectation
+was that aggregating three scenarios' cut data into one row would cost iterations relative
+to three separate rows. At s=3 both modes took 4 iterations to the same optimum
+(`SingleCut` adding 3 cuts to `MultiCut`'s 5). n=10 with 1-5 total cuts puts neither mode
+under any pressure, so this cell cannot separate them; the comparison needs a harder
+instance before it means anything either way.
+
+The `restricted_scope` row is the narrowing path: formulation `max_stops=6` with the
+subproblem capped at 4 returns `multicut_s1`'s objective *exactly*, because the master
+carries no `max_stops` dependence at all (its rows are the station budget and endpoint
+feasibility, and the map keys off `max_walking_distance`). That identity is what makes the
+path testable without enumerating `max_stops=6`, which is not tractable.
+
+### Suite
+
+93,086/93,086 tests pass with the Benders work in (run 22409466, 2m23s). Credit to a
+parallel session for pointing out what that does and does not cover: the full suite on a
+clean tree reaches the CG path, the relaxed-cluster pricers, the clustering formulations
+and the include graph -- and NOT n=40/50 scale, long-running certification, or two-tier
+escalation under real budgets. Those are only exercised by the Study 9/10 arrays.
+
 LB == UB exactly on every cell, `gap = 0.000e+00`, and `benders == mixed_mono` to
 `diff 0.000e+00`. Master time is negligible (0.02–0.04 s total); the loop is
 subproblem-bound, and the whole run is dominated by up-front enumeration — which is the
 expected and the damning fact about this oracle (see below).
 
-**The LP-IP gap is 0% on all three cells**, so `benders ≤ direct_mip` passes trivially and
+**The LP-IP gap is 0% on every cell measured**, s=1 and s=3 alike, so `benders ≤ direct_mip` passes trivially and
 cannot distinguish the mixed optimum from the integral one at this size. The monolithic
 *mixed* comparison is the check that actually establishes exactness. A cell with a real
 gap (the hub-route effect shows 21.6% at n=40) would be the stronger test and has not been
 run.
 
 Iteration counts of 2–4 against C(10,5) = 252 candidate station sets say the cuts are
-strong here, but n=10 with one scenario is not evidence about scaling.
+strong here, but n=10 is not evidence about scaling -- note s=3 also took 4 iterations,
+i.e. tripling the second stage did not move the iteration count at all, which is far more
+likely to mean the instance is easy than that the method is insensitive to `s`.
+
+A cross-implementation check worth doing when Study 11's data lands: a `y`-fixed-binary /
+`theta`-and-`x_walk`-continuous snapshot over a CG pool is the same mixed model this
+solves, so the two objectives must agree -- but only on seeds where CG certified
+(`cg_stop_reason == "converged_by_certification"`, full-universe scope), since on a
+budget-stopped seed the CG number is an upper bound and a mismatch would prove nothing.
+Parameters have to match too: this oracle caps `max_stops` at 4 while the benchmarks run
+at 10, so a like-for-like cell needs small `n` and `max_stops = 4`.
 
 Repro: `sbatch benchmarks/diagnostics/run_benders_n10.sh` (env `BJ_SEED`, `BJ_N`, `BJ_P`,
 `BJ_S`, `BJ_MAX_STOPS`); the script runs both monolithic references and fails loudly.

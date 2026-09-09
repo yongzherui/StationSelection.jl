@@ -20,6 +20,11 @@ reports honestly rather than claiming a bound it never established.
 iteration's second-stage evaluation is a genuine feasible solution, and the master's
 `y` sequence is not monotone in cost, so the final iteration is frequently worse than one
 seen earlier.
+
+`master_infeasible` is kept separately from `stop_reason` because it is the one
+non-optimal master status that is a *proof about the problem* rather than a stopped run,
+and so changes the reported `SolveStatus` -- see `loop.jl` for why a Benders cut cannot
+remove a feasible first-stage point.
 """
 mutable struct BendersLoopState
     start_time::Float64
@@ -33,10 +38,11 @@ mutable struct BendersLoopState
     master_sec::Float64
     subproblem_sec::Float64
     converged::Bool
+    master_infeasible::Bool
     stop_reason::String
 
     BendersLoopState(start_time::Float64) =
-        new(start_time, 0, -Inf, Inf, nothing, nothing, 0, 0, 0.0, 0.0, false, "")
+        new(start_time, 0, -Inf, Inf, nothing, nothing, 0, 0, 0.0, 0.0, false, false, "")
 end
 
 """

@@ -139,6 +139,14 @@ the same mixed model solved monolithically over the same pool (`diff 0.000e+00`)
 `benders <= direct_mip` passes trivially there; the monolithic *mixed* comparison is the
 check that actually establishes exactness.
 
+That script's five arms (25/25 checks) additionally cover `SingleCut` and 3 scenarios, and
+the `max_stops`-narrowing path -- a formulation at `max_stops=6` with the subproblem capped
+at 4 returns the `max_stops=4` objective *exactly*, since the master carries no `max_stops`
+dependence, which is what makes that path testable without enumerating the wider universe.
+`MultiCut` at s=3 added 5 cuts over 4 iterations against a possible 12, so the cut
+deduplication behind `add_benders_cut!`'s return count is exercised, not merely defensive.
+Full suite: 93,086/93,086.
+
 Both bounds are reported (`benders_lower_bound`/`benders_upper_bound`/`benders_gap`): the
 LB is the master's `objective_bound` (not `objective_value`, which a non-zero `MIPGap`
 would inflate into an invalid bound), the UB is the best incumbent's exact second-stage

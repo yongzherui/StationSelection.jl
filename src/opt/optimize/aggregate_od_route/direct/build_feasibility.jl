@@ -11,10 +11,11 @@ fast `optimize!` call.
 """
     check_feasibility(problem::StationSelectionProblem,
                        formulation::Union{AggregateODRouteBaseFormulation,
-                                           AggregateODRouteJointRoutingAssignmentFormulation},
+                                           AggregateODRouteJointRoutingAssignmentFormulation,
+                                           AggregateODRouteJointRoutingAssignmentMasterFormulation},
                        solver::AbstractSolver) -> Union{Nothing, String}
 
-`run_opt`'s generic feasibility-gate hook (`optimize/run_opt.jl`), specialized for the two
+`run_opt`'s generic feasibility-gate hook (`optimize/run_opt.jl`), specialized for the
 live aggregate-OD-route formulations: solves `AggregateODRouteFeasibilityFormulation`
 (this file, `y` + `station_limit` + `endpoint_feasibility` only -- no route columns) via
 `DirectMIPSolver` and returns a refutation string unless it comes back `SOLVE_OPTIMAL`,
@@ -28,6 +29,19 @@ and gets misread as "this instance is infeasible" -- see
 `notes/2026-08-28_study5_dominance_fix_pilot_infeasible_repro.md` for the investigation
 that motivated this.
 
+`AggregateODRouteJointRoutingAssignmentMasterFormulation` is in the `Union` because the
+condition this gate tests -- `y` + `station_limit` + `endpoint_feasibility` -- IS that
+formulation's entire row set, so the gate is exactly, not approximately, applicable to it.
+Without it a `BendersSolver` run on an infeasible `k` skipped the gate entirely and
+reported the refutation by *throwing* from
+`aggregate_od_route_validate_feasible_coverage` (for uncovered groups) or by returning
+`SOLVE_NOT_SOLVED` off an infeasible master -- both contradicting this gate's contract
+that a proven-infeasible instance is an ANSWER (`SOLVE_INFEASIBLE`), not a usage error.
+Its sibling `AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation` is
+deliberately absent: it has no `station_limit` row at all (`y` is fixed by the master, not
+chosen), so a `k`-reachability question is not even well-posed for it -- and it is
+unreachable from `run_opt` regardless, its `build_model` requiring a `scenario` kwarg.
+
 Does not prove the full problem is feasible -- route/capacity/wait-time/detour
 constraints can still fail even when this passes -- only that this necessary condition on
 `y` alone isn't already broken. `run_opt` also calls this hook on
@@ -40,6 +54,7 @@ function check_feasibility(
         formulation::Union{
             AggregateODRouteBaseFormulation,
             AggregateODRouteJointRoutingAssignmentFormulation,
+            AggregateODRouteJointRoutingAssignmentMasterFormulation,
         },
         solver::AbstractSolver,
     )::Union{Nothing, String}

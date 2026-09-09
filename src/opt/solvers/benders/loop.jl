@@ -34,6 +34,15 @@ function optimize_model(build_result::BuildResult, solver::BendersSolver)::OptRe
             # the lower bound this iteration would have contributed, so the run has to
             # report which status stopped it rather than looking like a clean finish.
             st.stop_reason = "master_$(JuMP.termination_status(m))"
+            # An INFEASIBLE master proves the PROBLEM infeasible, and may be reported as
+            # such -- unlike CGSolver, whose infeasible restricted master says only that
+            # its column pool is too thin. The difference is that a Benders optimality cut
+            # never removes a feasible first-stage point (it underestimates the second
+            # stage everywhere, so it can only raise `Theta`), so an empty master means the
+            # `y` polytope itself is empty, at iteration 1 or iteration 100 alike.
+            st.master_infeasible =
+                JuMP.termination_status(m) in
+                    (MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED, MOI.LOCALLY_INFEASIBLE)
             break
         end
         # `objective_bound`, not `objective_value`: under a non-zero MIPGap the latter is
@@ -110,6 +119,10 @@ function _benders_package_result(build_result::BuildResult, st::BendersLoopState
         SOLVE_OPTIMAL
     elseif has_incumbent
         SOLVE_FEASIBLE
+    elseif st.master_infeasible
+        # See the loop's own comment: a Benders cut cannot remove a feasible `y`, so an
+        # infeasible master is a proof about the problem, not about a restricted relaxation.
+        SOLVE_INFEASIBLE
     else
         SOLVE_NOT_SOLVED
     end
