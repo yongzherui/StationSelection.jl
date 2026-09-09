@@ -294,6 +294,102 @@ at 10, so a like-for-like cell needs small `n` and `max_stops = 4`.
 Repro: `sbatch benchmarks/diagnostics/run_benders_n10.sh` (env `BJ_SEED`, `BJ_N`, `BJ_P`,
 `BJ_S`, `BJ_MAX_STOPS`); the script runs both monolithic references and fails loudly.
 
+## Comparison with the 2026-07/08 Benders work
+
+`notes/2026-08-04_zhuzhou_benders_cut_ms5_scaling_results.md` measured the previous
+(pre-split, now removed) Benders implementations on the same instance family. Its best
+configuration was `BendersYZ` with restricted-MW cuts. Median iterations / optimality cuts /
+solver wall, against this implementation at s=3:
+
+| n, q | OLD BendersYZ-MW iters | OLD cuts | OLD time | NEW iters | NEW cuts | NEW wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10, 3 | 28.0 | 81.0 | 29 s | **4** | **5** | 17.4 s |
+| 15, 3 | 175.5 | 521.5 | 823 s | **4** | **8** | 9.1 s |
+| 20, 3 | -- (3/6 succeeded) | 766.0 | 3,390 s | **7** | **12** | 69.9 s |
+| 25, 3 | 0/6 succeeded | -- | -- | not run | | |
+
+Old-side context: 45 of 348 tasks hit the `max_iterations=500` cap, 88 timed out, 44 OOMed
+at 16 GB. No three-scenario case completed beyond n=25 by any method. `BendersY` (master
+over `y` only, the same first-stage shape as this implementation) deteriorated sooner still:
+at n=15 half its single-scenario runs hit 500 iterations.
+
+So on nominally comparable `(n, q)` the new implementation uses **44x fewer iterations and
+65x fewer cuts at n=15**, and 64x fewer cuts at n=20 where the old one only succeeded half
+the time.
+
+### Why -- and it is NOT that this implementation is better
+
+Five differences, and the last one is the whole story:
+
+1. **`p` differs**: p=8 here versus p=16/32 there, so 2-4x fewer OD pairs and coverage rows.
+2. **`max_stops`**: 4 versus 5.
+3. **Different MODEL, not just a different algorithm.** Those runs used
+   `NearestOpenAggregateODAssignmentPolicy(:big_m_nearest)` -- a procedural nearest-open
+   assignment resolver. This formulation has free assignment baked into the columns. **The
+   objectives are not comparable at all**; only rough algorithmic effort is, and even that
+   is confounded by 1 and 2.
+4. **Different first stage**: `BendersYZ`'s master carries `y` AND the nearest-open endpoint
+   selectors `z`. This master carries `y` only.
+5. **The subproblem there was INEXACT; here it is exact.** Those runs solved the
+   route-covering subproblem by *inner column generation* with repricing, and derived cuts
+   through completion tricks (`zero_completion`, `restricted_mw_fixed_pi`,
+   `standard + reprice`). An inexact subproblem gives weaker cuts, and completion-derived
+   cuts were separately found to be outright invalid in some cases
+   (`2026-07-27` / `project_yz_completion_lp_invalid_cut`). This implementation solves the
+   subproblem to optimality over a *complete* enumerated pool and takes the plain LP dual.
+
+**The low iteration count is bought with up-front enumeration.** The old implementation paid
+for an inexact subproblem in iterations; this one pays for an exact subproblem in
+enumeration. That is a trade, not a win -- and it yields a falsifiable prediction: **when the
+`:column_generation` oracle replaces `:direct_enumeration`, iteration and cut counts should
+rise substantially toward the historical numbers**, because the subproblem becomes inexact in
+exactly the way theirs was. If they *don't* rise, something else is going on and this
+comparison is the reason to look.
+
+### Three historical bugs this implementation avoids by construction
+
+Not by cleverness -- the notes were the specification:
+
+- `2026-07-21_benders_final_result_vs_best_result_bug.md`: the terminal return used the wrong
+  incumbent. Here `BendersLoopState` tracks `best_incumbent`/`best_iteration` explicitly and
+  `_benders_package_result` reports the best, never the last (the n=10 s=1 runs stop at
+  iteration 4 and report iteration 2's solution, so this path is live, not theoretical).
+- `2026-07-23_benders_reports_optimal_with_unclosed_outer_gap.md`: `OPTIMAL` reported with a
+  large open outer gap. Here the status comes from `st.converged`, never from the master's
+  `MOI` code, and the lower bound is read from `objective_bound` rather than
+  `objective_value` so a non-zero `MIPGap` cannot fake convergence.
+- `2026-07-27` invalid completion-LP cuts: avoided by not using completion cuts at all.
+
+### One historical result that corrects this note's own feasibility claim
+
+`2026-07-22_endpoint_coverage_feasibility_guarantee.md` made subproblem feasibility
+*provable* for the old model via three changes together: endpoint coverage in the master,
+`allow_same_station = true` so a `(j,j)` pair always resolves the "both endpoints' nearest
+stations collide" case, and a walk-only companion rule. **The current package removed
+same-station pairs entirely** (`compute_valid_jk_pairs` no longer emits `j == k`), so that
+proof does not transfer verbatim -- which is why the guarantee here was only ever measured.
+
+But the historical note also supplies the missing argument: by the triangle inequality, any
+`j` within `max_walking_distance` of both `o` and `d` implies
+`dist(o,d) <= 2 * max_walking_distance`, which is exactly the condition for `WALK_ONLY_PAIR`
+to exist. So same-station pairs and walk-only cover the identical set of groups, and dropping
+`(j,j)` loses nothing. That splits every group cleanly:
+
+- `dist(o,d) <= 2 * max_walking_distance`: `x_walk` exists, always coverable.
+- otherwise: no same-station `j` can exist either, so a genuine `(j,k)`, `j != k`, is
+  required -- and endpoint coverage forces a station near `o` and one near `d` to be built,
+  with the 2-stop route `j -> k` serving the pair whenever `routing_cost(j,k)` is finite
+  (its ride limit is `detour_factor * routing_cost(j,k) >= routing_cost(j,k)` for
+  `detour_factor >= 1`, so the direct hop always fits) and `max_wait_time` is met.
+
+That reduces the residual risk to two concrete conditions -- an infinite routing cost between
+the specific built pair, or a wait-time violation -- rather than leaving it as "necessary but
+not sufficient, measured 0/86". Worth turning into a real build-time assertion.
+
+Corroboration worth noting: that 2026-08-04 scaling run also reports "endpoint coverage is
+imposed eagerly in the master; all recorded feasibility-cut counts are zero" -- the same
+mechanism and the same observed outcome as here, three months earlier.
+
 ## What this is not
 
 `:direct_enumeration` enumerating the whole route universe up front is exactly the cost
