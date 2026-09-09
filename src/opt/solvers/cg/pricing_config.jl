@@ -71,7 +71,7 @@ time limit.
 `relaxed_cluster_macro_count` = K1 -- required by `:relaxed_cluster_two_tier` and rejected
 without it. The coarse layer of the nested pair, built at build time by clustering the meso
 medoids and lifting, so every macro cell is a union of meso cells
-(`relaxed_cluster/utils/certification/two_tier.jl`). MEASURED at n=40 with K2=24: K1=14-16
+(`relaxed_cluster/utils/certification/two_tier/`). MEASURED at n=40 with K2=24: K1=14-16
 is the optimum, turning a 22-150 s meso sweep into 0.2-1.4 s for the pair with the same
 column priced; K1 <= 8 is nearly worthless (the macro support keeps 79-83% of the meso
 graph) and K1 >= 18 starts paying real time in the macro sweep itself. Cannot be combined
@@ -88,7 +88,20 @@ restricted meso sweep exhausts, so alignment is a shortcut rather than the only 
 Lowered from 20 to 15 after the n=40 stall: station-search cost is super-linear (7-8
 stations exhaust in ~0.1 s, 11-13 need over a second), and MEASURED there, 7 of 10 seeds
 burned every 300 s round while the 3 that certified had subset medians of 8-10 stations.
-A cheap search that earns one cut beats an expensive one that earns two.
+
+REVISED 2026-09-09, and the old one-line justification here ("a cheap search that earns one
+cut beats an expensive one that earns two") was wrong about the mechanism: the caps do not
+earn different numbers of cuts. Seed 43 at K1=16/g=3, PER ROUND rather than summed over
+attempts, cap 13/16/20 give 1.253/1.287/1.287 macro cuts per macro round -- 16 and 20
+identical, 13 within 3% -- and 44% zero-cut attempts in all three. What the cap actually
+trades is alignment refusals (0.205 -> 0.027 -> 0.000 per station search, falling with the
+cap) against unexhausted searches (0.061 -> 0.090 -> 0.142, rising with it), and what
+decides the run is COST CONCENTRATION: all three produce exactly two blocking rounds
+(unexhausted AND nothing improving), but they cost 2001 s / 53 s / 278 s respectively.
+cap=16 wins by making rounds cheap (13.8 s per macro round against cap=13's 24.9), so more
+fit in the budget. 16 is the measured optimum at n=40; this default stays 15 only because
+nothing has re-measured the smaller instances. See
+`notes/2026-09-09_n40_certification_frontier_5_of_10.md`.
 
 Two further experimental switches used to live here -- a barren-support cache and active-cut
 subsumption pruning. Both were removed: the measured cut load is far too small for either

@@ -68,7 +68,7 @@ include("label_setting/route_covering/station_simple/hooks.jl")
 # `enumerate_aggregate_od_route_columns` (below, `AggregateODRouteBaseFormulation`'s own
 # route pool builder, which builds its own uniform-reward duals directly and needs none of
 # this) or from PassengerFreeAssignmentCG (AggregateODRouteJointRoutingAssignmentFormulation
-# + CGSolver), which goes through opt/solvers/cg_solver.jl's generic outer loop with its own
+# + CGSolver), which goes through opt/solvers/cg/loop.jl's generic outer loop with its own
 # joint_routing_assignment/{duals,pricing_round,routing_and_assignment}.jl hooks instead.
 include("label_setting/route_covering/exact/enumeration.jl")
 # Shared by both AggregateODRouteBaseFormulation build_model methods below (DirectMIPSolver
@@ -206,16 +206,23 @@ include("label_setting/joint_routing_assignment/relaxed_cluster/hooks.jl")
 # utils/refinement/refine.jl: witness-guided cluster refinement. Needs data.jl's reward
 # witness and ../exact/accept.jl's replay, and is consumed by the certification loop, so it
 # loads between them. Pure functions -- no model, no solver, no search state.
-# utils/certification/certify.jl is the loop around the cut-aware search -- the whole of
-# `pricing.mode = :relaxed_cluster`. It needs guiding/guide.jl's subset
-# extraction, the cut context and refine.jl, so it loads last of all.
+# utils/certification/ is the loop around the cut-aware search -- the whole of
+# `pricing.mode = :relaxed_cluster` and `:relaxed_cluster_two_tier`. It needs
+# guiding/guide.jl's subset extraction, the cut context and refine.jl, so it loads last of
+# all. Within it the order is bottom-up: shared result types, then the plumbing both modes
+# use, then the one-tier loop, then the round driver that fans a per-scenario pass across
+# scenarios, then the two-tier mode -- which is the same certification contract over a
+# NESTED macro/meso partition pair and reuses the driver, the result type and the stat
+# record, so it has to come after them.
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/refinement/refine.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/results.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/common.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl")
-# utils/certification/two_tier.jl is `:relaxed_cluster_two_tier`: the same certification
-# contract over a NESTED macro/meso partition pair. It reuses certify.jl's round driver
-# (via that function's `pass` keyword), its result type and its stat record, so it has to
-# be included after it.
-include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/round.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/tuning.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/partitions.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/loop.jl")
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/round.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
 # master CGSolver's build (above) solves, seeded with the exhaustive pool

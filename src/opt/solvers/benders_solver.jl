@@ -19,7 +19,7 @@ per `AbstractProblem`), not here:
 `mapping` (`build_result.mapping`) is passed as its own positional argument, not just
 read off `build_result`, so that formulation-specific methods can dispatch on its
 concrete type (e.g. `mapping::AggregateODRouteMap`) -- mirrors `CGSolver`'s identical
-hook-dispatch pattern (`opt/solvers/cg_solver.jl`), see that file's docstring for why
+hook-dispatch pattern (`opt/solvers/cg/solver.jl`), see that file's docstring for why
 dispatching on `build_result::BuildResult` alone can't distinguish formulations.
 
 `extract_incumbent` reads whatever the master's first-stage decision is (e.g. `y`

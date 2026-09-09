@@ -33,7 +33,7 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 Every pricer this formulation can be solved with -- `:exact`, `:station_simple`,
 `:darp_modified`, `:darp`, and `:relaxed_cluster` -- plus warm-start
 phasing and every relaxed-cluster setting are configured on `CGSolver.pricing`
-(`CGPricingConfig`, `opt/solvers/cg_pricing_config.jl`), which is also where they are
+(`CGPricingConfig`, `opt/solvers/cg/pricing_config.jl`), which is also where they are
 documented. They are search algorithms, not encoding: runs differing only in pricer solve
 the identical model, and three of them are required to reach the identical optimum. This
 formulation's `build_model` for `CGSolver` reads that config and resolves the default

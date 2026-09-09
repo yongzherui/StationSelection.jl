@@ -821,6 +821,75 @@
         @test_throws ArgumentError StationSelection.optimize_model(build, solver)
     end
 
+    @testset "a round names its inconclusive scenarios and can be restricted to them" begin
+        # Escalation is decided PER SCENARIO (`cg/loop.jl`), which needs two things from a
+        # round: which scenarios came back inconclusive, and the ability to re-run only
+        # those. Without the pair, a round is escalatable only as a unit, and a single
+        # productive scenario masks a permanently stuck one -- MEASURED at n=40 seed 47,
+        # where scenario 1 replayed the same inconclusive 262 s search 24 times because
+        # scenario 2 kept harvesting columns and the round therefore never looked stuck.
+        instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
+        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
+        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        solver = rc_solver(3)
+        build = StationSelection.build_model(
+            problem,
+            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            solver,
+        )
+        m = build.model
+        JuMP.optimize!(m)
+        @test JuMP.termination_status(m) == MOI.OPTIMAL
+        duals = StationSelection.extract_duals(build, build.mapping, m)
+
+        full = StationSelection.cg_certification_round(
+            build, build.mapping, m, duals, solver; time_limit_sec = 60.0,
+        )
+        all_scenarios = collect(1:SS.n_scenarios(data))
+        @test full.scenarios_run == all_scenarios
+        @test full.n_scenarios == length(all_scenarios)
+        # Inconclusive scenarios are a subset of what ran, and a certified round has none:
+        # `certified` already means every scenario reached a verdict.
+        @test issubset(Set(full.inconclusive_scenarios), Set(full.scenarios_run))
+        @test allunique(full.inconclusive_scenarios)
+        if full.certified
+            @test isempty(full.inconclusive_scenarios)
+        end
+        # `exhausted` is exactly "nothing inconclusive and nothing refuted".
+        @test full.exhausted == (isempty(full.inconclusive_scenarios) && !full.improving_found)
+
+        # Restricting runs only what was named, and says so.
+        for s in all_scenarios
+            one = StationSelection.cg_certification_round(
+                build, build.mapping, m, duals, solver;
+                time_limit_sec = 60.0, only_scenarios = [s],
+            )
+            @test one.scenarios_run == [s]
+            @test one.n_scenarios == 1
+            @test issubset(Set(one.inconclusive_scenarios), Set([s]))
+        end
+        # Order follows the formulation's scenario order, not the caller's, so a restricted
+        # round is comparable to the full one row for row.
+        if length(all_scenarios) > 1
+            rev = StationSelection.cg_certification_round(
+                build, build.mapping, m, duals, solver;
+                time_limit_sec = 60.0, only_scenarios = reverse(all_scenarios),
+            )
+            @test rev.scenarios_run == all_scenarios
+        end
+
+        # A scenario that does not exist is a caller bug, not something to silently drop --
+        # silently dropping it would escalate nothing and look like a clean round.
+        @test_throws ArgumentError StationSelection.cg_certification_round(
+            build, build.mapping, m, duals, solver;
+            time_limit_sec = 60.0, only_scenarios = [maximum(all_scenarios) + 1],
+        )
+        @test_throws ArgumentError StationSelection.cg_certification_round(
+            build, build.mapping, m, duals, solver;
+            time_limit_sec = 60.0, only_scenarios = Int[],
+        )
+    end
+
     # ── combinatorial-no-good certification ─────────────────────────────────
     @testset "no-good cuts: the mask compiles and the right routes survive" begin
         nodes = two_group_nodes()

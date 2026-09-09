@@ -250,7 +250,7 @@ end
 """
     integer_recovery_build(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model) -> BuildResult
 
-`CGSolver` hook (`opt/solvers/cg_solver.jl`, `recover_integer_solution=true`): rebuilds
+`CGSolver` hook (`opt/solvers/cg/hooks.jl`, `recover_integer_solution=true`): rebuilds
 the joint routing+assignment master from scratch via `_build_joint_routing_assignment_model`
 as a genuine MIP -- `y`/`theta`/`x_walk` all binary -- seeded with exactly the column pool
 CG discovered (`m[:joint_routing_assignment_columns]`), not the two-stop seed

@@ -2,7 +2,7 @@
 `CGSolver` hook dispatch, shared by every `AggregateODRouteMap`-based CG master
 (`AggregateODRouteBaseFormulation`, `AggregateODRouteJointRoutingAssignmentFormulation`).
 
-`CGSolver`'s 4 hooks (`opt/solvers/cg_solver.jl`) are fixed-signature
+`CGSolver`'s 4 hooks (`opt/solvers/cg/hooks.jl`) are fixed-signature
 `(build_result::BuildResult, mapping, m::JuMP.Model, ...)` calls, and both live
 aggregate-OD-route formulations share the exact same `mapping::AggregateODRouteMap` type --
 so a naive `extract_duals(::BuildResult, ::AggregateODRouteMap, ::JuMP.Model)` method per
@@ -87,15 +87,18 @@ function cg_certification_supported(build_result::BuildResult, mapping::Aggregat
 end
 
 function cg_certification_round(build_result::BuildResult, mapping::AggregateODRouteMap,
-        m::JuMP.Model, duals, solver::CGSolver; time_limit_sec::Real, iteration::Int=0)
+        m::JuMP.Model, duals, solver::CGSolver; time_limit_sec::Real, iteration::Int=0,
+        only_scenarios::Union{Nothing, AbstractVector{Int}}=nothing)
     if m[:joint_routing_assignment_pricing_mode] === :relaxed_cluster_two_tier
         return _run_two_tier_certification_round(
             m[:aggregate_od_route_formulation], mapping, m, duals, solver;
             time_limit=Float64(time_limit_sec), iteration=iteration,
+            only_scenarios=only_scenarios,
         )
     end
     return _run_relaxed_cluster_certification_round(
         m[:aggregate_od_route_formulation], mapping, m, duals, solver;
         time_limit=Float64(time_limit_sec), iteration=iteration,
+        only_scenarios=only_scenarios,
     )
 end

@@ -25,14 +25,23 @@ opt/
 ├── problems/              # AbstractProblem subtypes (StationSelectionProblem, RouteCoveringProblem)
 ├── formulations/          # AbstractFormulation subtypes (clustering.jl, aggregate_od_route/*)
 ├── solvers/                # AbstractSolver subtypes + shared solver utils
+│                          #   direct_solver.jl, benders_solver.jl, and cg/ — the column
+│                          #   generation solver split by role: pricing_config.jl (pricer
+│                          #   selection), solver.jl (the CGSolver struct + the docstring
+│                          #   that documents the algorithm), state.jl (loop state +
+│                          #   iteration-log row), loop.jl (the loop and its phases),
+│                          #   metadata.jl (result report), hooks.jl (per-formulation hook
+│                          #   fallbacks)
 ├── optimize/               # build_model methods, one per (problem × formulation × solver)
 ├── label_setting/          # pricing/column-enumeration engine for the AggregateODRoute formulations
 │                          #   joint_routing_assignment/{exact,station_simple,darp,darp_modified}/ price columns;
 │                          #   joint_routing_assignment/relaxed_cluster/ is a relaxed GRAPH, not
 │                          #   a pricer: the exact search runs on it. Label-setting core at its
 │                          #   top level; the drivers that use it live in its utils/, one folder
-│                          #   per optimization — certification/ (one-shot + no-good cut loop),
-│                          #   guiding/ (station subset for the exact pricer), refinement/
+│                          #   per optimization — certification/, guiding/ (station subset
+│                          #   for the exact pricer), refinement/. certification/ holds both
+│                          #   modes: results.jl + common.jl + round.jl are shared, certify.jl
+│                          #   is :relaxed_cluster, two_tier/ is :relaxed_cluster_two_tier
 ├── variables/               # shared variable-creation building blocks (y, z, x, θ, f, walk)
 ├── constraints/             # shared constraint-creation building blocks
 └── objectives/               # shared objective-assembly building blocks
@@ -126,7 +135,7 @@ label-setting pricer; `DirectMIPSolver`'s enumeration never runs dominance.
 
 **Pricers are solver settings, not formulation ones.** `pricing_mode` and every
 `relaxed_cluster_*` field moved off `AggregateODRouteJointRoutingAssignmentFormulation`
-onto `CGSolver.pricing`, a `CGPricingConfig` (`opt/solvers/cg_pricing_config.jl`) — a
+onto `CGSolver.pricing`, a `CGPricingConfig` (`opt/solvers/cg/pricing_config.jl`) — a
 pricer is a search algorithm, so two runs differing only in it solve the *identical*
 model. A mode sweep therefore varies one solver and reuses one formulation instead of
 constructing a "different" formulation per arm:
@@ -230,6 +239,21 @@ optimality, but it harvests the real columns its exhaustive subset searches foun
 *is* that iteration's pricing round rather than being wasted (96% of attempts were
 refuted). An inconclusive attempt (budget or cut cap) is the only one that escalates, and
 a second inconclusive result ends the loop with `cg_stop_reason="pricing_inconclusive"`.
+
+**Escalation is PER SCENARIO, not per round.** A round names the scenarios that came back
+inconclusive (`RelaxedClusterCertificationResult.inconclusive_scenarios`) and
+`cg_certification_round`'s `only_scenarios` re-runs exactly those at
+`certifying_pricing_time_limit_sec` -- never the refuted ones (their columns are already in
+the pool) or the certified ones. It had to become per-scenario: escalation used to be
+decided round-wide *and only when the round produced no columns at all*, so the
+harvest-and-continue path skipped straight past it and one productive scenario masked a
+permanently stuck one. MEASURED at n=40 seed 47: scenario 2 refuted in all 38 iterations, so
+the round always had columns; scenario 1 replayed a bit-identical 262 s inconclusive search
+24 consecutive times, 0 escalated attempts in the whole run, master objective frozen at
+32043.0090 from iteration 19 to 38, 73% of the wall proving nothing. A partial round's
+`certified` means "every scenario I ran certified", so the round certifies only when nothing
+outside the escalated subset refuted either; its `relaxed_rc_bound` stays `NaN` because a
+partial round bounds only what it re-ran.
 The certificate covers the **full** route universe (it bounds every real route, not just
 the ones the active pricer searches), so such a run reports
 `cg_optimality_scope="full_route_universe"` even when a

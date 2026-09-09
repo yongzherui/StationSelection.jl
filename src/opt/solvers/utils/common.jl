@@ -33,7 +33,7 @@ not a proof.
 An infeasible status is reported regardless of `certified` -- infeasibility of a
 *restricted* master is not infeasibility of the problem, so `CGSolver` must not reach here
 with an infeasible restricted master and call the instance infeasible (it breaks the loop
-on `master_not_optimal` and re-solves instead; see `cg_solver.jl`).
+on `master_not_optimal` and re-solves instead; see `cg/loop.jl`).
 """
 function _solve_status(m::JuMP.Model; certified::Bool=true)::SolveStatus
     term_status = JuMP.termination_status(m)

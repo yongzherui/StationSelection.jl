@@ -54,8 +54,17 @@ include("opt/abstract.jl")
 include("opt/solvers/utils/abstract.jl")
 include("opt/solvers/utils/common.jl")
 include("opt/solvers/direct_solver.jl")
-include("opt/solvers/cg_pricing_config.jl")
-include("opt/solvers/cg_solver.jl")
+# opt/solvers/cg/: the column-generation solver, split by role. `pricing_config.jl` is the
+# pricer selection, `solver.jl` the `CGSolver` struct and the docstring that documents the
+# algorithm, `state.jl` the loop's mutable state and its iteration-log row, `loop.jl` the
+# loop and its phases, `metadata.jl` the result report, `hooks.jl` the per-formulation hook
+# fallbacks. Load order is bottom-up: everything the loop calls is defined before it.
+include("opt/solvers/cg/pricing_config.jl")
+include("opt/solvers/cg/solver.jl")
+include("opt/solvers/cg/state.jl")
+include("opt/solvers/cg/hooks.jl")
+include("opt/solvers/cg/metadata.jl")
+include("opt/solvers/cg/loop.jl")
 include("opt/solvers/benders_solver.jl")
 # heuristic_solver.jl (HeuristicDispatchSolver) removed -- generic run_heuristic! hook
 # shell with zero implementations and zero callers/tests, unlike BendersSolver (kept
