@@ -44,6 +44,19 @@ could disagree for its own reasons.
 - `singlecut_s3`     -- the same at `SingleCut`: same optimum, but expected to need MORE
                         iterations than `multicut_s3`, since one aggregated row carries
                         what three separate rows carried.
+- `infeasible_gate`  -- `k=1`, through `run_opt`. Most Zhuzhou OD pairs are further apart
+                        than `2 * max_walking_distance`, so they carry no direct-walk
+                        fallback and DO get endpoint-feasibility rows; one station cannot
+                        be near every required location. Expects `SOLVE_INFEASIBLE` with
+                        `metadata["infeasibility_reason"]` set -- i.e. the refutation comes
+                        back as an ANSWER, not as a thrown error.
+- `infeasible_master` -- the same `k=1`, but `build_model` + `optimize_model` DIRECTLY,
+                        bypassing `run_opt`'s gate. This is the only way to reach the
+                        infeasible-master branch, since the gate solves exactly the
+                        master's own row set and so always refutes first. Expects
+                        `SOLVE_INFEASIBLE` with a `master_*` stop reason. Worth testing
+                        despite being unreachable via `run_opt`: benchmark scripts call
+                        `build_model`/`optimize_model` directly all the time.
 
 Also checked across arms: the final gap is 0, the reported objective is the UB (never the
 master's lower bound), and the `reduced_cost(y)` cross-check agrees with the aggregated
@@ -68,7 +81,11 @@ const MAX_STOPS = parse(Int, get(ENV, "BJ_MAX_STOPS", "4"))
 # distinguish "converged" from "ran out of iterations".
 const MAX_ITERS = parse(Int, get(ENV, "BJ_MAX_ITERS", "500"))
 const ARMS = split(get(ENV, "BJ_ARMS",
-    "multicut_s1,singlecut_s1,restricted_scope,multicut_s3,singlecut_s3"), ',')
+    "multicut_s1,singlecut_s1,restricted_scope,multicut_s3,singlecut_s3," *
+    "infeasible_gate,infeasible_master"), ',')
+# Deliberately below any feasible station count: one station cannot sit near both endpoints
+# of every demand group that has no direct-walk fallback.
+const INFEASIBLE_K = 1
 const MAX_ROUTES = 200_000
 const ENUM_LIMIT = 300.0
 
@@ -176,7 +193,56 @@ end
         N, P, SEED, MAX_STOPS, join(ARMS, ", "))
 flush(stdout)
 
-rows = [run_arm(strip(a)) for a in ARMS]
+"""The two infeasibility arms. Returns `nothing` for the row list -- these assert their
+own outcome rather than being compared against a monolithic reference (there is no optimum
+to compare)."""
+function run_infeasible_arm(arm::AbstractString)
+    problem, _k, _meta = benchmark_problem(@__DIR__, "BJ", N, P, 1, SEED)
+    small = StationSelectionProblem(problem.data, INFEASIBLE_K;
+                                    max_walking_distance=problem.max_walking_distance)
+    formulation = _formulation(MAX_STOPS)
+    solver = BendersSolver(
+        config=SolverOptions(silent=true, time_limit_sec=300.0),
+        max_iterations=MAX_ITERS,
+        subproblem=BendersSubproblemConfig(
+            max_stops=MAX_STOPS, max_routes=MAX_ROUTES,
+            enumeration_time_limit_sec=ENUM_LIMIT))
+
+    @printf("\n=== arm %s (k=%d, expected infeasible) ===\n", arm, INFEASIBLE_K)
+    flush(stdout)
+    if arm == "infeasible_gate"
+        result = run_opt(small, formulation, solver)
+        reason = get(result.metadata, "infeasibility_reason", nothing)
+        @printf("status %s | reason %s\n", result.termination_status,
+                isnothing(reason) ? "<none>" : reason)
+        flush(stdout)
+        return (arm=arm, status=string(result.termination_status),
+                detail=isnothing(reason) ? "<no infeasibility_reason>" : "reason set",
+                ok_extra=!isnothing(reason))
+    else
+        # Bypass run_opt (and therefore its gate) to reach the infeasible-master branch.
+        build = build_model(small, formulation, solver)
+        result = StationSelection.optimize_model(build, solver)
+        stop = get(result.metadata, "benders_stop_reason", "<none>")
+        @printf("status %s | stop %s | LB %.6f\n", result.termination_status, stop,
+                result.metadata["benders_lower_bound"])
+        flush(stdout)
+        return (arm=arm, status=string(result.termination_status), detail=stop,
+                ok_extra=startswith(String(stop), "master_"))
+    end
+end
+
+
+rows = Any[]
+infeasible_rows = Any[]
+for a in ARMS
+    arm = strip(a)
+    if startswith(arm, "infeasible")
+        push!(infeasible_rows, run_infeasible_arm(arm))
+    else
+        push!(rows, run_arm(arm))
+    end
+end
 
 # ------------------------------------------------------------------ checks
 println("\n=== checks ===")
@@ -225,8 +291,16 @@ if haskey(by_arm, "restricted_scope") && haskey(by_arm, "multicut_s1")
         a.scope == "full_route_universe", a.scope)
 end
 
+for r in infeasible_rows
+    # A proven-infeasible instance is an ANSWER, not a usage error -- the whole point of
+    # both fixes being tested here.
+    push_check!("$(r.arm): INFEASIBLE not NOT_SOLVED",
+        r.status == "INFEASIBLE", r.status)
+    push_check!("$(r.arm): reports how it knew", r.ok_extra, string(r.detail))
+end
+
 for (name, ok, detail) in checks
-    @printf("%-40s %s   %s\n", name, ok ? "PASS" : "FAIL", detail)
+    @printf("%-44s %s   %s\n", name, ok ? "PASS" : "FAIL", detail)
 end
 n_fail = count(c -> !c[2], checks)
 @printf("\n%d checks, %d failed\n", length(checks), n_fail)

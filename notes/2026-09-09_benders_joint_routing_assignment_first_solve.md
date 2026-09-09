@@ -98,7 +98,7 @@ testable without enumerating the wider universe.
 | 43 | 8758.928834 | 3 | 2 | 7500 | 2.19 s | 2.88 s |
 | 45 | 8398.668920 | 2 | 1 | 1823 | 1.30 s | 2.02 s |
 
-### Arm sweep (seed 42, `benders_joint_n10.jl`, 25/25 checks)
+### Arm sweep (seed 42, `benders_joint_n10.jl`, 29/29 checks)
 
 | arm | objective | iters | cuts | cols | scope |
 | --- | --- | --- | --- | --- | --- |
@@ -129,6 +129,27 @@ subproblem capped at 4 returns `multicut_s1`'s objective *exactly*, because the 
 carries no `max_stops` dependence at all (its rows are the station budget and endpoint
 feasibility, and the map keys off `max_walking_distance`). That identity is what makes the
 path testable without enumerating `max_stops=6`, which is not tractable.
+
+### Infeasibility reporting (k=1)
+
+A proven-infeasible instance must come back as an ANSWER, not a thrown error. Both routes
+to that verified at `k=1`, which is infeasible here because most Zhuzhou OD pairs exceed
+`2 * max_walking_distance` and so carry no direct-walk fallback, giving them
+endpoint-feasibility rows that one station cannot satisfy:
+
+| arm | status | how it knew |
+| --- | --- | --- |
+| infeasible_gate (via `run_opt`) | INFEASIBLE | `infeasibility_reason` -- "no size-1 station selection can reach every demand group that lacks a direct-walk fallback" |
+| infeasible_master (bypassing the gate) | INFEASIBLE | `benders_stop_reason = "master_INFEASIBLE"`, `LB = -Inf` |
+
+Worth being precise about the second one: **it is unreachable through `run_opt`**, because
+the gate solves exactly the master's own row set and therefore always refutes first. So the
+infeasible-master branch is defensive, not on the normal path -- it exists because
+benchmark scripts call `build_model`/`optimize_model` directly, bypassing the gate, which
+is how this arm reaches it. Keeping it is still right (an infeasible master IS a proof
+about the problem, since a Benders cut can only raise `Theta` and never removes a feasible
+`y`), but it should not be described as the mechanism by which infeasibility is normally
+reported.
 
 ### Suite
 
