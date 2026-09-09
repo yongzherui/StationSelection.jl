@@ -139,13 +139,23 @@ the same mixed model solved monolithically over the same pool (`diff 0.000e+00`)
 `benders <= direct_mip` passes trivially there; the monolithic *mixed* comparison is the
 check that actually establishes exactness.
 
-That script's five arms (25/25 checks) additionally cover `SingleCut` and 3 scenarios, and
-the `max_stops`-narrowing path -- a formulation at `max_stops=6` with the subproblem capped
-at 4 returns the `max_stops=4` objective *exactly*, since the master carries no `max_stops`
-dependence, which is what makes that path testable without enumerating the wider universe.
-`MultiCut` at s=3 added 5 cuts over 4 iterations against a possible 12, so the cut
-deduplication behind `add_benders_cut!`'s return count is exercised, not merely defensive.
-Full suite: 93,086/93,086.
+That script's arms (29/29 checks) additionally cover `SingleCut`, 3 scenarios, both
+infeasibility paths, and the `max_stops`-narrowing path. Two further scripts verify it
+independently of the shared model definition: `benders_brute_force_certificate.jl`
+enumerates the master's whole feasible set (86 of 252 at n=10/k=5), evaluates the second
+stage exactly at each, and audits every cut *pointwise* against the true value function
+(worst violation `6.4e-07`); `benders_vs_cg_crosscheck.jl` compares against `CGSolver`,
+whose columns come from label-setting pricing rather than enumeration, so `cg_lp` bounds
+the true optimum whatever the enumerated pool holds.
+
+`benders_scaling_s3.jl` runs n=10/15/20 at s=3 (MultiCut, 18/18 checks). All five numbers
+(`cg_lp`, `benders`, `mixed_mono`, `cg_ip`, `direct_mip`) agree at every size. **The cut
+count is near-flat in the first-stage space** -- 733x more station sets from n=10 to n=20,
+2.4x more cuts (5 -> 12) -- because `Γ_j` is the shadow price of a linking row that binds at
+`y_j = 0`, so each cut prices every station rather than one vertex. Enumeration is NOT the
+bottleneck at `max_stops=4`: 237,353 columns in 12.2 s at n=20/s=3. (Note `max_routes` is
+checked pre-deduplication, so it bounds *generated* columns, not the pool -- a cap that
+looks binding may not be.) Full suite: 93,086/93,086.
 
 Both bounds are reported (`benders_lower_bound`/`benders_upper_bound`/`benders_gap`): the
 LB is the master's `objective_bound` (not `objective_value`, which a non-zero `MIPGap`

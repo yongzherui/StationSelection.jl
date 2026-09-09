@@ -53,6 +53,14 @@ the same reason `CGSolver.pricing` is (a search algorithm, not part of the model
 `total_time_limit_sec` is a wall cap over the whole loop, distinct from
 `config.time_limit_sec`, which reaches only the master model's own `optimize!`.
 
+`iteration_callback` receives one `NamedTuple` per iteration the moment it ends (mirrors
+`CGSolver.iteration_callback`): `(; iteration, lower_bound, upper_bound, gap,
+incumbent_objective, cuts_added, cuts_total, n_stations_built, master_sec, subproblem_sec)`.
+Without it the loop's bound trajectory is invisible from outside, and "why did this converge
+in 3 cuts" is not answerable after the fact -- the aggregate metadata reports only the final
+state. A callback that throws is not caught: a diagnostic that fails silently is worse than
+one that stops the run.
+
 Live today for `AggregateODRouteJointRoutingAssignmentFormulation`, via the master/
 subproblem formulation pair in
 `opt/formulations/aggregate_od_route/joint_routing_assignment/` and the builds in
@@ -64,6 +72,7 @@ struct BendersSolver <: AbstractSolver
     optimality_tol::Float64
     subproblem::BendersSubproblemConfig
     total_time_limit_sec::Float64
+    iteration_callback::Union{Nothing, Function}
 
     function BendersSolver(;
             config::SolverOptions=SolverOptions(),
@@ -71,12 +80,13 @@ struct BendersSolver <: AbstractSolver
             optimality_tol::Number=1e-6,
             subproblem::BendersSubproblemConfig=BendersSubproblemConfig(),
             total_time_limit_sec::Number=Inf,
+            iteration_callback::Union{Nothing, Function}=nothing,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         optimality_tol >= 0 || throw(ArgumentError("optimality_tol must be non-negative"))
         total_time_limit_sec > 0 ||
             throw(ArgumentError("total_time_limit_sec must be positive"))
         new(config, max_iterations, Float64(optimality_tol), subproblem,
-            Float64(total_time_limit_sec))
+            Float64(total_time_limit_sec), iteration_callback)
     end
 end

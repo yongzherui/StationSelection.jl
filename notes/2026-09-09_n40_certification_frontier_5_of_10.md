@@ -43,21 +43,56 @@ so a COARSE macro layer needs a LARGER budget to align the same support. This is
 opposite of what the round-cost diagnostics recommend, and it is why their advice was wrong
 (below).
 
-### The cap has a two-sided optimum
+### The cap has a two-sided optimum -- but NOT because of cut supply
 
-Seed 43, at fixed K2=24 / K1=16 / g=3:
+Seed 43, at fixed K2=24 / K1=16 / g=3. All three arms ran exactly 63 attempts.
 
-| cap | outcome | macro cuts | align refusals |
-| --- | --- | --- | --- |
-| 13 | failed, 4954 s | 342 | 47 |
-| **16** | **CERTIFIED, 2610 s** | 390 | 6 |
-| 20 | failed, 2586 s | 345 | 0 |
+CORRECTED 2026-09-09. An earlier version of this table reported SUMMED macro cuts (342 /
+390 / 345) and read cap=16's 390 as the mechanism. That is a round-count artefact and the
+reading was wrong. Cuts are built per round, the cut sets are local to an attempt
+(`two_tier.jl` initialises `macro_cuts`/`meso_cuts` empty every attempt), and a sum over
+attempts therefore measures mostly how many rounds ran. **Report cut yield per round.**
 
-Too small and supports cannot be rounded up to whole macro cells at all, so no macro cut
-issues (47 refusals). Too large and the rounded-up set is admitted but cannot be searched
-exhaustively, so no macro cut issues either -- and only an EXHAUSTED search licenses a cut.
-cap=16 with K1=16 lands the priced supports at a median of 12 stations, immediately below
-the exhaustion cliff. **Recommend cap=16, K1=16, g=3 at n=40.**
+| cap | outcome | macro rnds | **macro cuts/round** | **meso cuts/search** | **alignSkip/search** | **unexh/search** |
+| --- | --- | --- | --- | --- | --- | --- |
+| 13 | failed, 4954 s | 273 | 1.253 | 0.769 | 0.205 | 0.061 |
+| **16** | **CERTIFIED, 2610 s** | 303 | **1.287** | 0.733 | 0.027 | 0.090 |
+| 20 | failed, 2586 s | 268 | **1.287** | 0.684 | 0.000 | 0.142 |
+
+Per round the three caps are indistinguishable on cut yield: cap=16 and cap=20 are
+IDENTICAL at 1.287 macro cuts/round, and cap=13 is 2.6% below them while having the HIGHEST
+meso yield. Per attempt they are indistinguishable too -- 44% zero-cut attempts, median 2,
+in all three arms. cap=16 did not cut more productively; it got 303 macro rounds in against
+273 and 268.
+
+What the cap really controls, and both gradients are monotone and real:
+
+- **alignment refusals** fall with the cap (0.205 -> 0.027 -> 0.000 per station search), the
+  too-small half;
+- **unexhausted searches** rise with it (0.061 -> 0.090 -> 0.142), the too-large half, and
+  only an EXHAUSTED search licenses a cut.
+
+But neither gradient shows up as a cut-yield difference, so "too small starves the macro
+layer" -- the previous reading -- is NOT supported per round.
+
+### What actually separates them: cost concentration
+
+| cap | blocking rounds | per search | cost of those rounds | sec/macro round | wall |
+| --- | --- | --- | --- | --- | --- |
+| 13 | 2 | 0.009 | **2001 s** | 24.9 | 4954 |
+| **16** | 2 | 0.010 | **53 s** | **13.8** | **2610** |
+| 20 | 2 | 0.010 | **278 s** | 15.5 | 2586 |
+
+A *blocking* round is one that is unexhausted AND found nothing improving: no cut, no
+column, nothing learned. All three caps produce **exactly two** of them, at an identical
+rate. What differs is what those two rounds COST -- cap=13 burns 2001 s on them, 40% of its
+entire run.
+
+So cap=16 wins because its rounds are CHEAP (13.8 s per macro round against 24.9), so more
+of them fit inside the budget -- not because each one yields more. cap=16 with K1=16 lands
+the priced supports at a median of 12 stations, immediately below the exhaustion cliff,
+which is what keeps the cost down. **Recommend cap=16, K1=16, g=3 at n=40** -- the
+recommendation survives; only the explanation changed.
 
 ## The exhaustion cliff (1230 station searches, K2=24)
 
@@ -71,9 +106,30 @@ the exhaustion cliff. **Recommend cap=16, K1=16, g=3 at n=40.**
 | 17 | 29 | 3% | 150 |
 | 18-20 | 20 | **0%** | 150 |
 
-`<=12` stations: 838/839 exhausted. `>12`: 222/391. Cost jumps 48x for one extra station
-between 13 and 14. This is a property of the exact pricer, not of the cut machinery, and it
-is what sets the frontier.
+`<=12` stations: 838/839 exhausted. `>12`: 222/391.
+
+**CORRECTED 2026-09-09: this table is CONFOUNDED by the slice each search was granted, and
+the original reading of it -- "a property of the exact pricer, not of the cut machinery, and
+what sets the frontier" -- is not supported.** The station search receives
+`min(headroom, 0.5 x attempt_budget)`, which is only **150 s** inside an ordinary 300 s
+attempt. Of 1150 station rounds at cap=16: 976 ran at the 30 s base slice, 142 at ~150 s,
+and only **32** ever reached the escalated tier. 97% of unexhausted rounds ran to >=0.95 of
+their slice, i.e. were CUT OFF rather than finishing. Splitting the same rounds by the slice
+they were given:
+
+| stations | slice ~150 s | slice >200 s |
+| --- | --- | --- |
+| 14 | 100% exh | 86% exh |
+| 15 | **0% exh** (n=43, median 163 s = the cap) | **86% exh** (median 517 s) |
+| 16 | 47% exh (median 180 s) | 73% exh |
+| 17 | **0% exh** (median 180 s) | **50% exh** (median 525 s) |
+| 18 | -- | 67% exh (n=3) |
+
+Searches that DO exhaust at the big slice cost 57-974 s, median ~250 s -- routinely 2-6.5x
+the 150 s cap they normally get. So the "median 150-180 s at 14+ stations" above is the CAP
+SATURATING, not the search's cost, and the 0% at 18-20 is 20 rounds that were never given
+time to finish. The pricer is expensive, but this table does not establish it as the
+frontier; what it establishes is that the pricer is expensive *relative to a 150 s slice*.
 
 ## What predicts certifiability (and what does not)
 
@@ -159,9 +215,18 @@ all at `full_route_universe` scope -- and it is now 5/10 at 7200 s against a pub
 at 21600 s, and 5/10 against a matched-budget control's 3/10.
 
 But 5/10 is one seed, not the 6-8/10 hoped for, and the remaining five seeds fail with
-95-100% of budget consumed. **The frontier at n=40 is set by the exact pricer's inability to
-exhaustively search a 13+ station subset**, not by cut plumbing, budget, or scheduling. The
-three bugs were real and worth fixing; they bought a 3x budget reduction and one seed.
+95-100% of budget consumed.
+
+**CORRECTED 2026-09-09.** This section originally concluded "the frontier at n=40 is set by
+the exact pricer's inability to exhaustively search a 13+ station subset, not by cut
+plumbing, budget, or scheduling." The per-round data does not support that. The pricer
+cannot exhaust a 13+ station subset *in 150 s*, which is the derived slice an ordinary
+300 s attempt grants it; given the escalated slice it exhausts 75% of the time (24/32),
+including an 18-station subset in 401 s. And of the 96 rounds that are genuinely blocking
+(unexhausted AND nothing improving, so no cut and no column), **86 died at that ~150 s cap**
+and only 3 at the escalated tier. It is a scheduling bound at least as much as a pricer
+bound. The three bugs were real and worth fixing; they bought a 3x budget reduction and one
+seed.
 
 Getting further needs a cheaper exhaustive subset search, not another parameter. Candidates,
 in the order I would try them: reduce the aligned-support size structurally (a nested THIRD

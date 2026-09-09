@@ -71,11 +71,15 @@ function optimize_model(build_result::BuildResult, solver::BendersSolver)::OptRe
                              lower_bound=st.lower_bound, upper_bound=st.upper_bound)
             st.converged = true
             st.stop_reason = "converged"
+            # Reported before breaking: the converging iteration is the one a reader most
+            # wants in the trace, and it never reaches the cut phase below.
+            _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, 0)
             break
         end
 
         n_added = add_benders_cut!(build_result, mapping, m, subproblem_result, solver)
         st.cuts_added += n_added
+        _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, n_added)
         if n_added == 0
             # Every cut this iteration derived was already in the master, so the next
             # iteration would re-solve an unchanged master, re-derive the same incumbent
@@ -150,6 +154,40 @@ function _benders_package_result(build_result::BuildResult, st::BendersLoopState
         nothing,
         metadata,
     )
+end
+
+"""
+    _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, n_added)
+
+Hand one row to `solver.iteration_callback`, if there is one.
+
+Exists so the bound TRAJECTORY is observable, not just the final state. "Why did this
+converge in 3 cuts?" is unanswerable from the aggregate metadata -- it needs the per-
+iteration lower/upper bounds, and specifically whether the incumbent was found early and
+the remaining iterations spent raising the lower bound to meet it (the expected shape) or
+whether the bounds moved together (which would suggest the master is being steered rather
+than bounded).
+
+`incumbent_objective` is THIS iteration's second-stage cost, distinct from
+`upper_bound`, which is the best seen so far -- keeping both is what makes the
+found-early-then-prove pattern visible instead of hidden behind a monotone envelope.
+"""
+function _benders_report_iteration(st::BendersLoopState, solver::BendersSolver,
+        iteration::Int, incumbent, incumbent_objective::Float64, n_added::Int)
+    isnothing(solver.iteration_callback) && return nothing
+    solver.iteration_callback((
+        iteration = iteration,
+        lower_bound = st.lower_bound,
+        upper_bound = st.upper_bound,
+        gap = _benders_gap(st),
+        incumbent_objective = incumbent_objective,
+        cuts_added = n_added,
+        cuts_total = st.cuts_added,
+        n_stations_built = count(v -> v > 0.5, incumbent),
+        master_sec = st.master_sec,
+        subproblem_sec = st.subproblem_sec,
+    ))
+    return nothing
 end
 
 """

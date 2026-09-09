@@ -136,41 +136,64 @@ carries no `max_stops` dependence at all (its rows are the station budget and en
 feasibility, and the map keys off `max_walking_distance`). That identity is what makes the
 path testable without enumerating `max_stops=6`, which is not tractable.
 
-### n=15: the decomposition holds, the ORACLE hits its ceiling
+### Scaling at s=3: n=10 / 15 / 20, MultiCut, and the cut-count answer
 
-Same script at `BJ_N=15` (k=8, p=8, seed 42, max_stops=4):
+`benders_scaling_s3.jl`, generous caps (`max_routes=20e6`, `max_iterations=2000`), 18/18
+checks, 6m01s total including precompile:
 
-| arm | objective | iters | cuts | cols | outcome |
-| --- | --- | --- | --- | --- | --- |
-| multicut_s1 | 12629.456738 | 4 | 3 | 11243 | exact vs both references |
-| singlecut_s1 | 12629.456738 | 4 | 3 | 11243 | exact |
-| restricted_scope | 12629.456738 | 4 | 3 | 11243 | exact, scope labelled |
-| multicut_s3 | -- | -- | -- | **>200000** | `ArgumentError: joint route enumeration exceeded max_routes=200000` |
+| n | k | C(n,k) | pool | enum | iters | cuts | objective |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 | 5 | 252 | 21,635 | 3.6 s | 4 | 5 | 25771.187908 |
+| 15 | 8 | 6,435 | 61,324 | 3.4 s | 4 | 8 | 28384.120680 |
+| 20 | 10 | 184,756 | 237,353 | 12.2 s | 7 | 12 | 28735.190221 |
 
-So the s=1 arms hold at n=15 exactly as at n=10 -- same iteration count, same exactness,
-LB == UB (gap `-1.8e-12`, i.e. float noise). What fails is
-`enumerate_joint_routing_assignment_columns` at n=15 x s=3, and it fails the right way:
-it **throws** rather than truncating, so the run cannot silently become an optimum over a
-partial pool. That is the `:direct_enumeration` ceiling, measured rather than argued, and
-it is the concrete case for the `:column_generation` oracle.
+**CORRECTION: there was no oracle ceiling at n=15.** This note previously recorded n=15 x
+s=3 as beyond `:direct_enumeration`'s reach because it threw
+`exceeded max_routes=200000`. That reading was wrong on two counts. `max_routes` is checked
+against the **pre-deduplication accumulator** (`enumeration.jl:267`; dedup runs only in the
+final `return`), so it bounds *generated* columns, not the pool -- n=15 x s=3 generates over
+200,000 raw entries but deduplicates to 61,324. And it is not a tractability wall at all: with
+a generous cap, n=20 x s=3 enumerates 237,353 columns in **12.2 s**. Enumeration is simply
+not the bottleneck at `max_stops=4` up to n=20; the earlier "ceiling" was an artifact of a
+cap I had set too low and then over-interpreted. The real argument for a
+`:column_generation` oracle has to be made at larger `max_stops` or larger `n`, not here.
 
-Two things worth recording from the numbers:
+**The cut count is near-flat in the size of the first-stage space.** 733x more station sets
+from n=10 to n=20; 2.4x more cuts (5 -> 12). That is the answer to "why so few cuts": each
+cut prices out EVERY station, not one vertex. `Gamma_j` is the shadow price of the linking
+row `sum(theta) <= y_j`, and that row is binding precisely when `y_j = 0` -- so a single cut
+says "and here is what each station you did NOT build would have been worth", which
+constrains the whole space at once. A Benders cut that only pinned down its own incumbent
+would have to scale with C(n,k).
 
-**Column count is NOT monotone in `n`.** n=15/s=1 enumerates 11,243 columns; n=10/s=1
-enumerates 16,320. The Zhuzhou generator takes the deterministic top-`n` stations by
-popularity and then draws OD pairs, so n=15 is a genuinely *different* instance, not a
-superset of n=10 -- the 8 pairs land differently against a larger station set. Do not read
-the ceiling as a function of `n` alone; the driver is (demand groups) x (per-route
-assignment branching), which is why `s` is the axis that broke it: n=15 went from 11k
-columns at s=1 to >200k at s=3, i.e. far worse than linear in `s`, since each scenario
-contributes its own pairs AND its own multi-certified-passenger cartesian product.
+**The trace shows the master exploring, not being steered** -- which is the direct
+counter-evidence to the over-strong-cut worry, and needed the new
+`BendersSolver.iteration_callback` to see at all. At n=20:
 
-**Still no cell with a nonzero LP-IP gap.** At n=15/s=1 `mixed_mono` and `direct_mip` agree
-to the last digit (12629.456738) and even select the same station set. So across every cell
-measured -- n=10 s=1/s=3 seeds 42/43/45, n=15 s=1 -- the mixed optimum equals the
-all-binary one, and `benders <= direct_mip` has never yet been a discriminating check. The
-mixed-vs-integral question therefore remains open, not resolved: these instances are simply
-too small/easy to exhibit the hub-route effect that shows a 21.6% gap at n=40.
+    iter |          LB |          UB | this-iter Q | cuts
+       1 |        0.00 |    31820.92 |    31820.92 | 3
+       2 |    27453.52 |    31820.92 |    32091.70 | 3   <-- proposed y is WORSE than incumbent
+       3 |    27453.52 |    29098.17 |    29098.17 | 3
+       4 |    28401.81 |    28735.19 |    28735.19 | 1
+       5 |    28693.94 |    28735.19 |    29025.52 | 1   <-- again worse
+       6 |    28693.94 |    28735.19 |    28735.19 | 1
+       7 |    28735.19 |    28735.19 |    28735.19 | 0
+
+At iterations 2 and 5 the master proposed station sets that evaluated *worse* than the best
+already known. Over-strong cuts would drive the master monotonically at one point; instead
+the lower bound rises monotonically, the upper bound descends, and the master rejects its own
+proposals along the way. Textbook Benders behaviour. Note also that the "4 iterations
+always" pattern from the earlier cells simply broke at n=20 (7 iterations) -- it was
+smallness, not a suspicious constant.
+
+**Still 0% LP-IP gap at every size.** `mixed_mono == direct_mip` to the last digit at n=10,
+15 and 20. So `benders <= direct_mip` remains non-discriminating and the mixed-vs-integral
+question is still open at n=20 -- it is not an artifact of tiny instances in the way I
+assumed, which makes it more interesting rather than less.
+
+**CG agrees at all three sizes** (independent column source, converged at
+`full_route_universe`): `cg_lp == cg_ip == benders == mixed_mono == direct_mip` at each n,
+with CG taking 3 / 9 / 6 iterations against pools of 21k / 61k / 237k enumerated columns.
 
 ### Independent verification: brute force + CGSolver cross-check
 
