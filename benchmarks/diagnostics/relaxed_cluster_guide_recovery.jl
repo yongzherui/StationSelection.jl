@@ -48,6 +48,12 @@ n_scenarios = parse(Int, get(ENV, "GUIDE_S", "3"))
 seed = parse(Int, get(ENV, "GUIDE_SEED", "42"))
 cluster_counts = [parse(Int, x) for x in split(get(ENV, "GUIDE_K", "3,6,9,12"), ',')]
 iteration_ladder = [parse(Int, x) for x in split(get(ENV, "GUIDE_ITERS", "1,2,4,8,16,32"), ',')]
+# Search budgets. The full-graph reference search is the expensive one and at large n it can
+# time out -- which would silently corrupt both containment and recovery -- so its limit is
+# tunable and its exhaustion flag is REPORTED rather than dropped.
+full_limit = parse(Float64, get(ENV, "GUIDE_FULL_LIMIT", "120.0"))
+guide_limit_env = get(ENV, "GUIDE_GUIDE_LIMIT", "")
+cg_pricing_limit = parse(Float64, get(ENV, "GUIDE_CG_PRICING_LIMIT", "120.0"))
 
 include(joinpath(@__DIR__, "..", "lib", "cg_benchmark.jl"))
 problem, k, _meta = benchmark_problem(@__DIR__, "GUIDE", n_stations, n_pairs, n_scenarios, seed)
@@ -58,17 +64,22 @@ problem, k, _meta = benchmark_problem(@__DIR__, "GUIDE", n_stations, n_pairs, n_
 """Best reduced cost and the argmin route, over a pricing graph, searched to exhaustion.
 Pruning stays ON here: this is looking for the best IMPROVING route, which is exactly what
 pruning preserves, and leaving it on keeps the full-graph search affordable."""
-function best_route(ctx)
+function best_route(ctx; time_limit::Float64=full_limit)
+    t0 = time()
     labels, exhausted, _ = SS._run_label_setting(
-        ctx; time_limit=120.0, reduced_cost_tol=1e-6,
+        ctx; time_limit=time_limit, reduced_cost_tol=1e-6,
     )
-    isempty(labels) && return (Inf, Int[], exhausted)
+    secs = time() - t0
+    isempty(labels) && return (Inf, Int[], exhausted, secs)
     best = argmin(l -> l.reduced_cost, labels)
-    return (best.reduced_cost, best.route, exhausted)
+    return (best.reduced_cost, best.route, exhausted, secs)
 end
 
-@printf("%-6s %-6s %-5s %6s %7s %14s %14s %-11s %-9s\n",
-        "K", "iters", "scen", "|S|", "|S|/n", "full_rc", "subset_rc", "containment", "recovery")
+@printf("guide search limit: %s s | full/subset search limit: %.0f s | CG pricing limit: %.0f s\n\n",
+        isempty(guide_limit_env) ? "0.5 x CG pricing" : guide_limit_env, full_limit, cg_pricing_limit)
+@printf("%-4s %-5s %-4s %5s %6s %13s %13s %-9s %-8s %8s %-8s %8s %-8s %8s %-8s\n",
+        "K", "iters", "sc", "|S|", "|S|/n", "full_rc", "subset_rc", "contained", "recover",
+        "guide_s", "g_exh", "full_s", "f_exh", "sub_s", "s_exh")
 
 for n_clusters in cluster_counts, max_iterations in iteration_ladder
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
@@ -80,7 +91,7 @@ for n_clusters in cluster_counts, max_iterations in iteration_ladder
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=1),
         pricing=CGPricingConfig(relaxed_cluster_count=n_clusters),
         max_iterations=max_iterations, reduced_cost_tol=1e-6,
-        pricing_time_limit_sec=120.0, certifying_pricing_time_limit_sec=600.0,
+        pricing_time_limit_sec=cg_pricing_limit, certifying_pricing_time_limit_sec=600.0,
         total_time_limit_sec=1800.0, parallel_scenario_pricing=true,
         recover_integer_solution=false,
     )
@@ -113,19 +124,30 @@ for n_clusters in cluster_counts, max_iterations in iteration_ladder
             s, all_nodes, m[:joint_routing_assignment_travel_cost], candidates; shared...,
         )
         isempty(full.opportunities) && continue
-        full_rc, full_route, _ = best_route(SS.JointRoutingAssignmentSearchContext(full))
+        full_rc, full_route, full_exh, full_sec = best_route(
+            SS.JointRoutingAssignmentSearchContext(full))
 
         relaxed = SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
             s, clustering, m[:joint_routing_assignment_travel_cost], candidates; shared...,
         )
-        cluster_routes, _relaxed_exhausted = SS._relaxed_cluster_guide_routes(
+        # THE measurement this probe exists for at large n: how long the relaxed guide
+        # search takes and whether it exhausts the K-cluster graph inside its slice. In
+        # production that slice is half the round's remaining budget, which is what the
+        # default mirrors.
+        guide_limit = isempty(guide_limit_env) ? 0.5 * solver.pricing_time_limit_sec :
+            parse(Float64, guide_limit_env)
+        guide_t0 = time()
+        cluster_routes, guide_exh = SS._relaxed_cluster_guide_routes(
             relaxed, Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
-            0.5 * solver.pricing_time_limit_sec,
+            guide_limit,
         )
+        guide_sec = time() - guide_t0
         subset = isempty(cluster_routes) ? Int[] :
             relaxed_cluster_station_subset(clustering, cluster_routes)
 
         subset_rc = Inf
+        subset_exh = true
+        subset_sec = 0.0
         if !isempty(subset)
             subset_candidates = SS._restrict_candidates_to_subset(candidates, subset)
             if !isempty(subset_candidates)
@@ -133,7 +155,8 @@ for n_clusters in cluster_counts, max_iterations in iteration_ladder
                     s, subset, m[:joint_routing_assignment_travel_cost], subset_candidates; shared...,
                 )
                 isempty(subset_pricing.opportunities) ||
-                    ((subset_rc, _r, _e) = best_route(SS.JointRoutingAssignmentSearchContext(subset_pricing)))
+                    ((subset_rc, _r, subset_exh, subset_sec) =
+                        best_route(SS.JointRoutingAssignmentSearchContext(subset_pricing)))
             end
         end
 
@@ -148,9 +171,12 @@ for n_clusters in cluster_counts, max_iterations in iteration_ladder
         else
             "no"
         end
-        @printf("%-6d %-6d %-5d %6d %7.2f %14.4f %14.4f %-11s %-9s\n",
+        @printf("%-4d %-5d %-4d %5d %6.2f %13.4f %13.4f %-9s %-8s %8.1f %-8s %8.1f %-8s %8.1f %-8s\n",
                 n_clusters, max_iterations, s, length(subset),
-                length(subset) / length(all_nodes), full_rc, subset_rc, contained, recovered)
+                length(subset) / length(all_nodes), full_rc, subset_rc, contained, recovered,
+                guide_sec, guide_exh ? "yes" : "TIMEOUT",
+                full_sec, full_exh ? "yes" : "TRUNC",
+                subset_sec, subset_exh ? "yes" : "TIMEOUT")
         flush(stdout)
     end
 end
