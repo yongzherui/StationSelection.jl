@@ -130,6 +130,42 @@ carries no `max_stops` dependence at all (its rows are the station budget and en
 feasibility, and the map keys off `max_walking_distance`). That identity is what makes the
 path testable without enumerating `max_stops=6`, which is not tractable.
 
+### n=15: the decomposition holds, the ORACLE hits its ceiling
+
+Same script at `BJ_N=15` (k=8, p=8, seed 42, max_stops=4):
+
+| arm | objective | iters | cuts | cols | outcome |
+| --- | --- | --- | --- | --- | --- |
+| multicut_s1 | 12629.456738 | 4 | 3 | 11243 | exact vs both references |
+| singlecut_s1 | 12629.456738 | 4 | 3 | 11243 | exact |
+| restricted_scope | 12629.456738 | 4 | 3 | 11243 | exact, scope labelled |
+| multicut_s3 | -- | -- | -- | **>200000** | `ArgumentError: joint route enumeration exceeded max_routes=200000` |
+
+So the s=1 arms hold at n=15 exactly as at n=10 -- same iteration count, same exactness,
+LB == UB (gap `-1.8e-12`, i.e. float noise). What fails is
+`enumerate_joint_routing_assignment_columns` at n=15 x s=3, and it fails the right way:
+it **throws** rather than truncating, so the run cannot silently become an optimum over a
+partial pool. That is the `:direct_enumeration` ceiling, measured rather than argued, and
+it is the concrete case for the `:column_generation` oracle.
+
+Two things worth recording from the numbers:
+
+**Column count is NOT monotone in `n`.** n=15/s=1 enumerates 11,243 columns; n=10/s=1
+enumerates 16,320. The Zhuzhou generator takes the deterministic top-`n` stations by
+popularity and then draws OD pairs, so n=15 is a genuinely *different* instance, not a
+superset of n=10 -- the 8 pairs land differently against a larger station set. Do not read
+the ceiling as a function of `n` alone; the driver is (demand groups) x (per-route
+assignment branching), which is why `s` is the axis that broke it: n=15 went from 11k
+columns at s=1 to >200k at s=3, i.e. far worse than linear in `s`, since each scenario
+contributes its own pairs AND its own multi-certified-passenger cartesian product.
+
+**Still no cell with a nonzero LP-IP gap.** At n=15/s=1 `mixed_mono` and `direct_mip` agree
+to the last digit (12629.456738) and even select the same station set. So across every cell
+measured -- n=10 s=1/s=3 seeds 42/43/45, n=15 s=1 -- the mixed optimum equals the
+all-binary one, and `benders <= direct_mip` has never yet been a discriminating check. The
+mixed-vs-integral question therefore remains open, not resolved: these instances are simply
+too small/easy to exhibit the hub-route effect that shows a 21.6% gap at n=40.
+
 ### Infeasibility reporting (k=1)
 
 A proven-infeasible instance must come back as an ANSWER, not a thrown error. Both routes
