@@ -27,8 +27,8 @@ default", which is what makes a bare `CGSolver()` work against any formulation; 
 resolves it and stashes the resolved symbol on the model, so
 `metadata["cg_final_pricing_mode"]` always reports a concrete pricer. For
 `AggregateODRouteJointRoutingAssignmentFormulation` the default resolves to `:exact` and
-the full set is `:exact`, `:station_simple`, `:darp_modified`, `:darp`, and
-`:relaxed_cluster` -- see that formulation's docstring for what each searches
+the full set is `:exact`, `:station_simple`, `:darp_modified`, `:darp`,
+`:relaxed_cluster` and `:relaxed_cluster_two_tier` -- see that formulation's docstring for what each searches
 and which of them can certify. A formulation with no selectable pricer
 (`AggregateODRouteBaseFormulation`) rejects any non-`nothing` mode at build time rather
 than silently ignoring it.
@@ -68,6 +68,28 @@ their clusters to each exact station-subset search in `:relaxed_cluster`. The re
 search receives half of the pricing round's remaining time; there is no independent guide
 time limit.
 
+`relaxed_cluster_macro_count` = K1 -- required by `:relaxed_cluster_two_tier` and rejected
+without it. The coarse layer of the nested pair, built at build time by clustering the meso
+medoids and lifting, so every macro cell is a union of meso cells
+(`relaxed_cluster/utils/certification/two_tier.jl`). MEASURED at n=40 with K2=24: K1=14-16
+is the optimum, turning a 22-150 s meso sweep into 0.2-1.4 s for the pair with the same
+column priced; K1 <= 8 is nearly worthless (the macro support keeps 79-83% of the meso
+graph) and K1 >= 18 starts paying real time in the macro sweep itself. Cannot be combined
+with `relaxed_cluster_max_count`.
+
+`relaxed_cluster_aligned_subset_max` (default 15) -- the station budget for a macro-ALIGNED
+subset search. A barren support only licenses a macro cut when the station set priced is a
+union of whole macro cells, so the loop rounds the meso support up to macro boundaries
+before pricing it -- but only while the result fits this cap. Over the cap it prices the
+support unaligned and takes the meso cut alone, which is still sound and simply forgoes the
+macro cut -- and the iterative meso cuts still float up to a macro cut on their own when the
+restricted meso sweep exhausts, so alignment is a shortcut rather than the only route.
+
+Lowered from 20 to 15 after the n=40 stall: station-search cost is super-linear (7-8
+stations exhaust in ~0.1 s, 11-13 need over a second), and MEASURED there, 7 of 10 seeds
+burned every 300 s round while the 3 that certified had subset medians of 8-10 stations.
+A cheap search that earns one cut beats an expensive one that earns two.
+
 Two further experimental switches used to live here -- a barren-support cache and active-cut
 subsumption pruning. Both were removed: the measured cut load is far too small for either
 to pay for itself (0.5-0.75 cuts per scenario attempt at n=30/40, 11 inner rounds at
@@ -81,6 +103,8 @@ struct CGPricingConfig
     relaxed_cluster_count::Union{Nothing, Int}
     relaxed_cluster_max_count::Union{Nothing, Int}
     relaxed_cluster_guide_routes::Int
+    relaxed_cluster_macro_count::Union{Nothing, Int}
+    relaxed_cluster_aligned_subset_max::Int
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -89,6 +113,8 @@ struct CGPricingConfig
             relaxed_cluster_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_max_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_guide_routes::Int=5,
+            relaxed_cluster_macro_count::Union{Nothing, Int}=nothing,
+            relaxed_cluster_aligned_subset_max::Int=15,
         )
         _cg_validate_pricing_mode(mode, "mode")
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
@@ -96,6 +122,11 @@ struct CGPricingConfig
         # exhaust is the relaxation, and that is a full-universe certificate that ends the
         # solve outright. A warm start in it would therefore either finish the solve in
         # phase 1 or never reach phase 2 at all.
+        warm_start_mode === :relaxed_cluster_two_tier && throw(ArgumentError(
+            "warm_start_mode=:relaxed_cluster_two_tier is not a warm start, for the same " *
+            "reason :relaxed_cluster is not: the mode either certifies (ending the solve) " *
+            "or keeps harvesting, so it never hands off and phase 2 would be unreachable",
+        ))
         warm_start_mode === :relaxed_cluster && throw(ArgumentError(
             "warm_start_mode=:relaxed_cluster is not a warm start: the mode never hands " *
             "off (it either certifies, which ends the solve, or keeps harvesting), so " *
@@ -112,7 +143,7 @@ struct CGPricingConfig
         # run CG on real duals with an ordinary pricer, then measure offline what the guide
         # would have done with them (`benchmarks/diagnostics/relaxed_cluster_guide_recovery.jl`).
         # It costs one k-medoids pass at build time and nothing else.
-        (mode === :relaxed_cluster ||
+        (mode in (:relaxed_cluster, :relaxed_cluster_two_tier) ||
          warm_start_mode in (:relaxed_cluster, :cluster_guide)) &&
             isnothing(relaxed_cluster_count) && throw(ArgumentError(
                 "a relaxed-cluster pricing mode needs a station partition -- set " *
@@ -133,10 +164,49 @@ struct CGPricingConfig
                 "refinement is possible, which is what `nothing` already expresses",
             ))
         end
+        # K1 is required by the two-tier mode and inert without it, mirroring how
+        # `relaxed_cluster_count` relates to the one-tier mode -- except that a macro layer
+        # costs a second k-medoids pass and means nothing to any other pricer, so unlike a
+        # bare partition there is no diagnostic that wants it built and unread.
+        if mode === :relaxed_cluster_two_tier
+            isnothing(relaxed_cluster_macro_count) && throw(ArgumentError(
+                ":relaxed_cluster_two_tier needs a macro layer -- set " *
+                "relaxed_cluster_macro_count = K1 below relaxed_cluster_count = K2",
+            ))
+            relaxed_cluster_macro_count >= 1 || throw(ArgumentError(
+                "relaxed_cluster_macro_count must be >= 1, got " *
+                "$(relaxed_cluster_macro_count)",
+            ))
+            relaxed_cluster_macro_count < relaxed_cluster_count || throw(ArgumentError(
+                "relaxed_cluster_macro_count ($(relaxed_cluster_macro_count)) must be " *
+                "below relaxed_cluster_count ($(relaxed_cluster_count)); equal means no " *
+                "coarsening at all, which :relaxed_cluster already expresses. MEASURED " *
+                "optimum is K1 around 0.6 x K2",
+            ))
+            # Refinement rewrites cut sets onto a split partition; the macro layer's parent
+            # map is built against the UNsplit one, and a parent map that no longer matches
+            # its partition mis-translates cuts -- which fails as a false certificate rather
+            # than a crash. Rejected rather than silently ignored.
+            isnothing(relaxed_cluster_max_count) || throw(ArgumentError(
+                ":relaxed_cluster_two_tier cannot be combined with " *
+                "relaxed_cluster_max_count: refinement re-partitions the meso layer, " *
+                "which invalidates the macro parent map the two tiers are nested by",
+            ))
+        elseif !isnothing(relaxed_cluster_macro_count)
+            throw(ArgumentError(
+                "relaxed_cluster_macro_count is only read by " *
+                "mode=:relaxed_cluster_two_tier, got mode=$(repr(mode))",
+            ))
+        end
+        relaxed_cluster_aligned_subset_max >= 1 || throw(ArgumentError(
+            "relaxed_cluster_aligned_subset_max must be >= 1, got " *
+            "$(relaxed_cluster_aligned_subset_max)",
+        ))
         new(
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
-            relaxed_cluster_guide_routes,
+            relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
+            relaxed_cluster_aligned_subset_max,
         )
     end
 end
@@ -147,7 +217,10 @@ the solver is constructed rather than on the first pricing call of a long run. W
 *paired* formulation actually offers the named pricer is a build-time question, answered by
 that formulation's `build_model` (`AggregateODRouteBaseFormulation` offers none at all).
 """
-const CG_PRICING_MODES = (:exact, :station_simple, :darp_modified, :darp, :relaxed_cluster)
+const CG_PRICING_MODES = (
+    :exact, :station_simple, :darp_modified, :darp, :relaxed_cluster,
+    :relaxed_cluster_two_tier,
+)
 const CG_WARM_START_PRICING_MODES = (CG_PRICING_MODES..., :cluster_guide)
 
 function _cg_validate_pricing_mode(mode::Union{Nothing, Symbol}, field::AbstractString)

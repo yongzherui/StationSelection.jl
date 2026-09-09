@@ -211,6 +211,11 @@ include("label_setting/joint_routing_assignment/relaxed_cluster/hooks.jl")
 # extraction, the cut context and refine.jl, so it loads last of all.
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/refinement/refine.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl")
+# utils/certification/two_tier.jl is `:relaxed_cluster_two_tier`: the same certification
+# contract over a NESTED macro/meso partition pair. It reuses certify.jl's round driver
+# (via that function's `pass` keyword), its result type and its stat record, so it has to
+# be included after it.
+include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
 # master CGSolver's build (above) solves, seeded with the exhaustive pool

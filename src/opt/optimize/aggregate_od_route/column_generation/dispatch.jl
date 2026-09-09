@@ -75,13 +75,27 @@ function cg_certification_supported(build_result::BuildResult, mapping::Aggregat
         m::JuMP.Model)
     m[:aggregate_od_route_formulation] isa AggregateODRouteJointRoutingAssignmentFormulation ||
         return false
-    return haskey(m.obj_dict, :joint_routing_assignment_station_clustering)
+    haskey(m.obj_dict, :joint_routing_assignment_station_clustering) || return false
+    # The two-tier mode additionally needs its macro layer, which the build only creates
+    # when `relaxed_cluster_macro_count` was given. `CGPricingConfig` already requires the
+    # two together, so a model reaching here without one is a build that never asked for
+    # the mode -- reported as unsupported rather than crashed into.
+    if m[:joint_routing_assignment_pricing_mode] === :relaxed_cluster_two_tier
+        return haskey(m.obj_dict, :joint_routing_assignment_macro_clustering)
+    end
+    return true
 end
 
 function cg_certification_round(build_result::BuildResult, mapping::AggregateODRouteMap,
-        m::JuMP.Model, duals, solver::CGSolver; time_limit_sec::Real)
+        m::JuMP.Model, duals, solver::CGSolver; time_limit_sec::Real, iteration::Int=0)
+    if m[:joint_routing_assignment_pricing_mode] === :relaxed_cluster_two_tier
+        return _run_two_tier_certification_round(
+            m[:aggregate_od_route_formulation], mapping, m, duals, solver;
+            time_limit=Float64(time_limit_sec), iteration=iteration,
+        )
+    end
     return _run_relaxed_cluster_certification_round(
         m[:aggregate_od_route_formulation], mapping, m, duals, solver;
-        time_limit=Float64(time_limit_sec),
+        time_limit=Float64(time_limit_sec), iteration=iteration,
     )
 end

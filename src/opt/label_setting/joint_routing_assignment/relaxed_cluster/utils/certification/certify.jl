@@ -138,6 +138,26 @@ Outcome of one certification round, over every scenario -- the shape
   round, which drops its harvest on purpose: CG is about to stop, and adding
   columns to a master just proved optimal would only churn it. See the module
   docstring's "Harvesting" section.
+- `relaxed_rc_bound` -- a VALID lower bound on the minimum reduced cost over the
+  whole real route universe, across every scenario, or `NaN` when no such bound
+  was established this round. This is the number the round already computes and
+  then throws away after testing it against `-tol`; recording it is what turns a
+  refuted round from a pass/fail into a measurement.
+
+  Why the final `relaxed_rc` bounds *real* routes: a real route either escapes
+  every cut, in which case its image escapes too and its reduced cost is at
+  least the relaxed minimum over escaping routes; or it lies inside some cut
+  support `T`, and a cut is only ever added after `stations(T)` was searched
+  EXHAUSTIVELY by the exact pricer and found barren, so that route's reduced
+  cost is at least `-tol`. The bound is the smaller of the two, which is the
+  final `relaxed_rc` in every round that failed to certify.
+
+  `NaN` when ANY scenario came back `:inconclusive`, and that exclusion is the
+  whole correctness of the field. An inconclusive sweep stopped early, so its
+  running minimum is the best value *seen*, an UPPER bound on the relaxed
+  minimum -- it bounds nothing from below, and plotting it as a bound would
+  read as steady progress while proving nothing. A scenario with nothing to
+  price contributes `Inf`, since it vacuously bounds everything.
 """
 struct RelaxedClusterCertificationResult
     certified::Bool
@@ -148,6 +168,7 @@ struct RelaxedClusterCertificationResult
     n_clusters::Int
     elapsed_sec::Float64
     candidates::Vector{Any}
+    relaxed_rc_bound::Float64
 end
 
 """
@@ -449,7 +470,7 @@ which takes the model's lock.
 function _relaxed_cluster_scenario_pass(
     formulation::AggregateODRouteJointRoutingAssignmentFormulation,
     mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver,
-    s::Int, clustering::StationClustering; deadline::Float64,
+    s::Int, clustering::StationClustering; deadline::Float64, iteration::Int=0,
 )
     alpha, gamma_o, gamma_d = duals
     data = m[:joint_routing_assignment_data]
@@ -467,6 +488,9 @@ function _relaxed_cluster_scenario_pass(
     )
     _record_relaxed_cluster_stat!(m, (
         scenario=s,
+        # WHICH CG iteration this attempt belongs to, so attempts can be ordered in time and
+        # cost at late near-converged duals told apart from cost at easy early ones.
+        iteration=iteration,
         guide_routes=maximum((r.guide_routes for r in result.trace); init=0),
         subset_size=result.last_subset_size,
         n_stations=length(m[:joint_routing_assignment_nodes]),
@@ -511,6 +535,11 @@ pricing round it displaced was already threaded. A serial round therefore left
 as pricing (`solver.parallel_scenario_pricing` or the formulation's own opt-in), so a run
 cannot silently thread one round shape and not the other.
 
+`pass` is the per-scenario body, defaulting to the one-tier
+`_relaxed_cluster_scenario_pass`. `:relaxed_cluster_two_tier` supplies
+`_two_tier_scenario_pass` instead (`two_tier.jl`) and reuses everything else here --
+the concurrency rule, the budget rule and the reduction below are the same for both.
+
 `time_limit` is budgeted the way `_run_pricing_round` budgets a pricing round's, and for
 the same reason: divided across scenarios when they run serially (their searches sum),
 given in full to each when they run concurrently (their searches overlap). Both honour the
@@ -519,7 +548,8 @@ same round wall.
 function _run_relaxed_cluster_certification_round(
     formulation::AggregateODRouteJointRoutingAssignmentFormulation,
     mapping::AggregateODRouteMap, m::JuMP.Model, duals, solver::CGSolver;
-    time_limit::Float64,
+    time_limit::Float64, pass::Function=_relaxed_cluster_scenario_pass,
+    iteration::Int=0,
 )::RelaxedClusterCertificationResult
     t_start = time()
     deadline = t_start + time_limit
@@ -535,9 +565,9 @@ function _run_relaxed_cluster_certification_round(
         # Concurrent searches overlap, so each scenario may have the WHOLE round budget and
         # the round still finishes within its wall -- exactly `_run_pricing_round`'s rule.
         Threads.@threads for i in eachindex(scenarios)
-            results[i] = _relaxed_cluster_scenario_pass(
+            results[i] = pass(
                 formulation, mapping, m, duals, solver, scenarios[i], clustering;
-                deadline=deadline,
+                deadline=deadline, iteration=iteration,
             )
         end
     else
@@ -546,9 +576,9 @@ function _run_relaxed_cluster_certification_round(
         for (position, i) in enumerate(eachindex(scenarios))
             remaining_scenarios = length(scenarios) - position + 1
             slice_deadline = time() + max(0.0, (deadline - time()) / remaining_scenarios)
-            results[i] = _relaxed_cluster_scenario_pass(
+            results[i] = pass(
                 formulation, mapping, m, duals, solver, scenarios[i], clustering;
-                deadline=slice_deadline,
+                deadline=slice_deadline, iteration=iteration,
             )
         end
     end
@@ -557,6 +587,10 @@ function _run_relaxed_cluster_certification_round(
     any_refuted = false
     all_conclusive = true
     harvested = Any[]
+    # The round's lower bound on the real minimum reduced cost. `Inf` is the identity of
+    # `min` here and also the honest value for a scenario with nothing to price, so the two
+    # coincide and no special case is needed for an all-vacuous round.
+    rc_bound = Inf
     for r in results
         if isnothing(r)
             certified_count += 1     # nothing to price: vacuously certified
@@ -570,6 +604,11 @@ function _run_relaxed_cluster_certification_round(
         else
             all_conclusive = false
         end
+        # Only an EXHAUSTED sweep bounds from below; see the struct docstring. An
+        # inconclusive scenario poisons the whole round's bound rather than being skipped,
+        # because the round bounds the universe only if every scenario in it does.
+        rc_bound = r.outcome === :inconclusive ? NaN :
+            min(rc_bound, isempty(r.trace) ? Inf : Float64(r.trace[end].relaxed_rc))
     end
 
     certified = !any_refuted && all_conclusive && certified_count == length(scenarios)
@@ -581,7 +620,7 @@ function _run_relaxed_cluster_certification_round(
     # columns to a master that has just been proved optimal would only churn it.
     return RelaxedClusterCertificationResult(
         certified, any_refuted, conclusive_and_complete, certified_count, length(scenarios),
-        clustering.n_clusters, time() - t_start, certified ? Any[] : harvested,
+        clustering.n_clusters, time() - t_start, certified ? Any[] : harvested, rc_bound,
     )
 end
 

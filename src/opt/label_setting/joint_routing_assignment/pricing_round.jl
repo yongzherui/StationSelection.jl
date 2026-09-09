@@ -142,15 +142,15 @@ function _pricing_build_scenario_context(
     # (`cg_certification_round`) instead of calling `price_columns` at all, because it is a
     # relaxation with a cut loop around it, not a label-setting context over `pricing_data`.
     # Reached only by a direct call, which this turns into the explanation.
-    pricing_mode === :relaxed_cluster && throw(ArgumentError(
-        "pricing_mode=:relaxed_cluster has no label-setting context: it is the relaxed " *
-        "cluster round, driven by CGSolver via cg_certification_round, not by " *
+    pricing_mode in (:relaxed_cluster, :relaxed_cluster_two_tier) && throw(ArgumentError(
+        "pricing_mode=$(repr(pricing_mode)) has no label-setting context: it is a " *
+        "relaxed-cluster round, driven by CGSolver via cg_certification_round, not by " *
         "_run_pricing_round",
     ))
     pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
-        "expected :exact, :station_simple, :darp_modified, :darp, :cluster_guide, or " *
-        ":relaxed_cluster",
+        "expected :exact, :station_simple, :darp_modified, :darp, :cluster_guide, " *
+        ":relaxed_cluster, or :relaxed_cluster_two_tier",
     ))
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;

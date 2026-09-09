@@ -68,6 +68,7 @@ const MOI = JuMP.MOI
         include("opt/test_joint_routing_assignment_column_dedup.jl")
         include("opt/test_joint_routing_assignment_warm_start.jl")
         include("opt/test_joint_routing_assignment_relaxed_cluster_pricing.jl")
+        include("opt/test_joint_routing_assignment_two_tier_pricing.jl")
         include("opt/test_aggregate_od_route_base_cg.jl")
         include("opt/test_solve_status.jl")
     end

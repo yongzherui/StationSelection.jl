@@ -210,6 +210,7 @@ One `NamedTuple` per CG iteration, in order:
 | `certification_sec` | wall time in this iteration's relaxation certification attempt (`0.0` when the feature is off) |
 | `certification_certified` | `true` on the single iteration whose relaxation certified, ending the loop |
 | `certification_outcome` | `"certified"` / `"refuted"` (an improving relaxed solution existed -- the relaxation is too loose) / `"inconclusive"` (the attempt ran out of budget) / `"none"` (no attempt this iteration) |
+| `relaxed_rc_bound` | a valid LOWER bound on the minimum reduced cost over the whole real route universe, or `NaN` when this iteration established none (no attempt, or an inconclusive one -- see `RelaxedClusterCertificationResult.relaxed_rc_bound`). The master objective is an *upper* bound on `z_LP` that descends as columns arrive; this is the only quantity in the loop that bounds from below, and it is what makes a refuted round a measurement rather than a failed test |
 
 The final iteration is always logged, including the one that breaks the loop (on
 convergence, on a non-`OPTIMAL` master, or on the last `max_iterations` pass), so
@@ -236,6 +237,8 @@ struct CGSolver <: AbstractSolver
     parallel_scenario_pricing::Bool
     initial_columns::Union{Nothing, AbstractVector}
     recover_integer_solution::Bool
+    iteration_callback::Union{Nothing, Function}
+    dual_callback::Union{Nothing, Function}
 
     function CGSolver(;
             config::SolverOptions=SolverOptions(),
@@ -248,6 +251,8 @@ struct CGSolver <: AbstractSolver
             parallel_scenario_pricing::Bool=false,
             initial_columns::Union{Nothing, AbstractVector}=nothing,
             recover_integer_solution::Bool=false,
+            iteration_callback::Union{Nothing, Function}=nothing,
+            dual_callback::Union{Nothing, Function}=nothing,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
         reduced_cost_tol >= 0 || throw(ArgumentError("reduced_cost_tol must be non-negative"))
@@ -264,7 +269,8 @@ struct CGSolver <: AbstractSolver
             config, pricing, max_iterations, Float64(reduced_cost_tol),
             Float64(pricing_time_limit_sec), Float64(certifying_pricing_time_limit_sec),
             Float64(total_time_limit_sec), parallel_scenario_pricing,
-            initial_columns, recover_integer_solution,
+            initial_columns, recover_integer_solution, iteration_callback,
+            dual_callback,
         )
     end
 end
@@ -323,11 +329,12 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     # `label_setting/joint_routing_assignment/relaxed_cluster/relaxation.jl` for the bound.
     # Read off `active_pricing_mode` per iteration, not once, because a warm start can
     # switch modes mid-solve.
-    if final_pricing_mode === :relaxed_cluster
+    if final_pricing_mode in (:relaxed_cluster, :relaxed_cluster_two_tier)
         cg_certification_supported(build_result, mapping, m) || throw(ArgumentError(
-            "pricing.mode=:relaxed_cluster was requested, but this model has no " *
-            "relaxed-cluster pricer available -- it needs a formulation that implements " *
-            "one, built from a CGPricingConfig carrying relaxed_cluster_count",
+            "pricing.mode=$(repr(final_pricing_mode)) was requested, but this model has " *
+            "no matching relaxed-cluster pricer available -- it needs a formulation that " *
+            "implements one, built from a CGPricingConfig carrying " *
+            "relaxed_cluster_count (and relaxed_cluster_macro_count for the two-tier mode)",
         ))
     end
     certification_rounds = 0
@@ -352,6 +359,29 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     # this iteration (the pool grows by that much); `cumulative_columns_added` excludes
     # any seed columns the model was built with.
     iteration_log = NamedTuple[]
+    # Every iteration row goes through here, so `iteration_callback` sees each one AS IT
+    # HAPPENS rather than only in the returned metadata. Without it a run that is killed --
+    # preempted, or over its Slurm wall -- emits nothing at all, and hours of a long solve
+    # become unobservable and unrecoverable.
+    #
+    # A callback that throws must NOT take the solve with it: progress logging is
+    # observability, and losing a two-hour certification run to a transient filesystem
+    # error would be a strictly worse outcome than losing the log line. The first failure
+    # is warned about once and the rest are silent.
+    callback_failed = false
+    function log_iteration!(row::NamedTuple)
+        push!(iteration_log, row)
+        isnothing(solver.iteration_callback) && return nothing
+        try
+            solver.iteration_callback(row)
+        catch err
+            if !callback_failed
+                callback_failed = true
+                @warn "CGSolver iteration_callback failed; continuing without it" err
+            end
+        end
+        return nothing
+    end
     cumulative_columns_added = 0
     for iteration in 1:solver.max_iterations
         if remaining_budget() <= 0
@@ -367,6 +397,10 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         escalated_certification = false
         iteration_certified = false
         iteration_certification_outcome = "none"
+        # NaN = "no valid lower bound this iteration", which covers both the pricers that
+        # never attempt one and an attempt that came back inconclusive. See
+        # `RelaxedClusterCertificationResult.relaxed_rc_bound`.
+        iteration_rc_bound = NaN
 
         t0 = time()
         optimize!(m)
@@ -374,7 +408,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         status = JuMP.termination_status(m)
 
         if status != MOI.OPTIMAL
-            push!(iteration_log, (
+            log_iteration!((
                 iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
                 add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
@@ -384,6 +418,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 certification_sec=iteration_certification_sec,
                 certification_certified=false,
                 certification_outcome=iteration_certification_outcome,
+                relaxed_rc_bound=iteration_rc_bound,
             ))
             stop_reason = "master_not_optimal"
             break
@@ -391,12 +426,31 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         master_objective = JuMP.objective_value(m)
 
         duals = extract_duals(build_result, mapping, m)
+        # LATE-STAGE duals are the ones that matter and the ones nothing could reach: a
+        # parameter diagnostic that re-runs CG only ever sees early iterations, where every
+        # search exhausts in milliseconds. The regime that decides certification is a
+        # near-converged master fighting a ~0 margin, and the only way to study it offline
+        # is to capture the dual vectors from a real long run and replay them.
+        #
+        # Same failure policy as `iteration_callback`: a snapshot that throws must not take
+        # the solve with it.
+        if !isnothing(solver.dual_callback)
+            try
+                solver.dual_callback(iteration, duals)
+            catch err
+                if !callback_failed
+                    callback_failed = true
+                    @warn "CGSolver dual_callback failed; continuing without it" err
+                end
+            end
+        end
 
         # `:relaxed_cluster` IS this iteration's pricing round: it certifies, or it
         # harvests real columns, or it comes back inconclusive and escalates below. It runs
         # under the ordinary `pricing_time_limit_sec` for exactly that reason -- it is
         # doing the pricing, not sitting in front of it.
-        relaxed_cluster_pricing = active_pricing_mode === :relaxed_cluster
+        relaxed_cluster_pricing =
+            active_pricing_mode in (:relaxed_cluster, :relaxed_cluster_two_tier)
         if relaxed_cluster_pricing
             certification_limit = min(solver.pricing_time_limit_sec, remaining_budget())
             if certification_limit > 0
@@ -404,12 +458,13 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 certification_rounds += 1
                 certification = cg_certification_round(
                     build_result, mapping, m, duals, solver;
-                    time_limit_sec=certification_limit,
+                    time_limit_sec=certification_limit, iteration=iteration,
                 )
                 iteration_certification_sec = time() - t_cert
                 certification_sec += iteration_certification_sec
                 iteration_certified = certification.certified
                 certification_candidates = certification.candidates
+                iteration_rc_bound = certification.relaxed_rc_bound
                 iteration_certification_outcome = if certification.certified
                     "certified"
                 elseif certification.improving_found
@@ -429,7 +484,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             converged = true
             certified_by_relaxation = true
             stop_reason = "converged_by_certification"
-            push!(iteration_log, (
+            log_iteration!((
                 iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
                 add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
@@ -438,6 +493,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 pricing_mode=_mode_label(),
                 certification_sec=iteration_certification_sec, certification_certified=true,
                 certification_outcome=iteration_certification_outcome,
+                relaxed_rc_bound=iteration_rc_bound,
             ))
             break
         end
@@ -464,7 +520,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             add_sec = time() - t_add
             cumulative_columns_added += accepted
             certification_harvested_columns += accepted
-            push!(iteration_log, (
+            log_iteration!((
                 iteration=iteration, master_sec=master_sec, pricing_sec=0.0,
                 add_columns_sec=add_sec, columns_added=length(harvested_columns),
                 columns_accepted=accepted,
@@ -474,6 +530,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 pricing_mode=_mode_label(),
                 certification_sec=iteration_certification_sec, certification_certified=false,
                 certification_outcome=iteration_certification_outcome,
+                relaxed_rc_bound=iteration_rc_bound,
             ))
             accepted == 0 && break   # nothing entered the master: no progress is possible
             continue
@@ -521,7 +578,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                     certification_rounds += 1
                     escalated = cg_certification_round(
                         build_result, mapping, m, duals, solver;
-                        time_limit_sec=escalated_limit,
+                        time_limit_sec=escalated_limit, iteration=iteration,
                     )
                     iteration_certification_sec += time() - t_cert
                     certification_sec += time() - t_cert
@@ -554,7 +611,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             converged = true
             certified_by_relaxation = true
             stop_reason = "converged_by_certification"
-            push!(iteration_log, (
+            log_iteration!((
                 iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
                 add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
@@ -563,6 +620,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 pricing_mode=_mode_label(),
                 certification_sec=iteration_certification_sec, certification_certified=true,
                 certification_outcome=iteration_certification_outcome,
+                relaxed_rc_bound=iteration_rc_bound,
             ))
             break
         end
@@ -596,7 +654,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             # warm-start universe proves nothing about the full one, and leaving it true
             # here is exactly how a restricted search would masquerade as a certificate.
             if converged && warm_start_active
-                push!(iteration_log, (
+                log_iteration!((
                     iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
                     add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                     cumulative_columns_added=cumulative_columns_added,
@@ -606,6 +664,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                     certification_sec=iteration_certification_sec,
                     certification_certified=false,
                     certification_outcome=iteration_certification_outcome,
+                    relaxed_rc_bound=iteration_rc_bound,
                 ))
                 set_cg_pricing_mode!(build_result, mapping, m, final_pricing_mode)
                 warm_start_active = false
@@ -625,7 +684,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             else
                 stop_reason = "pricing_inconclusive"
             end
-            push!(iteration_log, (
+            log_iteration!((
                 iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
                 add_columns_sec=0.0, columns_added=0, columns_accepted=0,
                 cumulative_columns_added=cumulative_columns_added,
@@ -635,6 +694,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
                 certification_sec=iteration_certification_sec,
                 certification_certified=false,
                 certification_outcome=iteration_certification_outcome,
+                relaxed_rc_bound=iteration_rc_bound,
             ))
             break
         end
@@ -643,7 +703,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         columns_accepted = add_columns!(build_result, mapping, m, new_columns)
         add_columns_sec = time() - t0
         cumulative_columns_added += columns_accepted
-        push!(iteration_log, (
+        log_iteration!((
             iteration=iteration, master_sec=master_sec, pricing_sec=pricing_sec,
             add_columns_sec=add_columns_sec, columns_added=length(new_columns),
             columns_accepted=columns_accepted,
@@ -654,6 +714,7 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
             certification_sec=iteration_certification_sec,
             certification_certified=false,
             certification_outcome=iteration_certification_outcome,
+            relaxed_rc_bound=iteration_rc_bound,
         ))
 
         # Pricing returned improving columns but every one was de-duplicated away, so the
@@ -711,7 +772,8 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
         # Kept as its own key (rather than left to `cg_final_pricing_mode`) so a run that
         # stopped inside a warm-start phase still records that it was going to certify.
         "cg_certification_pricing_mode" =>
-            (final_pricing_mode === :relaxed_cluster ? :relaxed_cluster : nothing),
+            (final_pricing_mode in (:relaxed_cluster, :relaxed_cluster_two_tier) ?
+                final_pricing_mode : nothing),
         "cg_certification_rounds" => certification_rounds,
         "cg_certification_refuted_rounds" => certification_refuted_rounds,
         "cg_certification_inconclusive_rounds" => certification_inconclusive_rounds,
@@ -883,7 +945,7 @@ and only when the solver's `CGPricingConfig` carried a `relaxed_cluster_count`.
 cg_certification_supported(build_result::BuildResult, mapping, m::JuMP.Model) = false
 
 function cg_certification_round(build_result::BuildResult, mapping, m::JuMP.Model, duals,
-        solver::CGSolver; time_limit_sec::Real)
+        solver::CGSolver; time_limit_sec::Real, iteration::Int=0)
     throw(MethodError(cg_certification_round, (build_result, mapping, m, duals, solver)))
 end
 

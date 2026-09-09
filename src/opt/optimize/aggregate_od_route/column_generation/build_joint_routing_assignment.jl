@@ -147,10 +147,26 @@ function _build_joint_routing_assignment_model(
     # relaxed-cluster mode without a count (and a count without such a mode), so an absent
     # partition here means no relaxed-cluster mode was asked for.
     m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
+    m[:joint_routing_assignment_aligned_subset_max] = pricing.relaxed_cluster_aligned_subset_max
     if !isnothing(pricing.relaxed_cluster_count)
         m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
             m[:joint_routing_assignment_nodes], travel_cost, pricing.relaxed_cluster_count,
         )
+        # The NESTED macro layer for `:relaxed_cluster_two_tier`, built here for the same
+        # reason the meso layer is: the two tiers must be identical across every CG
+        # iteration or K1 is not a meaningful swept parameter and successive rounds' macro
+        # cuts are not comparable. `_nested_macro_clustering` returns the parent map
+        # alongside, and BOTH are stashed -- a parent map separated from its partition
+        # mis-translates cuts, and a mis-applied cut EXCLUDES relaxed routes, so that
+        # failure surfaces as a false certificate rather than an error.
+        if !isnothing(pricing.relaxed_cluster_macro_count)
+            macro_clustering, macro_parent = _nested_macro_clustering(
+                m[:joint_routing_assignment_station_clustering],
+                pricing.relaxed_cluster_macro_count, travel_cost,
+            )
+            m[:joint_routing_assignment_macro_clustering] = macro_clustering
+            m[:joint_routing_assignment_macro_parent] = macro_parent
+        end
         # Per-(round x scenario) guide diagnostics -- how big a station subset the relaxation
         # actually handed the exact pricer. Phase 1 of `_run_pricing_round` is threaded over
         # scenarios, so the lock is not optional: `push!` onto a shared Vector from several
@@ -296,11 +312,15 @@ it describes a phase of the CG loop that has already finished.
 function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPricingConfig
     count = haskey(m.obj_dict, :joint_routing_assignment_station_clustering) ?
         m[:joint_routing_assignment_station_clustering].n_clusters : nothing
+    macro_count = haskey(m.obj_dict, :joint_routing_assignment_macro_clustering) ?
+        m[:joint_routing_assignment_macro_clustering].n_clusters : nothing
     return CGPricingConfig(
         mode = m[:joint_routing_assignment_pricing_mode]::Symbol,
         compensated_dominance = Bool(m[:joint_routing_assignment_compensated_dominance]),
         relaxed_cluster_count = count,
         relaxed_cluster_max_count = m[:joint_routing_assignment_relaxed_cluster_max_count],
         relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
+        relaxed_cluster_macro_count = macro_count,
+        relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
     )
 end
