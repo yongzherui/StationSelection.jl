@@ -17,6 +17,8 @@ include("constraints/base.jl")
 include("constraints/assignment.jl")
 include("constraints/flow_activation.jl")
 include("constraints/endpoint_feasibility.jl")
+# Generic Benders optimality cuts -- formulation-independent, see variables/benders_cuts.jl.
+include("constraints/benders_cuts.jl")
 include("constraints/aggregate_od_route/core.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/coverage.jl")
 include("constraints/aggregate_od_route/joint_routing_assignment/linking.jl")

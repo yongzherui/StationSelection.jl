@@ -17,6 +17,8 @@ include("objectives/clustering_base.jl")
 # set_aggregate_od_route_base_objective!/set_joint_routing_assignment_objective! below.
 include("objectives/aggregate_od_route/joint_routing_assignment/assembly.jl")
 include("objectives/aggregate_od_route/base/assembly.jl")
+# Generic Benders master objective -- formulation-independent, see variables/benders_cuts.jl.
+include("objectives/benders_master.jl")
 # The old nearest-open-assignment-policy Benders objective files (expressions/
 # aggregate_od_route/benders.jl, aggregate_od_route/benders/{subproblem,master,dual_lp}.jl)
 # were removed -- see opt/formulations/aggregate_od_route/benders/*.jl for the surviving

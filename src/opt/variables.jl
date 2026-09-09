@@ -20,3 +20,7 @@ include("variables/assignment.jl")
 include("variables/walk.jl")
 include("variables/flow.jl")
 include("variables/routes.jl")
+# Generic Benders cut placeholders (Theta) -- formulation-independent, needs
+# AbstractBendersCutMode (opt/formulations/aggregate_od_route/benders/cut_mode.jl, loaded
+# earlier).
+include("variables/benders_cuts.jl")

@@ -164,7 +164,12 @@ end
 
 Exhaustive `θ` pool for `AggregateODRouteJointRoutingAssignmentFormulation`'s own
 `DirectMIPSolver` build (`optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl`)
--- the formulation's counterpart to `enumerate_aggregate_od_route_columns`. See this
+-- the formulation's counterpart to `enumerate_aggregate_od_route_columns`.
+
+Typed on `AnyJointRoutingAssignmentFormulation`, not just the monolith: it reads only the
+family's shared encoding fields, and `BendersSolver`'s `:direct_enumeration` oracle calls
+it with the derived *subproblem* formulation (whose `max_stops` is normally capped below
+the monolith's -- see `BendersSubproblemConfig`). See this
 file's module docstring for the design: reuse Base's physical-route DFS, then for each
 route take the maximal, elementarity-preserving cartesian product over every certified
 passenger's own certified `(j, k)` options.
@@ -184,7 +189,7 @@ enumerator uses collects every certification rather than arg-maxing over reward.
 """
 function enumerate_joint_routing_assignment_columns(
     problem::StationSelectionProblem,
-    formulation::AggregateODRouteJointRoutingAssignmentFormulation,
+    formulation::AnyJointRoutingAssignmentFormulation,
     data::StationSelectionData;
     max_routes::Int=10_000,
     time_limit_sec::Float64=30.0,

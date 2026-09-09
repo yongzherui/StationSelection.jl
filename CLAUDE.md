@@ -15,7 +15,8 @@ run_opt(problem::AbstractProblem, formulation::AbstractFormulation, solver::Abst
   staging, cost weights). See "Live Formulations" below for the six concrete types.
 - `AbstractSolver` — *which* algorithm solves it: `DirectMIPSolver` (single `optimize!`
   call), `CGSolver` (column-generation outer loop), `BendersSolver` (Benders outer loop,
-  scaffolded but no formulation implements its hooks yet).
+  live for `AggregateODRouteJointRoutingAssignmentFormulation` — see "Benders
+  decomposition" below).
 
 ## Directory Layout (`src/opt/`)
 
@@ -23,16 +24,22 @@ run_opt(problem::AbstractProblem, formulation::AbstractFormulation, solver::Abst
 opt/
 ├── abstract.jl           # AbstractProblem, AbstractFormulation
 ├── problems/              # AbstractProblem subtypes (StationSelectionProblem, RouteCoveringProblem)
-├── formulations/          # AbstractFormulation subtypes (clustering.jl, aggregate_od_route/*)
-├── solvers/                # AbstractSolver subtypes + shared solver utils
-│                          #   direct_solver.jl, benders_solver.jl, and cg/ — the column
-│                          #   generation solver split by role: pricing_config.jl (pricer
-│                          #   selection), solver.jl (the CGSolver struct + the docstring
-│                          #   that documents the algorithm), state.jl (loop state +
-│                          #   iteration-log row), loop.jl (the loop and its phases),
-│                          #   metadata.jl (result report), hooks.jl (per-formulation hook
-│                          #   fallbacks)
-├── optimize/               # build_model methods, one per (problem × formulation × solver)
+├── formulations/          # AbstractFormulation subtypes (clustering.jl, aggregate_od_route/*).
+│                          #   aggregate_od_route/joint_routing_assignment/ is a FAMILY:
+│                          #   shared.jl (the six shared encoding fields + the derivation
+│                          #   helper), monolithic.jl, master.jl, benders_subproblem.jl,
+│                          #   unions.jl
+├── solvers/                # AbstractSolver subtypes + shared solver utils.
+│                          #   direct_solver.jl, plus cg/ and benders/ — each split by the
+│                          #   same roles: {pricing,subproblem}_config.jl (the search-
+│                          #   algorithm config), solver.jl (the struct + the docstring
+│                          #   that documents the algorithm), state.jl (loop state),
+│                          #   loop.jl (the loop), metadata.jl (result report), hooks.jl
+│                          #   (per-formulation hook fallbacks)
+├── optimize/               # build_model methods, one per (problem × formulation × solver);
+│                          #   aggregate_od_route/{direct,column_generation,benders}/ by
+│                          #   solver, plus joint_shared.jl (the cost/pool stash all three
+│                          #   joint builds share)
 ├── label_setting/          # pricing/column-enumeration engine for the AggregateODRoute formulations
 │                          #   joint_routing_assignment/{exact,station_simple,darp,darp_modified}/ price columns;
 │                          #   joint_routing_assignment/relaxed_cluster/ is a relaxed GRAPH, not
@@ -50,7 +57,7 @@ opt/
 `build_model` methods compose the `variables/`/`constraints/`/`objectives/` building
 blocks; they don't live inside `formulations/` or `problems/` themselves.
 
-## Live Formulations (6)
+## Live Formulations (6 + 2 derived)
 
 | Formulation | Solver | Key idea | Unique fields | Unique variables |
 | --- | --- | --- | --- | --- |
@@ -76,19 +83,90 @@ Both `AggregateODRoute*` formulations validate build-time feasibility
 (`x_walk`, `WALK_ONLY_PAIR`) as a station-free coverage option — not configurable, no
 `allow_walk_only` field.
 
+## Benders decomposition (Joint formulation)
+
+`AggregateODRouteJointRoutingAssignmentFormulation` is also solvable by `BendersSolver`.
+The decomposition is expressed as **two derived formulation types**, not as a solver that
+builds two models by hand — so master and subproblem compose the same
+`variables/`/`constraints/`/`objectives/` blocks the monolith does:
+
+| Formulation | Carries | Blocks |
+| --- | --- | --- |
+| `…JointRoutingAssignmentMasterFormulation` | `y` + cut placeholders `Θ` | `add_station_selection_variables!`, `add_benders_cut_variables!`, `add_station_limit_constraint!`, `add_aggregate_od_route_endpoint_feasibility_constraints!`, `set_benders_master_objective!` |
+| `…JointRoutingAssignmentBendersSubproblemFormulation` | one scenario's `x_walk`, `θ`, with `y` fixed | `add_walk_variables!`, `add_joint_routing_assignment_{coverage,station_linking}_constraints!`, `set_joint_routing_assignment_objective!`, `add_joint_routing_assignment_column!` — all with the new `scenarios` kwarg |
+
+The two partition the monolith's rows exactly: `y` appears in neither the coverage rows nor
+the objective, so the first stage is `y` plus the rows written only in `y`, and everything
+else is the second stage — which separates exactly by scenario (every column belongs to one
+scenario, every row is keyed `(s,p)`), hence `MultiCut(:scenario)` and one subproblem model
+per scenario, built once.
+
+**Both derived types are derived, never built from loose keywords.**
+`MasterFormulation(parent; cut_mode)` / `BendersSubproblemFormulation(parent; max_stops)`
+copy the family's six shared encoding fields off `parent`
+(`joint_routing_assignment/shared.jl`). A master at one `detour_factor` against a
+subproblem at another yields invalid cuts and a confidently wrong `OPTIMAL` with nothing
+raising, so the inconsistent combination is made unrepresentable. `run_opt` still takes
+ONE formulation — the monolith — and `build_model(problem, ::Monolith, ::BendersSolver)`
+derives both halves, because Benders is an algorithm for the same model, not a different
+model.
+
+`y` is kept as a (relaxed) variable in the subproblem and pinned with
+`JuMP.fix(y[j], ŷ[j]; force=true)`, which is what lets the linking-constraint builder be
+reused **verbatim** — the rows stay `θ - y[j] ≤ 0` and there is no numeric-RHS code path to
+drift from the first.
+
+### Two properties of the answer that must travel with it
+
+- **`metadata["benders_second_stage_relaxed"] == true`, always.** The cut IS the
+  subproblem's LP dual, so the subproblem must be an LP, so a converged run is optimal for
+  the **mixed** model (`y` binary, `θ`/`x_walk` continuous) — NOT `DirectMIPSolver`'s
+  all-binary optimum over the same pool. Those differ by this formulation's LP–IP gap,
+  which is not small here.
+- **`metadata["benders_optimality_scope"]`.** The only oracle today is
+  `:direct_enumeration`, whose pool is exponential in `max_stops`, so
+  `BendersSubproblemConfig.max_stops` defaults to **4** and narrows the formulation's own
+  value when that is larger. When it does, the scope reads `"max_stops_restricted"` and
+  the claim is optimality over routes of at most that many stops — the same discipline
+  `cg_optimality_scope` enforces for `CGSolver`. `nothing` disables the cap.
+
+MEASURED (Zhuzhou n=10 p=8 sc=1 seed=42, k=5, `max_stops=4`, 16,320 enumerated columns):
+converges in **4 iterations / 3 cuts**, LB == UB exactly at 12249.400939, loop wall 2.3 s
+(master 0.04 s, subproblems 1.50 s) on top of 3.5 s of enumeration. Verified exact against
+the same mixed model solved monolithically over the same pool (`diff 0.000e+00`) --
+`benchmarks/diagnostics/benders_joint_n10.jl`, which runs that check plus
+`benders <= direct_mip` on every invocation. Note the LP-IP gap on that cell is 0%, so
+`benders <= direct_mip` passes trivially there; the monolithic *mixed* comparison is the
+check that actually establishes exactness.
+
+Both bounds are reported (`benders_lower_bound`/`benders_upper_bound`/`benders_gap`): the
+LB is the master's `objective_bound` (not `objective_value`, which a non-zero `MIPGap`
+would inflate into an invalid bound), the UB is the best incumbent's exact second-stage
+cost. `SOLVE_OPTIMAL` requires the two to have met inside `optimality_tol`; a run stopped
+by `max_iterations`/`total_time_limit_sec` reports `SOLVE_FEASIBLE`, and the reported
+objective is always the UB — a lower bound is not a solution.
+
+No feasibility cuts exist or are needed: `x_walk` covers every demand group with no `y`
+linking, so the subproblem is feasible at every incumbent. `solve_subproblem` raises on a
+non-optimal subproblem rather than deriving a weak cut from it, and every solve asserts the
+strong-duality identity `Σα − Σ Γⱼ ŷⱼ == objective` before its cut is built — one line that
+catches a wrong dual sign, a dropped linking family, or a subproblem whose `mapping`
+disagrees with the master's.
+
 ## Kept-but-unwired scaffolding
 
 Not dead code — deliberately preserved as a starting point for future work, but not
 reachable from any `build_model`/`Solver` today:
 
 - Five Benders formulation marker structs under `opt/formulations/aggregate_od_route/
-  benders/` (`{y,xy,yz,yzh,yx}.jl` + `cut_mode.jl`'s `AbstractBendersCutMode`/`SingleCut`/
-  `MultiCut`) — no formulation implements `BendersSolver`'s four hooks yet.
+  benders/` (`{y,xy,yz,yzh,yx}.jl`) — pre-split scaffolding, superseded by the live
+  master/subproblem pair above and still wired to nothing. `cut_mode.jl`
+  (`AbstractBendersCutMode`/`SingleCut`/`MultiCut`) in that same directory is NOT
+  scaffolding — it is live, read by the master formulation.
 - `RouteCoveringProblem` (`opt/problems/route_covering.jl`) — fixed-`y`/fixed-assignment
-  shape a future Benders subproblem should reuse.
-- `BendersSolver` (`opt/solvers/benders_solver.jl`) — generic outer loop with four
-  formulation-specific hook stubs (`extract_incumbent`, `solve_subproblem`,
-  `benders_converged`, `add_benders_cut!`); none implemented yet.
+  shape; the live Benders subproblem fixes `y` but leaves assignment to `θ`, so this
+  remains the shape a `:column_generation` subproblem oracle would reuse rather than one
+  anything builds today.
 
 See `notes/2026-08-11_problem_formulation_solver_split_progress.md` for the fuller
 writeup, migration history, and remaining-work list.
@@ -265,7 +343,18 @@ both relaxed-cluster modes means `relaxed_cluster_count` was set at build time; 
 `pricing.warm_start_mode=:relaxed_cluster` is rejected too: the mode never reports its own
 exhaustion, so phase 2 would be unreachable.
 
-`BendersSolver` carries `max_iterations`, `optimality_tol`.
+`BendersSolver` carries `max_iterations`, `optimality_tol`, `total_time_limit_sec` (a wall
+cap over the whole loop, distinct from `config.time_limit_sec`, which reaches only the
+master's own `optimize!`), and `subproblem` — a `BendersSubproblemConfig`
+(`opt/solvers/benders/subproblem_config.jl`). **The subproblem oracle is a solver setting,
+not a formulation one**, for exactly the reason pricers are: it is a search algorithm, so
+two runs differing only in it solve the identical model. It carries `oracle`
+(`:direct_enumeration` only today; `:column_generation` is the intended next value and is
+rejected rather than ignored), `max_stops` (the enumeration cap — **default 4**, see the
+scope note under "Benders decomposition"), `max_routes` and
+`enumeration_time_limit_sec` (the enumerator's own guard rails, which throw rather than
+truncate), and `time_limit_sec` (per subproblem LP; a subproblem that hits it is a hard
+error, since a truncated LP's duals are not a valid underestimator).
 
 ## Key Constraints
 
@@ -339,8 +428,8 @@ optimal" (`MOI.FEASIBLE_POINT` is a *primal* status).
 
 | Member | Prints as | Meaning |
 | --- | --- | --- |
-| `SOLVE_OPTIMAL` | `OPTIMAL` | Certified optimum. For `CGSolver` this additionally requires pricing to have exhausted (`metadata["cg_converged"]`), i.e. a pool complete **for the universe pricing searched** -- see the scope note below |
-| `SOLVE_FEASIBLE` | `FEASIBLE` | Valid incumbent / upper bound, optimality NOT proven: budget-stopped or pricing-inconclusive CG, or a MIP that hit a limit with an incumbent |
+| `SOLVE_OPTIMAL` | `OPTIMAL` | Certified optimum. For `CGSolver` this additionally requires pricing to have exhausted (`metadata["cg_converged"]`), i.e. a pool complete **for the universe pricing searched** -- see the scope note below. For `BendersSolver` it requires the two bounds to have MET (`metadata["benders_converged"]`) -- a master solving to `MOI.OPTIMAL` only means the master solved, and its objective is a lower bound |
+| `SOLVE_FEASIBLE` | `FEASIBLE` | Valid incumbent / upper bound, optimality NOT proven: budget-stopped or pricing-inconclusive CG, a Benders run stopped by its iteration cap or wall budget, or a MIP that hit a limit with an incumbent |
 | `SOLVE_INFEASIBLE` | `INFEASIBLE` | No feasible solution: solver said so, or `check_feasibility`'s gate refuted the instance before any solve |
 | `SOLVE_NOT_SOLVED` | `NOT_SOLVED` | No incumbent to report |
 

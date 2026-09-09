@@ -145,7 +145,8 @@ Resolve the "is direct walking (`WALK_ONLY_PAIR`) available" flag per formulatio
 `AggregateODRouteBendersYXFormulation` (unwired, see `opt/optimize.jl`'s include
 comments) carries it as a genuine opt-in `allow_walk_only::Bool` field. Both *live*
 aggregate-OD-route formulations -- `AggregateODRouteBaseFormulation` and
-`AggregateODRouteJointRoutingAssignmentFormulation` -- carry no such field: direct
+every member of `AnyJointRoutingAssignmentFormulation` (the monolith and its Benders
+master/subproblem pair) -- carry no such field: direct
 walking is mandatory for both (see their own docstrings), since
 `compute_valid_jk_pairs` no longer produces same-station pairs at all, making
 `WALK_ONLY_PAIR` the *only* station-free coverage option left, and each formulation's
@@ -153,7 +154,7 @@ build-time feasibility guarantee (`aggregate_od_route_validate_feasible_coverage
 assumes it's always on.
 """
 _aggregate_od_route_allow_walk_only(formulation) = formulation.allow_walk_only
-_aggregate_od_route_allow_walk_only(::AggregateODRouteJointRoutingAssignmentFormulation) = true
+_aggregate_od_route_allow_walk_only(::AnyJointRoutingAssignmentFormulation) = true
 _aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = true
 _aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = true
 

@@ -65,11 +65,21 @@ include("opt/solvers/cg/state.jl")
 include("opt/solvers/cg/hooks.jl")
 include("opt/solvers/cg/metadata.jl")
 include("opt/solvers/cg/loop.jl")
-include("opt/solvers/benders_solver.jl")
+# opt/solvers/benders/: the Benders decomposition solver, split by role exactly as cg/ is.
+# `subproblem_config.jl` is the second-stage oracle choice (BendersSolver's counterpart to
+# CGPricingConfig), `solver.jl` the BendersSolver struct and the docstring that documents
+# the bound contract, `state.jl` the loop's bound/incumbent bookkeeping, `hooks.jl` the
+# per-formulation hooks and the three generic defaults, `metadata.jl` the result report,
+# `loop.jl` the loop and its result packaging. Bottom-up: everything the loop calls is
+# defined before it.
+include("opt/solvers/benders/subproblem_config.jl")
+include("opt/solvers/benders/solver.jl")
+include("opt/solvers/benders/state.jl")
+include("opt/solvers/benders/hooks.jl")
+include("opt/solvers/benders/metadata.jl")
+include("opt/solvers/benders/loop.jl")
 # heuristic_solver.jl (HeuristicDispatchSolver) removed -- generic run_heuristic! hook
-# shell with zero implementations and zero callers/tests, unlike BendersSolver (kept
-# despite having no formulation wired to it yet, since it's the Benders-specific
-# reminder scaffold this cleanup pass deliberately preserved).
+# shell with zero implementations and zero callers/tests.
 
 include("opt/problems/station_selection.jl")
 # aggregate_od_route.jl (AggregateODRouteProblem) was removed entirely -- AggregateODRouteColumn,
@@ -96,7 +106,16 @@ include("opt/formulations/aggregate_od_route/benders/xy.jl")
 include("opt/formulations/aggregate_od_route/benders/yz.jl")
 include("opt/formulations/aggregate_od_route/benders/yzh.jl")
 include("opt/formulations/aggregate_od_route/benders/yx.jl")
-include("opt/formulations/aggregate_od_route/joint_routing_assignment.jl")
+# opt/formulations/aggregate_od_route/joint_routing_assignment/: the joint routing+assignment
+# formulation FAMILY -- the monolith (DirectMIPSolver/CGSolver) plus the master/subproblem
+# pair it decomposes into under BendersSolver. Load order is bottom-up: shared.jl's field
+# copier first (both derived types call it from their constructors), then the three
+# members, then unions.jl, which needs all of them to exist. See shared.jl for the table.
+include("opt/formulations/aggregate_od_route/joint_routing_assignment/shared.jl")
+include("opt/formulations/aggregate_od_route/joint_routing_assignment/monolithic.jl")
+include("opt/formulations/aggregate_od_route/joint_routing_assignment/master.jl")
+include("opt/formulations/aggregate_od_route/joint_routing_assignment/benders_subproblem.jl")
+include("opt/formulations/aggregate_od_route/joint_routing_assignment/unions.jl")
 include("opt/formulations/aggregate_od_route/feasibility.jl")
 
 # Clustering OD map (depends on AbstractClusteringTwoStageODFormulation)
@@ -211,6 +230,13 @@ export extract_joint_routing_assignment_duals, joint_routing_assignment_pricing_
 export joint_routing_assignment_two_stop_seed_columns
 export add_joint_routing_assignment_coverage_constraints!, add_joint_routing_assignment_station_linking_constraints!
 export set_joint_routing_assignment_objective!
+# Benders decomposition of the joint routing+assignment model: the formulation family's
+# two derived halves, the generic cut blocks, and the subproblem result types.
+export AggregateODRouteJointRoutingAssignmentMasterFormulation
+export AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation
+export add_benders_cut_variables!, benders_cut_group
+export add_benders_optimality_cut!, set_benders_master_objective!
+export JointRoutingAssignmentBendersScenarioResult, JointRoutingAssignmentBendersSubproblemResult
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!

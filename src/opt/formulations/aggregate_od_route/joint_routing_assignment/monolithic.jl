@@ -2,14 +2,13 @@
 Formulation-level encoding for the aggregate-OD-route problem's compact joint
 routing+assignment MILP/LP -- the non-Benders-decomposed representation, solved via
 column generation (`CGSolver`). See `base.jl` in this directory for the sibling
-formulation solved directly against an enumerated column pool (`DirectMIPSolver`), and
-`benders/` for the Benders-decomposed masters. Model construction lives per
+formulation solved directly against an enumerated column pool (`DirectMIPSolver`), and `master.jl`/`benders_subproblem.jl` in this directory for the two
+formulations this one decomposes into under `BendersSolver`. Model construction lives per
 (problem family × solver algorithm) under `opt/optimize/` instead -- see
 `opt/optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl`.
 """
 
 export AggregateODRouteJointRoutingAssignmentFormulation
-export AnyAggregateODRouteFormulation
 
 """
     AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
@@ -21,7 +20,11 @@ exact same field set and structural shape but is solved directly against an
 exhaustively enumerated column pool (`DirectMIPSolver`) rather than iteratively priced
 -- the two are separate marker types, not one formulation dispatching on solver, so
 each can carry its own future structural fields independently. For the decomposed
-masters, see `AggregateODRouteBendersYFormulation`/`XY`/`YZ`/`YZH` in `benders/`.
+masters this one decomposes into under `BendersSolver`, see
+`AggregateODRouteJointRoutingAssignmentMasterFormulation` (`master.jl`) and
+`AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation`
+(`benders_subproblem.jl`), both of which derive their encoding fields from an instance of
+this type so the three can never disagree about the route universe or the cost weights.
 
 # Fields
 See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
@@ -96,25 +99,3 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
         )
     end
 end
-
-"""
-    AnyAggregateODRouteFormulation
-
-Every `StationSelectionProblem`-paired aggregate-OD-route formulation that carries the
-identical encoding-detail field set (see `AggregateODRouteBaseFormulation`'s docstring),
-so shared-engine functions (`create_aggregate_od_route_map`,
-`enumerate_aggregate_od_route_columns`) dispatch on this rather than repeating themselves
-per formulation. Note `AggregateODRouteJointRoutingAssignmentFormulation` itself does NOT
-carry an `allow_walk_only` field (see its own docstring) despite matching this Union's
-field set otherwise -- `create_aggregate_od_route_map` resolves that one field via
-`_aggregate_od_route_allow_walk_only` instead of direct field access. Mirrors
-`AnyAggregateODRouteProblem` (`opt/problems/route_covering.jl`) for the same reason.
-`AggregateODRouteBendersYXFormulation` (`benders/yx.jl`) shares this field set too --
-its subproblem reuses `AggregateODRouteBaseFormulation`'s own map/enumeration code
-verbatim.
-"""
-const AnyAggregateODRouteFormulation = Union{
-    AggregateODRouteBaseFormulation,
-    AggregateODRouteJointRoutingAssignmentFormulation,
-    AggregateODRouteBendersYXFormulation,
-}

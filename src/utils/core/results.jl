@@ -98,6 +98,12 @@ it describes what the run established about the *problem*, where the MOI code de
 only the last model object that was optimized. The raw MOI code is kept as
 `metadata["moi_termination_status"]`.
 
+`solution` is `Union{Nothing, Tuple, NamedTuple}`. `NamedTuple` is NOT a `Tuple` subtype
+in Julia, so it has to be named explicitly; it is allowed because a positional tuple of
+several same-typed vectors is unreadable at the call site and silently reorderable, and a
+`BendersSolver` result reports `(y, selected_station_indices, scenario_objectives)` --
+three things a caller has no way to tell apart positionally.
+
 `duals` is `nothing` for every `AbstractStationSelectionModel` result (the
 overwhelming majority) and populated only for `AbstractBendersDualProblem`
 results (see `src/opt/abstract.jl`), which have no station/assignment
@@ -109,7 +115,7 @@ need to pass it explicitly.
 struct OptResult
     termination_status::SolveStatus
     objective_value::Union{Nothing, Float64}
-    solution::Union{Nothing, Tuple}
+    solution::Union{Nothing, Tuple, NamedTuple}
     runtime_sec::Float64
     model::JuMP.Model
     mapping::AbstractStationSelectionMap
@@ -122,7 +128,7 @@ struct OptResult
     function OptResult(
         termination_status::SolveStatus,
         objective_value::Union{Nothing, Float64},
-        solution::Union{Nothing, Tuple},
+        solution::Union{Nothing, Tuple, NamedTuple},
         runtime_sec::Float64,
         model::JuMP.Model,
         mapping::AbstractStationSelectionMap,

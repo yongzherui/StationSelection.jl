@@ -104,16 +104,13 @@ function _build_joint_routing_assignment_model(
     # not `problem`/`formulation`, so anything pricing, column-adding, or integer-recovery
     # rebuilding requires has to be stashed here.
     n = data.n_stations
-    m[:aggregate_od_route_formulation] = formulation
-    m[:joint_routing_assignment_data] = data
+    # The subset every joint build shares (cost weights + pool containers), so this master
+    # and the Benders subproblem cannot drift apart on them -- see
+    # `optimize/aggregate_od_route/joint_shared.jl`.
+    _stash_joint_routing_assignment_cost_parameters!(
+        m, data, formulation; relax_integrality = relax_integrality,
+    )
     m[:joint_routing_assignment_l] = l
-    m[:joint_routing_assignment_relax_integrality] = relax_integrality
-    m[:joint_routing_assignment_route_regularization_weight] = formulation.route_regularization_weight
-    m[:joint_routing_assignment_repositioning_time] = formulation.repositioning_time
-    m[:joint_routing_assignment_walk_cost_weight] = formulation.walk_cost_weight
-    m[:joint_routing_assignment_max_wait_time] = formulation.max_wait_time
-    m[:joint_routing_assignment_max_stops] = formulation.max_stops
-    m[:joint_routing_assignment_detour_factor] = formulation.detour_factor
     m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
     # The pricer is the SOLVER's choice (`CGSolver.pricing`, a `CGPricingConfig`), resolved
     # to a concrete symbol here and stashed so every later pricing call -- and
@@ -195,12 +192,6 @@ function _build_joint_routing_assignment_model(
         end
     end
     m[:joint_routing_assignment_relaxed_cluster_max_count] = pricing.relaxed_cluster_max_count
-    # Empty pool containers: real entries arrive from the seed pass below and (for the
-    # LP master) from every later CG iteration (`add_columns!`, routing_and_assignment.jl).
-    m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()
-    m[:joint_routing_assignment_columns] = Dict{Int, JointRoutingAssignmentRouteColumn}()
-    m[:joint_routing_assignment_column_signatures] = Dict{Any, Int}()
-
     # ---- 2. Variables ----
     variable_counts = Dict{String, Int}()
     variable_counts["station_selection"] =

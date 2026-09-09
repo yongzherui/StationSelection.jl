@@ -76,6 +76,10 @@ include("label_setting/route_covering/exact/enumeration.jl")
 # it.
 include("optimize/aggregate_od_route/base_shared.jl")
 include("optimize/aggregate_od_route/direct/build_base.jl")
+# The cost-weight/pool stash every AnyJointRoutingAssignmentFormulation build shares --
+# needed by the CG master build, the Benders subproblem build, and the integer-recovery
+# rebuild, so it loads before all of them.
+include("optimize/aggregate_od_route/joint_shared.jl")
 include("optimize/aggregate_od_route/direct/build_feasibility.jl")
 include("label_setting/joint_routing_assignment/types.jl")
 include("label_setting/joint_routing_assignment/data.jl")
@@ -230,6 +234,18 @@ include("optimize/aggregate_od_route/column_generation/build_joint_routing_assig
 # shared _build_joint_routing_assignment_model body -- Joint's counterpart to Base's own
 # DirectMIPSolver build below.
 include("optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl")
+# optimize/aggregate_od_route/benders/: AggregateODRouteJointRoutingAssignmentFormulation +
+# BendersSolver -- the master/subproblem pair the formulation family's master.jl and
+# benders_subproblem.jl declare, built from the same variables/constraints/objectives
+# blocks the monolith uses (see each build's own "Blocks used" list). Load order is
+# bottom-up: the subproblem build first (build_master.jl calls it directly to construct
+# one model per scenario), then the solve/dual extraction, then the cut builder, then the
+# master build, and dispatch.jl last -- its hooks forward to everything above.
+include("optimize/aggregate_od_route/benders/build_subproblem.jl")
+include("optimize/aggregate_od_route/benders/subproblem.jl")
+include("optimize/aggregate_od_route/benders/cuts.jl")
+include("optimize/aggregate_od_route/benders/build_master.jl")
+include("optimize/aggregate_od_route/benders/dispatch.jl")
 # AggregateODRouteBaseFormulation + CGSolver: same y/x/theta master DirectMIPSolver's build
 # (above) solves, grown from an empty column pool via add_aggregate_od_route_base_column!
 # (constraints/aggregate_od_route/base/route_activation.jl, part of opt/constraints.jl)
