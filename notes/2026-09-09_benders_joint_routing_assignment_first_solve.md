@@ -294,6 +294,66 @@ at 10, so a like-for-like cell needs small `n` and `max_stops = 4`.
 Repro: `sbatch benchmarks/diagnostics/run_benders_n10.sh` (env `BJ_SEED`, `BJ_N`, `BJ_P`,
 `BJ_S`, `BJ_MAX_STOPS`); the script runs both monolithic references and fails loudly.
 
+### The independent DirectMIPSolver arm, and what actually explains the cut count
+
+`benders_direct_arm_and_flatness.jl`. Two gaps closed here.
+
+**Gap 1: none of the earlier references were independent of each other.** `mixed_mono`,
+`direct_mip` and `CGSolver`'s master are all built by the SAME function,
+`_build_joint_routing_assignment_model`, so a bug in it would make all three agree and all
+three be wrong. (Benders was the odd one out all along -- its master and subproblem are
+separate constructions.) This runs the SHIPPED `DirectMIPSolver` path
+(`optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl`) instead:
+
+| n | Benders | DirectMIPSolver | brute-force min over all `y` | pool | Direct wall |
+| --- | --- | --- | --- | --- | --- |
+| 10 | 25771.187908 | 25771.187908 | 25771.187908 (86 sets) | 21,635 | 3.4 s |
+| 15 | 28384.120680 | 28384.120680 | 28384.120680 (4,437 sets) | 61,324 | 13.0 s |
+| 20 | 28735.190221 | 28735.190221 | -- (C(20,10) too large) | 237,353 | 127.1 s |
+
+8/8 checks. Brute force now also covers n=15 (4,437 master-feasible sets, exhaustively
+evaluated), so the optimum is confirmed by exhaustion at two sizes, not one.
+
+Still shared by EVERY arm and therefore tested by none: the `AggregateODRouteMap`,
+`joint_routing_assignment_column_cost`, and the objective assembly. Those are the model
+definition; falsifying them needs an oracle outside this formulation family.
+
+**Gap 2: my explanation of the low cut count was wrong twice, and the corrected one is
+narrower.**
+
+First wrong claim: "each cut prices every station, since `Gamma_j` binds at `y_j = 0`, so one
+cut constrains the whole space." The audit refutes it -- and so does the scaling:
+
+| n | nonzero coefs per cut | round-1 LB as % of optimum | flatness `Q_max/Q_min` |
+| --- | --- | --- | --- |
+| 10 | 1-2 of 10 | 99.71% | 1.3528 |
+| 15 | 2-7 of 15 | 66.48% | 1.4415 |
+| 20 | 2-10 of 20 | 79.74% | -- |
+
+Cuts are sparse at n=10 but reach 10 of 20 nonzeros at n=20, so density GROWS with `n`.
+
+Second wrong claim, from the n=10 trace: "one round of cuts gets 99.7% of the way". That is
+n=10-specific. At n=15 one round reaches only 66.5%.
+
+**What survives is the flatness.** `Q_max/Q_min` is 1.35 at n=10 and 1.44 at n=15: even the
+WORST master-feasible station set is only 35-44% more expensive than the best, and `Q` never
+approaches zero. A Benders cut is exact at its anchor, so anchoring anywhere immediately
+bounds the optimum to within a few tens of percent, and a handful of cuts closes the rest.
+The low cut count is therefore a property of THIS INSTANCE FAMILY -- a high-floor,
+narrow-range second-stage cost -- not of cut strength and not evidence the decomposition is
+good. **These cells barely stress the method.**
+
+That is consistent with the historical nearest-open runs needing 80-770 cuts at p=16/32: a
+value function with a lower floor and wider spread gives cuts much less to work with. And it
+predicts that a family where `Q` varies by orders of magnitude would need far more cuts here
+too. Until such a cell is run, the cut counts above should be read as "this instance is easy
+in the dimension Benders cares about", not as a property of the solver.
+
+**Cut counts are not reproducible run to run; objectives are.** n=20/s=3 reported 12 cuts in
+one run and 9 in another at identical configuration. The master is a MIP with many optimal
+`y` (21 of 86 sets tie at the optimum at n=10), so which optimum Gurobi returns varies with
+threading, and the cut sequence follows. Compare objectives across runs, never cut counts.
+
 ## Comparison with the 2026-07/08 Benders work
 
 `notes/2026-08-04_zhuzhou_benders_cut_ms5_scaling_results.md` measured the previous
