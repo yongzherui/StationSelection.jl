@@ -62,6 +62,11 @@ loop: on expiry the run stops and reports `cg_stop_reason="total_budget"` with
 scheduler. The recovery MIP afterwards is bounded separately by `config.time_limit_sec`
 (300 s), so budget a job's walltime for `total_time_limit_sec + 300 s` plus start-up.
 
+`iteration_callback` is invoked with each iteration-log row the moment that iteration ends,
+so a benchmark can stream progress to disk instead of only seeing it in the returned
+metadata. A run killed mid-solve (preemption, or the Slurm wall) then still leaves its
+per-iteration history behind.
+
 `pricing` is the whole pricer choice -- mode, warm start, relaxed-cluster settings -- as a
 `CGPricingConfig`. A mode-sweep arm therefore varies this one argument and reuses the
 formulation, which is what makes the arms comparable by construction.
@@ -71,7 +76,9 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         certifying_pricing_time_limit_sec::Real=3600.0,
         total_time_limit_sec::Real=Inf,
         parallel_scenario_pricing::Bool=false,
-        pricing::CGPricingConfig=CGPricingConfig())
+        pricing::CGPricingConfig=CGPricingConfig(),
+        iteration_callback::Union{Nothing, Function}=nothing,
+        dual_callback::Union{Nothing, Function}=nothing)
     return CGSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0, threads=threads), max_iterations=1_000,
         reduced_cost_tol=1e-6, pricing_time_limit_sec=pricing_time_limit_sec,
@@ -80,6 +87,8 @@ function benchmark_cg_solver(pricing_time_limit_sec::Real; recover_integer_solut
         parallel_scenario_pricing=parallel_scenario_pricing,
         recover_integer_solution=recover_integer_solution,
         pricing=pricing,
+        iteration_callback=iteration_callback,
+        dual_callback=dual_callback,
     )
 end
 

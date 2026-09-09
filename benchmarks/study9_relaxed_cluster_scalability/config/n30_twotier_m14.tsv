@@ -1,0 +1,11 @@
+job_id	phase	arm	n_stations	n_pairs	n_scenarios	seed	max_stops	n_threads	cluster_count	cluster_max_count	guide_routes	barren_cache	cut_management	pricing_limit_sec	certifying_limit_sec	total_limit_sec	macro_count
+1	frontier	twotier_k60m14	30	16	3	42	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+2	frontier	twotier_k60m14	30	16	3	43	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+3	frontier	twotier_k60m14	30	16	3	44	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+4	frontier	twotier_k60m14	30	16	3	45	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+5	frontier	twotier_k60m14	30	16	3	46	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+6	frontier	twotier_k60m14	30	16	3	47	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+7	frontier	twotier_k60m14	30	16	3	48	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+8	frontier	twotier_k60m14	30	16	3	49	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+9	frontier	twotier_k60m14	30	16	3	50	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14
+10	frontier	twotier_k60m14	30	16	3	51	10	3	18	0	5	false	false	300.0	3600.0	6000.0	14

@@ -49,8 +49,12 @@ STUDY9_RUN_ID=2026-09-08_rc_scale sbatch --array=1-20 submit_benchmark.sh n30.ts
 julia --project=../.. check_gate.jl ../../benchmarks/experiments/2026-09-08_rc_scale_study9_relaxed_cluster_scalability 30
 ```
 
-Increase Slurm `--time` and `--mem` at later frontiers without changing the job-table
-algorithmic budgets. Result rows record both limits, all certification outcomes, cut and
+Increase Slurm `--time` at later frontiers without changing the job-table algorithmic
+budgets. Do **not** raise `--mem`: measured peak RSS is 13.1G across every arm from n=20 to
+n=50 and is flat in n (fixed Julia/Gurobi overhead dominates), so the script's 16G is
+already generous. Over-reserving is poor hygiene on shared hardware, but it is not what
+makes jobs wait -- pending jobs here report `(Priority)`, i.e. fair-share, not
+`(Resources)`. Result rows record both limits, all certification outcomes, cut and
 cache activity, refinement counts, thread IDs, iterations, labels, and columns.
 
 Aggregate every completed stage with:

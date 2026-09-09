@@ -1,0 +1,2 @@
+job_id	phase	arm	n_stations	n_pairs	n_scenarios	seed	max_stops	n_threads	cluster_count	cluster_max_count	guide_routes	barren_cache	cut_management	pricing_limit_sec	certifying_limit_sec	total_limit_sec	macro_count	aligned_subset_max
+1	smoke	twotier_k60	8	4	3	42	6	3	5	0	5	false	false	30.0	120.0	600.0	3	20
