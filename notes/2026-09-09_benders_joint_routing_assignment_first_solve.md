@@ -381,17 +381,55 @@ cut is tight anywhere, i.e. the derivation is too weak.
 | n=10 s=1 | exhaustive, 86 of 252 sets | (rounded-signature audit; see below) |
 | n=10 s=3 | exhaustive, 86 of 252 sets | (rounded-signature audit; see below) |
 | n=15 s=3 | **exhaustive, 4,437 of 6,435 sets** | **+1.819e-12** |
-| n=20 s=3 | 400 targeted+random per seed, 9 seeds | **+5.457e-12** worst of any seed |
+| n=20 s=3 | 400 targeted+random per seed, **10 seeds** | **+5.457e-12** worst of any seed |
 
-n=20, ten seeds (42-51), one SLURM array task each -- 36 checks, 0 failed:
+n=20, ten seeds (42-51), one SLURM array task each -- **40 checks, 0 failed**:
 
-| seed | 42 | 43 | 44 | 45 | 46 | 47 | 48 | 49 | 50 | 51 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| iters | 7 | 3 | 4 | 4 | * | 4 | 5 | 4 | 4 | 3 |
-| cuts | 12 | 6 | 8 | 8 | * | 9 | 11 | 9 | 8 | 6 |
+| seed | objective | iters | cuts | worst violation |
+| --- | --- | --- | --- | --- |
+| 42 | 28735.190221 | 7 | 12 | +3.638e-12 |
+| 43 | 25239.045365 | 3 | 6 | +0.000e+00 |
+| 44 | 26239.038055 | 4 | 8 | +1.819e-12 |
+| 45 | 22477.695933 | 4 | 8 | +1.819e-12 |
+| 46 | 21319.838931 | 3 | 6 | +9.095e-13 |
+| 47 | 26192.836808 | 4 | 9 | +1.819e-12 |
+| 48 | 25941.370173 | 5 | 11 | +1.819e-12 |
+| 49 | 26197.983971 | 4 | 9 | +5.457e-12 |
+| 50 | 27966.517070 | 4 | 8 | +3.638e-12 |
+| 51 | 26195.983801 | 3 | 6 | +0.000e+00 |
 
-`*` seed 46's first task died in Julia startup (see the depot note below) and was rerun.
-Cuts 6-12 and iterations 3-7 across seeds, consistent with the flatness explanation.
+Iterations 3-7 (mean 4.1), cuts 6-12 (mean 8.3), every seed converged with LB == UB. Per
+seed: no invalid cut over 400 audited sets, `benders == DirectMIPSolver`,
+`cg_lp <= benders <= cg_ip`, both LB invariants.
+
+Objectives span 21,320-28,735 across seeds (1.35x) -- coincidentally about the same ratio as
+the WITHIN-instance flatness. Per `project_zhuzhou_seed_varies_demand_only`, Zhuzhou seeds
+change the demand draw only and leave the station geography identical, so this spread is
+demand, not geometry.
+
+#### Why MultiCut adds fewer cuts than (iterations x scenarios)
+
+MultiCut derives one cut per scenario per iteration, and the converging iteration exits
+before the cut phase, so derivations = `(iters - 1) * n_scenarios`. Across the ten seeds:
+
+    93 derivations  ->  83 new cuts  ->  10 duplicates discarded (10.8%)
+
+Zero duplicates on five seeds, one on four, six on seed 42 (18 derivations, 12 new). At
+n=10/s=3 it was 4 of 9 -- **44%** -- so the duplicate rate falls sharply with `n`. That fits
+the mechanism: a subproblem sees `yhat` only through its linking right-hand sides, so a
+scenario re-derives an identical cut whenever the master's new `yhat` does not perturb that
+scenario's optimal basis (a swapped station the scenario never uses, or a different tied
+optimum -- 21 of 86 sets tie at n=10). With 20 stations the master has far more ways to
+change `yhat` that DO perturb it.
+
+Discarding duplicates is sound in the safe direction: adding a row already present does not
+change the master's feasible region, and *omitting* a valid cut can never delete the optimum,
+only slow convergence. Note dedup compares the 6-decimal-rounded signature, so cuts differing
+by less than 1e-6 count as one -- a deliberate approximation, safe by the same argument.
+
+The counts above are exact without extra instrumentation, since MultiCut always derives
+exactly `n_scenarios` per non-final iteration. Per-scenario added/duplicate logging would
+make it directly readable rather than derived, but would add no information.
 
 #### A measurement bug that looked exactly like the thing being tested
 
