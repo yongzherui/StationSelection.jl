@@ -1,0 +1,11 @@
+job_id	phase	arm	n_stations	n_pairs	n_scenarios	seed	max_stops	n_threads	cluster_count	guide_routes	pricing_limit_sec	certifying_limit_sec	total_limit_sec	ip_every	ip_time_limit_sec
+1	main	relaxed_k60	30	16	3	42	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+2	main	relaxed_k60	30	16	3	43	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+3	main	relaxed_k60	30	16	3	44	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+4	main	relaxed_k60	30	16	3	45	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+5	main	relaxed_k60	30	16	3	46	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+6	main	relaxed_k60	30	16	3	47	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+7	main	relaxed_k60	30	16	3	48	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+8	main	relaxed_k60	30	16	3	49	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+9	main	relaxed_k60	30	16	3	50	10	3	18	5	300.0	3600.0	14400.0	1	120.0
+10	main	relaxed_k60	30	16	3	51	10	3	18	5	300.0	3600.0	14400.0	1	120.0
