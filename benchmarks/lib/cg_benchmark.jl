@@ -102,11 +102,13 @@ schema).
 `certified_by_relaxation` is the headline: did the cheap relaxed round ever prove pricing
 was done, i.e. did the run skip the exhaustive certifying search entirely?
 `certification_sec` is what the attempts cost in total, including every one that did not
-end the solve. It is NOT overhead -- a refuted attempt harvests columns and displaces a
-pricing round -- so pair it with `certification_harvested_columns` rather than reading it
-as cost. `certification_rounds` counts attempts, one per CG iteration that reached pricing,
-and the `refuted`/`inconclusive` counts split the failures by which fix they call for -- a
-relaxation that was too loose, versus one that ran out of budget.
+end the solve. It is NOT overhead -- a `:negative_rc_column_found` attempt harvests columns
+and displaces a pricing round -- so pair it with `certification_harvested_columns` rather
+than reading it as cost. `certification_rounds` counts attempts, one per CG iteration that
+reached pricing, and the `negative_rc_column_found`/`inconclusive` counts split the
+non-certifying attempts into two things that are NOT both failures: the first priced a real
+column (progress, and the source of the run's columns -- expect this to dominate), the
+second ran out of budget and learned nothing.
 
 **These columns cannot yet isolate the relaxation's own cost.** `certification_sec` sums
 two different things: the cluster-graph searches (the relaxation proper) and the exhaustive
@@ -124,17 +126,19 @@ function benchmark_certification_metrics(result)
             get(metadata, "cg_certification_pricing_mode", nothing), "none")),
         certified_by_relaxation=Bool(get(metadata, "cg_certified_by_relaxation", false)),
         certification_rounds=Int(get(metadata, "cg_certification_rounds", 0)),
-        # The two failure modes point at different places: `refuted` means the partition
-        # this run was built with was too coarse (an observation across arms -- the
-        # partition is fixed at build time), `inconclusive` means the attempt ran out of
-        # its round budget (`pricing_time_limit_sec`, or
+        # The two point at different places, and only the second is a failure:
+        # `negative_rc_column_found` means the attempt priced a real improving column, so CG
+        # made progress and iterates again (a high count is the normal shape of a solve; it
+        # also indicates the partition is loose enough that certification is still far off,
+        # which is an observation across arms since the partition is fixed at build time).
+        # `inconclusive` means the attempt ran out of its round budget (`pricing_time_limit_sec`, or
         # `certifying_pricing_time_limit_sec` on the escalated attempt).
-        certification_refuted_rounds=Int(get(metadata, "cg_certification_refuted_rounds", 0)),
+        certification_negative_rc_column_rounds=Int(get(metadata, "cg_certification_negative_rc_column_rounds", 0)),
         certification_inconclusive_rounds=Int(get(metadata, "cg_certification_inconclusive_rounds", 0)),
         certification_sec=Float64(get(metadata, "cg_certification_sec", 0.0)),
         # Wall spent in attempts that did not END the solve. NOT the same as waste, and it
         # was renamed from `failed_certification_sec` precisely because that reading is now
-        # wrong: a refuted attempt harvests real columns and
+        # wrong: a `:negative_rc_column_found` attempt harvests real columns and
         # replaces the pricing round, so this time is where the pricing HAPPENS. Measured at
         # 84-97% of the wall of runs that finished 4x faster than baseline. Read it against
         # `certification_harvested_columns` to see what it bought.
@@ -143,7 +147,7 @@ function benchmark_certification_metrics(result)
              if !Bool(get(r, :certification_certified, false))); init=0.0),
         certifying_rounds=Int(get(metadata, "cg_certifying_rounds", 0)),
         # Columns recovered from attempts that did not certify -- what the time above
-        # bought. Zero only when nothing was ever refuted (or the feature is off).
+        # bought. Zero only when no attempt ever found a column (or the feature is off).
         certification_harvested_columns=Int(get(metadata, "cg_certification_harvested_columns", 0)),
     )
 end

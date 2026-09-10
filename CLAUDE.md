@@ -345,25 +345,34 @@ than a swept parameter, because the wall clock and the 64-bit cut mask are the r
 Each iteration the mode runs a **relaxation** of the pricing problem whose minimum reduced
 cost lower-bounds the real one, so exhausting it without finding anything below
 `-reduced_cost_tol` proves no real improving column exists -- ending the solve with
-`cg_stop_reason="converged_by_certification"`. A refuted attempt proves nothing about
-optimality, but it harvests the real columns its exhaustive subset searches found, so it
-*is* that iteration's pricing round rather than being wasted (96% of attempts were
-refuted). An inconclusive attempt (budget or cut cap) is the only one that escalates, and
-a second inconclusive result ends the loop with `cg_stop_reason="pricing_inconclusive"`.
+`cg_stop_reason="converged_by_certification"`.
+
+**The mode PRICES FIRST and certifies second, and its ordinary outcome is a column, not a
+proof.** An attempt that exact-prices a cluster support and finds an improving real column
+returns `:negative_rc_column_found`: it proves nothing about optimality, but it harvests
+those columns and *is* that iteration's pricing round rather than an overhead on top of
+one. **96% of attempts end this way, and that is the mode working as designed, not a 96%
+failure rate** -- the barrenness proofs the other attempts produce accumulate as cuts until
+one attempt finally certifies. (This outcome was named `:refuted` until 2026-09-10. The
+name read as a failure and was repeatedly misread as one, including in our own write-ups,
+so it was renamed; `cg_certification_negative_rc_column_rounds` is the counter, formerly
+`cg_certification_refuted_rounds`.) An inconclusive attempt (budget or cut cap) is the only
+outcome that proves nothing *and* makes no progress, the only one that escalates, and a
+second inconclusive result ends the loop with `cg_stop_reason="pricing_inconclusive"`.
 
 **Escalation is PER SCENARIO, not per round.** A round names the scenarios that came back
 inconclusive (`RelaxedClusterCertificationResult.inconclusive_scenarios`) and
 `cg_certification_round`'s `only_scenarios` re-runs exactly those at
-`certifying_pricing_time_limit_sec` -- never the refuted ones (their columns are already in
-the pool) or the certified ones. It had to become per-scenario: escalation used to be
+`certifying_pricing_time_limit_sec` -- never the `:negative_rc_column_found` ones (their
+columns are already in the pool) or the certified ones. It had to become per-scenario: escalation used to be
 decided round-wide *and only when the round produced no columns at all*, so the
 harvest-and-continue path skipped straight past it and one productive scenario masked a
-permanently stuck one. MEASURED at n=40 seed 47: scenario 2 refuted in all 38 iterations, so
+permanently stuck one. MEASURED at n=40 seed 47: scenario 2 priced a column in all 38 iterations, so
 the round always had columns; scenario 1 replayed a bit-identical 262 s inconclusive search
 24 consecutive times, 0 escalated attempts in the whole run, master objective frozen at
 32043.0090 from iteration 19 to 38, 73% of the wall proving nothing. A partial round's
 `certified` means "every scenario I ran certified", so the round certifies only when nothing
-outside the escalated subset refuted either; its `relaxed_rc_bound` stays `NaN` because a
+outside the escalated subset priced a column either; its `relaxed_rc_bound` stays `NaN` because a
 partial round bounds only what it re-ran.
 The certificate covers the **full** route universe (it bounds every real route, not just
 the ones the active pricer searches), so such a run reports

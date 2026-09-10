@@ -1,5 +1,13 @@
 # Relaxed-cluster n=50 frontier: bounded harvesting and fixed-K experiments
 
+> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` is now
+> `:negative_rc_column_found`, and the metadata counter `cg_certification_refuted_rounds` is
+> now `cg_certification_negative_rc_column_rounds`. The rename is because "refuted" read as
+> a failure and was repeatedly misread as one: the relaxed-cluster mode **prices first and
+> certifies second**, so an attempt that finds an improving real column is that iteration's
+> pricing round doing its job, not a failed certification. Read every "refuted" below as
+> "priced a column, so CG iterates again".
+
 ## Goal
 
 Push the confirmed `:relaxed_cluster` pricing pipeline from occasional certification at

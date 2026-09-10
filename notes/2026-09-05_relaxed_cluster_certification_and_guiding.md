@@ -1,5 +1,13 @@
 # Relaxed-cluster pricing: certification is dead one-shot, alive with no-good cuts
 
+> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` is now
+> `:negative_rc_column_found`, and the metadata counter `cg_certification_refuted_rounds` is
+> now `cg_certification_negative_rc_column_rounds`. The rename is because "refuted" read as
+> a failure and was repeatedly misread as one: the relaxed-cluster mode **prices first and
+> certifies second**, so an attempt that finds an improving real column is that iteration's
+> pricing round doing its job, not a failed certification. Read every "refuted" below as
+> "priced a column, so CG iterates again".
+
 Status of `src/opt/label_setting/joint_routing_assignment/relaxed_cluster/` as of
 2026-09-05. Everything below is measured on Zhuzhou `n=15, p=16, s=3, seed 42` unless
 stated; treat every number as one instance, one seed, one dual trajectory.

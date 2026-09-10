@@ -243,7 +243,7 @@ else
         cg_stop_reason=[string(get(md, "cg_stop_reason", "unknown"))],
         n_columns=[metrics.n_columns], labels_generated=[metrics.labels_generated],
         certification_rounds=[cert.certification_rounds],
-        certification_refuted_rounds=[cert.certification_refuted_rounds],
+        certification_negative_rc_column_rounds=[cert.certification_negative_rc_column_rounds],
         certification_inconclusive_rounds=[cert.certification_inconclusive_rounds],
         certification_sec=[cert.certification_sec],
         certification_harvested_columns=[cert.certification_harvested_columns],

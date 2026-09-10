@@ -1,5 +1,13 @@
 # Relaxed-cluster certification: harvesting, parallelism, refinement, cut management
 
+> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` is now
+> `:negative_rc_column_found`, and the metadata counter `cg_certification_refuted_rounds` is
+> now `cg_certification_negative_rc_column_rounds`. The rename is because "refuted" read as
+> a failure and was repeatedly misread as one: the relaxed-cluster mode **prices first and
+> certifies second**, so an attempt that finds an improving real column is that iteration's
+> pricing round doing its job, not a failed certification. Read every "refuted" below as
+> "priced a column, so CG iterates again".
+
 **2026-09-06.** Follow-on to `2026-09-05_relaxed_cluster_certification_and_guiding.md`.
 
 Four changes to `:relaxed_cluster_nogood` certification were built and measured. Two are
