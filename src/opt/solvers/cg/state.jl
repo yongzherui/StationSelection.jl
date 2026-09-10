@@ -51,9 +51,9 @@ mutable struct CGLoopState
     # everything else in the iteration and understates the phase.
     warm_start_sec::Float64
 
-    # Relaxed-cluster certification. The negative_rc_column_found/inconclusive split is the
+    # Relaxed-cluster certification. The column_found/inconclusive split is the
     # only way to read a run that never certifies, and the two are NOT two failures.
-    # "negative_rc_column_found" means the attempt exact-priced a support and got a real
+    # "column_found" means the attempt exact-priced a support and got a real
     # improving column: the mode prices first and certifies second, so this is the ordinary
     # outcome and the source of the run's columns -- a high count means CG is making
     # progress, not that anything is wrong. "inconclusive" means the search ran out of its
@@ -61,11 +61,11 @@ mutable struct CGLoopState
     # and the only outcome an escalation can rescue. The bare attempt count cannot tell the
     # two apart, and they point at different places.
     certification_rounds::Int
-    certification_negative_rc_column_rounds::Int
+    certification_column_found_rounds::Int
     certification_inconclusive_rounds::Int
     certification_sec::Float64
     # Columns recovered from certification attempts that did not certify -- overwhelmingly
-    # the `:negative_rc_column_found` ones, where the attempt was the pricing round.
+    # the `:column_found` ones, where the attempt was the pricing round.
     # Reported so the feature's cost can be read net of what it gave back.
     certification_harvested_columns::Int
     certified_by_relaxation::Bool
@@ -116,7 +116,7 @@ mutable struct CGIterationState
     # Escalation is decided PER SCENARIO off these two, not off whether the round as a whole
     # produced columns -- see `_cg_escalate_inconclusive_scenarios!`.
     inconclusive_scenarios::Vector{Int}
-    round_negative_rc_column::Bool
+    round_found_column::Bool
     # NaN = "no valid lower bound this iteration", which covers both the pricers that never
     # attempt one and an attempt that came back inconclusive. See
     # `RelaxedClusterCertificationResult.relaxed_rc_bound`.

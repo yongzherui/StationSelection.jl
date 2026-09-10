@@ -85,7 +85,7 @@ Under a relaxed-cluster mode two more reasons appear: `converged_by_certificatio
 relaxation exhausted -- a full-universe proof, so the cut is licensed) and
 `certification_inconclusive` (the attempt ran out of budget or hit the cut cap, proving
 nothing, so no cut). `certifications` counts attempts made, which is the number to watch:
-`:negative_rc_column_found` attempts are productive (they ARE the pricing round), so a high
+`:column_found` attempts are productive (they ARE the pricing round), so a high
 count with eventual certification is healthy, while a high count ending inconclusive is the
 known weak point.
 """
@@ -210,7 +210,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
         #     RELAXATION that lower-bounds every real route's reduced cost. `certified` then
         #     proves no real improving column exists WITHOUT having searched for one, and it
         #     covers the full universe, so it licenses a cut exactly as a search would. An
-        #     attempt that does not certify is not wasted: `:negative_rc_column_found` means
+        #     attempt that does not certify is not wasted: `:column_found` means
         #     it harvested the real columns its exhaustive subset searches found, so it IS
         #     this round's pricing.
         #
@@ -345,7 +345,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             # How many columns the round PRICED (search productivity), and the status that
             # licenses a cut -- which differs by branch:
             #   search branch: `exhausted`, set by _run_pricing_round on the model.
-            #   certification branch: `negative_rc_column_found` (harvested columns, no
+            #   certification branch: `column_found` (harvested columns, no
             #     proof yet -- the ordinary productive outcome). NOTHING sets the exhausted
             #     flag there, and `_cg_pricing_exhausted` defaults to `true` for a model that
             #     never set it -- so printing it in that branch claimed "exhausted true" for
@@ -353,7 +353,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             #     inventing a proof that was not made.
             @printf("      [cg s=%d it=%d] priced %d | %s | price %.1fs cum %.1fs\n",
                     scenario, iteration, length(columns),
-                    certifying ? "negative_rc_column_found" : "exhausted $(_cg_pricing_exhausted(sm))",
+                    certifying ? "column_found" : "exhausted $(_cg_pricing_exhausted(sm))",
                     time() - t_price, pricing_sec)
             flush(stdout)
         end

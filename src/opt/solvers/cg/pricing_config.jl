@@ -103,10 +103,12 @@ fit in the budget. 16 is the measured optimum at n=40; this default stays 15 onl
 nothing has re-measured the smaller instances. See
 `notes/2026-09-09_n40_certification_frontier_5_of_10.md`.
 
-Two further experimental switches used to live here -- a barren-support cache and active-cut
-cut management. Both were removed: the measured cut load is far too small for either
-to pay for itself (0.5-0.75 cuts per scenario attempt at n=30/40, 11 inner rounds at
-worst). They are written up as possible future work in
+Two further switches used to live here -- a barren-support cache and active-cut cut
+management. **The switches are gone but the behaviours are not**: both run unconditionally
+in `:relaxed_cluster` now and cannot be disabled. They were dropped when the measured cut
+load was far too small for either to pay for itself (0.5-0.75 cuts per scenario attempt at
+n=30/40, 11 inner rounds at worst), then reinstated in 3767740 once n=40 seed 42 exhausted
+all 64 mask bits. See
 `label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
 """
 struct CGPricingConfig

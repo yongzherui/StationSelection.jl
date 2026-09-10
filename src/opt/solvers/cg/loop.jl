@@ -138,7 +138,7 @@ One CG iteration, as the four phases in the order they must run.
 
 The order is load-bearing, and the comments on each phase say why. In particular
 certification runs BEFORE pricing (under `:relaxed_cluster` it *is* the pricing round), and
-the harvest branch sits between them because a `:negative_rc_column_found` attempt's
+the harvest branch sits between them because a `:column_found` attempt's
 columns make the ordinary pricing round unnecessary for that iteration.
 """
 function _cg_run_iteration!(
@@ -236,12 +236,12 @@ function _cg_certification_phase!(
         it.certification_candidates = certification.candidates
         it.rc_bound = certification.relaxed_rc_bound
         it.inconclusive_scenarios = copy(certification.inconclusive_scenarios)
-        it.round_negative_rc_column = certification.improving_found
+        it.round_found_column = certification.improving_found
         it.certification_outcome = if certification.certified
             "certified"
         elseif certification.improving_found
-            st.certification_negative_rc_column_rounds += 1
-            "negative_rc_column_found"
+            st.certification_column_found_rounds += 1
+            "column_found"
         else
             st.certification_inconclusive_rounds += 1
             "inconclusive"
@@ -321,16 +321,16 @@ function _cg_escalate_inconclusive_scenarios!(
     # in the pool is counted as not accepted.
     append!(it.certification_candidates, escalated.candidates)
     it.inconclusive_scenarios = copy(escalated.inconclusive_scenarios)
-    it.round_negative_rc_column = it.round_negative_rc_column || escalated.improving_found
-    it.certified = !it.round_negative_rc_column && escalated.certified
+    it.round_found_column = it.round_found_column || escalated.improving_found
+    it.certified = !it.round_found_column && escalated.certified
     it.certification_outcome = if it.certified
-        "certified_escalated"
+        "escalation_certified"
     elseif escalated.improving_found
-        st.certification_negative_rc_column_rounds += 1
-        "negative_rc_column_found_escalated"
+        st.certification_column_found_rounds += 1
+        "escalation_found_column"
     else
         st.certification_inconclusive_rounds += 1
-        "inconclusive_escalated"
+        "escalation_inconclusive"
     end
     # A certified round drops its harvest for the same reason the ordinary one does: CG is
     # about to stop, and churning a master just proved optimal buys nothing.
@@ -362,7 +362,7 @@ An attempt that did not certify is not a failed attempt. Under `:relaxed_cluster
 PRICES FIRST and certifies second: it runs the real exact pricer over a station subset and
 hands back the improving columns that search found, which is exactly what a pricing round
 produces. Taking them here skips the regular round entirely -- the expensive full-station
-search -- for the price of an attempt that had to run anyway. The `:negative_rc_column_found`
+search -- for the price of an attempt that had to run anyway. The `:column_found`
 outcome this branch serves is therefore the mode's ordinary, productive path (96% of
 attempts), not an error case.
 

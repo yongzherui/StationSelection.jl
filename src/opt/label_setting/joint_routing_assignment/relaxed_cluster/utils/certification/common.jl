@@ -60,7 +60,7 @@ It has two jobs at once, which is why it is shaped the way it is:
 
   * **price** -- return `rc < -reduced_cost_tol`, meaning the relaxation pointed at a
     support that really does hold an improving column, and keep that column. This is the
-    `:negative_rc_column_found` outcome, and it is what the mode spends most of a solve
+    `:column_found` outcome, and it is what the mode spends most of a solve
     doing; it is a successful pricing round, not a failed certification. The labels
     are scored through `_pricing_accept_closure` (`../../../../round.jl`), so a survivor is
     deduped against the pool and against earlier rounds exactly as a pricing round's

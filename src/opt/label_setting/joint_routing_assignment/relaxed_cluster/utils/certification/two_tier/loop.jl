@@ -281,7 +281,7 @@ cuts.
   * not exhausted                 ->  `:inconclusive`
   * otherwise, align the meso support and exact-price its stations
     (`_two_tier_station_phase!`):
-        improving found          ->  `:negative_rc_column_found`, having harvested real columns
+        improving found          ->  `:column_found`, having harvested real columns
         exhausted, barren        ->  meso cut, plus a macro cut when alignment applied
         not exhausted            ->  `:inconclusive` (a truncated search proves nothing)
 
@@ -466,7 +466,7 @@ function _two_tier_certify_scenario(
                              sec=station.sec, slice=station.slice,
                              exhausted=station.exhausted)
 
-            station.rc < -tol && return _two_tier_result(st, :negative_rc_column_found)
+            station.rc < -tol && return _two_tier_result(st, :column_found)
             # Only an EXHAUSTED station search proves barrenness. Cutting on a timed-out one
             # -- at either layer -- is the false-certificate failure.
             station.exhausted ||

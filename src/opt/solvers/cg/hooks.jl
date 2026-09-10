@@ -86,7 +86,7 @@ and the loop can stop *certified* without ever running the expensive exhaustive 
 that would otherwise be needed to prove the same thing. `certified=false` proves nothing
 (the relaxation may simply be loose); what it does carry is `candidates`, the improving
 columns the exhaustive sub-searches found, which the loop materializes as that iteration's
-pricing result. That is the `:negative_rc_column_found` outcome, and it is the hook's
+pricing result. That is the `:column_found` outcome, and it is the hook's
 ordinary return -- the round is a pricing round that may also certify, not a certification
 attempt that may fail.
 

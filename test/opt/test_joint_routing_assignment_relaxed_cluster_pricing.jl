@@ -748,7 +748,7 @@
         @test base.metadata["cg_certification_pricing_mode"] === nothing
         @test base.metadata["cg_certified_by_relaxation"] === false
         @test base.metadata["cg_certification_rounds"] == 0
-        @test base.metadata["cg_certification_negative_rc_column_rounds"] == 0
+        @test base.metadata["cg_certification_column_found_rounds"] == 0
         @test base.metadata["cg_certification_inconclusive_rounds"] == 0
         @test all(r -> r.certification_outcome == "none", base.metadata["cg_iteration_log"])
 
@@ -769,15 +769,15 @@
                 @test last(result.metadata["cg_iteration_log"]).certification_outcome == "certified"
             end
             # Every attempt is accounted for by exactly one outcome, so a sweep that never
-            # certifies can still be read: `negative_rc_column_found` says the attempt
+            # certifies can still be read: `column_found` says the attempt
             # priced a real column (the ordinary, productive outcome),
             # `inconclusive` says it ran out of budget and learned nothing. A miscount here would make those
             # two indistinguishable, which is the whole point of recording them.
             log = result.metadata["cg_iteration_log"]
             attempted = count(r -> r.certification_outcome != "none", log)
             @test attempted == result.metadata["cg_certification_rounds"]
-            @test count(r -> r.certification_outcome == "negative_rc_column_found", log) ==
-                result.metadata["cg_certification_negative_rc_column_rounds"]
+            @test count(r -> r.certification_outcome == "column_found", log) ==
+                result.metadata["cg_certification_column_found_rounds"]
             @test count(r -> r.certification_outcome == "inconclusive", log) ==
                 result.metadata["cg_certification_inconclusive_rounds"]
             @test count(r -> r.certification_outcome == "certified", log) ==
@@ -1189,7 +1189,7 @@
         end
     end
 
-    @testset "a :negative_rc_column_found attempt harvests its columns instead of discarding them" begin
+    @testset "a :column_found attempt harvests its columns instead of discarding them" begin
         # Such an attempt has just run the REAL exact pricer over `stations(T)`, so the
         # improving labels it found are ordinary columns. They are handed to the master and
         # the regular pricing round is skipped for that iteration -- which is the whole
@@ -1203,7 +1203,7 @@
             CGSolver(recover_integer_solution = true),
         )
         # K = 2 is coarse enough that the relaxation is loose, so attempts keep coming back
-        # `:negative_rc_column_found` -- which is exactly the path that harvests.
+        # `:column_found` -- which is exactly the path that harvests.
         result = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
@@ -1214,7 +1214,7 @@
         @test harvested >= 0
         # The counter must be live, not vestigial: if this instance ever stops finding
         # columns, the assertion below flags that the path is no longer covered.
-        @test result.metadata["cg_certification_negative_rc_column_rounds"] == 0 || harvested > 0
+        @test result.metadata["cg_certification_column_found_rounds"] == 0 || harvested > 0
         # Harvesting changes only WHERE columns come from, never the answer.
         @test result.termination_status == SOLVE_OPTIMAL
         @test result.objective_value ≈ base.objective_value atol = 1e-6

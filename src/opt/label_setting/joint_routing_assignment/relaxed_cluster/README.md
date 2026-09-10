@@ -66,6 +66,13 @@ available mask bits. Both optimizations pay off only in the opposite regime — 
 attempt — so they are worth revisiting if a future workload pushes attempts toward the
 `RELAXED_CLUSTER_MAX_CUTS` cap, and not before.
 
+> **That trigger condition has since arrived, and both were reinstated (commit 3767740).**
+> n=40 seed 42 exhausts all 64 mask bits and reports `:cut_mask_full`, measured identically
+> at K=24, 30 and 34 — so it is the cap, not the partition. The numbers above are the
+> *pre-trigger* measurements and are kept because they explain why neither optimization was
+> in the code before that; they are no longer the current cut load. Both sections below are
+> now descriptions of live code, not of future work.
+
 ### Barren-support cache
 
 **Idea.** If `T` is barren, `T ⊆ T'`, and every cluster in `T' \ T` is *reward-free* (holds
@@ -105,13 +112,35 @@ exact duplicates ever — which is why only this one direction would need prunin
 `nogood_supports`, which `utils/certification/certify.jl` still emits for exactly that
 purpose.
 
-**Care required if reinstated.** Pruning acts on the *active cut set* only. A proof must
+**Care required (and taken).** Pruning acts on the *active cut set* only. A proof must
 never be discarded along with its cut: a smaller barren support that a larger cut subsumes
 for search purposes can still be the premise a barren-support cache needs later, so the
 two structures have to be kept separate (the removed implementation carried
 `cluster_sets` and `barren_supports` side by side). Under refinement, both need
 `rewrite_cut_sets_for_split` applied on every split.
 
-**Why it was dropped.** Cut management only matters once a single attempt carries enough
-simultaneous cuts for the mask to hurt dominance. With a maximum of 11 active cuts observed
-at n=30 and 3 at n=40, the state-space penalty it removes is not measurable.
+**Why it was dropped, and why that reversed.** Cut management only matters once a single
+attempt carries enough simultaneous cuts for the mask to hurt dominance. At a maximum of 11
+active cuts observed at n=30 and 3 at n=40 the state-space penalty it removes was not
+measurable, so it was left out. n=40 seed 42 then hit the full 64-bit mask, and it is back.
+
+### Why the round cap is 96, and why raising it further is self-defeating
+
+`RELAXED_CLUSTER_MAX_CUT_ROUNDS` was `RELAXED_CLUSTER_MAX_CUTS + 1` = 65, an identity that
+held exactly while every cut-adding round spent a mask bit for good. Cut management
+reclaims bits, so one cut can now free more than it consumes and the identity is broken.
+The cap is therefore set on its own terms, at **96**.
+
+**It is deliberately modest, and the mask width is NOT the binding constraint.** Each active
+cut adds a bit to the label's `satisfied` mask, and dominance only holds between labels with
+comparable masks, so `C` active cuts split the search into up to `2^C` `(node, mask)`
+states. The label search stops being able to EXHAUST long before 64 cuts — and **an
+unexhausted sweep cannot certify at all**, so a large cut count is self-defeating rather
+than merely slow. This is the answer to "why not just raise the cap": raising it buys rounds
+that cannot produce a certificate anyway.
+
+So a cell that wants dozens of cuts is reporting that the relaxation is too coarse, not that
+the cap is too low. The levers are a cut that excludes more per bit
+(`:relaxed_cluster_two_tier`, whose macro cuts cover whole unions of meso cells) or a tighter
+relaxation that needs fewer (`relaxed_cluster_max_count` refinement) — not more rounds spent
+bloating the mask.

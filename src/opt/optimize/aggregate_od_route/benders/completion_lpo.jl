@@ -410,7 +410,7 @@ function _benders_lpo_completion!(
     #   certifying (:relaxed_cluster / :relaxed_cluster_two_tier) -- run the relaxation,
     #     whose minimum reduced cost LOWER-BOUNDS every real route's. `certified` therefore
     #     means no real route is over-credited, which IS separation's stopping test; and a
-    #     `:negative_rc_column_found` attempt harvests the real columns its exhaustive subset
+    #     `:column_found` attempt harvests the real columns its exhaustive subset
     #     searches found, which are exactly the violated rows separation wants. So the certifying pricer is
     #     not merely compatible with separation -- it is the natural way to run it at the
     #     sizes where the exact search stops exhausting.

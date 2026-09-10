@@ -1,12 +1,22 @@
 # Per-scenario escalation and a 600 s pricing round: NEGATIVE at n=40
 
-> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` is now
-> `:negative_rc_column_found`, and the metadata counter `cg_certification_refuted_rounds` is
-> now `cg_certification_negative_rc_column_rounds`. The rename is because "refuted" read as
-> a failure and was repeatedly misread as one: the relaxed-cluster mode **prices first and
-> certifies second**, so an attempt that finds an improving real column is that iteration's
-> pricing round doing its job, not a failed certification. Read every "refuted" below as
-> "priced a column, so CG iterates again".
+> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` was renamed
+> TWICE on 2026-09-10, so the full chain is:
+>
+> | | outcome symbol | metadata counter / CSV column |
+> | --- | --- | --- |
+> | until 2026-09-10 | `:refuted` | `cg_certification_refuted_rounds` |
+> | 2026-09-10, briefly | `:negative_rc_column_found` | `cg_certification_negative_rc_column_rounds` |
+> | 2026-09-10 onward | **`:column_found`** | **`cg_certification_column_found_rounds`** |
+>
+> The whole chain is given because a reader with an older checkout or an older results CSV
+> needs it to place what they are looking at; note that no run ever wrote the middle name,
+> so result files carry either the first or the last. The reason for the rename is that
+> "refuted" read as a failure and was repeatedly misread as one: the relaxed-cluster mode
+> **prices first and certifies second**, so an attempt that finds an improving real column
+> is that iteration's pricing round doing its job, not a failed certification. Read every
+> "refuted" below as "priced a column, so CG iterates again". Full argument in
+> `notes/2026-09-10_certification_outcome_naming.md`.
 
 Status 2026-09-09. Companion to `2026-09-09_n40_certification_frontier_5_of_10.md`, whose
 cap table, exhaustion cliff and bottom line this run's analysis also corrected in place.

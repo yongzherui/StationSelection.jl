@@ -49,13 +49,18 @@ else
     macro_count == 0 || error("macro_count is only read by the twotier_* arms")
 end
 kmax == 0 || error("cluster refinement is excluded from Study 9")
-# The barren-support cache and active-cut subsumption pruning were REMOVED from
-# `:relaxed_cluster` (see `relaxed_cluster/README.md`): unnecessary at the measured cut
-# load. Study 9 already excluded both, so its arms are unchanged. The two job columns and
-# the two result columns stay, pinned to `false`, so rows written before the removal share
-# one schema with rows written after it -- this study is mid-flight.
-!barren_cache || error("barren cache no longer exists; this column must be false")
-!cut_management || error("cut management no longer exists; this column must be false")
+# The barren-support cache and active-cut cut management (once called "subsumption
+# pruning") are LIVE and UNCONDITIONAL in `:relaxed_cluster` -- see
+# `relaxed_cluster/utils/certification/results.jl`. They were briefly absent, dropped as
+# unnecessary at the then-measured cut load, and returned in 3767740 once n=40 seed 42
+# started exhausting all 64 mask bits. What no longer exists is the SWITCH: there is no
+# `barren_cache`/`cut_management` field on `CGPricingConfig`, so neither can be turned on
+# or off and these two columns must stay `false`, which keeps one schema across rows
+# written before and after the change.
+!barren_cache ||
+    error("barren cache is no longer configurable (now unconditional); this column must be false")
+!cut_management ||
+    error("cut management is no longer configurable (now unconditional); this column must be false")
 
 problem, selection_k, instance_meta = benchmark_problem(@__DIR__, "STUDY10", n, p, s, seed)
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(
@@ -246,7 +251,7 @@ else
         cg_stop_reason=[string(get(md, "cg_stop_reason", "unknown"))],
         n_columns=[metrics.n_columns], labels_generated=[metrics.labels_generated],
         certification_rounds=[cert.certification_rounds],
-        certification_negative_rc_column_rounds=[cert.certification_negative_rc_column_rounds],
+        certification_column_found_rounds=[cert.certification_column_found_rounds],
         certification_inconclusive_rounds=[cert.certification_inconclusive_rounds],
         certification_sec=[cert.certification_sec],
         certification_harvested_columns=[cert.certification_harvested_columns],

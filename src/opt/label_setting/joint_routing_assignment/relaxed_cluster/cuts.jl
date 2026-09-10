@@ -16,7 +16,7 @@ The loop's step is:
 
     relaxed search  ->  best improving cluster routes, combined support T
     exact search over stations(T)
-        found an improving real column  ->  :negative_rc_column_found; harvest it and
+        found an improving real column  ->  :column_found; harvest it and
                                             stop (this iteration priced, and CG iterates)
         exhausted with nothing          ->  T is BARREN; cut it and search again
 

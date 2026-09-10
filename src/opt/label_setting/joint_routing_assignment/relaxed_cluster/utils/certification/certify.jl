@@ -35,16 +35,24 @@ unsound.
   has no improving route. Every cut removed only cluster supports an exhaustive
   exact search had already found barren, so no real improving route's image was
   ever removed: this is a certificate over the **full** route universe.
-- **negative_rc_column_found** -- an exhaustive exact search over some
-  `stations(T)` produced a genuinely improving column. **This is the mode
+- **column_found** -- an exhaustive exact search over some
+  `stations(T)` produced a genuinely improving column, i.e. one whose reduced
+  cost is below `-reduced_cost_tol`. **The negative reduced cost is the whole
+  point of the outcome** -- it is what makes the column worth adding and what
+  makes this branch productive rather than a dead end. The symbol is short for
+  readability at the call sites; it does NOT mean "a column was found" in some
+  weaker sense. **This is the mode
   pricing, and it is the normal outcome for most of a solve.** The column goes
   to the master and CG iterates again; the attempt replaced the ordinary pricing
   round rather than costing anything on top of it. It says nothing against the
   relaxation and nothing against the instance -- a support that yields a column
   simply is not barren, which is information the loop needs before it can prove
-  anything. (This outcome was called `:refuted` until 2026-09-10. The name read
-  as a failure and was repeatedly misread as one, including in our own write-ups,
-  when it is in fact the productive half of the mode.)
+  anything. (Naming history: `:refuted` until 2026-09-10, briefly
+  `:negative_rc_column_found` that same day, `:column_found` from then on. The
+  first name read as a failure and was repeatedly misread as one, including in
+  our own write-ups, when it is in fact the productive half of the mode; the
+  second named the witness rather than the verdict. Result CSVs carry either the
+  first counter name or the last, never the middle one.)
 - **inconclusive** -- a search timed out, or the round cap or cut cap was hit.
   This is the only outcome that proves nothing, and the only one an escalation
   can rescue.
@@ -78,7 +86,7 @@ measure how many times the loop ran, not how deep any one of them went; the
 depth of a single loop is its round count, which is what
 `RELAXED_CLUSTER_MAX_CUT_ROUNDS` bounds.
 
-# Harvesting: a `:negative_rc_column_found` attempt IS a pricing round
+# Harvesting: a `:column_found` attempt IS a pricing round
 
 Step 4 runs the **real** exact pricer over `stations(T)` -- real stations, real duals, real
 reward structure -- so when it finds something, the labels it just found ARE improving
@@ -116,14 +124,15 @@ exact search is the expensive half, and it is exactly the work `../guiding/guide
 already does -- so on rounds where step 4 finds a column this loop costs what guided
 pricing costs and, with harvesting, returns that column too.
 
-What reduces that is harvesting: the search on a `:negative_rc_column_found` round *is* a
+What reduces that is harvesting: the search on a `:column_found` round *is* a
 pricing round.
 
-A barren-support cache (infer `T'` barren from an already-proven `T` when everything
-between them is reward-free) would skip step 4 on some rounds entirely, and active-cut
-cut management would keep the mask narrow. Both existed and both were removed: the
-measured cut load is far too small for either to pay for itself. See `../../README.md` for
-the write-ups and the numbers.
+Two optimizations do the rest, and both are **live and unconditional** (no config field
+turns them off): a barren-support cache infers `T'` barren from an already-proven `T` when
+everything between them is reward-free, skipping step 4 on those rounds entirely, and cut
+management keeps the mask narrow by reclaiming the bits of subsumed cuts. Both were removed
+once as too small to pay for themselves and returned in 3767740, when n=40 seed 42 began
+exhausting all 64 mask bits. See `../../README.md` for the write-ups and the numbers.
 """
 
 """
@@ -143,7 +152,7 @@ Each round is the four steps of the module docstring:
      `:inconclusive` (a truncated search proves nothing)
   3. `T` := the clusters the best few relaxed routes visit
   4. exact search over `stations(T)` (`_certification_station_search`, shared with the
-     two-tier loop) -> `:negative_rc_column_found` (harvest and return), or barren and
+     two-tier loop) -> `:column_found` (harvest and return), or barren and
      therefore cut; then refine and go to 1
 """
 function _relaxed_cluster_certify_scenario(
@@ -345,7 +354,7 @@ function _relaxed_cluster_certify_scenario(
 
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.
-        search.rc < -tol && return _result(:negative_rc_column_found, round)
+        search.rc < -tol && return _result(:column_found, round)
         # Only an EXHAUSTED subset search proves the support barren. Cutting on a
         # timed-out one would remove a support that may well hold an improving route,
         # and the loop could then certify falsely.

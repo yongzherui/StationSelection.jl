@@ -53,7 +53,7 @@ producing one. Cluster guidance and certification now form one pricing mode:
   certifies second.
   Every cut round keeps several promising cluster routes, unions their clusters into a
   station subset, and runs the ordinary exact pricer there. Those searches return real
-  columns (`:negative_rc_column_found`, the ordinary outcome) and prove supports barren
+  columns (`:column_found`, the ordinary outcome) and prove supports barren
   otherwise, the barren ones becoming the cuts a later round certifies from.
 
 Its top level is **label-setting core only**; everything that *drives* that core
@@ -100,11 +100,13 @@ removed once the answer was in.
 `CGPricingConfig.relaxed_cluster_max_count` and driven from inside the no-good
 loop when a round comes back barren.
 
-Two further experimental optimizations of that loop — a barren-support cache and
-cut management (reclaiming mask bits) — were implemented, measured, and removed: both are sound,
-but the measured cut load per attempt is far too small for either to pay for itself.
-`relaxed_cluster/README.md` carries the write-ups and the numbers, for the day a workload
-pushes cut counts up.
+Two further optimizations of that loop — a barren-support cache and cut management
+(reclaiming mask bits) — are **live and unconditional**, with no config field to turn them
+off. They were implemented, measured, and removed once as too small to pay for themselves at
+the then-measured cut load, and returned in 3767740: that day a workload pushed cut counts
+up arrived, when n=40 seed 42 exhausted all 64 mask bits and reported `:cut_mask_full`.
+`relaxed_cluster/README.md` carries the write-ups, the numbers, and why the round cap is
+therefore set on its own terms rather than at `MAX_CUTS + 1`.
 
 The same cut-free cluster search is also available as the warm-start-only
 `CGPricingConfig(warm_start_mode=:cluster_guide, relaxed_cluster_count=K)`. It selects a

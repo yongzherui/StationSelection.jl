@@ -306,11 +306,19 @@ objective as baseline.
 
 The one experimental optimization still exposed is `relaxed_cluster_max_count`, which
 enables refinement. Core no-good cut generation remains mandatory because it is the
-certification mechanism itself. Two other switches -- a barren-support cache and active-cut
-cut management -- were removed as unnecessary at the measured cut load (0.5-0.75 cuts
-per scenario attempt at n=30/40, 11 active cuts at worst against a cap of 64); both are
-written up as possible future work in
-`src/opt/label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
+certification mechanism itself.
+
+**The barren-support cache and active-cut cut management are LIVE and UNCONDITIONAL** --
+`_relaxed_cluster_add_cut!` (`relaxed_cluster/utils/certification/results.jl`) reclaims the
+mask bits of subsumed cuts and maintains `barren_supports` on every call. What was removed
+is the *switches*: there is no `barren_cache` or `cut_management` field on
+`CGPricingConfig`, so neither can be turned off. Both were genuinely absent for a while,
+dropped as unnecessary at the then-measured load (0.5-0.75 cuts per scenario attempt at
+n=30/40, 11 active cuts at worst against a cap of 64), and both returned in commit 3767740
+when that regime ended exactly where `relaxed_cluster/README.md` predicted: n=40 seed 42
+exhausts all 64 mask bits and reports `:cut_mask_full`, measured identically at K=24, 30
+and 34, so it is the cap and not the partition. Do not read the historical "removed as
+future work" framing as meaning the code is not there -- it is.
 
 **The cuts are the mechanism, not an optimization on top of a working relaxation.** A
 cut-free round is exactly this loop's round 1, and round 1 certified 0 times across ~1130
@@ -345,8 +353,15 @@ all three are gone. `:relaxed_cluster` is now selected as `pricing.mode`, it run
 the pricing budgets already there
 (`pricing_time_limit_sec` for the ordinary attempt, `certifying_pricing_time_limit_sec` for
 the escalated one -- the same two-tier ladder every other mode uses), and the cut-round cap
-is the constant `RELAXED_CLUSTER_MAX_CUT_ROUNDS` (65, in `relaxed_cluster/cuts.jl`) rather
-than a swept parameter, because the wall clock and the 64-bit cut mask are the real bounds.
+is the constant `RELAXED_CLUSTER_MAX_CUT_ROUNDS` (**96**, in `relaxed_cluster/cuts.jl`)
+rather than a swept parameter, because the wall clock and the cut mask are the real bounds.
+It used to be `RELAXED_CLUSTER_MAX_CUTS + 1` = 65, an identity that held only while every
+cut-adding round spent a mask bit for good; cut management now reclaims subsumed bits, so
+the cap is set on its own terms. Not an aspiration: each active cut adds a bit to the
+label's `satisfied` mask and dominance only holds between comparable masks, so `C` cuts
+split the search into up to `2^C` `(node, mask)` states and it stops being able to EXHAUST
+well before 64 -- and an unexhausted sweep cannot certify at all. A cell wanting dozens of
+cuts is reporting a too-coarse relaxation, not too low a cap.
 
 Each iteration the mode runs a **relaxation** of the pricing problem whose minimum reduced
 cost lower-bounds the real one, so exhausting it without finding anything below
@@ -355,21 +370,24 @@ cost lower-bounds the real one, so exhausting it without finding anything below
 
 **The mode PRICES FIRST and certifies second, and its ordinary outcome is a column, not a
 proof.** An attempt that exact-prices a cluster support and finds an improving real column
-returns `:negative_rc_column_found`: it proves nothing about optimality, but it harvests
+returns `:column_found`: it proves nothing about optimality, but it harvests
 those columns and *is* that iteration's pricing round rather than an overhead on top of
 one. **96% of attempts end this way, and that is the mode working as designed, not a 96%
 failure rate** -- the barrenness proofs the other attempts produce accumulate as cuts until
-one attempt finally certifies. (This outcome was named `:refuted` until 2026-09-10. The
-name read as a failure and was repeatedly misread as one, including in our own write-ups,
-so it was renamed; `cg_certification_negative_rc_column_rounds` is the counter, formerly
-`cg_certification_refuted_rounds`.) An inconclusive attempt (budget or cut cap) is the only
+one attempt finally certifies. (Naming history, because results files span it: the outcome
+was `:refuted` until 2026-09-10, briefly `:negative_rc_column_found` that same day, and is
+`:column_found` from then on -- the counter went `cg_certification_refuted_rounds` ->
+`cg_certification_negative_rc_column_rounds` -> `cg_certification_column_found_rounds`, and
+no run ever wrote the middle name, so a CSV carries either the first or the last. "Refuted"
+read as a failure and was repeatedly misread as one, including in our own write-ups; see
+`notes/2026-09-10_certification_outcome_naming.md`.) An inconclusive attempt (budget or cut cap) is the only
 outcome that proves nothing *and* makes no progress, the only one that escalates, and a
 second inconclusive result ends the loop with `cg_stop_reason="pricing_inconclusive"`.
 
 **Escalation is PER SCENARIO, not per round.** A round names the scenarios that came back
 inconclusive (`RelaxedClusterCertificationResult.inconclusive_scenarios`) and
 `cg_certification_round`'s `only_scenarios` re-runs exactly those at
-`certifying_pricing_time_limit_sec` -- never the `:negative_rc_column_found` ones (their
+`certifying_pricing_time_limit_sec` -- never the `:column_found` ones (their
 columns are already in the pool) or the certified ones. It had to become per-scenario: escalation used to be
 decided round-wide *and only when the round produced no columns at all*, so the
 harvest-and-continue path skipped straight past it and one productive scenario masked a
@@ -450,7 +468,7 @@ identical to the plain closed form, versus 3 / 6 for separation. The reason is n
 too (`notes/2026-09-10_activated_dual_completion_verified_and_why_weak.md`): `demand_p == 1`
 on these instances, so `(T)` and the closed form are the same number up to letting the two
 endpoints split the requirement, and both credit the WALKING term (0.2–1.2% of the `αₚ` they
-must cancel) while ignoring route travel (25–85%). Do not read the route-free family as the
+must cancel) while ignoring route travel (median 33%). Do not read the route-free family as the
 LPO oracle's mechanism.
 
 Note MW's usual normalisation row is **vacuous** here: every free variable sits on a

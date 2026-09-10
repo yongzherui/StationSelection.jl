@@ -9,12 +9,10 @@ master, until pricing finds nothing improving or `max_iterations` is reached.
 
 ## Which pricer (`pricing::CGPricingConfig`)
 
-*Which* search finds those columns -- the pricer, its warm-start phasing, and every
-relaxed-cluster setting -- lives on `pricing`, a `CGPricingConfig`
-(`opt/solvers/cg/pricing_config.jl`), which documents each field. It is a solver concern
-rather than a formulation one because a pricer is a search algorithm: two runs differing
-only in `pricing.mode` solve the identical model. The fields below are about *budgets* --
-how long each search may run -- and are orthogonal to it.
+*Which* search finds those columns -- the pricer, its warm-start phasing, every
+relaxed-cluster setting, and why a pricer is a solver concern at all -- is
+[`CGPricingConfig`](@ref)'s subject. The fields below are *budgets*: how long each search
+may run, orthogonal to which search it is.
 
 `pricing_time_limit_sec` is the wall-clock budget for **one whole pricing round**, across
 every scenario. Under serial pricing `_run_pricing_round` divides it equally, so each
@@ -60,7 +58,7 @@ Three things about it reach into this struct, and only these three:
 1. **The certification attempt replaces the pricing round.** It runs under this struct's
    `pricing_time_limit_sec`, not on top of it.
 2. **Its outcome drives the budgets.** `certified` ends the loop
-   (`cg_stop_reason="converged_by_certification"`). `negative_rc_column_found` is the
+   (`cg_stop_reason="converged_by_certification"`). `column_found` is the
    ordinary outcome and means the round priced columns, so the loop simply iterates.
    `inconclusive` is the only one that both proves nothing and makes no progress, so it is
    the only one that escalates -- per **scenario**, to
@@ -87,6 +85,8 @@ feasible but its optimality is **not** certified, and the LP value is *not* a va
 bound on the unrestricted optimum. The point is that a budget-bound run still returns a
 usable result instead of being killed by the scheduler with nothing written.
 
+## Serial vs. parallel scenario pricing
+
 `parallel_scenario_pricing` (default `false`) prices scenarios concurrently with
 `Threads.@threads` when more than one thread is available. Both settings obey the same
 round wall budget, so the comparison is like for like on time; what differs is how much
@@ -101,8 +101,9 @@ runs afterwards under its own `config.time_limit_sec`, so the whole solve can ex
 `total_time_limit_sec` by at most that one solve -- size the SLURM walltime with room
 for both (e.g. a 4 h budget and a 300 s recovery limit fit comfortably in a 6 h job).
 
-Relies on three formulation-specific hooks -- implemented per `AbstractFormulation`
-(or per `AbstractProblem`), not here:
+## Formulation hooks
+
+Three hooks, implemented per `AbstractFormulation` (or per `AbstractProblem`), not here:
 
     extract_duals(build_result, mapping, m) -> duals
     price_columns(build_result, mapping, m, duals, solver::CGSolver) -> Union{Nothing, AbstractVector}
@@ -130,22 +131,16 @@ fourth hook
 
     integer_recovery_build(build_result, mapping, m) -> BuildResult
 
-is called to *rebuild* the master from scratch in its true (binary/integer) domain, over
-the exact column pool CG has generated so far -- no further pricing happens. This is a
-real `build_model`-shaped rebuild, not an in-place mutation of `m`: see
-`_build_joint_routing_assignment_model`/`integer_recovery_build`
-(`optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl`) for
-why sharing the actual construction code with `build_model` (parameterized by
-`relax_integrality`/seed columns) is safer than duplicating it as a set of post-hoc
-`set_binary` calls. The returned `BuildResult` replaces this call's `build_result`/`m`,
-which is then re-optimized once as a genuine MIP. This is the standard "restricted master
-heuristic": the resulting integer solution is feasible for the real problem and its
-objective is a valid upper bound, but -- because pricing only ever ran against LP duals
--- it is not guaranteed globally optimal for the original (unrestricted) column set. The
-pre-recovery LP objective is preserved in `OptResult.metadata` under
-`"cg_lp_objective_value"` as a lower bound for judging that gap; `"cg_converged"` records
-whether pricing actually exhausted (vs. hit `max_iterations`), since only the converged
-case makes that LP value a valid bound on the true (unrestricted) optimum.
+is called to rebuild the master in its true (binary/integer) domain over the exact column
+pool CG has generated -- no further pricing happens. The returned `BuildResult` replaces
+this call's, and is optimized once as a genuine MIP. (`integer_recovery_build`'s own
+docstring covers why it rebuilds rather than mutating `m` in place.)
+
+This is the standard "restricted master heuristic": the integer solution is feasible and
+its objective a valid upper bound, but pricing only ever ran against LP duals, so it is
+not guaranteed optimal over the unrestricted column set. `"cg_lp_objective_value"` keeps
+the pre-recovery LP objective as the lower bound for that gap -- valid as a bound on the
+TRUE optimum only when `"cg_converged"` says pricing actually exhausted.
 
 ## Per-iteration log (`metadata["cg_iteration_log"]`)
 
@@ -166,7 +161,7 @@ One `NamedTuple` per CG iteration, in order:
 | `certifying_pricing` | `true` if this iteration escalated to a certifying round |
 | `certification_sec` | wall time in this iteration's relaxation certification attempt (`0.0` when the feature is off) |
 | `certification_certified` | `true` on the single iteration whose relaxation certified, ending the loop |
-| `certification_outcome` | `"certified"` / `"negative_rc_column_found"` (the attempt priced a real improving column, which is the ordinary outcome -- this iteration made progress, it did not fail) / `"inconclusive"` (the attempt ran out of budget and learned nothing) / `"none"` (no attempt this iteration) |
+| `certification_outcome` | `"certified"` / `"column_found"` / `"inconclusive"` / `"none"` (no attempt this iteration). The three are explained under "Pricing modes that certify" above |
 | `relaxed_rc_bound` | a valid LOWER bound on the minimum reduced cost over the whole real route universe, or `NaN` when this iteration established none (no attempt, or an inconclusive one -- see `RelaxedClusterCertificationResult.relaxed_rc_bound`). The master objective is an *upper* bound on `z_LP` that descends as columns arrive; this is the only quantity in the loop that bounds from below, and it is what makes a round that priced instead of certifying a measurement rather than a failed test |
 
 The final iteration is always logged, including the one that breaks the loop (on

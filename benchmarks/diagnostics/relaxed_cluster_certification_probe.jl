@@ -14,7 +14,7 @@ A relaxation that is even slightly loose therefore certifies never, not sometime
 probe measures that directly and cheaply, before committing queue time to Study 9's sweep.
 
 For each `K` it reports, per run: whether the relaxation ended the solve, how many attempts
-it took, and the negative_rc_column_found/inconclusive split of the non-certifying attempts
+it took, and the column_found/inconclusive split of the non-certifying attempts
 (the first is the mode pricing, not failing) -- plus the *margin*, which is
 the number that actually explains the outcome. The margin is measured at the FINAL duals
 (the ones a certifying round faces) as
@@ -146,7 +146,7 @@ for K in probe_ks
     # is therefore the count on the rows whose outcome was :certified.
     stats = get(md, "cg_relaxed_cluster_guide_stats", Any[])
     certified_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :certified]
-    priced_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :negative_rc_column_found]
+    priced_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :column_found]
     if !isempty(stats)
         @printf("       cuts-to-certify per scenario: %s | rounds: %s\n",
                 isempty(certified_rows) ? "none" :
@@ -183,7 +183,7 @@ for K in probe_ks
             string(get(md, "cg_stop_reason", "?")),
             wall,
             Int(get(md, "cg_certification_rounds", 0)),
-            Int(get(md, "cg_certification_negative_rc_column_rounds", 0)),
+            Int(get(md, "cg_certification_column_found_rounds", 0)),
             Int(get(md, "cg_certification_inconclusive_rounds", 0)),
             exact_min, relaxed_min, sizes)
     flush(stdout)

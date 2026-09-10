@@ -18,7 +18,7 @@ Outcome of one certification round, over every scenario -- the shape
 
 - `certified` -- the whole point: no improving relaxed route survives the cuts
   anywhere, proved by exhaustion. Only this makes CG's convergence claim valid.
-- `improving_found` -- some scenario came back `:negative_rc_column_found`: an
+- `improving_found` -- some scenario came back `:column_found`: an
   exhaustive exact search over a cluster support found a genuinely improving
   real column. **This is the mode PRICING, and it is the expected outcome for
   most of a solve** -- the column goes into the master and CG continues, so the
@@ -42,7 +42,7 @@ Outcome of one certification round, over every scenario -- the shape
   on the same test).
 - `candidates` -- improving columns harvested from the step-4 searches on any
   round that did not certify, for `CGSolver` to add to the master. On a
-  `:negative_rc_column_found` round these ARE that iteration's priced columns,
+  `:column_found` round these ARE that iteration's priced columns,
   which is why such a round displaces the ordinary pricing round rather than
   adding to it. Empty on a certified
   round, which drops its harvest on purpose: CG is about to stop, and adding
@@ -112,7 +112,7 @@ actually cheap), and `trace` -- one row per round recording how the bound moved.
   so far. On the FINAL row this is the surviving minimum that is `>= -tol`, i.e.
   the value that certifies; it is a real number, not a sentinel.
 - `subset_rc` -- the best REAL reduced cost the exact search found inside
-  `stations(support)`. `< -tol` is a priced column (`:negative_rc_column_found`);
+  `stations(support)`. `< -tol` is a priced column (`:column_found`);
   `>= -tol` (including `Inf`, meaning no
   reward-carrying route exists there at all) means the support is **barren** and
   a cut is added. So the barren rounds are the ones whose `subset_rc` sits at
@@ -130,7 +130,7 @@ previous round's cut should already have excluded.
 see the module docstring's "Harvesting" section.
 """
 struct RelaxedClusterNoGoodResult
-    outcome::Symbol          # :certified, :negative_rc_column_found, :inconclusive
+    outcome::Symbol          # :certified, :column_found, :inconclusive
     rounds::Int
     cuts_added::Int
     last_subset_size::Int

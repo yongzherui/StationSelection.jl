@@ -15,7 +15,7 @@ second copy of them is a second place for the two modes to drift apart on the me
 
 The `cg_certification_round` body -- the only one, since `:relaxed_cluster` is the only
 certification mode. `certified` only when EVERY scenario certified, and the
-`:negative_rc_column_found`/`:inconclusive` split says what actually happened on a round
+`:column_found`/`:inconclusive` split says what actually happened on a round
 that did not: the first means the mode priced (columns are on the way to the master and CG
 should iterate), the second means the attempt learned nothing and is the only one worth
 escalating.
@@ -106,7 +106,7 @@ function _run_relaxed_cluster_certification_round(
     end
 
     certified_count = 0
-    any_negative_rc_column = false
+    any_column_found = false
     all_conclusive = true
     harvested = Any[]
     # The round's lower bound on the real minimum reduced cost. `Inf` is the identity of
@@ -123,8 +123,8 @@ function _run_relaxed_cluster_certification_round(
         append!(harvested, r.candidates)
         if r.outcome === :certified
             certified_count += 1
-        elseif r.outcome === :negative_rc_column_found
-            any_negative_rc_column = true
+        elseif r.outcome === :column_found
+            any_column_found = true
         else
             all_conclusive = false
             push!(inconclusive_scenarios, scenarios[i])
@@ -137,15 +137,15 @@ function _run_relaxed_cluster_certification_round(
             min(rc_bound, isempty(r.trace) ? Inf : Float64(r.trace[end].relaxed_rc))
     end
 
-    certified = !any_negative_rc_column && all_conclusive && certified_count == length(scenarios)
+    certified = !any_column_found && all_conclusive && certified_count == length(scenarios)
     # `exhausted` means: every scenario reached a conclusion AND none was skipped. Now that
     # no scenario is ever skipped, this is exactly "nothing came back inconclusive, and
     # nothing found a column".
-    conclusive_and_complete = all_conclusive && !any_negative_rc_column
+    conclusive_and_complete = all_conclusive && !any_column_found
     # A certified round's harvest is dropped on purpose: CG is about to stop, and adding
     # columns to a master that has just been proved optimal would only churn it.
     return RelaxedClusterCertificationResult(
-        certified, any_negative_rc_column, conclusive_and_complete, certified_count, length(scenarios),
+        certified, any_column_found, conclusive_and_complete, certified_count, length(scenarios),
         clustering.n_clusters, time() - t_start, certified ? Any[] : harvested, rc_bound,
         inconclusive_scenarios, collect(scenarios), inconclusive_reasons,
     )
