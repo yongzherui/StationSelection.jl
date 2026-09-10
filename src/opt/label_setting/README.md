@@ -99,7 +99,7 @@ removed once the answer was in.
 loop when a round comes back barren.
 
 Two further experimental optimizations of that loop — a barren-support cache and
-active-cut subsumption pruning — were implemented, measured, and removed: both are sound,
+cut management (reclaiming mask bits) — were implemented, measured, and removed: both are sound,
 but the measured cut load per attempt is far too small for either to pay for itself.
 `relaxed_cluster/README.md` carries the write-ups and the numbers, for the day a workload
 pushes cut counts up.

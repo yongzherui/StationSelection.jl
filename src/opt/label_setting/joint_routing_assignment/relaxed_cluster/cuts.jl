@@ -98,7 +98,7 @@ const RELAXED_CLUSTER_MAX_CUTS = 64
 
 Deliberately modest, and NOT an aspiration. It used to be `RELAXED_CLUSTER_MAX_CUTS + 1`,
 which was exactly right while every cut-adding round consumed a mask bit for good.
-Subsumption pruning broke that identity -- a round can now reclaim several bits -- so the
+Cut management broke that identity -- a round can now reclaim several bits -- so the
 two constants are no longer the same quantity and the round cap is set on its own terms.
 
 Those terms are NOT "how many rounds might a proof need". Each active cut adds a bit to the

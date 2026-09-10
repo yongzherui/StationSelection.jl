@@ -104,7 +104,7 @@ What reduces that is harvesting: a refuting round's search *is* a pricing round.
 
 A barren-support cache (infer `T'` barren from an already-proven `T` when everything
 between them is reward-free) would skip step 4 on some rounds entirely, and active-cut
-subsumption pruning would keep the mask narrow. Both existed and both were removed: the
+cut management would keep the mask narrow. Both existed and both were removed: the
 measured cut load is far too small for either to pay for itself. See `../../README.md` for
 the write-ups and the numbers.
 """
@@ -148,6 +148,27 @@ function _relaxed_cluster_certify_scenario(
     node_clusters = _relaxed_cluster_node_clusters(relaxed)
 
     cluster_sets = Set{Int}[]
+    # Every support ever PROVED barren, kept separate from the active cuts so cut
+    # management cannot discard a theorem to reclaim a mask bit. See
+    # `_relaxed_cluster_add_cut!` for why the two must not be the same structure.
+    barren_supports = Set{Int}[]
+    # Cells that anchor at least one candidate endpoint at these duals. Fixed for the whole
+    # attempt (the duals do not move inside one certification), so it is computed once. Any
+    # cell NOT here is reward-free, which is the premise the barren-support cache needs.
+    # Read off `relaxed.clustering`, NOT the `clustering` argument, and recomputed after
+    # every refinement: a split rebuilds the partition and the support indices name cells of
+    # whichever partition produced them, so a set built against the original would mark the
+    # WRONG cells reward-free and the cache could then declare a live support barren.
+    _reward_carrying(cl) = begin
+        acc = Set{Int}()
+        for cand in candidates, st in (cand.origin, cand.destination)
+            cell = get(cl.cluster_of, st, 0)
+            cell == 0 || push!(acc, cell)
+        end
+        acc
+    end
+    reward_carrying = _reward_carrying(relaxed.clustering)
+    cache_hits = 0
     # Bumped on every refinement. Cluster indices only mean anything within one epoch, so
     # every trace row carries the epoch it was recorded under -- without it a downstream
     # containment analysis (the nesting probe does exactly this on `nogood_supports`) would
@@ -178,7 +199,7 @@ function _relaxed_cluster_certify_scenario(
             support=support, guide_routes=guide_routes, partition_epoch=partition_epoch,
             # The two numbers that decide whether "cut the barren support again" is a viable
             # strategy at all, and which were not recorded:
-            #   n_active_cuts -- cuts live in the mask AFTER subsumption pruning. Each one
+            #   n_active_cuts -- cuts live in the mask AFTER cut management. Each one
             #     adds a bit to every label's `satisfied` mask, and dominance only holds
             #     between comparable masks, so C cuts split the search into up to 2^C
             #     (node, mask) states.
@@ -249,6 +270,36 @@ function _relaxed_cluster_certify_scenario(
         )
         last_subset_size = length(subset)
 
+        # ---- (4a) can an existing proof settle this support without searching?
+        # If some proved-barren T is inside it and every extra cell is reward-free at these
+        # duals, the support is barren by the shortcut argument in
+        # `_relaxed_cluster_support_barren_by_cache` -- so skip the exact search, which is
+        # the expensive step and the one that times out at n=40 (`:subset_not_exhausted`).
+        if _relaxed_cluster_support_barren_by_cache(barren_supports, support, reward_carrying)
+            cache_hits += 1
+            _trace_row!(round, first(guides).reduced_cost, length(support), length(subset),
+                        Inf, false; support=copy(support), guide_routes=length(guides),
+                        n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
+                        relaxed_exhausted=exhausted)
+            _relaxed_cluster_add_cut!(cluster_sets, support;
+                                      barren_supports=barren_supports) ||
+                return _result(:inconclusive, round, :cut_mask_full)
+            refined_c = _relaxed_cluster_refine_after_cut!(
+                m, s, relaxed, guides, candidates, travel_cost, shared, cluster_sets,
+                barren_supports,
+            )
+            if !isnothing(refined_c)
+                refined_c === :exhausted && return _result(:certified, round)
+                relaxed, node_clusters = refined_c
+                # The reward-free classification names cells too, so it is rebuilt on the
+                # new partition. (`barren_supports` was rewritten inside the refine call,
+                # where the split cell is in scope.)
+                reward_carrying = _reward_carrying(relaxed.clustering)
+                partition_epoch += 1
+            end
+            continue
+        end
+
         # ---- (4) does that support hold a real improving route?
         # `search.rc` is the best REAL reduced cost inside it: below -tol means the
         # relaxation pointed somewhere genuine, `Inf` means barren.
@@ -278,12 +329,11 @@ function _relaxed_cluster_certify_scenario(
         # and the loop could then certify falsely.
         search.exhausted || return _result(:inconclusive, round, :subset_not_exhausted)
 
-        # The support is proved barren, so cut it. Cuts a new one subsumes are NOT pruned:
-        # `Cut(T_new)` does imply `Cut(T_old)` for `T_old ⊆ T_new`, so the older cut is
-        # then dead weight in the mask, but at the measured cut load (0.5-0.75 cuts per
-        # scenario attempt at n=30/40) there is nothing there to win -- see
-        # `../../README.md`.
-        _relaxed_cluster_add_cut!(cluster_sets, support) ||
+        # The support is proved barren, so cut it -- reclaiming the bits of any cut this
+        # one subsumes, and recording the proof in `barren_supports` whether or not the cut
+        # itself fits.
+        _relaxed_cluster_add_cut!(cluster_sets, support;
+                                  barren_supports=barren_supports) ||
             return _result(:inconclusive, round, :cut_mask_full)
 
         # ---- refinement. The combined support is barren, so every retained guide is
@@ -291,10 +341,12 @@ function _relaxed_cluster_certify_scenario(
         # disagreement (`../refinement/refine.jl`).
         refined = _relaxed_cluster_refine_after_cut!(
             m, s, relaxed, guides, candidates, travel_cost, shared, cluster_sets,
+            barren_supports,
         )
         isnothing(refined) && continue                    # no split available: carry on
         refined === :exhausted && return _result(:certified, round)
         relaxed, node_clusters = refined
+        reward_carrying = _reward_carrying(relaxed.clustering)
         partition_epoch += 1
     end
     return _result(:inconclusive, max_rounds, :round_cap)
@@ -326,6 +378,7 @@ better.
 function _relaxed_cluster_refine_after_cut!(
     m::JuMP.Model, s::Int, relaxed, guides, candidates, travel_cost,
     shared::NamedTuple, cluster_sets::Vector{Set{Int}},
+    barren_supports::Union{Nothing, Vector{Set{Int}}}=nothing,
 )
     refinement = _relaxed_cluster_refine!(
         m, s, relaxed, [guide.route for guide in guides], travel_cost,
@@ -337,6 +390,13 @@ function _relaxed_cluster_refine_after_cut!(
     )
     isempty(rebuilt.inner.opportunities) && return :exhausted
     rewrite_cut_sets_for_split(cluster_sets, chosen_cluster, refined.n_clusters)
+    # The barren-support record is indexed in cluster INDICES exactly as the cuts are, so a
+    # split renumbers it identically and it needs the same rewrite. Skipping it would leave
+    # the cache reasoning from stale indices, and since a wrongly-matched premise makes the
+    # cache declare a live support barren, the failure mode is a FALSE CERTIFICATE rather
+    # than a crash -- the same hazard this function's docstring names for the cuts.
+    isnothing(barren_supports) ||
+        rewrite_cut_sets_for_split(barren_supports, chosen_cluster, refined.n_clusters)
     return rebuilt, _relaxed_cluster_node_clusters(rebuilt)
 end
 

@@ -300,7 +300,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                         config.cg_pricing_time_limit_sec / max(1, cert.n_scenarios),
                         cert.n_clusters, cert.relaxed_rc_bound, reasons)
                 # Is "cut the barren support again" viable here? These are the numbers that
-                # answer it: how many cuts stayed ACTIVE after subsumption pruning, how the
+                # answer it: how many cuts stayed ACTIVE after cut management, how the
                 # relaxed sweep's cost moved as they accumulated, and -- decisively --
                 # whether it was still EXHAUSTING at the end. An unexhausted sweep cannot
                 # certify no matter how many more rounds it gets, so if that flips to false

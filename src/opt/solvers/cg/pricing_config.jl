@@ -104,7 +104,7 @@ nothing has re-measured the smaller instances. See
 `notes/2026-09-09_n40_certification_frontier_5_of_10.md`.
 
 Two further experimental switches used to live here -- a barren-support cache and active-cut
-subsumption pruning. Both were removed: the measured cut load is far too small for either
+cut management. Both were removed: the measured cut load is far too small for either
 to pay for itself (0.5-0.75 cuts per scenario attempt at n=30/40, 11 inner rounds at
 worst). They are written up as possible future work in
 `label_setting/joint_routing_assignment/relaxed_cluster/README.md`.

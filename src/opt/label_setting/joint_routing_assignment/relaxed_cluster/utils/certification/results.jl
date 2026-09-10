@@ -147,37 +147,90 @@ RelaxedClusterNoGoodResult(outcome, rounds, cuts_added, last_subset_size, trace,
 
 
 """
+    _relaxed_cluster_add_cut!(cluster_sets, support; barren_supports=nothing) -> Bool
+
 Insert a proven-barren support as a new cut, first reclaiming the mask bits of any cut the
 new one subsumes. `false` means the cap was still reached, which the caller must report as
 inconclusive rather than silently dropping the cut (see `RELAXED_CLUSTER_MAX_CUTS`).
 
-# Subsumption
+# Cut management: which cuts are worth a mask bit
 
 A cut says "every route must visit at least one cluster OUTSIDE this support". So when
 `T_old` is a SUBSET of `T_new`, every cluster outside `T_new` is also outside `T_old`, and
-any route satisfying `Cut(T_new)` satisfies `Cut(T_old)` automatically:
+any route satisfying `Cut(T_new)` satisfies `Cut(T_old)`:
 
     T_old ⊆ T_new   ⟹   Cut(T_new) ⟹ Cut(T_old)
 
-`T_old` therefore excludes nothing once `T_new` is active, while still holding one of the
-64 mask bits and doubling the `(current, satisfied)` state space the label search carries.
-Dropping it is exact, not a heuristic -- no route is re-admitted.
+`T_old` therefore excludes nothing once `T_new` is active, while still holding one of the 64
+mask bits and doubling the `(current, satisfied)` state space the label search carries --
+which weakens dominance in the cut-aware search. Dropping it is exact: no route is
+re-admitted. MEASURED at n=15: 60% of cuts (515 of 861) were dominated this way, with 0
+exact duplicates.
 
-This pruning was written up as possible future work and deliberately left out, because at
-the load measured then (0.5-0.75 cuts per scenario attempt at n=30/40, 11 active cuts at
-worst against a cap of 64) there was nothing to win. That is no longer the situation:
-at n=40 seed 42 the loop exhausts all 64 bits and reports `:cut_mask_full` -- measured
-identically at K=24, 30 and 34, so it is the cap and not the partition -- which makes
-reclaiming dead bits the difference between certifying and not.
+# The proof is NOT the cut, and must outlive it
+
+`barren_supports` is the record of every support ever PROVED barren, and pruning never
+touches it. A cut is a search restriction; a barren support is a theorem. A smaller support
+that a larger cut subsumes for search purposes is still the premise the barren-support cache
+reasons from (`_relaxed_cluster_support_barren_by_cache`), so discarding it with its cut
+would throw away a proof to save a mask bit. Keep the two side by side.
+
+Both structures were removed from this pathway as unnecessary while the measured load was
+0.5-0.75 cuts per attempt and 11 active cuts at worst against a cap of 64. They are back
+because that regime ended exactly where the README predicted it would: n=40 seed 42
+exhausts all 64 bits and reports `:cut_mask_full`, identically at K=24, 30 and 34.
 """
 function _relaxed_cluster_add_cut!(
-    cluster_sets::Vector{Set{Int}}, support::Set{Int},
+    cluster_sets::Vector{Set{Int}}, support::Set{Int};
+    barren_supports::Union{Nothing, Vector{Set{Int}}}=nothing,
 )::Bool
-    # Reclaim first, then check the cap: a new cut that subsumes several old ones can free
-    # more bits than it consumes, so testing the cap before pruning would refuse a cut that
-    # actually fits.
+    # Record the theorem first and unconditionally -- even when the cut itself is refused
+    # for want of a mask bit, the proof stands and the cache can still use it.
+    if !isnothing(barren_supports) && !any(t -> t == support, barren_supports)
+        push!(barren_supports, copy(support))
+    end
+    # Reclaim, then check the cap: a new cut that subsumes several old ones can free more
+    # bits than it consumes, so testing the cap first would refuse a cut that actually fits.
     filter!(existing -> !issubset(existing, support), cluster_sets)
     length(cluster_sets) < RELAXED_CLUSTER_MAX_CUTS || return false
     push!(cluster_sets, copy(support))
     return true
+end
+
+
+"""
+    _relaxed_cluster_support_barren_by_cache(barren_supports, support, reward_carrying)
+        -> Bool
+
+`true` when `support` can be declared barren from an existing proof instead of an exact
+search: some proved-barren `T ⊆ support` exists whose complement `support \\ T` holds no
+reward-carrying cluster at the current duals.
+
+# Why it is sound
+
+Take any route `R` over `stations(support)` and delete its stops in `support \\ T`, giving
+`R'` over `stations(T)`. Travel does not increase (the travel matrix is metric), every
+arrival is therefore no later so no pickup window or ride limit becomes harder to meet, and
+no reward is lost because a reward-free cluster anchors no candidate endpoint. Hence
+`rc(R) >= rc(R') >= -tol`, the last step because `T` is barren. So `support` is barren too,
+and step 4's exact search over it can be skipped entirely.
+
+The inference runs in ONE direction only. Barren-ness is downward-closed, so a barren `T`
+says nothing about a superset that adds *reward-carrying* cells -- which is exactly why the
+complement has to be tested and not just its size.
+
+Note the test is on the CANDIDATE SET, not on one route: the exact search ranges over every
+route in `stations(support)`, so "the witnessing route gained nothing there" would be too
+weak a premise.
+"""
+function _relaxed_cluster_support_barren_by_cache(
+    barren_supports::Vector{Set{Int}}, support::Set{Int}, reward_carrying::Set{Int},
+)::Bool
+    for t in barren_supports
+        length(t) < length(support) || continue      # equal sets are already cut
+        issubset(t, support) || continue
+        # Every extra cell must be reward-free at these duals.
+        all(c -> !(c in reward_carrying), setdiff(support, t)) && return true
+    end
+    return false
 end

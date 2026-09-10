@@ -943,10 +943,62 @@
     end
 
     @testset "the no-good loop is wired and validated" begin
-        # One final search is allowed with every UInt64 cut bit active.
-        @test StationSelection.RELAXED_CLUSTER_MAX_CUT_ROUNDS ==
-            StationSelection.RELAXED_CLUSTER_MAX_CUTS + 1
+        # The round cap and the cut cap are DELIBERATELY no longer tied. They were
+        # `MAX_CUTS + 1` while every cut-adding round spent a mask bit for good, so 64 bits
+        # meant at most 65 useful rounds. Cut management
+        # (`_relaxed_cluster_add_cut!`) breaks that identity -- a round can reclaim several
+        # bits -- so rounds are no longer bounded by simultaneously-active cuts.
+        #
+        # The round cap is nonetheless kept MODEST rather than raised to whatever a proof
+        # might need: each active cut adds a bit to the label `satisfied` mask and dominance
+        # only holds between comparable masks, so C cuts split the search into up to 2^C
+        # states and it stops being able to EXHAUST well before 64. An unexhausted sweep
+        # cannot certify at all, so a cell wanting dozens of cuts is reporting a too-coarse
+        # relaxation, not too low a cap.
+        @test StationSelection.RELAXED_CLUSTER_MAX_CUTS == 64          # the UInt64 mask
+        @test StationSelection.RELAXED_CLUSTER_MAX_CUT_ROUNDS >
+            StationSelection.RELAXED_CLUSTER_MAX_CUTS
+        @test StationSelection.RELAXED_CLUSTER_MAX_CUT_ROUNDS <= 256  # modest, not aspirational
         @test_throws ArgumentError CGPricingConfig(mode = :not_a_relaxation)
+    end
+
+    @testset "barren-support cache: sound premise only" begin
+        # `T` barren and `T ⊆ T'` licenses "T' barren" ONLY when every extra cell is
+        # reward-free at these duals: delete R's stops in T'\T to get R' over stations(T),
+        # travel cannot increase (metric matrix), arrivals are no later, and no reward is
+        # lost -- so rc(R) >= rc(R') >= -tol. Add a reward-CARRYING cell and the premise
+        # collapses, because barren-ness is downward-closed and says nothing about a
+        # superset that brings new reward.
+        barren = [Set([1, 2])]
+        @test SS._relaxed_cluster_support_barren_by_cache(barren, Set([1, 2, 5]), Set([9]))
+        @test !SS._relaxed_cluster_support_barren_by_cache(barren, Set([1, 2, 5]), Set([5]))
+        # No proof inside it at all -> no inference.
+        @test !SS._relaxed_cluster_support_barren_by_cache(barren, Set([3, 4]), Set{Int}())
+        # An EQUAL set is already cut, so it is not a cache hit (and must not masquerade as
+        # one, or the loop would skip the search that produces the columns).
+        @test !SS._relaxed_cluster_support_barren_by_cache(barren, Set([1, 2]), Set{Int}())
+        # A proof strictly LARGER than the query proves nothing about it.
+        @test !SS._relaxed_cluster_support_barren_by_cache(
+            [Set([1, 2, 3])], Set([1, 2]), Set{Int}())
+    end
+
+    @testset "pruning reclaims mask bits but never discards the proof" begin
+        # A cut is a search restriction; a barren support is a theorem. Pruning acts on the
+        # active cut set only -- a smaller support that a larger cut subsumes for search
+        # purposes is still the premise the cache reasons from, so discarding it with its
+        # cut would trade a proof for a mask bit.
+        cluster_sets = [Set([1, 2])]
+        barren = [Set([1, 2])]
+        @test SS._relaxed_cluster_add_cut!(cluster_sets, Set([1, 2, 3]);
+                                           barren_supports = barren)
+        @test !(Set([1, 2]) in cluster_sets)   # cut pruned: it excludes nothing further
+        @test Set([1, 2]) in barren            # proof retained
+        @test Set([1, 2, 3]) in barren
+        # A cut refused for want of a mask bit STILL records its proof.
+        full = [Set([100 + i]) for i in 1:SS.RELAXED_CLUSTER_MAX_CUTS]
+        barren2 = Set{Int}[]
+        @test !SS._relaxed_cluster_add_cut!(full, Set([7, 8]); barren_supports = barren2)
+        @test Set([7, 8]) in barren2
     end
 
     @testset "randomized: the cut search equals brute force over cut-satisfying routes" begin

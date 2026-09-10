@@ -92,7 +92,7 @@ cuts whose support grows only by reward-free cells. At 0.5–0.75 cuts per attem
 ceiling is well under one search per attempt, before accounting for the O(n³) metric check
 each attempt paid up front.
 
-### Active-cut subsumption pruning
+### Cut management: reclaiming mask bits
 
 **Idea.** `Cut(T_new)` implies `Cut(T_old)` whenever `T_old ⊆ T_new`, so the older cut then
 excludes nothing further while still holding a bit of the `UInt64` mask and doubling the
@@ -112,6 +112,6 @@ two structures have to be kept separate (the removed implementation carried
 `cluster_sets` and `barren_supports` side by side). Under refinement, both need
 `rewrite_cut_sets_for_split` applied on every split.
 
-**Why it was dropped.** The pruning only matters once a single attempt carries enough
+**Why it was dropped.** Cut management only matters once a single attempt carries enough
 simultaneous cuts for the mask to hurt dominance. With a maximum of 11 active cuts observed
 at n=30 and 3 at n=40, the state-space penalty it removes is not measurable.

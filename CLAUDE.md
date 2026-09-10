@@ -301,7 +301,7 @@ objective as baseline.
 The one experimental optimization still exposed is `relaxed_cluster_max_count`, which
 enables refinement. Core no-good cut generation remains mandatory because it is the
 certification mechanism itself. Two other switches -- a barren-support cache and active-cut
-subsumption pruning -- were removed as unnecessary at the measured cut load (0.5-0.75 cuts
+cut management -- were removed as unnecessary at the measured cut load (0.5-0.75 cuts
 per scenario attempt at n=30/40, 11 active cuts at worst against a cap of 64); both are
 written up as possible future work in
 `src/opt/label_setting/joint_routing_assignment/relaxed_cluster/README.md`.
