@@ -71,10 +71,44 @@ per-scenario hardness; it just was not what blocked most seeds.
 **Seed 45 fails at n=40 but certifies at n=50.** Changing `n` changes the station set, so
 per-seed difficulty is not monotone in size.
 
-**The s=1 failures are not budget-limited.** All 21 stop on `pricing_inconclusive` with a
-median 736 s and up to 4758 s (66%) of budget unspent. That is a different failure mode from
-s=3 at n=40, where failures consumed 95-100%. Worth testing whether relaxing the
-two-consecutive-inconclusive stop rescues any of them before calling them out of reach.
+**The 21 non-certified cells are `FEASIBLE`, not failures** -- every one carries a valid
+incumbent at `full_route_universe` scope. What is missing is the certificate, not a solution.
+CORRECTED: an earlier draft of this note said all 21 stop on `pricing_inconclusive`; that came
+from partial data. The split is **16 `pricing_inconclusive` / 5 `total_budget`**, and they are
+different problems:
+
+- **Early-stop with budget left (16).** Two consecutive inconclusive certification attempts
+  end the loop. n=50 two-tier seed 47 quit at 2442 s with **4758 s (66%) unused** after 7
+  iterations; seed 49 at 2963 s with 4237 s unused after 4; n=40 two-tier seed 45 at 3555 s
+  with 3645 s unused. Median unused across all 21 is 736 s.
+- **Genuinely out of time (5).** n=40 single 45/47 and n=50 single 42/47/49 consumed the full
+  budget, and are pricer-bound in a way the iteration counts expose: **n=50 single seed 49
+  managed 2 iterations in 7215 s**, seed 47 managed 3. Roughly an hour per iteration, which
+  has nothing to do with the certification loop.
+
+**In 3 of 5 cases the uncertified arm had already found the optimum.** Where one arm certified
+and the other did not:
+
+| n | seed | proven optimum | other arm's incumbent | delta |
+| --- | --- | --- | --- | --- |
+| 40 | 46 | 10804.0014 | 10804.0014 | **0** |
+| 50 | 43 | 8798.3052 | 8798.3052 | **0** |
+| 50 | 45 | 8659.6750 | 8659.6750 | **0** |
+| 50 | 50 | 9760.9183 | 9990.7622 | +229.8 |
+| 50 | 51 | 9768.3031 | 9991.2452 | +222.9 |
+
+For three of them nothing was missing but the proof. The 16 early-stops are therefore the
+tractable target -- they quit holding a third to two-thirds of budget, sometimes while already
+sitting on the answer. The 5 timeouts will not yield to a stop-rule change; they need a
+cheaper pricer.
+
+**Measurement caveat: do not read wall-clock differences across cells.** Engaging nodes are
+heterogeneous (node1380 = 40 CPU / 248 GB against node4901 = 120 CPU / 2 TB) and the pricer
+runs under WALL-CLOCK slices, so a faster node explores more per 30 s slice and can converge
+in fewer iterations. MEASURED on one identical n=20 smoke: 18 iterations on a slow node
+against 13 on a fast one, same certified objective. Certification counts are robust to this;
+per-seed timings are not, and a borderline seed could certify on a fast node and fail on a
+slow one.
 
 ## What this says about the prior two notes
 
@@ -111,6 +145,7 @@ much, because with three scenarios the round still had to win three simultaneous
   per-scenario successes predicts the direction but has not been checked quantitatively
   against the per-scenario rates.
 - Does s=2 sit between? Nothing measured between 1 and 3.
-- The 21 `pricing_inconclusive` stops leaving up to 66% of budget unused.
+- The 16 early-stops leaving up to 66% of budget unused -- does relaxing the
+  two-consecutive-inconclusive rule convert any of them?
 - n=50 single-tier is 1/10 against two-tier's 5/10 -- the largest arm gap seen anywhere, and
   worth a look on its own.
