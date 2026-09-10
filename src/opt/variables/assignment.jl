@@ -16,7 +16,7 @@ export add_assignment_variables!
 
 
 # ============================================================================
-# ClusteringTwoStageODMap (TwoStageODPolicy)
+# ClusteringTwoStageODMap (`ClusteringTwoStageOD*Formulation`)
 # ============================================================================
 
 """
@@ -26,7 +26,7 @@ export add_assignment_variables!
         mapping::ClusteringTwoStageODMap;
     )
 
-Add assignment variables x[s][p][pair_idx] for TwoStageODPolicy.
+Add assignment variables x[s][p][pair_idx] for the `ClusteringTwoStageOD*` formulations.
 
 x[s][p][pair_idx] is the integer passenger count from demand group p (the OD
 pair Omega_s[s][p]) in scenario s assigned to the corresponding valid
@@ -63,7 +63,7 @@ function add_assignment_variables!(
 end
 
 # ============================================================================
-# ClusteringBaseModelMap (SingleStagePolicy)
+# ClusteringBaseModelMap (`ClusteringBaseFormulation`)
 # ============================================================================
 
 # ============================================================================
@@ -103,13 +103,13 @@ function add_assignment_variables!(
 end
 
 # ============================================================================
-# ClusteringBaseModelMap (SingleStagePolicy)
+# ClusteringBaseModelMap (`ClusteringBaseFormulation`)
 # ============================================================================
 
 """
     add_assignment_variables!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Add sparse assignment variables x[i][j_idx] for SingleStagePolicy.
+Add sparse assignment variables x[i][j_idx] for `ClusteringBaseFormulation`.
 
 For each station location i, one binary variable is created per admissible
 cluster center j.

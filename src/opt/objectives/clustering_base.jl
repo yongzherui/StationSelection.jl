@@ -1,8 +1,8 @@
 """
-Objective function for SingleStagePolicy.
+Objective function for `ClusteringBaseFormulation`.
 
 Contains objective for:
-- SingleStagePolicy: simple walking cost minimization (k-medoids style)
+- `ClusteringBaseFormulation`: simple walking cost minimization (k-medoids style)
 """
 
 using JuMP
@@ -17,7 +17,7 @@ export set_clustering_base_objective!
         mapping::ClusteringBaseModelMap
     )
 
-Set the minimization objective for SingleStagePolicy.
+Set the minimization objective for `ClusteringBaseFormulation`.
 
 Objective:
     min Σᵢ Σ_{j ∈ Aᵢ} qᵢ · d(i,j) · x[i,j]

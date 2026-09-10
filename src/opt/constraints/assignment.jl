@@ -29,7 +29,7 @@ export add_assignment_to_selected_constraints!
 All demand for each OD pair must be assigned across valid station pairs.
     Σⱼₖ x[s][p][j,k] = Q_s[s][p]  ∀p ∈ Ω_s, s
 
-Used by: TwoStageODPolicy
+Used by: `ClusteringTwoStageODFormulation`, `ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_assignment_constraints!(
         m::Model,
@@ -53,10 +53,10 @@ end
 """
     add_assignment_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Each station location must be assigned to exactly one medoid (SingleStagePolicy).
+Each station location must be assigned to exactly one medoid (`ClusteringBaseFormulation`).
     Σ_{j ∈ Aᵢ} x[i,j] = 1  ∀i
 
-Used by: SingleStagePolicy
+Used by: `ClusteringBaseFormulation`
 """
 function add_assignment_constraints!(
         m::Model,
@@ -109,11 +109,11 @@ end
         mapping::ClusteringTwoStageODMap;
     )
 
-Assignment requires both stations to be active (TwoStageODPolicy).
+Assignment requires both stations to be active (`ClusteringTwoStageODFormulation`).
     x[s][p][pair_idx] ≤ Q_s[s][p] * z[j,s]
     x[s][p][pair_idx] ≤ Q_s[s][p] * z[k,s]
 
-Used by: TwoStageODPolicy
+Used by: `ClusteringTwoStageODFormulation`, `ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_assignment_to_active_constraints!(
         m::Model,
@@ -178,10 +178,10 @@ end
 """
     add_assignment_to_selected_constraints!(m::Model, data::StationSelectionData, mapping::ClusteringBaseModelMap)
 
-Assignment can only be made to selected stations (SingleStagePolicy).
+Assignment can only be made to selected stations (`ClusteringBaseFormulation`).
     x[i,j] ≤ y[j]  ∀i, j ∈ Aᵢ
 
-Used by: SingleStagePolicy
+Used by: `ClusteringBaseFormulation`
 """
 function add_assignment_to_selected_constraints!(
         m::Model,

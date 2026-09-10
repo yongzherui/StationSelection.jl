@@ -35,7 +35,7 @@ Limit total number of stations selected.
     Σⱼ y[j] = limit  (if equality)
     Σⱼ y[j] ≤ limit  (otherwise)
 
-Used by: All models
+Used by: all formulations
 """
 function add_station_limit_constraint!(
     m::Model,
@@ -64,7 +64,8 @@ end
 Limit active stations per scenario.
     Σⱼ z[j,s] = l  ∀s
 
-Used by: TwoStageSingleDetourModel (with or without walking limits), TwoStageODPolicy
+Used by: `ClusteringTwoStageFormulation`, `ClusteringTwoStageODFormulation`,
+`ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_scenario_activation_limit_constraints!(
     m::Model,
@@ -90,7 +91,8 @@ end
 Active stations must be built.
     z[j,s] ≤ y[j]  ∀j,s
 
-Used by: TwoStageSingleDetourModel (with or without walking limits), TwoStageODPolicy
+Used by: `ClusteringTwoStageFormulation`, `ClusteringTwoStageODFormulation`,
+`ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_activation_linking_constraints!(m::Model, data::StationSelectionData)
     before = _total_num_constraints(m)

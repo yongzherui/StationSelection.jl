@@ -9,7 +9,7 @@ Both a lower bound (x ≤ demand * f_flow for each OD pair) and an upper bound
 f_flow tracks x exactly regardless of the flow_regularization_weight.
 
 Supported mappings:
-- ClusteringTwoStageODMap (TwoStageODPolicy with flow_regularization_weight; sparse x only)
+- ClusteringTwoStageODMap (`ClusteringTwoStageODFlowRegularizerFormulation`; sparse x only)
 """
 
 using JuMP
@@ -23,7 +23,7 @@ Links f_flow to x with both lower and upper bounds:
     x[s][p][idx] ≤ Q_s[s][p] * f_flow[s][(j,k)]
     f_flow[s][(j,k)] ≤ Σ_p x[s][p][idx]         (one per (s,j,k))
 
-Used by: TwoStageODPolicy (when flow_regularization_weight is set)
+Used by: `ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_flow_activation_constraints!(
         m::Model,

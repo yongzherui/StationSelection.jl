@@ -27,7 +27,7 @@ masters (e.g. a column-generation restricted master) that need valid simplex dua
 this variable, mirroring `add_route_variables!`'s `relax_integrality`
 kwarg for the same reason.
 
-Used by: All models
+Used by: all formulations
 """
 function add_station_selection_variables!(
         m::Model,
@@ -53,7 +53,8 @@ Add binary scenario activation variables z[j,s] for stations and scenarios.
 z[j,s] = 1 if station j is activated in scenario s.
 Allows different subsets of built stations to be active in each scenario.
 
-Used by: TwoStageSingleDetourModel (with or without walking limits), TwoStageODPolicy
+Used by: `ClusteringTwoStageFormulation`, `ClusteringTwoStageODFormulation`,
+`ClusteringTwoStageODFlowRegularizerFormulation`
 """
 function add_scenario_activation_variables!(m::Model, data::StationSelectionData)
     before = JuMP.num_variables(m)
