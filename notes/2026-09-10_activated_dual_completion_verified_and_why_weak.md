@@ -119,7 +119,8 @@ any route could pay to touch `j` — route-free to compute, and the term BOTH co
 away.
 
 So the completion must cancel ~1500-2000 of reward per triple and credits **4-18 of it
-(0.2-1.2%)**, while the route-travel term it ignores is worth **350-1750 (25-85%)**. With
+(0.26-0.95%, median 0.80%)**, while the route-travel term it ignores is worth **4-1746, a
+median 33% of `alpha_p` (range 0.2-114%, mean 48%)**. With
 `walk_cost_weight=0.1` against `route_regularization_weight=10.0`, crediting walking is
 crediting the wrong term by two orders of magnitude. `gamma_pj` therefore lands at
 essentially `alpha_p`, and `Gamma_j = sum_{p: j valid} gamma_pj` reaches the cut's whole
@@ -155,11 +156,16 @@ n=10, where 77 cuts is comparable to the 86 station sets that exist.
 ## 5. The one untried lever, and the number that decides it
 
 Charge the discarded route term: any column visiting an unbuilt `j` pays at least
-`beta * delta_j`, which the table above puts at 25-85% of `alpha_p`. It is route-free, so it
+`beta * delta_j`, which the table above puts at a median 33% of `alpha_p`. It is route-free, so it
 keeps the cheap pricing. The obstacle is that it is a PER-COLUMN credit and the completion is
 a per-triple family — one column can serve several out-triples at the same station, so the
 credit needs a share-out rule (e.g. `beta * delta_j / M` with `M` a bound on out-triples per
 column) to stay sound.
+
+One anchor already argues against it on its own: at `[1,6,7,8,10]`, `beta * delta_j`
+averages **4.03** -- 0.2% of `alpha_p`. Some unbuilt station there sits almost exactly on
+the path between two built ones, so touching it is nearly free and there is nothing to
+charge. The lever is worth a median 33% but it is not reliably worth anything.
 
 Worth trying, but note the ceiling: even crediting all of `beta * delta_j` leaves
 `gamma_pj > 0` where the truth is exactly 0, so this buys a constant factor on the

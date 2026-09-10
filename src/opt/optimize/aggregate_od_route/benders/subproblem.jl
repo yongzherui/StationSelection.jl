@@ -505,8 +505,9 @@ assertion fires immediately.
 
 Sound but weak, and the cause is which term gets credited rather than the bound being loose
 in general: per unbuilt `(p,j)` the completion must cancel `alpha_p` and credits only the
-walking term (0.2-1.2% of it), while ignoring the route travel it should charge for
-(25-85%). With `walk_cost_weight = 0.1` against `route_regularization_weight = 10.0` that is
+walking term (0.26-0.95% of it), while ignoring the route travel it should charge for
+(median 33% of `alpha_p`, range 0.2-114% over the 8 anchors). With `walk_cost_weight = 0.1`
+against `route_regularization_weight = 10.0` that is
 the wrong term by two orders of magnitude, so `gamma_pj` lands at essentially `alpha_p`.
 
 The consequence is not "more iterations" but no convergence beyond n=10. Measured cut
