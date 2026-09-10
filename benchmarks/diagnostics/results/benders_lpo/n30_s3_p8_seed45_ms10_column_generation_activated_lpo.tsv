@@ -1,0 +1,2 @@
+n	s	p	seed	max_stops	oracle	status	objective	iters	cuts	lower_bound	gap	stop_reason	wall	master_sec	sub_sec	enum_sec	price_total	price_cg	price_restricted	price_full	price_separation	pool	lpo_calls	lpo_rounds	lpo_rows	lpo_gain	core_slack	scope	node
+30	3	8	45	10	column_generation_activated_lpo	FEASIBLE	25655.14672971392	93	100	12752.6413922674	12902.50533744652	total_budget	12640.96	0.33	12621.54	0.0	12613.31	625.08	625.08	0.0	11988.24	1074	279	417	73625	4.618773166e6	0.5	full_route_universe	node1447

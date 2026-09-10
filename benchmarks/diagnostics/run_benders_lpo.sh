@@ -92,6 +92,7 @@ export LP_THREADS="${LP_THREADS:-1}"
 export LP_TOTAL_LIMIT="${LP_TOTAL_LIMIT:-1800.0}"
 export LP_CG_PRICE_LIMIT="${LP_CG_PRICE_LIMIT:-600.0}"
 export LP_PARALLEL_SCENARIOS="${LP_PARALLEL_SCENARIOS:-0}"
+export LP_GUIDE_ROUTES="${LP_GUIDE_ROUTES:-5}"
 export JULIA_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 
 # Per-task depot: concurrent tasks that share ~/.julia can rewrite a .ji while a sibling has

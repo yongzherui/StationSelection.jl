@@ -96,11 +96,22 @@ const RELAXED_CLUSTER_MAX_CUTS = 64
 
 """Cap on cut rounds in one certification attempt, i.e. per (CG iteration x scenario).
 
-Not a solver knob: the loop is bounded by the caller's wall-clock deadline and by
-`RELAXED_CLUSTER_MAX_CUTS`. The extra round permits one final search with all 64 cuts
-active; it can certify, while finding another barren support reports inconclusive because
-no additional mask bit exists."""
-const RELAXED_CLUSTER_MAX_CUT_ROUNDS = RELAXED_CLUSTER_MAX_CUTS + 1
+Deliberately modest, and NOT an aspiration. It used to be `RELAXED_CLUSTER_MAX_CUTS + 1`,
+which was exactly right while every cut-adding round consumed a mask bit for good.
+Subsumption pruning broke that identity -- a round can now reclaim several bits -- so the
+two constants are no longer the same quantity and the round cap is set on its own terms.
+
+Those terms are NOT "how many rounds might a proof need". Each active cut adds a bit to the
+label's `satisfied` mask, and dominance only holds between labels with comparable masks, so
+`C` active cuts split the search into up to `2^C` `(node, mask)` states. The label search
+stops being able to EXHAUST long before 64 cuts, which is what makes a large cut count
+self-defeating rather than merely slow: an unexhausted search cannot certify at all.
+
+So a cell that wants dozens of cuts is telling us the relaxation is too coarse, not that the
+cap is too low. The levers are a cut that excludes more per bit (`:relaxed_cluster_two_tier`,
+whose macro cuts cover whole unions of meso cells) or a tighter relaxation that needs fewer
+(`relaxed_cluster_max_count` refinement) -- not more rounds spent bloating the mask."""
+const RELAXED_CLUSTER_MAX_CUT_ROUNDS = 96
 
 """
     _relaxed_cluster_cuts(data, cluster_sets) -> RelaxedClusterNoGoodCuts

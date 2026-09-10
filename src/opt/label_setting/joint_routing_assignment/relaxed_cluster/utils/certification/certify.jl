@@ -45,7 +45,8 @@ unsound.
 Each cut forbids every route confined to a subset of its cluster set, so a
 support once refuted can never come back and the loop cannot cycle. With `K`
 clusters there are `2^K` supports, so it terminates; the caller's wall-clock deadline,
-`RELAXED_CLUSTER_MAX_CUTS` and `RELAXED_CLUSTER_MAX_CUT_ROUNDS` bound it well below that in
+`RELAXED_CLUSTER_MAX_CUTS` (simultaneously ACTIVE cuts, since subsumed ones are pruned)
+and the caller's wall-clock deadline bound it well below that in
 practice, at the cost of reporting inconclusive.
 
 # Cuts are per attempt, and caching them across CG iterations would be UNSOUND
@@ -169,11 +170,25 @@ function _relaxed_cluster_certify_scenario(
     # state space while excluding nothing. See
     # `benchmarks/diagnostics/nogood_cut_nesting_probe.jl` and `../../README.md`.
     _trace_row!(round, relaxed_rc, support_size, subset_size, subset_rc, subset_checked;
-                support = Set{Int}(), guide_routes = 0) =
+                support = Set{Int}(), guide_routes = 0,
+                n_active_cuts = 0, relaxed_sec = 0.0, relaxed_exhausted = true) =
         push!(trace, (
             round=round, relaxed_rc=relaxed_rc, support_size=support_size,
             subset_size=subset_size, subset_rc=subset_rc, subset_checked=subset_checked,
             support=support, guide_routes=guide_routes, partition_epoch=partition_epoch,
+            # The two numbers that decide whether "cut the barren support again" is a viable
+            # strategy at all, and which were not recorded:
+            #   n_active_cuts -- cuts live in the mask AFTER subsumption pruning. Each one
+            #     adds a bit to every label's `satisfied` mask, and dominance only holds
+            #     between comparable masks, so C cuts split the search into up to 2^C
+            #     (node, mask) states.
+            #   relaxed_exhausted -- whether the relaxed sweep still finished. This is the
+            #     cliff that matters: an unexhausted sweep cannot certify at all, so if it
+            #     stops exhausting as cuts accumulate, more rounds are worthless and the
+            #     answer has to be a coarser cut (two-tier) or a tighter relaxation
+            #     (refinement) instead.
+            n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
+            relaxed_exhausted=relaxed_exhausted,
         ))
     # Every exit builds the same six-field result off the same loop state, and writing it
     # out at each of the eight `return`s made the exits impossible to compare at a glance --
@@ -194,9 +209,12 @@ function _relaxed_cluster_certify_scenario(
         # this search exhausts early, both stages still share the same absolute deadline, so
         # its unused time remains available to exact pricing.
         ctx = RelaxedClusterCutSearchContext(relaxed, cluster_sets)
+        n_active_cuts = length(cluster_sets)
+        t_relaxed = time()
         labels, exhausted, _stats = _run_label_setting(
             ctx; time_limit=0.5 * remaining, reduced_cost_tol=tol,
         )
+        relaxed_sec = time() - t_relaxed
         improving = filter(l -> l.reduced_cost < -tol, labels)
 
         # ---- (2) nothing improving survives the cuts. Only exhaustion proves that is
@@ -208,7 +226,9 @@ function _relaxed_cluster_certify_scenario(
             # something different and specific: not one cut-escaping route carries any
             # reward at all.
             surviving_min = isempty(labels) ? Inf : minimum(l.reduced_cost for l in labels)
-            _trace_row!(round, surviving_min, 0, 0, Inf, false)
+            _trace_row!(round, surviving_min, 0, 0, Inf, false;
+                        n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
+                        relaxed_exhausted=exhausted)
             return _result(exhausted ? :certified : :inconclusive, round,
                            exhausted ? :none : :relaxed_not_exhausted)
         end
@@ -246,7 +266,9 @@ function _relaxed_cluster_certify_scenario(
         # reward-carrying route exists in `S` at all -- is what "barren" actually means,
         # and it is the condition that adds a cut below.
         _trace_row!(round, first(guides).reduced_cost, length(support), length(subset),
-                    search.rc, true; support=copy(support), guide_routes=length(guides))
+                    search.rc, true; support=copy(support), guide_routes=length(guides),
+                    n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
+                    relaxed_exhausted=exhausted)
 
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.

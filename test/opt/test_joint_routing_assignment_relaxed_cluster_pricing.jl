@@ -1291,25 +1291,49 @@
         @test cuts == before
     end
 
-    @testset "adding a cut appends until the mask is full" begin
-        # Subsumed cuts are deliberately NOT pruned: Cut(T_new) does imply Cut(T_old) for
-        # T_old ⊆ T_new, but the pruning that exploited it was removed as unnecessary at
-        # the measured cut load (see relaxed_cluster/README.md), so the older cut stays.
+    @testset "adding a cut reclaims the bits of the cuts it subsumes" begin
+        # A cut says "visit at least one cluster OUTSIDE this support". So for
+        # T_old ⊆ T_new, every cluster outside T_new is also outside T_old, and
+        # Cut(T_new) ⟹ Cut(T_old): the older cut then excludes nothing while still holding
+        # one of the 64 mask bits. Dropping it is exact, not a heuristic.
+        #
+        # This pruning was deliberately absent while the worst measured load was 11 active
+        # cuts against a cap of 64. It became load-bearing when n=40 seed 42 exhausted all
+        # 64 bits and reported `:cut_mask_full` -- measured identically at K=24, 30 and 34,
+        # so the cap and not the partition.
         cluster_sets = [Set([1, 2]), Set([9])]
         @test SS._relaxed_cluster_add_cut!(cluster_sets, Set([1, 2, 3]))
-        @test Set([1, 2]) in cluster_sets
+        @test !(Set([1, 2]) in cluster_sets)          # subsumed -> bit reclaimed
         @test Set([1, 2, 3]) in cluster_sets
+        @test Set([9]) in cluster_sets                # not a subset -> untouched
+        @test length(cluster_sets) == 2
+
+        # An equal set is a subset of itself, so re-adding the same support is idempotent
+        # rather than consuming a second bit for the identical restriction.
+        @test SS._relaxed_cluster_add_cut!(cluster_sets, Set([1, 2, 3]))
+        @test count(==(Set([1, 2, 3])), cluster_sets) == 1
+
         # The cut is copied in, so later mutation of the caller's support cannot corrupt it.
         support = Set([4, 5])
         @test SS._relaxed_cluster_add_cut!(cluster_sets, support)
         push!(support, 6)
         @test Set([4, 5]) in cluster_sets
 
-        # A full UInt64 mask refuses the cut rather than dropping an existing one, which is
-        # what the caller reports as inconclusive.
+        # A full mask whose cuts the newcomer subsumes NOTHING of still refuses it, and
+        # refuses it without dropping an existing cut -- which is what the caller reports
+        # as inconclusive.
         full = [Set([i]) for i in 1:SS.RELAXED_CLUSTER_MAX_CUTS]
         @test !SS._relaxed_cluster_add_cut!(full, Set([1000]))
         @test length(full) == SS.RELAXED_CLUSTER_MAX_CUTS
+
+        # But a full mask ACCEPTS a cut that subsumes some of what is already there, since
+        # reclaiming runs before the cap is checked. This is the case that turns a
+        # `:cut_mask_full` refusal into a certificate, so it is the one worth pinning.
+        full2 = [Set([i]) for i in 1:SS.RELAXED_CLUSTER_MAX_CUTS]
+        @test SS._relaxed_cluster_add_cut!(full2, Set([1, 2, 3]))
+        @test length(full2) == SS.RELAXED_CLUSTER_MAX_CUTS - 2   # 3 dropped, 1 added
+        @test Set([1, 2, 3]) in full2
+        @test !(Set([1]) in full2)
     end
 
     @testset ":relaxed_cluster makes the two-tier certifying round unreachable" begin

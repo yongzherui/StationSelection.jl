@@ -299,7 +299,22 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                         config.cg_pricing_time_limit_sec,
                         config.cg_pricing_time_limit_sec / max(1, cert.n_scenarios),
                         cert.n_clusters, cert.relaxed_rc_bound, reasons)
-                flush(stdout)
+                # Is "cut the barren support again" viable here? These are the numbers that
+                # answer it: how many cuts stayed ACTIVE after subsumption pruning, how the
+                # relaxed sweep's cost moved as they accumulated, and -- decisively --
+                # whether it was still EXHAUSTING at the end. An unexhausted sweep cannot
+                # certify no matter how many more rounds it gets, so if that flips to false
+                # the answer is a coarser cut or a tighter relaxation, not more rounds.
+                tr = cert.trace
+                if !isempty(tr) && haskey(first(tr), :n_active_cuts)
+                    cuts_seq = [r.n_active_cuts for r in tr]
+                    secs = [r.relaxed_sec for r in tr]
+                    n_unexh = count(r -> !r.relaxed_exhausted, tr)
+                    @printf("        cut cost: %d rounds | active cuts %d -> %d (max %d) | relaxed sweep %.3fs -> %.3fs (total %.1fs) | rounds whose sweep did NOT exhaust: %d\n",
+                            length(tr), first(cuts_seq), last(cuts_seq), maximum(cuts_seq),
+                            first(secs), last(secs), sum(secs), n_unexh)
+                    flush(stdout)
+                end
             end
             return BendersSubproblemCGResult(
                 scenario, false, "certification_inconclusive", cg_iterations, columns_added,

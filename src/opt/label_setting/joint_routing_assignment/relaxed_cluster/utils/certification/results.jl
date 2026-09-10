@@ -147,14 +147,36 @@ RelaxedClusterNoGoodResult(outcome, rounds, cuts_added, last_subset_size, trace,
 
 
 """
-Insert a proven-barren support as a new cut, unless the `UInt64` mask is already full.
+Insert a proven-barren support as a new cut, first reclaiming the mask bits of any cut the
+new one subsumes. `false` means the cap was still reached, which the caller must report as
+inconclusive rather than silently dropping the cut (see `RELAXED_CLUSTER_MAX_CUTS`).
 
-`false` means the cut cap was reached, which the caller must report as inconclusive rather
-than silently dropping the cut (see `RELAXED_CLUSTER_MAX_CUTS`).
+# Subsumption
+
+A cut says "every route must visit at least one cluster OUTSIDE this support". So when
+`T_old` is a SUBSET of `T_new`, every cluster outside `T_new` is also outside `T_old`, and
+any route satisfying `Cut(T_new)` satisfies `Cut(T_old)` automatically:
+
+    T_old ⊆ T_new   ⟹   Cut(T_new) ⟹ Cut(T_old)
+
+`T_old` therefore excludes nothing once `T_new` is active, while still holding one of the
+64 mask bits and doubling the `(current, satisfied)` state space the label search carries.
+Dropping it is exact, not a heuristic -- no route is re-admitted.
+
+This pruning was written up as possible future work and deliberately left out, because at
+the load measured then (0.5-0.75 cuts per scenario attempt at n=30/40, 11 active cuts at
+worst against a cap of 64) there was nothing to win. That is no longer the situation:
+at n=40 seed 42 the loop exhausts all 64 bits and reports `:cut_mask_full` -- measured
+identically at K=24, 30 and 34, so it is the cap and not the partition -- which makes
+reclaiming dead bits the difference between certifying and not.
 """
 function _relaxed_cluster_add_cut!(
     cluster_sets::Vector{Set{Int}}, support::Set{Int},
 )::Bool
+    # Reclaim first, then check the cap: a new cut that subsumes several old ones can free
+    # more bits than it consumes, so testing the cap before pruning would refuse a cut that
+    # actually fits.
+    filter!(existing -> !issubset(existing, support), cluster_sets)
     length(cluster_sets) < RELAXED_CLUSTER_MAX_CUTS || return false
     push!(cluster_sets, copy(support))
     return true
