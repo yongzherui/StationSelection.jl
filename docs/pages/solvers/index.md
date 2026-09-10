@@ -15,7 +15,4 @@ settings rather than formulation ones for one reason: a search algorithm does no
 the model, so two runs differing only in a pricer or an oracle are solving exactly the
 same problem.
 
-```@docs
-AbstractSolver
-SolverOptions
-```
+{{autodocs opt/solvers/utils}}

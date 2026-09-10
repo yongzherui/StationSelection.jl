@@ -3,9 +3,7 @@
 An [`AbstractFormulation`](@ref) is the mathematical encoding: which variables exist,
 which rows tie them together, and what the objective weighs.
 
-```@docs
-AbstractFormulation
-```
+
 
 ## Two families
 
@@ -19,20 +17,11 @@ feasibility with [`aggregate_od_route_validate_feasible_coverage`](@ref).
 
 ## Clustering
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/formulations/clustering.jl"]
-```
+{{autodocs opt/formulations/clustering.jl}}
 
 ## AggregateODRoute
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/formulations/aggregate_od_route/base.jl",
-    "opt/formulations/aggregate_od_route/feasibility.jl",
-]
-```
+{{autodocs opt/formulations/aggregate_od_route/base.jl opt/formulations/aggregate_od_route/feasibility.jl}}
 
 ### Joint routing/assignment
 
@@ -44,20 +33,8 @@ derived from the parent and never built from loose keywords: a master at one
 `detour_factor` against a subproblem at another yields invalid cuts and a confidently
 wrong `OPTIMAL`, so the inconsistent combination is made unrepresentable.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/formulations/aggregate_od_route/joint_routing_assignment/shared.jl",
-    "opt/formulations/aggregate_od_route/joint_routing_assignment/monolithic.jl",
-    "opt/formulations/aggregate_od_route/joint_routing_assignment/master.jl",
-    "opt/formulations/aggregate_od_route/joint_routing_assignment/benders_subproblem.jl",
-    "opt/formulations/aggregate_od_route/joint_routing_assignment/unions.jl",
-]
-```
+{{autodocs opt/formulations/aggregate_od_route/joint_routing_assignment}}
 
 ### Cut aggregation
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/formulations/aggregate_od_route/benders/cut_mode.jl"]
-```
+{{autodocs opt/formulations/aggregate_od_route/benders}}

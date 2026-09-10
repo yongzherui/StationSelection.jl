@@ -6,26 +6,12 @@ Solve the restricted master, price against its duals, add improving columns, rep
 [`CGPricingConfig`](@ref), and the pricers themselves are documented under
 [Pricing & label setting](@ref).
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/solvers/cg/solver.jl"]
-```
+{{autodocs opt/solvers/cg/solver.jl}}
 
 ## Choosing the pricer
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/solvers/cg/pricing_config.jl"]
-```
+{{autodocs opt/solvers/cg/pricing_config.jl}}
 
 ## Loop internals
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/solvers/cg/state.jl",
-    "opt/solvers/cg/loop.jl",
-    "opt/solvers/cg/metadata.jl",
-    "opt/solvers/cg/hooks.jl",
-]
-```
+{{autodocs opt/solvers/cg !opt/solvers/cg/solver.jl !opt/solvers/cg/pricing_config.jl}}

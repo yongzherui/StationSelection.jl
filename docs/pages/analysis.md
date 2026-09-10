@@ -9,35 +9,15 @@ silently missing from the exported CSVs.
 
 ## Solution analysis
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "utils/analysis/solution_analysis.jl",
-    "utils/analysis/objective_decomposition.jl",
-    "utils/analysis/export_variables.jl",
-]
-```
+{{autodocs utils/analysis output}}
 
 ## Core utilities
 
 `OptResult`, `SolveStatus` and `BuildResult` also live in `utils/core/results.jl` but are
 documented under [Results & solve status](@ref), where they belong.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "utils/core/coords.jl",
-    "utils/core/costs.jl",
-    "utils/core/export.jl",
-]
-```
+{{autodocs utils/core !utils/core/results.jl}}
 
 ## Scenario and candidate-station helpers
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "utils/data/scenarios.jl",
-    "utils/data/candidate_stations.jl",
-]
-```
+{{autodocs utils/data}}

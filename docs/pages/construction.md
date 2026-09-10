@@ -10,24 +10,11 @@ The Benders master and subproblem builders are documented with
 
 ## Clustering
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/optimize/clustering/build_single_stage.jl",
-    "opt/optimize/clustering/build_two_stage.jl",
-    "opt/optimize/clustering/build_two_stage_od.jl",
-]
-```
+{{autodocs opt/optimize.jl opt/optimize/clustering}}
 
 ## AggregateODRoute — direct
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/optimize/aggregate_od_route/direct/build_base.jl",
-    "opt/optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl",
-]
-```
+{{autodocs opt/optimize/aggregate_od_route/direct opt/optimize/aggregate_od_route/base_shared.jl !opt/optimize/aggregate_od_route/direct/build_feasibility.jl}}
 
 ## AggregateODRoute — column generation
 
@@ -35,12 +22,4 @@ Pages = [
 than an in-place mutation, which is what lets it share construction code with
 `build_model` instead of duplicating it as post-hoc `set_binary` calls.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/optimize/aggregate_od_route/column_generation/build_base.jl",
-    "opt/optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl",
-    "opt/optimize/aggregate_od_route/joint_shared.jl",
-    "opt/optimize/aggregate_od_route/column_generation/dispatch.jl",
-]
-```
+{{autodocs opt/optimize/aggregate_od_route/column_generation opt/optimize/aggregate_od_route/joint_shared.jl}}

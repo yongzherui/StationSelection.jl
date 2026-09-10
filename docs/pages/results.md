@@ -1,10 +1,6 @@
 # Results & solve status
 
-```@docs
-OptResult
-ModelCounts
-DetourComboData
-```
+{{autodocs utils/core/results.jl}}
 
 ## SolveStatus is not a MOI code
 
@@ -19,9 +15,7 @@ Member names carry a `SOLVE_` prefix because `using JuMP` re-exports bare
 `OPTIMAL`/`INFEASIBLE` from MOI into scope; the printed labels drop it so result CSVs stay
 readable.
 
-```@docs
-SolveStatus
-```
+
 
 ## `OPTIMAL` is scoped to the universe that was priced
 
@@ -48,10 +42,5 @@ abort, which `run_opt` turns into a `SOLVE_INFEASIBLE` result carrying it as
 `metadata["infeasibility_reason"]`. It does **not** throw — a proven-infeasible instance is
 an answer, not a usage error.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/optimize/aggregate_od_route/direct/build_feasibility.jl",
-]
-```
+{{autodocs opt/optimize/aggregate_od_route/direct/build_feasibility.jl}}
 

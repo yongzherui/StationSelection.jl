@@ -9,46 +9,12 @@ analysis output silently omits it.
 
 ## Variables
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/variables/base.jl",
-    "opt/variables/assignment.jl",
-    "opt/variables/routes.jl",
-    "opt/variables/walk.jl",
-    "opt/variables/flow.jl",
-    "opt/variables/benders_cuts.jl",
-]
-```
+{{autodocs opt/variables opt/variables.jl}}
 
 ## Constraints
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/constraints/base.jl",
-    "opt/constraints/assignment.jl",
-    "opt/constraints/flow_activation.jl",
-    "opt/constraints/endpoint_feasibility.jl",
-    "opt/constraints/benders_cuts.jl",
-    "opt/constraints/aggregate_od_route/base/coverage.jl",
-    "opt/constraints/aggregate_od_route/base/linking.jl",
-    "opt/constraints/aggregate_od_route/base/route_activation.jl",
-    "opt/constraints/aggregate_od_route/joint_routing_assignment/coverage.jl",
-    "opt/constraints/aggregate_od_route/joint_routing_assignment/linking.jl",
-    "opt/constraints/aggregate_od_route/joint_routing_assignment/routing_and_assignment.jl",
-]
-```
+{{autodocs opt/constraints opt/constraints.jl}}
 
 ## Objectives
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/objectives/clustering_base.jl",
-    "opt/objectives/clustering_od.jl",
-    "opt/objectives/benders_master.jl",
-    "opt/objectives/aggregate_od_route/base/assembly.jl",
-    "opt/objectives/aggregate_od_route/joint_routing_assignment/assembly.jl",
-]
-```
+{{autodocs opt/objectives opt/objective.jl}}

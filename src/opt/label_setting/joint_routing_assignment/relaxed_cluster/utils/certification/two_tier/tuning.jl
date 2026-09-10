@@ -145,14 +145,18 @@ const RELAXED_CLUSTER_TWO_TIER_STATION_ESCALATION_SHARE = 0.5
 
 """Cap on inner (meso) rounds per outer (macro) round.
 
-One macro region must not be able to monopolise an attempt. At the default cut-round cap of
-65 a single region could run 65 inner rounds, each paying a station search. Harvested
+One macro region must not be able to monopolise an attempt. Uncapped, a single region could
+run `RELAXED_CLUSTER_MAX_CUT_ROUNDS` inner rounds, each paying a station search. Harvested
 columns survive an early return (`_result` carries them), so returning after a bounded
 number of inner rounds is strictly better than grinding to the deadline.
 
+That cap is named, not quoted: it is no longer `RELAXED_CLUSTER_MAX_CUTS + 1` and its own
+docstring says why.
+
 NOTE this cap has never actually bound: under the old `0.5 * remaining` inner slice only 3
 inner rounds fit in a 300 s attempt and 6 in a 3600 s one (see the slice schedule below),
-so the budget was the real limiter and lowering this from 65 to 8 changed nothing."""
+so the budget was the real limiter and lowering this from 65 (then the cut-round cap) to 8
+changed nothing."""
 const RELAXED_CLUSTER_TWO_TIER_MAX_INNER_ROUNDS = 8
 
 """Slice schedule for the inner (meso) sweeps, and why it GROWS with the round index.

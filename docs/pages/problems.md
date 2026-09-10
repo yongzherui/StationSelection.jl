@@ -3,10 +3,7 @@
 An [`AbstractProblem`](@ref) carries the instance data plus the decision made on top of
 it. It says nothing about how the decision is encoded.
 
-```@docs
-AbstractProblem
-StationSelectionProblem
-```
+
 
 ## Kept but unwired
 
@@ -15,7 +12,4 @@ The live Benders subproblem fixes `y` but leaves assignment to `θ`, so this rem
 shape a `:column_generation` subproblem oracle would reuse rather than one anything
 constructs now.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/problems/route_covering.jl"]
-```
+{{autodocs opt/problems}}

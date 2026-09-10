@@ -22,10 +22,7 @@ its `objective_value`, which a non-zero `MIPGap` would inflate into an invalid b
 upper bound is the best incumbent's exact second-stage cost. The reported objective is
 always the upper bound — a lower bound is not a solution.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/solvers/benders/solver.jl"]
-```
+{{autodocs opt/solvers/benders/solver.jl}}
 
 ## Subproblem oracles
 
@@ -35,33 +32,12 @@ restricted dual only, and the resulting cut can exclude the true optimum. Every 
 therefore ends in a proof of exhaustion, and a run that cannot produce one raises rather
 than emitting a cut.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["opt/solvers/benders/subproblem_config.jl"]
-```
+{{autodocs opt/solvers/benders/subproblem_config.jl}}
 
 ## Loop internals
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/solvers/benders/state.jl",
-    "opt/solvers/benders/loop.jl",
-    "opt/solvers/benders/metadata.jl",
-    "opt/solvers/benders/hooks.jl",
-]
-```
+{{autodocs opt/solvers/benders !opt/solvers/benders/solver.jl !opt/solvers/benders/subproblem_config.jl}}
 
 ## Building and cutting
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/optimize/aggregate_od_route/benders/build_master.jl",
-    "opt/optimize/aggregate_od_route/benders/build_subproblem.jl",
-    "opt/optimize/aggregate_od_route/benders/subproblem.jl",
-    "opt/optimize/aggregate_od_route/benders/subproblem_cg.jl",
-    "opt/optimize/aggregate_od_route/benders/completion_lpo.jl",
-    "opt/optimize/aggregate_od_route/benders/cuts.jl",
-]
-```
+{{autodocs opt/optimize/aggregate_od_route/benders}}

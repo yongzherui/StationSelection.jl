@@ -2,12 +2,7 @@
 
 ## Instance data
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "data/core/struct.jl",
-]
-```
+{{autodocs data/core}}
 
 ## Mappings
 
@@ -16,23 +11,8 @@ station id ↔ array index, scenario label ↔ index, and (for AggregateODRoute)
 `Omega_s`/`Q_s` demand-group indexing. Each formulation family has its own, because the
 bookkeeping a formulation needs is part of how it is encoded.
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "data/maps/create_map.jl",
-    "data/maps/clustering_base_map.jl",
-    "data/maps/clustering_od_map.jl",
-    "data/maps/clustering_two_stage_station_map.jl",
-    "data/maps/aggregate_od_route_map.jl",
-]
-```
+{{autodocs data/maps}}
 
 ## IO
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "data/io/stations.jl",
-    "data/io/requests.jl",
-]
-```
+{{autodocs data/io}}

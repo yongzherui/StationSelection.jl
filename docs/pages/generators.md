@@ -10,29 +10,12 @@ across seeds and only the OD draw changes.
 
 ## Zhuzhou
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["generators/zhuzhou.jl"]
-```
+{{autodocs generators/zhuzhou.jl}}
 
 ## Grid
 
-```@autodocs
-Modules = [StationSelection]
-Pages = ["generators/grid.jl"]
-```
+{{autodocs generators/grid.jl}}
 
 ## Hand-built test cases
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "generators/test_cases/base_middle_zone.jl",
-    "generators/test_cases/test1_vehicle.jl",
-    "generators/test_cases/test2_zone_proximity.jl",
-    "generators/test_cases/test3_north_shift.jl",
-    "generators/test_cases/test4_mirrored_zone.jl",
-    "generators/test_cases/test5_triangle.jl",
-    "generators/test_cases/test6_bidirectional.jl",
-]
-```
+{{autodocs generators/test_cases}}

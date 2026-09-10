@@ -54,7 +54,4 @@ This site documents the *code*. Two other places carry things it deliberately do
   with the instance, seed and job it came from. A docstring that needs a measurement cites
   the note rather than restating it, so there is one copy to keep true.
 
-```@docs
-run_opt
-BuildResult
-```
+{{autodocs opt/optimize/run_opt.jl opt/abstract.jl}}

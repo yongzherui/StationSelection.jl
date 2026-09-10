@@ -1,49 +1,16 @@
 # Certification
 
-`:relaxed_cluster` is the only mode that can certify. It runs on `K` cluster nodes rather
-than `n` stations, and because its minimum reduced cost lower-bounds every *real* route's,
-exhausting it without finding anything improving proves no real improving column exists —
-regardless of which pricer found the columns.
+The loop that turns the [Relaxed-cluster relaxation](@ref) into a proof of CG optimality:
+price the relaxation, exact-search the cluster supports it names, and cut the supports that
+come back barren until one attempt exhausts with nothing improving left.
 
-Two properties are easy to get backwards, and both are load-bearing:
+Only an *exhausted* subset search may be cut on, and the obvious stronger cut form is
+unsound -- `certify.jl` and `cuts.jl` below say why.
 
-1. **It prices first and certifies second.** The ordinary outcome of an attempt is a
-   column, not a proof. That is the mode working as designed.
-2. **The no-good cuts are the mechanism, not an optimization on top of it.** A cut-free
-   round is exactly this loop's round 1, and round 1 does not certify. The relaxation's
-   slack is orders of magnitude larger than the margin a converged master leaves.
+## The certification round
 
-The cut direction also matters: only an *exhausted* subset search may be cut on, and the
-obvious stronger cut form is unsound. See `certify.jl` below for why.
+{{autodocs opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/certification}}
 
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/data.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/clustering.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/relaxation.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/cuts.jl",
-]
-```
+## Guiding and refinement
 
-### The certification round
-
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/results.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/common.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/round.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl",
-]
-```
-
-### Guiding and refinement
-
-```@autodocs
-Modules = [StationSelection]
-Pages = [
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/guiding/guide.jl",
-    "opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/refinement/refine.jl",
-]
-```
+{{autodocs opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/guiding opt/label_setting/joint_routing_assignment/relaxed_cluster/utils/refinement}}
