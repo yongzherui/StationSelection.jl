@@ -49,6 +49,13 @@ const MAX_STOPS = parse(Int, get(ENV, "LP_MAX_STOPS", "4"))
 const ORACLE = Symbol(get(ENV, "LP_ORACLE", "column_generation"))
 const SUB_MODE = Symbol(get(ENV, "LP_SUB_MODE", "exact"))
 const SUB_K = parse(Int, get(ENV, "LP_SUB_K", "0"))
+# Two-tier pricing (`:relaxed_cluster_two_tier`) needs a macro count K1 on top of the meso
+# count K2=SUB_K, and it is REQUIRED by that mode rather than optional. MEASURED at n=40
+# with K2=24: K1=14-16 is the optimum, turning a 22-150s meso sweep into 0.2-1.4s for the
+# pair with the same column priced; K1<=8 is nearly worthless and K1>=18 pays real time in
+# the macro sweep itself. 0 means "not set", which is an error under the two-tier mode.
+const SUB_K1 = parse(Int, get(ENV, "LP_SUB_K1", "0"))
+const ALIGNED_MAX = parse(Int, get(ENV, "LP_ALIGNED_MAX", "15"))
 const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "separation"))
 const THREADS = parse(Int, get(ENV, "LP_THREADS", "1"))
 # Solve the per-scenario subproblems concurrently. Shortens the wall only -- it does not
@@ -69,7 +76,9 @@ const CG_PRICE_LIMIT = parse(Float64, get(ENV, "LP_CG_PRICE_LIMIT", "600.0"))
 @printf("n=%d s=%d p=%d seed=%d max_stops=%d | oracle %s\n",
         N, S, P, SEED, MAX_STOPS, ORACLE)
 @printf("pricer %s%s | lpo_completion %s | master threads %s\n",
-        SUB_MODE, SUB_K > 0 ? " (K=$SUB_K)" : "", LPO_COMPLETION,
+        SUB_MODE,
+        SUB_K1 > 0 ? " (K2=$SUB_K, K1=$SUB_K1, aligned<=$ALIGNED_MAX)" :
+            (SUB_K > 0 ? " (K=$SUB_K)" : ""), LPO_COMPLETION,
         THREADS > 0 ? string(THREADS) : "auto")
 @printf("budgets: %.0fs per pricing round, %.0fs total Benders loop | parallel scenarios %s (%d julia threads)\n",
         CG_PRICE_LIMIT, TOTAL_LIMIT, PARALLEL ? "on" : "off", Threads.nthreads())
@@ -82,9 +91,17 @@ formulation = AggregateODRouteJointRoutingAssignmentFormulation(
 flush(stdout)
 
 is_enum = ORACLE === :direct_enumeration
-pricing = is_enum ? CGPricingConfig() :
-    (SUB_K > 0 ? CGPricingConfig(mode=SUB_MODE, relaxed_cluster_count=SUB_K) :
-                 CGPricingConfig(mode=SUB_MODE))
+pricing = if is_enum
+    CGPricingConfig()
+elseif SUB_K1 > 0
+    CGPricingConfig(mode=SUB_MODE, relaxed_cluster_count=SUB_K,
+                    relaxed_cluster_macro_count=SUB_K1,
+                    relaxed_cluster_aligned_subset_max=ALIGNED_MAX)
+elseif SUB_K > 0
+    CGPricingConfig(mode=SUB_MODE, relaxed_cluster_count=SUB_K)
+else
+    CGPricingConfig(mode=SUB_MODE)
+end
 config = THREADS > 0 ?
     SolverOptions(silent=true, time_limit_sec=600.0, threads=THREADS) :
     SolverOptions(silent=true, time_limit_sec=600.0)

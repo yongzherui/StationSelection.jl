@@ -82,6 +82,12 @@ export LP_SUB_MODE="${LP_SUB_MODE:-exact}"
 if [[ "$LP_SUB_MODE" == "relaxed_cluster" || "$LP_SUB_MODE" == "relaxed_cluster_two_tier" ]]; then
     export LP_SUB_K="${LP_SUB_K:-$(( (LP_N * 6 + 9) / 10 ))}"
 fi
+# Two-tier REQUIRES a macro count. Derived from the measured optimum rather than fixed:
+# K1=14-16 at n=40 with K2=24, i.e. about 0.62*K2, and K1<=8 is nearly worthless while
+# K1>=18 pays real time in the macro sweep.
+if [[ "$LP_SUB_MODE" == "relaxed_cluster_two_tier" ]]; then
+    export LP_SUB_K1="${LP_SUB_K1:-$(( (LP_SUB_K * 62 + 50) / 100 ))}"
+fi
 export LP_THREADS="${LP_THREADS:-1}"
 export LP_TOTAL_LIMIT="${LP_TOTAL_LIMIT:-1800.0}"
 export LP_CG_PRICE_LIMIT="${LP_CG_PRICE_LIMIT:-600.0}"
