@@ -1,0 +1,2 @@
+n	s	p	seed	max_stops	oracle	status	objective	iters	cuts	lower_bound	gap	stop_reason	wall	master_sec	sub_sec	enum_sec	price_total	price_phase1	price_separation	pool	lpo_calls	lpo_rounds	lpo_rows	lpo_gain	core_slack	scope	node
+15	3	8	42	4	column_generation_activated_lpo	OPTIMAL	28384.120679648422	6	12	28384.120679648422	0.0	converged	23.5	0.03	7.74	0.0	5.61	4.31	1.29	445	18	36	1987	337441.367	0.3333333333333333	full_route_universe	node2426
