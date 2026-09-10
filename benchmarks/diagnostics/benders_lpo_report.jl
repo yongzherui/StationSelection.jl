@@ -57,16 +57,17 @@ for key in sort(instances)
     here = [r for r in rows if inst(r) == key]
     byarm = Dict(r["oracle"] => r for r in here)
     @printf("\n%s\n=== %s ===\n", repeat("=", 100), key)
-    @printf("%-34s %9s %6s %6s %9s %9s %9s %8s %s\n",
-            "oracle", "status", "iters", "cuts", "wall", "pricing", "objective", "pool",
-            "node")
+    @printf("%-30s %9s %5s %5s %8s %8s %8s %8s %10s %7s\n",
+            "oracle", "status", "it", "cuts", "price", "restr", "full", "sep",
+            "objective", "pool")
     for a in ARMS
         haskey(byarm, a) || continue
         r = byarm[a]
-        @printf("%-34s %9s %6d %6d %9.1f %9.1f %9.2f %8d %s\n",
+        @printf("%-30s %9s %5d %5d %8.1f %8.1f %8.1f %8.1f %10.2f %7d\n",
                 short[a], r["status"], int(r, "iters"), int(r, "cuts"),
-                num(r, "wall"), num(r, "price_total"), num(r, "objective"),
-                int(r, "pool", 0), get(r, "node", "?"))
+                num(r, "price_total", 0.0), num(r, "price_restricted", 0.0),
+                num(r, "price_full", 0.0), num(r, "price_separation", 0.0),
+                num(r, "objective"), int(r, "pool", 0))
     end
     missing_arms = [a for a in ARMS if !haskey(byarm, a) &&
                     a != "column_generation_activated"]
@@ -109,9 +110,17 @@ for key in sort(instances)
        haskey(byarm, "column_generation_activated_warm_start")
         c, w = byarm["column_generation"], byarm["column_generation_activated_warm_start"]
         pc, pw = num(c, "price_total"), num(w, "price_total")
-        @printf("  warm_start vs plain CG: pricing %.1fs -> %.1fs (%.2fx), wall %.1fs -> %.1fs, cuts %+d, iters %+d\n",
-                pc, pw, pc <= 0 ? NaN : pw / pc, num(c, "wall"), num(w, "wall"),
+        @printf("  warm_start vs plain CG: pricing %.1fs -> %.1fs (%.2fx), cuts %+d, iters %+d\n",
+                pc, pw, pc <= 0 ? NaN : pw / pc,
                 int(w, "cuts") - int(c, "cuts"), int(w, "iters") - int(c, "iters"))
+        # The decisive split: plain CG's pricing is ALL full-universe. If the warm start's
+        # own full-universe time is much smaller, the warm pool genuinely shortened the
+        # expensive search; if it is comparable and only the restricted phase was added, the
+        # win is elsewhere (a smaller pool, fewer master iterations) and the search itself
+        # was never the lever.
+        fc, fw = num(c, "price_full", 0.0), num(w, "price_full", 0.0)
+        @printf("    full-universe search only: %.1fs -> %.1fs (%.2fx) | warm start also spent %.1fs restricted\n",
+                fc, fw, fc <= 0 ? NaN : fw / fc, num(w, "price_restricted", 0.0))
     end
 end
 

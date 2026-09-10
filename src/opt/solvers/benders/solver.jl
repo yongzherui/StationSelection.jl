@@ -72,6 +72,18 @@ struct BendersSolver <: AbstractSolver
     optimality_tol::Float64
     subproblem::BendersSubproblemConfig
     total_time_limit_sec::Float64
+    # Solve the per-scenario subproblems concurrently. They are independent at a fixed
+    # incumbent -- separate JuMP models, separate Gurobi environments, no shared state, and
+    # nothing written to the master inside the loop -- and they are ~99% of the wall, so
+    # this is the one place scenario-level parallelism belongs (the pricing round's own
+    # docstring says so: a Benders subproblem model holds ONE scenario, so there is nothing
+    # to parallelise inside a round).
+    #
+    # Default `false` because the label-setting pricer may thread internally, and running
+    # both levels oversubscribes: 3 scenarios on 4 threads leaves the searches nothing.
+    # It shortens the wall; it does NOT enlarge any budget, and it cannot turn an
+    # inconclusive certification into a conclusive one.
+    parallel_scenarios::Bool
     iteration_callback::Union{Nothing, Function}
 
     function BendersSolver(;
@@ -80,6 +92,7 @@ struct BendersSolver <: AbstractSolver
             optimality_tol::Number=1e-6,
             subproblem::BendersSubproblemConfig=BendersSubproblemConfig(),
             total_time_limit_sec::Number=Inf,
+            parallel_scenarios::Bool=false,
             iteration_callback::Union{Nothing, Function}=nothing,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -87,6 +100,6 @@ struct BendersSolver <: AbstractSolver
         total_time_limit_sec > 0 ||
             throw(ArgumentError("total_time_limit_sec must be positive"))
         new(config, max_iterations, Float64(optimality_tol), subproblem,
-            Float64(total_time_limit_sec), iteration_callback)
+            Float64(total_time_limit_sec), parallel_scenarios, iteration_callback)
     end
 end

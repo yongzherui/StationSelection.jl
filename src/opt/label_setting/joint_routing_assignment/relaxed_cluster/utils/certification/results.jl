@@ -84,6 +84,9 @@ struct RelaxedClusterCertificationResult
     relaxed_rc_bound::Float64
     inconclusive_scenarios::Vector{Int}
     scenarios_run::Vector{Int}
+    # Parallel to `inconclusive_scenarios`: why each one came back inconclusive. See
+    # `RelaxedClusterNoGoodResult.reason` for the values and why this is worth carrying.
+    inconclusive_reasons::Vector{Symbol}
 end
 
 """
@@ -122,7 +125,25 @@ struct RelaxedClusterNoGoodResult
     last_subset_size::Int
     trace::Vector{NamedTuple}
     candidates::Vector{Any}
+    # WHICH exit produced an `:inconclusive`, because the loop has several and they want
+    # OPPOSITE fixes -- a finer partition versus more time -- while being externally
+    # indistinguishable. An n=40 attempt reported "inconclusive after 31.8s" against a
+    # nominal 1800s budget, and the elapsed time alone pointed at the wrong cause twice.
+    #   :deadline            -- the round's own slice was already spent
+    #   :relaxed_not_exhausted -- the relaxed guide search ran out of its half-slice
+    #   :subset_no_time      -- no time left to start the real subset search
+    #   :subset_not_exhausted -- the subset search was truncated, so barrenness is unproven
+    #   :cut_mask_full       -- all 64 cut bits used; no further cut can be recorded
+    #   :round_cap           -- RELAXED_CLUSTER_MAX_CUT_ROUNDS rounds without a conclusion
+    # `:none` on a conclusive outcome.
+    reason::Symbol
 end
+
+# Keeps the pre-`reason` construction sites (`two_tier/loop.jl`) working unchanged; only
+# the exits that can actually BE inconclusive need to name a reason.
+RelaxedClusterNoGoodResult(outcome, rounds, cuts_added, last_subset_size, trace, candidates) =
+    RelaxedClusterNoGoodResult(outcome, rounds, cuts_added, last_subset_size, trace,
+                               candidates, :none)
 
 
 """

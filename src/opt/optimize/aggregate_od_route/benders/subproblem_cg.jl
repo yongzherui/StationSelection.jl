@@ -95,6 +95,16 @@ struct BendersSubproblemCGResult
     cg_iterations::Int
     columns_added::Int
     pricing_sec::Float64
+    # The total splits by WHICH universe the round searched, which is the question the
+    # activated family exists to answer: is a cheap oracle's win a shorter full-universe
+    # search, or merely a smaller column pool feeding one that is just as long?
+    #   restricted -- the dual completion was installed before pricing, so unbuilt stations
+    #     were driven out of the pricer's filter and the search was effectively built-only.
+    #   full -- no completion installed; the search covered every station.
+    # plain CG is all `full`; activated and activated_lpo are all `restricted`; only
+    # `:column_generation_activated_warm_start` has both, one per phase.
+    restricted_pricing_sec::Float64
+    full_pricing_sec::Float64
     lp_sec::Float64
     certifications::Int
 end
@@ -152,6 +162,8 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
     cg_iterations = 0
     columns_added = 0
     pricing_sec = 0.0
+    restricted_pricing_sec = 0.0
+    full_pricing_sec = 0.0
     lp_sec = 0.0
     certifications = 0
 
@@ -164,11 +176,14 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
         status = JuMP.termination_status(sm)
         status == MOI.OPTIMAL || return BendersSubproblemCGResult(
             scenario, false, "lp_$(status)", cg_iterations, columns_added,
-            pricing_sec, lp_sec, certifications,
+            pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
         )
 
         duals = extract_joint_routing_assignment_duals(sm)
-        if activated && !(warm_start && phase == 2)
+        # Whether THIS round searches the restricted or the full universe -- the completion
+        # is what restricts it, so installing it and being restricted are the same fact.
+        restricted_round = activated && !(warm_start && phase == 2)
+        if restricted_round
             # BEFORE pricing, deliberately. The completion raises `gamma` to `alpha_p` on
             # unbuilt stations, which drives every candidate through such a station to
             # `rho <= 0` -- so the pricer's own filter restricts the search to the activated
@@ -216,7 +231,35 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                 time_limit = config.cg_pricing_time_limit_sec,
             )
         end
-        pricing_sec += time() - t_price
+        round_sec = time() - t_price
+        pricing_sec += round_sec
+        if restricted_round
+            restricted_pricing_sec += round_sec
+        else
+            full_pricing_sec += round_sec
+        end
+
+        if certifying && certified_now && warm_start && phase == 1
+            # Phase 1 certified. That is a VALUE certificate, not the end of the solve: the
+            # duals it certified against are the closed-form-completed ones, so returning
+            # here would hand back exactly the plain activated oracle's weak cut while still
+            # calling itself a warm start. Switch phases and re-price the full universe at
+            # the RAW duals, which is the whole point of this oracle.
+            #
+            # This branch has to exist separately because it sits BEFORE the `isempty(columns)`
+            # exit that handles the search-based pricers -- a certifying round returns an
+            # empty column vector when it certifies, and it never sets the model's exhausted
+            # flag, so the phase switch down there is unreachable under :relaxed_cluster.
+            phase = 2
+            if config.verbose
+                println("      [cg s=$scenario it=$iteration] phase 1 (built-only) " *
+                        "CERTIFIED in $(round(time() - t_price; digits=1))s; pool " *
+                        "$(length(sm[:joint_routing_assignment_columns])), entering " *
+                        "phase 2 (full universe, raw duals)")
+                flush(stdout)
+            end
+            continue
+        end
 
         if certifying && certified_now
             # The certificate IS the exhaustion proof; nothing further to search.
@@ -225,7 +268,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                                flush(stdout))
             return BendersSubproblemCGResult(
                 scenario, true, "converged_by_certification", cg_iterations, columns_added,
-                pricing_sec, lp_sec, certifications,
+                pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
             )
         end
 
@@ -233,11 +276,34 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             # Not certified and nothing harvested: the attempt was inconclusive (budget or
             # cut cap). No certificate means no cut -- exactly the same refusal as a
             # non-exhausted search, for the same reason.
-            config.verbose && (@printf("      [cg s=%d it=%d] certification INCONCLUSIVE after %.1fs\n",
-                                       scenario, iteration, time() - t_price); flush(stdout))
+            # WHICH exit fired matters more than the elapsed time, and the elapsed
+            # time alone actively misleads: an n=40 attempt reported "inconclusive after
+            # 31.8s" against a nominal 1800s budget, which reads as a budget shortfall and
+            # is not one.
+            #
+            # The scenario gets the FULL nominal budget here, not a slice of it. The round
+            # does divide its deadline by the scenario count, but only over the scenarios it
+            # was asked to price (`certification/round.jl`), and a Benders subproblem model
+            # holds exactly ONE scenario -- `only_scenarios = [scenario]` filters the list to
+            # length 1, so the divisor is 1. (Getting this backwards is what sent an earlier
+            # reading of the 31.8s exit chasing a budget shortfall that did not exist. The
+            # relaxed guide search does take half the remaining slice, but half of 1800s is
+            # still not 31.8s.) So the reason symbol, not the clock, is what says whether to
+            # spend more time or change the partition.
+            if config.verbose
+                reasons = isempty(cert.inconclusive_reasons) ? "unreported" :
+                    join(("s$sc=$rz" for (sc, rz) in
+                          zip(cert.inconclusive_scenarios, cert.inconclusive_reasons)), ", ")
+                @printf("      [cg s=%d it=%d] certification INCONCLUSIVE after %.1fs (nominal budget %.0fs, per-scenario slice ~%.0fs) | K=%d | relaxed bound %.4f | limited by: %s\n",
+                        scenario, iteration, time() - t_price,
+                        config.cg_pricing_time_limit_sec,
+                        config.cg_pricing_time_limit_sec / max(1, cert.n_scenarios),
+                        cert.n_clusters, cert.relaxed_rc_bound, reasons)
+                flush(stdout)
+            end
             return BendersSubproblemCGResult(
                 scenario, false, "certification_inconclusive", cg_iterations, columns_added,
-                pricing_sec, lp_sec, certifications,
+                pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
             )
         end
 
@@ -284,7 +350,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             return BendersSubproblemCGResult(
                 scenario, exhausted,
                 exhausted ? "converged" : "pricing_inconclusive",
-                cg_iterations, columns_added, pricing_sec, lp_sec, certifications,
+                cg_iterations, columns_added, pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
             )
         end
 
@@ -306,13 +372,13 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             # restricted-feasible and produce an invalid cut.
             return BendersSubproblemCGResult(
                 scenario, false, "dedup_stall", cg_iterations, columns_added,
-                pricing_sec, lp_sec, certifications,
+                pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
             )
         end
     end
 
     return BendersSubproblemCGResult(
         scenario, false, "iteration_limit", cg_iterations, columns_added,
-        pricing_sec, lp_sec, certifications,
+        pricing_sec, restricted_pricing_sec, full_pricing_sec, lp_sec, certifications,
     )
 end

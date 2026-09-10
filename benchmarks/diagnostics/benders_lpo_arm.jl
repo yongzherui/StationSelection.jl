@@ -51,18 +51,28 @@ const SUB_MODE = Symbol(get(ENV, "LP_SUB_MODE", "exact"))
 const SUB_K = parse(Int, get(ENV, "LP_SUB_K", "0"))
 const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "separation"))
 const THREADS = parse(Int, get(ENV, "LP_THREADS", "1"))
+# Solve the per-scenario subproblems concurrently. Shortens the wall only -- it does not
+# change any budget, so it cannot make a stuck certification succeed.
+const PARALLEL = get(ENV, "LP_PARALLEL_SCENARIOS", "0") == "1"
 const MAX_ITERS = parse(Int, get(ENV, "LP_MAX_ITERS", "3000"))
 const TOTAL_LIMIT = parse(Float64, get(ENV, "LP_TOTAL_LIMIT", "1800.0"))
 const OUT_DIR = get(ENV, "LP_OUT",
                     joinpath(@__DIR__, "results", "benders_lpo"))
 const MAX_ROUTES = 20_000_000
 const ENUM_LIMIT = 3600.0
+# Per-round pricing budget inside one subproblem. The n=30 failures were ALL
+# `certification_inconclusive` at 600 s -- the relaxed-cluster attempt ran out of budget and
+# proved nothing, and a cut may only come from an exhausted round. So this is the parameter
+# to raise at large n, not the iteration cap.
+const CG_PRICE_LIMIT = parse(Float64, get(ENV, "LP_CG_PRICE_LIMIT", "600.0"))
 
 @printf("n=%d s=%d p=%d seed=%d max_stops=%d | oracle %s\n",
         N, S, P, SEED, MAX_STOPS, ORACLE)
 @printf("pricer %s%s | lpo_completion %s | master threads %s\n",
         SUB_MODE, SUB_K > 0 ? " (K=$SUB_K)" : "", LPO_COMPLETION,
         THREADS > 0 ? string(THREADS) : "auto")
+@printf("budgets: %.0fs per pricing round, %.0fs total Benders loop | parallel scenarios %s (%d julia threads)\n",
+        CG_PRICE_LIMIT, TOTAL_LIMIT, PARALLEL ? "on" : "off", Threads.nthreads())
 flush(stdout)
 
 problem, k, _ = benchmark_problem(@__DIR__, "LP", N, P, S, SEED)
@@ -87,9 +97,10 @@ solver = BendersSolver(
         max_routes=MAX_ROUTES, enumeration_time_limit_sec=ENUM_LIMIT,
         pricing=pricing,
         lpo_completion=LPO_COMPLETION,
-        cg_pricing_time_limit_sec=600.0, max_cg_iterations=500,
+        cg_pricing_time_limit_sec=CG_PRICE_LIMIT, max_cg_iterations=500,
         verbose=true),
-    total_time_limit_sec=TOTAL_LIMIT)
+    total_time_limit_sec=TOTAL_LIMIT,
+    parallel_scenarios=PARALLEL)
 
 t0 = time()
 result = run_opt(problem, formulation, solver)
@@ -105,9 +116,11 @@ md = result.metadata
         md["benders_master_sec"], md["benders_subproblem_sec"],
         md["benders_enumeration_sec"])
 if get(md, "benders_cg_pool_final", 0) > 0
-    @printf("  CG: %d iters over %d rounds | pool %d | phase-1 pricing %.1fs\n",
+    @printf("  CG: %d iters over %d rounds | pool %d | pricing %.1fs (restricted %.1fs + full %.1fs)\n",
             get(md, "benders_cg_iterations", 0), get(md, "benders_cg_rounds", 0),
-            md["benders_cg_pool_final"], get(md, "benders_cg_pricing_sec", 0.0))
+            md["benders_cg_pool_final"], get(md, "benders_cg_pricing_sec", 0.0),
+            get(md, "benders_cg_restricted_pricing_sec", 0.0),
+            get(md, "benders_cg_full_pricing_sec", 0.0))
 end
 if get(md, "benders_cg_lpo_calls", 0) > 0
     @printf("  LPO: %d completions, %d LP rounds, %d rows, %d optimal | separation pricing %.1fs | gain %.3f | core slack %.4f\n",
@@ -128,7 +141,8 @@ row = joinpath(OUT_DIR, "n$(N)_s$(S)_p$(P)_seed$(SEED)_ms$(MAX_STOPS)_$(ORACLE).
 open(row, "w") do io
     println(io, join(["n", "s", "p", "seed", "max_stops", "oracle", "status", "objective",
                       "iters", "cuts", "lower_bound", "gap", "stop_reason", "wall",
-                      "master_sec", "sub_sec", "enum_sec", "price_total", "price_phase1",
+                      "master_sec", "sub_sec", "enum_sec", "price_total", "price_cg",
+                      "price_restricted", "price_full",
                       "price_separation", "pool", "lpo_calls", "lpo_rounds", "lpo_rows",
                       "lpo_gain", "core_slack", "scope", "node"], '\t'))
     println(io, join(string.([
@@ -141,6 +155,8 @@ open(row, "w") do io
         round(md["benders_enumeration_sec"]; digits=2),
         round(price_total; digits=2),
         round(get(md, "benders_cg_pricing_sec", 0.0); digits=2),
+        round(get(md, "benders_cg_restricted_pricing_sec", 0.0); digits=2),
+        round(get(md, "benders_cg_full_pricing_sec", 0.0); digits=2),
         round(get(md, "benders_cg_lpo_pricing_sec", 0.0); digits=2),
         get(md, "benders_cg_pool_final", 0), get(md, "benders_cg_lpo_calls", 0),
         get(md, "benders_cg_lpo_rounds", 0), get(md, "benders_cg_lpo_rows", 0),

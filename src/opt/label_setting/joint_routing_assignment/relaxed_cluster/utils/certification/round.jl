@@ -109,6 +109,7 @@ function _run_relaxed_cluster_certification_round(
     # coincide and no special case is needed for an all-vacuous round.
     rc_bound = Inf
     inconclusive_scenarios = Int[]
+    inconclusive_reasons = Symbol[]
     for (i, r) in enumerate(results)
         if isnothing(r)
             certified_count += 1     # nothing to price: vacuously certified
@@ -122,6 +123,7 @@ function _run_relaxed_cluster_certification_round(
         else
             all_conclusive = false
             push!(inconclusive_scenarios, scenarios[i])
+            push!(inconclusive_reasons, r.reason)
         end
         # Only an EXHAUSTED sweep bounds from below; see the struct docstring. An
         # inconclusive scenario poisons the whole round's bound rather than being skipped,
@@ -140,7 +142,7 @@ function _run_relaxed_cluster_certification_round(
     return RelaxedClusterCertificationResult(
         certified, any_refuted, conclusive_and_complete, certified_count, length(scenarios),
         clustering.n_clusters, time() - t_start, certified ? Any[] : harvested, rc_bound,
-        inconclusive_scenarios, collect(scenarios),
+        inconclusive_scenarios, collect(scenarios), inconclusive_reasons,
     )
 end
 

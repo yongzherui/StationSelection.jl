@@ -179,14 +179,15 @@ function _relaxed_cluster_certify_scenario(
     # out at each of the eight `return`s made the exits impossible to compare at a glance --
     # which of them differed in more than the outcome symbol was a question you had to
     # answer by diffing argument lists. Only `outcome` and the round count ever vary.
-    _result(outcome::Symbol, n_rounds::Int) = RelaxedClusterNoGoodResult(
-        outcome, n_rounds, length(cluster_sets), last_subset_size,
-        trace, collect(values(harvested)),
-    )
+    _result(outcome::Symbol, n_rounds::Int, reason::Symbol=:none) =
+        RelaxedClusterNoGoodResult(
+            outcome, n_rounds, length(cluster_sets), last_subset_size,
+            trace, collect(values(harvested)), reason,
+        )
 
     for round in 1:max_rounds
         remaining = deadline - time()
-        remaining > 0 || return _result(:inconclusive, round - 1)
+        remaining > 0 || return _result(:inconclusive, round - 1, :deadline)
 
         # ---- (1) the relaxed guide search, respecting every cut so far.
         # Reserve half of the remaining pricing budget for the real exact search below. If
@@ -208,7 +209,8 @@ function _relaxed_cluster_certify_scenario(
             # reward at all.
             surviving_min = isempty(labels) ? Inf : minimum(l.reduced_cost for l in labels)
             _trace_row!(round, surviving_min, 0, 0, Inf, false)
-            return _result(exhausted ? :certified : :inconclusive, round)
+            return _result(exhausted ? :certified : :inconclusive, round,
+                           exhausted ? :none : :relaxed_not_exhausted)
         end
 
         # ---- (3) union the supports of the best few relaxed routes. They guide one real
@@ -237,7 +239,7 @@ function _relaxed_cluster_certify_scenario(
         # Out of budget before the search could start: nothing was learned about this
         # support, and reading that as barren would cut a support that may well hold an
         # improving route.
-        search.outcome === :no_time && return _result(:inconclusive, round)
+        search.outcome === :no_time && return _result(:inconclusive, round, :subset_no_time)
 
         # `subset_checked = true`: a subset search really ran (or was vacuously settled by
         # there being no candidates in `S`). `rc >= -tol` -- including `Inf`, meaning no
@@ -252,7 +254,7 @@ function _relaxed_cluster_certify_scenario(
         # Only an EXHAUSTED subset search proves the support barren. Cutting on a
         # timed-out one would remove a support that may well hold an improving route,
         # and the loop could then certify falsely.
-        search.exhausted || return _result(:inconclusive, round)
+        search.exhausted || return _result(:inconclusive, round, :subset_not_exhausted)
 
         # The support is proved barren, so cut it. Cuts a new one subsumes are NOT pruned:
         # `Cut(T_new)` does imply `Cut(T_old)` for `T_old ⊆ T_new`, so the older cut is
@@ -260,7 +262,7 @@ function _relaxed_cluster_certify_scenario(
         # scenario attempt at n=30/40) there is nothing there to win -- see
         # `../../README.md`.
         _relaxed_cluster_add_cut!(cluster_sets, support) ||
-            return _result(:inconclusive, round)
+            return _result(:inconclusive, round, :cut_mask_full)
 
         # ---- refinement. The combined support is barren, so every retained guide is
         # spurious. Inspect all of their witnesses and refine against the strongest
@@ -273,7 +275,7 @@ function _relaxed_cluster_certify_scenario(
         relaxed, node_clusters = refined
         partition_epoch += 1
     end
-    return _result(:inconclusive, max_rounds)
+    return _result(:inconclusive, max_rounds, :round_cap)
 end
 
 """

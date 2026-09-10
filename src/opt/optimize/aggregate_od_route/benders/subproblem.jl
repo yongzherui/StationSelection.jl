@@ -200,16 +200,38 @@ function _solve_joint_routing_assignment_benders_subproblems(
     )::JointRoutingAssignmentBendersSubproblemResult
     builds = m[:benders_subproblem_builds]::Vector{BuildResult}
     t0 = time()
-    results = JointRoutingAssignmentBendersScenarioResult[]
-    total = 0.0
-    for build in builds
-        push!(results, _solve_one_joint_routing_assignment_benders_subproblem(
-            build, incumbent, solver,
-        ))
-        total += results[end].objective
+    # Results are written BY INDEX, never pushed: the cut builder pairs `results[i]` with
+    # `builds[i]`'s scenario, so completion order must not decide the ordering.
+    results = Vector{JointRoutingAssignmentBendersScenarioResult}(undef, length(builds))
+
+    # The scenarios are genuinely independent at a fixed `incumbent`: each holds its own
+    # JuMP model with its own `Gurobi.Optimizer()` (hence its own environment), each fixes
+    # `y` and grows the pool only in ITS model, and none of them touches the master `m` --
+    # the stats accumulation that does is called after the loop, single-threaded. So this is
+    # a wall-clock win with no shared state, and subproblems are ~99% of the loop's time.
+    #
+    # Opt-in, because the pricer inside each subproblem may thread internally and running
+    # both levels oversubscribes: with `nthreads` at 4 and 3 scenarios there is nothing left
+    # for the label search. Measure before turning it on for a given cell.
+    parallel = solver.parallel_scenarios && length(builds) > 1 && Threads.nthreads() > 1
+    if parallel
+        Threads.@threads for i in eachindex(builds)
+            results[i] = _solve_one_joint_routing_assignment_benders_subproblem(
+                builds[i], incumbent, solver,
+            )
+        end
+    else
+        for i in eachindex(builds)
+            results[i] = _solve_one_joint_routing_assignment_benders_subproblem(
+                builds[i], incumbent, solver,
+            )
+        end
     end
+
+    total = sum(r.objective for r in results; init = 0.0)
     _accumulate_benders_cg_stats!(m, results)
-    return JointRoutingAssignmentBendersSubproblemResult(results, total, time() - t0)
+    return JointRoutingAssignmentBendersSubproblemResult(collect(results), total,
+                                                         time() - t0)
 end
 
 function _solve_one_joint_routing_assignment_benders_subproblem(
@@ -361,7 +383,8 @@ function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
     any(r -> !isnothing(r.cg), results) || return nothing
     stats = get!(m.obj_dict, :benders_cg_stats) do
         Dict{String, Any}("iterations" => 0, "columns_added" => 0,
-                          "pricing_sec" => 0.0, "lp_sec" => 0.0, "rounds" => 0,
+                          "pricing_sec" => 0.0, "restricted_pricing_sec" => 0.0,
+                          "full_pricing_sec" => 0.0, "lp_sec" => 0.0, "rounds" => 0,
                           "certifications" => 0)
     end
     for r in results
@@ -369,6 +392,10 @@ function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
         stats["iterations"] += r.cg.cg_iterations
         stats["columns_added"] += r.cg.columns_added
         stats["pricing_sec"] += r.cg.pricing_sec
+        # Split by searched universe -- see BendersSubproblemCGResult for why this is the
+        # number that separates "shorter full search" from "smaller pool, same search".
+        stats["restricted_pricing_sec"] += r.cg.restricted_pricing_sec
+        stats["full_pricing_sec"] += r.cg.full_pricing_sec
         stats["lp_sec"] += r.cg.lp_sec
         stats["certifications"] += r.cg.certifications
         stats["rounds"] += 1

@@ -389,6 +389,22 @@ function _benders_lpo_completion!(
 
     settings = _benders_subproblem_cg_settings(config)
     pricing_formulation = sm[:joint_routing_assignment_pricing_formulation]
+    # HOW separation asks its question depends on the mode, because the two pricers prove
+    # "no violated row" in different ways -- and `_run_pricing_round` THROWS on the
+    # certifying modes (`pricing_round.jl`: a relaxed-cluster round is a relaxation with a
+    # cut loop around it, not a label-setting context), so this cannot be one code path.
+    #
+    #   search-based (:exact / :darp / :darp_modified) -- exhaust the route universe at the
+    #     candidate duals. Empty AND exhausted means no row is violated.
+    #   certifying (:relaxed_cluster / :relaxed_cluster_two_tier) -- run the relaxation,
+    #     whose minimum reduced cost LOWER-BOUNDS every real route's. `certified` therefore
+    #     means no real route is over-credited, which IS separation's stopping test; and a
+    #     refuted attempt harvests the real columns its exhaustive subset searches found,
+    #     which are exactly the violated rows separation wants. So the certifying pricer is
+    #     not merely compatible with separation -- it is the natural way to run it at the
+    #     sizes where the exact search stops exhausting.
+    certifying = sm[:joint_routing_assignment_pricing_mode]::Symbol in
+        (:relaxed_cluster, :relaxed_cluster_two_tier)
     verified_o, verified_d = fallback_o, fallback_d
     status = "row_limit"
     rounds = 0
@@ -415,13 +431,30 @@ function _benders_lpo_completion!(
         for (key, v) in cand_o; gamma_o[key] = v; end
         for (key, v) in cand_d; gamma_d[key] = v; end
         t_sep = time()
-        columns = _run_pricing_round(
-            pricing_formulation, mapping, sm, (alpha, gamma_o, gamma_d), settings;
-            only_scenarios = [scenario],
-            time_limit = config.lpo_pricing_time_limit_sec,
-        )
+        no_violation = false
+        columns = if certifying
+            cert = cg_certification_round(
+                build, mapping, sm, (alpha, gamma_o, gamma_d), settings;
+                time_limit_sec = config.lpo_pricing_time_limit_sec,
+                iteration = round, only_scenarios = [scenario],
+            )
+            no_violation = cert.certified
+            cert.certified ? Any[] : _cg_materialize_certification_columns(
+                build, mapping, sm, (alpha, gamma_o, gamma_d), cert.candidates,
+            )
+        else
+            found = _run_pricing_round(
+                pricing_formulation, mapping, sm, (alpha, gamma_o, gamma_d), settings;
+                only_scenarios = [scenario],
+                time_limit = config.lpo_pricing_time_limit_sec,
+            )
+            # Empty alone is not a proof -- a search stopped by its budget also returns
+            # nothing. Only empty AND exhausted certifies.
+            no_violation = isempty(found) && _cg_pricing_exhausted(sm)
+            found
+        end
         sep_pricing_sec += time() - t_sep
-        if isempty(columns) && _cg_pricing_exhausted(sm)
+        if no_violation
             # Feasible for every row, and optimal over a relaxation of the true constraint
             # set -- hence optimal. This is the Pareto-optimal completion.
             verified_o, verified_d = cand_o, cand_d
