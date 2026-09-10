@@ -428,9 +428,81 @@ Repair the duals of an ACTIVATED subproblem so they are feasible for the full-un
 raise `gamma` on every `(p, station)` linking row whose station is NOT built at `incumbent`,
 to the smallest value that forces that triple's net reward non-positive.
 
-See `BendersSubproblemConfig`'s "activated subproblem" section for the validity proof. What
-this function has to get exactly right is HOW MUCH to raise, since that is the cut's
-strength.
+What this function has to get exactly right is HOW MUCH to raise, since that is the cut's
+strength. The validity proof is below, because it constrains the pricer this function reaches
+into -- keep them together.
+
+# Why this is valid
+
+A column's dual constraint decomposes over its assignment triples, because linking is
+per-assignment rather than per-route-node:
+
+    sum_{(p,j,k) in c} [ alpha_p - gammaO_pj - gammaD_pk ]  <=  f_c
+
+Setting `gammaO_pj := max(gammaO_pj, alpha_p)` for every unbuilt `j` (and likewise
+`gammaD_pk`) does three things at once:
+
+1. **It restricts the search for free.** `joint_routing_assignment_pricing_candidates`
+   computes `rho = alpha_p - gammaO_pj - gammaD_pk - walk` and drops candidates with
+   `rho <= 0`, so afterwards every candidate through an unbuilt station is dropped by the
+   pricer's own filter. No change to any shared pricing code.
+2. **It costs nothing at the anchor.** `yhat_j = 0` for those `j`, so the added terms vanish
+   from the dual objective and the cut stays exactly TIGHT at `yhat`.
+3. **It restores full-universe dual feasibility.** Any triple touching an unbuilt station now
+   has `alpha_p - gamma - gamma <= 0`. For a column `c` mixing such triples with triples
+   inside `S`, let `c''` be `c` with the out-of-`S` assignments dropped AND its unbuilt
+   visited nodes removed. Then
+
+       sum_{A_in} r <= f_{c''}                              (`c''` is in the searched universe)
+       f_{c''} <= f_c - w * sum_{A_out} demand_p * walk_p    (`tau_{c''} <= tau_c`; walk >= 0)
+       sum_{A_out} r <= w * sum_{A_out} walk_p              (the completion, per triple; demand >= 1)
+       => sum_c r <= f_c.
+
+**Removing the unbuilt nodes is not optional, and this is where the triangle inequality
+enters.** The restriction is NOT "routes unrestricted, candidates shrink" -- candidate
+generation is reward-driven, so the two are the same thing. `rho <= 0` drops the candidate
+(`pricing_round.jl`), `create_joint_routing_assignment_pricing_data` builds
+`assignments_by_origin`/`origin_layer_mask` from the survivors only, and both the seed
+(`exact/seed.jl`, candidate origins only) and the extension (`exact/extend.jl`, nodes
+proposed only from live origins and their opportunities' destinations) read exactly those.
+So an unbuilt station leaves the searched ROUTE universe too, and the same-route `c'` is
+never searched -- only the shortcut `c''` is. **`tau_{c''} <= tau_c` holds because the travel
+matrix is required to be metric package-wide** (the pricer's age pruning already asserts on
+violation), so this is a cross-cutting precondition, not a local assumption.
+
+**`max_wait_time` is not a hazard for that shortcut**, though an earlier version of this
+proof recorded it as one. Both route-feasibility conditions bound ELAPSED durations from
+above -- the pickup window is `label.time <= max_wait_time`, the ride limit is
+`origin_age + travel <= detour_factor * routing_cost(j,k)` -- and removing a stop only
+decreases both. Nothing here measures wait against a fixed request clock, so a shortened
+route cannot make a retained passenger wait longer. (`A -> U -> A -> B` with the pickup at
+the second `A` is fine too: age is measured from the last visit to that station, so
+collapsing the two visits leaves the in-vehicle time unchanged.)
+
+For the same reason, "a column touching an unbuilt station is pinned to `theta = 0` by its
+own linking row" -- true of a column with an unbuilt ASSIGNMENT -- does NOT cover one whose
+route merely passes through an unbuilt node. Those are excluded from mattering by being
+dominated by their own shortcut, not by being pinned.
+
+**A free safety property**: the strong-duality assertion
+`sum(alpha) - sum(Gamma .* yhat) == objective` still holds, because the completion only ever
+touches stations with `yhat_j = 0`. So if it ever raised a `gamma` on a BUILT station, that
+assertion fires immediately.
+
+# The price is cut strength
+
+Sound but weak, and the cause is which term gets credited rather than the bound being loose
+in general: per unbuilt `(p,j)` the completion must cancel `alpha_p` and credits only the
+walking term (0.2-1.2% of it), while ignoring the route travel it should charge for
+(25-85%). With `walk_cost_weight = 0.1` against `route_regularization_weight = 10.0` that is
+the wrong term by two orders of magnitude, so `gamma_pj` lands at essentially `alpha_p`.
+
+The consequence is not "more iterations" but no convergence beyond n=10. Measured cut
+strength against the exact value function, and the numbers behind both claims, are in
+`notes/2026-09-10_activated_dual_completion_verified_and_why_weak.md` (job 22472084:
+17/17 checks, 8 anchors, all 86 master-feasible station sets, `min rc = -1.8e-12`).
+`:column_generation_activated_lpo` exists to buy that strength back -- see
+`benders/completion_lpo.jl`.
 
 # The bound, and why it credits the walking term
 

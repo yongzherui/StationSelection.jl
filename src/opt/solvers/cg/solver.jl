@@ -47,56 +47,32 @@ the answer. `metadata["cg_certifying_rounds"]` counts how often it fired, and ea
 iteration log row carries `certifying_pricing` plus the `pricing_limit_sec` actually
 used.
 
-## The `:relaxed_cluster` pricing mode
+## Pricing modes that certify
 
-`pricing.mode = :relaxed_cluster` (which requires `pricing.relaxed_cluster_count = K`) is
-both halves of an iteration at once: it finds columns, and it is the only search that can
-prove there are none left. It runs each iteration under the same `pricing_time_limit_sec`
-in place of an ordinary pricing round. Available only on formulations implementing
-`cg_certification_supported`/`cg_certification_round` -- a `:relaxed_cluster` mode on one
-that supports neither is rejected up front, never silently ignored.
+Most pricers report "nothing improving left" only for the universe they searched. The
+`:relaxed_cluster` modes instead price a relaxation that lower-bounds every real route's
+reduced cost, so exhausting it proves no real improving column exists at all. What the
+mode *is* belongs with the mode -- see [`CGPricingConfig`](@ref) for selecting it and
+`relaxed_cluster/utils/certification/certify.jl` for the mechanism.
 
-The mechanism (the relaxation, the no-good cuts on barren supports, and why the cuts are
-the mechanism rather than an optimization on top of it) is documented once, at
-`label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl`
-and in this package's `CLAUDE.md`. What matters *here* is that an attempt returns exactly
-one of three outcomes, because they drive this struct's budgets and its iteration log:
+Three things about it reach into this struct, and only these three:
 
-  *certified* -- nothing in the relaxation fell below `-reduced_cost_tol`, so no real
-    improving column exists. The loop stops with `cg_converged=true` and
-    `cg_stop_reason="converged_by_certification"`. The certificate covers the **full route
-    universe**, whatever pricer found the columns, so `cg_optimality_scope` reads
-    `"full_route_universe"` and `cg_certified_by_relaxation=true` -- including when a
-    `pricing.warm_start_mode=:station_simple` phase found most of them.
-
-  *negative_rc_column_found* -- an exhaustive real search over some cluster support found
-    a genuinely improving column. Those columns ARE this iteration's pricing result, so
-    the attempt *is* the pricing round rather than an overhead on top of one. **This is
-    the mode working, not failing:** it prices first and certifies second, and ~96% of
-    attempts end here.
-
-  *inconclusive* -- out of budget (or of cut rounds), with nothing harvested. The only
-    outcome that both proves nothing and makes no progress, and so the only one that
-    escalates: the inconclusive **scenarios** are re-run at
-    `certifying_pricing_time_limit_sec` (`_cg_escalate_inconclusive_scenarios!`). A second
-    inconclusive result ends the loop with `cg_stop_reason="pricing_inconclusive"`.
-
-**The generic two-tier re-price above is unreachable in this mode**, deliberately: when a
-round comes back empty, escalating the CERTIFIER is the cheaper buy, since the relaxed
-search runs on `K` cluster nodes and the exact pricer's cost is super-linear in node
-count. The guard is `!it.relaxed_cluster_pricing` in `loop.jl`, so `cg_certifying_rounds`
-stays 0 for a `:relaxed_cluster` run and its escalated attempts appear as extra
-`cg_certification_rounds` with `*_escalated` outcomes instead.
-
-MEASURED, and NOT reproducible under that guard: 4 of 45 arm runs (serial) and 1 of 35
-(parallel) reached OPTIMAL *only* because the two-tier round certified where the relaxation
-did not, all but one at `K/n = 0.4`. Those arms must have run before the exclusion, so read
-it as a fact about the arms as they ran and re-derive it before relying on it.
-
-Cost is reported by `cg_certification_rounds`/`cg_certification_sec`, split by outcome into
-`cg_certification_negative_rc_column_rounds` and `cg_certification_inconclusive_rounds` --
-two different things, and only the second is a failure. Only `inconclusive` is movable by
-`pricing_time_limit_sec`/`certifying_pricing_time_limit_sec`.
+1. **The certification attempt replaces the pricing round.** It runs under this struct's
+   `pricing_time_limit_sec`, not on top of it.
+2. **Its outcome drives the budgets.** `certified` ends the loop
+   (`cg_stop_reason="converged_by_certification"`). `negative_rc_column_found` is the
+   ordinary outcome and means the round priced columns, so the loop simply iterates.
+   `inconclusive` is the only one that both proves nothing and makes no progress, so it is
+   the only one that escalates -- per **scenario**, to
+   `certifying_pricing_time_limit_sec` (`_cg_escalate_inconclusive_scenarios!`). A second
+   inconclusive result stops the loop with `cg_stop_reason="pricing_inconclusive"`.
+3. **The generic two-tier re-price above does not apply**, deliberately: escalating the
+   certifier is the cheaper buy, since the relaxed search runs on `K` cluster nodes and the
+   exact pricer's cost is super-linear in node count. The guard is
+   `!it.relaxed_cluster_pricing` in `loop.jl`, so `cg_certifying_rounds` stays 0 for these
+   runs and escalated attempts show up as extra `cg_certification_rounds` instead. The
+   fallback used to be reachable here; the measured cost of removing it is in
+   `notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`.
 
 ## Total budget (`total_time_limit_sec`)
 
