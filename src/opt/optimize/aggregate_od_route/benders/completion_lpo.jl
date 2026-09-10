@@ -23,9 +23,14 @@ Dual feasibility needs, for every column `c` in the universe,
 `sum_{A(c)} [alpha_p - gamma~O - gamma~D] <= f_c`. Splitting `A(c)` by whether both stations
 are built:
 
-- `A_out(c) = {}` -- every term is fixed and the constraint ALREADY holds, because the
-  activated pricing exhausted over exactly those columns. These impose nothing on `g`, which
-  is what makes fixing the activated duals legitimate rather than an approximation.
+- `A_out(c) = {}` -- every term is fixed and the constraint ALREADY holds. These impose
+  nothing on `g`, which is what makes fixing the activated duals legitimate rather than an
+  approximation. Note the reason is NOT that "the activated pricing exhausted exactly those
+  columns": the restricted search covers columns whose *routes* are built-only too, and one
+  with all-built assignments may still pass through an unbuilt node. Such a column is
+  discharged by its own shortcut, which has the identical reward and (by the triangle
+  inequality) no greater cost -- the same argument that licenses the closed-form completion,
+  see `BendersSubproblemConfig`'s step 3.
 - `A_out(c) != {}` -- with `L_in(c) = sum_{A_in} [alpha_p - gammaO - gammaD]` known,
 
       sum_{free g in A_out(c)}  g  >=  b(c)
@@ -70,9 +75,11 @@ The rows above ARE the constraint set; they are just not all written down:
    ones.
 2. Solve `(LPC)` over the known rows.
 3. **Separate** by pricing with `gamma~` set to the candidate `g`. Any column returned with
-   negative reduced cost is a violated row. Note a column entirely inside `S` cannot be
-   returned, since `gamma~` agrees with `gamma_S` there and the activated pricing already
-   exhausted those -- so every violation genuinely touches an unbuilt station.
+   negative reduced cost is a violated row. Note a column with no out-of-`S` assignment
+   cannot be returned: `gamma~` agrees with `gamma_S` on every term it has, so its reduced
+   cost is whatever the activated solve already certified non-negative (directly if its route
+   was built-only, via its shortcut otherwise) -- so every violation genuinely touches an
+   unbuilt station.
 4. No violation AND the round exhausted ⇒ the candidate is feasible for ALL rows and optimal
    over a relaxation of the true problem, hence optimal. Otherwise add the row(s) and repeat.
 
@@ -101,8 +108,12 @@ permanently.
 The columns that DO touch an unbuilt station are discharged by *shortcutting*. Given `c`, let
 `c'` be `c` with the unbuilt stations dropped from its visit sequence, serving `A_in(c)` only:
 
-    tau_{c'} <= tau_c                                  (triangle inequality)
-    f_c = f_{c'} + w * sum_{A_out} demand_p * walk_p    (the dropped triples' walking)
+    tau_{c'} <= tau_c                                   (triangle inequality)
+    f_c >= f_{c'} + w * sum_{A_out} demand_p * walk_p   (the dropped triples' walking; the
+                                                         travel saving beta*(tau_c - tau_c')
+                                                         is DROPPED here, which is the whole
+                                                         reason this family is slack -- see
+                                                         the measurement below)
 
 `c'` visits only built stations, so `sum_{A_in} [alpha - gammaO - gammaD] <= f_{c'}` is the
 carried-over certificate, and the row for `c` then follows from

@@ -145,9 +145,13 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                                   :column_generation_activated_lpo,
                                   :column_generation_warm_start)
     # `:column_generation_warm_start` is a WARM START, not a restriction: phase 1
-    # prices built-only (cheap, and it already reaches the exact `Q_s(yhat)` -- a column
-    # touching an unbuilt station is pinned to `theta = 0` by its own `theta - y_j <= 0`
-    # row, so it can never improve the objective at a fixed `yhat`). Phase 1's exhaustion is
+    # prices built-only (cheap, and it already reaches the exact `Q_s(yhat)` -- a column with
+    # an unbuilt ASSIGNMENT is pinned to `theta = 0` by its own `theta - y_j <= 0` row, and
+    # one that merely routes through an unbuilt node is dominated by its own shortcut, which
+    # the restricted search does cover. MEASURED exact at every anchor tested,
+    # `benchmarks/diagnostics/benders_activated_completion_audit.jl`; note the pinning alone
+    # does NOT cover the second case, since linking is per assignment, not per visited
+    # node). Phase 1's exhaustion is
     # therefore a VALUE certificate only; the duals it leaves are feasible for the
     # completed-dual point, not for the raw one a cut would be read off here. So phase 2
     # drops the restriction and prices the full universe to exhaustion, and the cut is taken

@@ -420,23 +420,45 @@ the cost in master MIP solves. `:column_generation_activated_lpo` fixes that by 
 CUT's completion with a locally Pareto-optimal one (Magnanti-Wong, against an interior point
 from `_benders_core_point`'s max-min-slack LP), leaving `α` and the built-station `γ` fixed.
 
-**The LPO completion does no pricing and no row generation** — this is the whole point, and
-reintroducing separation would hand back the saving the activated solve bought. The completion
-problem has one row per column, but the activated certificate discharges all but a route-free
-family: a column touching no unbuilt station has its reduced cost unchanged by ANY completion,
-and one that does is discharged by *shortcutting* it past its unbuilt stations (`τ_{c'} ≤ τ_c`
-by the triangle inequality, which the travel matrix is required to satisfy package-wide). What
-survives is a condition on individual triples, written out in full and solved once:
+**The LPO completion DOES price — `lpo_completion=:separation` is the default and the only
+family that works.** The completion problem has one row per column; separation seeds those
+rows from the pool and generates the rest by pricing against each candidate `g`, and lowering
+`g` on the unbuilt stations re-admits them to the pricer's filter, so each separation round is
+a FULL-universe label search. Truncating is safe (it returns the last separation-verified
+completion, initialised to the closed-form bound), so validity never depends on the row
+generation converging.
+
+The pricing-free alternative exists and is `lpo_completion=:route_free`. It discharges the
+rows the activated certificate already holds (a column touching no unbuilt station has its
+reduced cost unchanged by ANY completion) and the rest by *shortcutting* past the unbuilt
+stations (`τ_{c''} ≤ τ_c` by the triangle inequality, required package-wide), leaving a
+condition on individual triples:
 
     gᴼ_pj + gᴰ_pk ≥ αₚ − w·demand_p·walk(o_p, d_p, (j,k))   for every triple with an unbuilt end
 
-This is a *relaxation* of the closed-form bound (which loads the whole requirement onto one
-side at the cheapest partner, and drops the `demand_p` factor the column cost actually
-charges — conservative, hence valid, but slack), so the closed-form point is always feasible
-for it and the LP can only match or beat it; `completion_lpo.jl` asserts that rather than
-assuming it. Note MW's usual normalisation row is **vacuous** here: every free variable sits
-on a coordinate with `ŷ_j = 0`, so every feasible completion is already tight at `ŷ` and the
-cut's value at the anchor is untouched — only its slope elsewhere changes.
+That is a *relaxation* of the closed-form bound (which loads the whole requirement onto one
+side at the cheapest partner and drops the `demand_p` factor), so the closed-form point is
+feasible for it and the LP can only match or beat it — `completion_lpo.jl` asserts that rather
+than assuming it. **MEASURED, and it recovers nothing:** 30 iterations / 77 cuts at n=10 s=3,
+identical to the plain closed form, versus 3 / 6 for separation. The reason is now measured
+too (`notes/2026-09-10_activated_dual_completion_verified_and_why_weak.md`): `demand_p == 1`
+on these instances, so `(T)` and the closed form are the same number up to letting the two
+endpoints split the requirement, and both credit the WALKING term (0.2–1.2% of the `αₚ` they
+must cancel) while ignoring route travel (25–85%). Do not read the route-free family as the
+LPO oracle's mechanism.
+
+Note MW's usual normalisation row is **vacuous** here: every free variable sits on a
+coordinate with `ŷ_j = 0`, so every feasible completion is already tight at `ŷ` and the cut's
+value at the anchor is untouched — only its slope elsewhere changes.
+
+**The completion is verified sound** — dual feasibility measured directly against the
+exhaustive 16,320-column pool at 8 anchors (`min rc = −1.8e-12`), every cut valid at all 86
+master-feasible `y`, tight at its anchor, and the restricted solve attaining the exact
+`Q_s(ŷ)`: `benchmarks/diagnostics/benders_activated_completion_audit.jl`, 17/17. What was
+wrong was the *proof of record*, not the code — it claimed the restricted search leaves the
+route universe unrestricted, which reward-driven candidate generation makes false; the
+argument that actually holds goes through the shortcut above. See the note and
+`subproblem_config.jl`.
 
 `BendersSolver` carries `max_iterations`, `optimality_tol`, `total_time_limit_sec` (a wall
 cap over the whole loop, distinct from `config.time_limit_sec`, which reaches only the
