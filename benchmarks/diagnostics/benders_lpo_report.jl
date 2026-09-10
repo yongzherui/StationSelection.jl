@@ -43,12 +43,12 @@ inst(r) = "n=$(r["n"]) s=$(r["s"]) p=$(r["p"]) seed=$(r["seed"]) ms=$(r["max_sto
 
 const ARMS = ["direct_enumeration", "column_generation", "column_generation_activated",
               "column_generation_activated_lpo",
-              "column_generation_activated_warm_start"]
+              "column_generation_warm_start"]
 short = Dict("direct_enumeration" => "enumeration",
              "column_generation" => "plain CG",
              "column_generation_activated" => "activated",
              "column_generation_activated_lpo" => "activated_lpo",
-             "column_generation_activated_warm_start" => "warm_start")
+             "column_generation_warm_start" => "warm_start")
 
 instances = unique(inst.(rows))
 checks = Tuple{String, Bool, String}[]
@@ -107,8 +107,8 @@ for key in sort(instances)
     # pinned to theta=0 by its own `theta - y_j <= 0` row -- so all of plain CG's
     # full-station pricing buys DUALS, not value. Does warming the pool cheapen it?
     if haskey(byarm, "column_generation") &&
-       haskey(byarm, "column_generation_activated_warm_start")
-        c, w = byarm["column_generation"], byarm["column_generation_activated_warm_start"]
+       haskey(byarm, "column_generation_warm_start")
+        c, w = byarm["column_generation"], byarm["column_generation_warm_start"]
         pc, pw = num(c, "price_total"), num(w, "price_total")
         @printf("  warm_start vs plain CG: pricing %.1fs -> %.1fs (%.2fx), cuts %+d, iters %+d\n",
                 pc, pw, pc <= 0 ? NaN : pw / pc,
@@ -136,7 +136,7 @@ n_fail = count(c -> !c[2], checks)
 # ratio pooled over partial data is how a direction gets claimed from noise.
 for (label, arm_a, arm_b) in
         (("warm_start vs plain CG", "column_generation",
-          "column_generation_activated_warm_start"),
+          "column_generation_warm_start"),
          ("activated_lpo vs plain CG", "column_generation",
           "column_generation_activated_lpo"))
     pairs = Tuple{String, Float64, Float64, Int, Int}[]

@@ -16,7 +16,7 @@
 # n=30, so n>=25 wants LP_SUB_MODE=relaxed_cluster with LP_SUB_K around 0.6n (Study 10: K/n
 # 0.6-0.8 certifies, 0.4 is 0/5 AND slower), and LP_MAX_STOPS=10 rather than 4. Example:
 #   LPO_NS="30 40 50" LPO_SEEDS="42 43 44 45 46" \
-#   LPO_ARMS="column_generation column_generation_activated_lpo column_generation_activated_warm_start" \
+#   LPO_ARMS="column_generation column_generation_activated_lpo column_generation_warm_start" \
 #   LP_SUB_MODE=relaxed_cluster LP_MAX_STOPS=10 LP_TOTAL_LIMIT=13500 \
 #   sbatch --array=1-45 --time=04:00:00 benchmarks/diagnostics/run_benders_lpo.sh
 # Then aggregate (the cross-arm objective gate lives there, since no single job can see
@@ -54,7 +54,7 @@ TASK="${SLURM_ARRAY_TASK_ID:?submit via sbatch --array}"
 #   LPO_NS="25 30" sbatch --array=1-8 ...
 read -r -a NS <<< "${LPO_NS:-10 15 20}"
 read -r -a SEEDS <<< "${LPO_SEEDS:-42}"
-read -r -a ARMS <<< "${LPO_ARMS:-direct_enumeration column_generation column_generation_activated_lpo column_generation_activated_warm_start}"
+read -r -a ARMS <<< "${LPO_ARMS:-direct_enumeration column_generation column_generation_activated_lpo column_generation_warm_start}"
 
 N_ARMS=${#ARMS[@]}
 N_SEEDS=${#SEEDS[@]}

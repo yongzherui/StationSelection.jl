@@ -138,8 +138,8 @@ One CG iteration, as the four phases in the order they must run.
 
 The order is load-bearing, and the comments on each phase say why. In particular
 certification runs BEFORE pricing (under `:relaxed_cluster` it *is* the pricing round), and
-the harvest branch sits between them because a refuted attempt's columns make the ordinary
-pricing round unnecessary for that iteration.
+the harvest branch sits between them because a `:negative_rc_column_found` attempt's
+columns make the ordinary pricing round unnecessary for that iteration.
 """
 function _cg_run_iteration!(
     st::CGLoopState, iteration::Int, build_result::BuildResult, mapping,
@@ -236,12 +236,12 @@ function _cg_certification_phase!(
         it.certification_candidates = certification.candidates
         it.rc_bound = certification.relaxed_rc_bound
         it.inconclusive_scenarios = copy(certification.inconclusive_scenarios)
-        it.round_refuted = certification.improving_found
+        it.round_negative_rc_column = certification.improving_found
         it.certification_outcome = if certification.certified
             "certified"
         elseif certification.improving_found
-            st.certification_refuted_rounds += 1
-            "refuted"
+            st.certification_negative_rc_column_rounds += 1
+            "negative_rc_column_found"
         else
             st.certification_inconclusive_rounds += 1
             "inconclusive"
@@ -271,7 +271,7 @@ round-wide, and only when the round produced no columns at all -- but the harves
 round where some OTHER scenario was productive.
 
 MEASURED, n=40 seed 47 (`notes/2026-09-09_n40_certification_frontier_5_of_10.md` and the
-`rounds/` dumps beside it): scenario 2 refuted and harvested columns in all 38 iterations,
+`rounds/` dumps beside it): scenario 2 priced and harvested columns in all 38 iterations,
 so the round always had something to show; scenario 1 was inconclusive from iteration 13
 onward and replayed a bit-identical 262 s search 24 consecutive times -- same relaxed_rc at
 every tier (-2000.6/-1059.4/-1042.1/-785.7), same subset sizes, same runtimes -- while the
@@ -279,11 +279,11 @@ master objective sat frozen at 32043.0090 from iteration 19 to 38. 0 escalated a
 the whole run, 73% of the wall spent re-running a search that had already failed. One
 productive scenario masked a permanently stuck one for the entire budget.
 
-So escalate the inconclusive scenarios THEMSELVES: re-running a refuted scenario would
-re-find columns already in the pool, and re-running a certified one would re-prove what is
-proved. `only_scenarios` is what makes the round restrictable; `escalated.certified` then
-means "every scenario I ran certified", so the round as a whole certifies exactly when
-nothing outside the escalated subset refuted either.
+So escalate the inconclusive scenarios THEMSELVES: re-running a scenario that already
+priced a column would re-find columns already in the pool, and re-running a certified one
+would re-prove what is proved. `only_scenarios` is what makes the round restrictable;
+`escalated.certified` then means "every scenario I ran certified", so the round as a whole
+certifies exactly when nothing outside the escalated subset priced a column either.
 
 This subsumes the old round-wide relaxed-cluster escalation, which is why
 `_cg_pricing_phase!`'s ladder now handles only the ordinary pricer.
@@ -321,13 +321,13 @@ function _cg_escalate_inconclusive_scenarios!(
     # in the pool is counted as not accepted.
     append!(it.certification_candidates, escalated.candidates)
     it.inconclusive_scenarios = copy(escalated.inconclusive_scenarios)
-    it.round_refuted = it.round_refuted || escalated.improving_found
-    it.certified = !it.round_refuted && escalated.certified
+    it.round_negative_rc_column = it.round_negative_rc_column || escalated.improving_found
+    it.certified = !it.round_negative_rc_column && escalated.certified
     it.certification_outcome = if it.certified
         "certified_escalated"
     elseif escalated.improving_found
-        st.certification_refuted_rounds += 1
-        "refuted_escalated"
+        st.certification_negative_rc_column_rounds += 1
+        "negative_rc_column_found_escalated"
     else
         st.certification_inconclusive_rounds += 1
         "inconclusive_escalated"
@@ -356,12 +356,15 @@ end
 """
     _cg_harvest_phase!(st, it, build_result, mapping, m, duals, solver) -> Symbol
 
-Take a failed certification attempt's columns as this iteration's pricing result.
+Take a non-certifying certification attempt's columns as this iteration's pricing result.
 
-A FAILED attempt is not wasted work. The loop refutes the relaxation by running the real
-exact pricer over a station subset, and hands back the improving columns that search found.
-Taking them here skips the regular round entirely -- the expensive full-station search --
-for the price of an attempt that had to run anyway.
+An attempt that did not certify is not a failed attempt. Under `:relaxed_cluster` the mode
+PRICES FIRST and certifies second: it runs the real exact pricer over a station subset and
+hands back the improving columns that search found, which is exactly what a pricing round
+produces. Taking them here skips the regular round entirely -- the expensive full-station
+search -- for the price of an attempt that had to run anyway. The `:negative_rc_column_found`
+outcome this branch serves is therefore the mode's ordinary, productive path (96% of
+attempts), not an error case.
 
 Soundness: these are ordinary priced columns (same materialization, same
 `_pricing_verify_column` cross-check), but the subset they came from is a RESTRICTED route
@@ -435,8 +438,8 @@ function _cg_pricing_phase!(
     end
     pricing_sec = time() - t0
 
-    # An escalated certification that merely refuted still hands back real columns, which is
-    # progress the pricing round did not find. (A successful one cannot reach here: both
+    # An escalated certification that priced instead of certifying still hands back real
+    # columns, which is progress the pricing round did not find. (A successful one cannot reach here: both
     # certification points break out of the loop.)
     if it.escalated_certification && !isempty(it.certification_candidates)
         escalated_columns = _cg_materialize_certification_columns(

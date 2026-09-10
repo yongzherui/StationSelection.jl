@@ -45,8 +45,8 @@ Two sound routes to a macro cut, both implemented here:
 1. **Alignment** (`_two_tier_aligned_support`). Round the support UP to whole macro cells
    before pricing it: `T' = π⁻¹(π(T))`, so `stations(T') = stations(π(T))` exactly. One
    exhausted station search over `stations(T')` then licenses a meso cut on `T'` AND a
-   macro cut on `π(T)`. Alignment never wastes work -- on a refutation the larger set can
-   only harvest more -- and its cost is the station-count blow-up, which is why it is
+   macro cut on `π(T)`. Alignment never wastes work -- when the search finds a column the
+   larger set can only harvest more -- and its cost is the station-count blow-up, which is why it is
    applied only while `|stations(T')| <= aligned_subset_max`.
 
    When the cap is exceeded the support is SHRUNK rather than the macro cut abandoned: the

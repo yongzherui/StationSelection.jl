@@ -93,6 +93,13 @@ struct BendersSolver <: AbstractSolver
     # core. Those LPs are a small share of the wall next to pricing, but set `threads` when
     # scenarios are many relative to cores.
     parallel_scenarios::Bool
+    # Log one line per OUTER iteration: bounds, gap, cuts proposed vs accepted, and the
+    # per-scenario cut geometry. Defaults to the subproblem's own verbosity, so a run that
+    # already asked to see pricing detail gets the outer loop too -- previously the loop
+    # printed NOTHING unless a caller supplied an `iteration_callback`, so a long run was
+    # indistinguishable from a stuck one and the cut trajectory (the thing this method's
+    # whole advantage rests on) was only visible in the final metadata.
+    verbose::Bool
     iteration_callback::Union{Nothing, Function}
 
     function BendersSolver(;
@@ -102,6 +109,7 @@ struct BendersSolver <: AbstractSolver
             subproblem::BendersSubproblemConfig=BendersSubproblemConfig(),
             total_time_limit_sec::Number=Inf,
             parallel_scenarios::Bool=true,
+            verbose::Bool=subproblem.verbose,
             iteration_callback::Union{Nothing, Function}=nothing,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
@@ -109,6 +117,7 @@ struct BendersSolver <: AbstractSolver
         total_time_limit_sec > 0 ||
             throw(ArgumentError("total_time_limit_sec must be positive"))
         new(config, max_iterations, Float64(optimality_tol), subproblem,
-            Float64(total_time_limit_sec), parallel_scenarios, iteration_callback)
+            Float64(total_time_limit_sec), parallel_scenarios, verbose,
+            iteration_callback)
     end
 end

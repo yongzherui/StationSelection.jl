@@ -85,8 +85,9 @@ Under a relaxed-cluster mode two more reasons appear: `converged_by_certificatio
 relaxation exhausted -- a full-universe proof, so the cut is licensed) and
 `certification_inconclusive` (the attempt ran out of budget or hit the cut cap, proving
 nothing, so no cut). `certifications` counts attempts made, which is the number to watch:
-refuted attempts are productive (they harvest columns), so a high count with eventual
-certification is healthy, while a high count ending inconclusive is the known weak point.
+`:negative_rc_column_found` attempts are productive (they ARE the pricing round), so a high
+count with eventual certification is healthy, while a high count ending inconclusive is the
+known weak point.
 """
 struct BendersSubproblemCGResult
     scenario::Int
@@ -102,7 +103,7 @@ struct BendersSubproblemCGResult
     #     were driven out of the pricer's filter and the search was effectively built-only.
     #   full -- no completion installed; the search covered every station.
     # plain CG is all `full`; activated and activated_lpo are all `restricted`; only
-    # `:column_generation_activated_warm_start` has both, one per phase.
+    # `:column_generation_warm_start` has both, one per phase.
     restricted_pricing_sec::Float64
     full_pricing_sec::Float64
     lp_sec::Float64
@@ -142,8 +143,8 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
     # happens after this loop returns (see subproblem.jl).
     activated = config.oracle in (:column_generation_activated,
                                   :column_generation_activated_lpo,
-                                  :column_generation_activated_warm_start)
-    # `:column_generation_activated_warm_start` is a WARM START, not a restriction: phase 1
+                                  :column_generation_warm_start)
+    # `:column_generation_warm_start` is a WARM START, not a restriction: phase 1
     # prices built-only (cheap, and it already reaches the exact `Q_s(yhat)` -- a column
     # touching an unbuilt station is pinned to `theta = 0` by its own `theta - y_j <= 0`
     # row, so it can never improve the objective at a fixed `yhat`). Phase 1's exhaustion is
@@ -155,7 +156,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
     # What this isolates: whether the full-station grind (columns that enter, get pinned to
     # zero, and exist only to raise `gamma` into dual feasibility) is warm-start sensitive.
     # It is the null hypothesis the completion approach is trying to route around.
-    warm_start = config.oracle === :column_generation_activated_warm_start
+    warm_start = config.oracle === :column_generation_warm_start
     phase = warm_start ? 1 : 2
     settings = _benders_subproblem_cg_settings(config)
 
@@ -204,9 +205,10 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
         #   certificate-based (:relaxed_cluster / :relaxed_cluster_two_tier) -- exhaust a
         #     RELAXATION that lower-bounds every real route's reduced cost. `certified` then
         #     proves no real improving column exists WITHOUT having searched for one, and it
-        #     covers the full universe, so it licenses a cut exactly as a search would. A
-        #     refuted attempt is not wasted: it harvests the real columns its exhaustive
-        #     subset searches found, so it doubles as this round's pricing.
+        #     covers the full universe, so it licenses a cut exactly as a search would. An
+        #     attempt that does not certify is not wasted: `:negative_rc_column_found` means
+        #     it harvested the real columns its exhaustive subset searches found, so it IS
+        #     this round's pricing.
         #
         # This is the branch that lets the oracle work past the sizes where the exact search
         # stops exhausting (measured CG frontier: n<=20 all scenarios, n=25 to <=5, n=30 s=1).
@@ -339,14 +341,15 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             # How many columns the round PRICED (search productivity), and the status that
             # licenses a cut -- which differs by branch:
             #   search branch: `exhausted`, set by _run_pricing_round on the model.
-            #   certification branch: `refuted` (harvested columns, no proof yet). NOTHING
-            #     sets the exhausted flag there, and `_cg_pricing_exhausted` defaults to
-            #     `true` for a model that never set it -- so printing it in that branch
-            #     claimed "exhausted true" for rounds that were actually refuted. Reporting
-            #     the branch's own status avoids inventing a proof that was not made.
+            #   certification branch: `negative_rc_column_found` (harvested columns, no
+            #     proof yet -- the ordinary productive outcome). NOTHING sets the exhausted
+            #     flag there, and `_cg_pricing_exhausted` defaults to `true` for a model that
+            #     never set it -- so printing it in that branch claimed "exhausted true" for
+            #     rounds that had merely priced. Reporting the branch's own status avoids
+            #     inventing a proof that was not made.
             @printf("      [cg s=%d it=%d] priced %d | %s | price %.1fs cum %.1fs\n",
                     scenario, iteration, length(columns),
-                    certifying ? "refuted" : "exhausted $(_cg_pricing_exhausted(sm))",
+                    certifying ? "negative_rc_column_found" : "exhausted $(_cg_pricing_exhausted(sm))",
                     time() - t_price, pricing_sec)
             flush(stdout)
         end

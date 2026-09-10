@@ -64,13 +64,17 @@ rather than `n` stations. Three things can come back:
     real improving column exists either. The loop stops with `cg_converged=true` and
     `cg_stop_reason="converged_by_certification"`.
 
-  *refuted* -- the relaxation named an improving cluster route, so the loop searched that
-    route's cluster support exhaustively with the real exact pricer. A barren support
-    becomes a no-good cut ("every route must visit at least one cluster outside T") and the
-    relaxation is asked again; a productive one yields real, verified columns. Those
-    columns ARE this iteration's pricing result -- the round doubles as the pricing round
-    rather than being wasted (MEASURED: 96% of attempts are refuted --
-    `notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`).
+  *negative_rc_column_found* -- the relaxation named an improving cluster route, so the
+    loop searched that route's cluster support exhaustively with the real exact pricer, and
+    that search produced a genuinely improving column. Those columns ARE this iteration's
+    pricing result: the attempt IS the pricing round rather than an overhead on top of one.
+    **This is the mode working, not failing.** The mode prices first and certifies second --
+    MEASURED, 96% of attempts end here
+    (`notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`), which is the
+    expected shape of a solve, not a 96% failure rate. Along the way a support that comes
+    back barren becomes a no-good cut ("every route must visit at least one cluster outside
+    T") and the relaxation is asked again; those cuts are the evidence a later attempt
+    certifies from.
 
   *inconclusive* -- the loop ran out of its budget (or of cut rounds) without settling
     either way, and harvested nothing. This is the only case that escalates: the same round
@@ -94,7 +98,8 @@ attempts appear as extra `cg_certification_rounds` with `*_escalated` outcomes i
 
 The trade is measured, not free: 4 of 45 arm runs (serial) and 1 of 35
 (parallel) reached OPTIMAL *only* because the two-tier round certified where the relaxation
-did not. All but one were `K/n = 0.4`, the coarse partition refuted on every other ground.
+did not. All but one were `K/n = 0.4`, where the coarse partition kept pricing columns
+instead of certifying on every other ground.
 At `K/n` in [0.6, 0.8] the fallback was load-bearing for exactly one run in two full
 sweeps.
 
@@ -105,11 +110,12 @@ certified reports `cg_optimality_scope="full_route_universe"` even when a
 `cg_certified_by_relaxation=true` records that the certificate came from the relaxation
 rather than from exhausted pricing.
 `metadata["cg_certification_rounds"]`/`["cg_certification_sec"]` cost it, and
-`["cg_certification_refuted_rounds"]`/`["cg_certification_inconclusive_rounds"]` split the
-non-certifying rounds into the two kinds that call for opposite fixes. *Refuted* means an
-exhaustive real search over some cluster support found a genuinely improving column -- a
-true negative, which says nothing against the relaxation, and which is where the columns
-come from. *Inconclusive* is the budget one, and the only one
+`["cg_certification_negative_rc_column_rounds"]`/`["cg_certification_inconclusive_rounds"]`
+split the non-certifying rounds into two kinds that are NOT two failures.
+*negative_rc_column_found* means an exhaustive real search over some cluster support found
+a genuinely improving column: the round priced, the columns are where CG's progress comes
+from, and a high count is the normal shape of a solve rather than a problem to fix.
+*Inconclusive* is the budget one, and the only one
 `pricing_time_limit_sec`/`certifying_pricing_time_limit_sec` can move. Each iteration log
 row carries `certification_sec`, `certification_certified` and `certification_outcome`.
 
@@ -209,8 +215,8 @@ One `NamedTuple` per CG iteration, in order:
 | `certifying_pricing` | `true` if this iteration escalated to a certifying round |
 | `certification_sec` | wall time in this iteration's relaxation certification attempt (`0.0` when the feature is off) |
 | `certification_certified` | `true` on the single iteration whose relaxation certified, ending the loop |
-| `certification_outcome` | `"certified"` / `"refuted"` (an improving relaxed solution existed -- the relaxation is too loose) / `"inconclusive"` (the attempt ran out of budget) / `"none"` (no attempt this iteration) |
-| `relaxed_rc_bound` | a valid LOWER bound on the minimum reduced cost over the whole real route universe, or `NaN` when this iteration established none (no attempt, or an inconclusive one -- see `RelaxedClusterCertificationResult.relaxed_rc_bound`). The master objective is an *upper* bound on `z_LP` that descends as columns arrive; this is the only quantity in the loop that bounds from below, and it is what makes a refuted round a measurement rather than a failed test |
+| `certification_outcome` | `"certified"` / `"negative_rc_column_found"` (the attempt priced a real improving column, which is the ordinary outcome -- this iteration made progress, it did not fail) / `"inconclusive"` (the attempt ran out of budget and learned nothing) / `"none"` (no attempt this iteration) |
+| `relaxed_rc_bound` | a valid LOWER bound on the minimum reduced cost over the whole real route universe, or `NaN` when this iteration established none (no attempt, or an inconclusive one -- see `RelaxedClusterCertificationResult.relaxed_rc_bound`). The master objective is an *upper* bound on `z_LP` that descends as columns arrive; this is the only quantity in the loop that bounds from below, and it is what makes a round that priced instead of certifying a measurement rather than a failed test |
 
 The final iteration is always logged, including the one that breaks the loop (on
 convergence, on a non-`OPTIMAL` master, or on the last `max_iterations` pass), so

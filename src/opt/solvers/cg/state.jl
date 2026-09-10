@@ -51,19 +51,22 @@ mutable struct CGLoopState
     # everything else in the iteration and understates the phase.
     warm_start_sec::Float64
 
-    # Relaxed-cluster certification. The refuted/inconclusive split is the only way to read
-    # a run that never certifies: "refuted" means an improving relaxed solution existed, so
-    # the relaxation is too loose as configured -- a between-runs observation, since a
-    # certification pricer's tightness is fixed before the solve starts and nothing here can
-    # react to it; "inconclusive" means the search ran out of its time (or cut-round) budget
-    # without settling either way, which IS a knob on this solver. The bare attempt count
-    # cannot tell the two apart, and they point at different places.
+    # Relaxed-cluster certification. The negative_rc_column_found/inconclusive split is the
+    # only way to read a run that never certifies, and the two are NOT two failures.
+    # "negative_rc_column_found" means the attempt exact-priced a support and got a real
+    # improving column: the mode prices first and certifies second, so this is the ordinary
+    # outcome and the source of the run's columns -- a high count means CG is making
+    # progress, not that anything is wrong. "inconclusive" means the search ran out of its
+    # time (or cut-round) budget without settling either way, which IS a knob on this solver
+    # and the only outcome an escalation can rescue. The bare attempt count cannot tell the
+    # two apart, and they point at different places.
     certification_rounds::Int
-    certification_refuted_rounds::Int
+    certification_negative_rc_column_rounds::Int
     certification_inconclusive_rounds::Int
     certification_sec::Float64
-    # Columns recovered from FAILED certification attempts. Reported so the feature's cost
-    # can be read net of what it gave back.
+    # Columns recovered from certification attempts that did not certify -- overwhelmingly
+    # the `:negative_rc_column_found` ones, where the attempt was the pricing round.
+    # Reported so the feature's cost can be read net of what it gave back.
     certification_harvested_columns::Int
     certified_by_relaxation::Bool
 
@@ -108,11 +111,12 @@ mutable struct CGIterationState
     certified::Bool
     certification_outcome::String
     escalated_certification::Bool
-    # The scenarios that came back `:inconclusive`, and whether any scenario refuted.
+    # The scenarios that came back `:inconclusive`, and whether any scenario priced a
+    # column.
     # Escalation is decided PER SCENARIO off these two, not off whether the round as a whole
     # produced columns -- see `_cg_escalate_inconclusive_scenarios!`.
     inconclusive_scenarios::Vector{Int}
-    round_refuted::Bool
+    round_negative_rc_column::Bool
     # NaN = "no valid lower bound this iteration", which covers both the pricers that never
     # attempt one and an attempt that came back inconclusive. See
     # `RelaxedClusterCertificationResult.relaxed_rc_bound`.

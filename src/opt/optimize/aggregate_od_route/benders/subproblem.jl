@@ -261,7 +261,7 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     cg_result = nothing
     if solver.subproblem.oracle in (:column_generation, :column_generation_activated,
                                     :column_generation_activated_lpo,
-                                    :column_generation_activated_warm_start)
+                                    :column_generation_warm_start)
         cg_result = _solve_joint_routing_assignment_subproblem_by_cg!(
             build, solver.subproblem, incumbent,
         )
@@ -294,7 +294,7 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     # (`gamma = -dual` on the `<=` rows) is defined in exactly one place.
     alpha, gamma_o, gamma_d = extract_joint_routing_assignment_duals(sm)
     lpo_stats = nothing
-    # NOT `:column_generation_activated_warm_start`: its phase 2 exhausted the full universe
+    # NOT `:column_generation_warm_start`: its phase 2 exhausted the full universe
     # at the RAW duals, so those are already dual-feasible and completing them would only
     # inflate `Gamma` and weaken the cut for no reason.
     if solver.subproblem.oracle in (:column_generation_activated,

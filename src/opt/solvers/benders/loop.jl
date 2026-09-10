@@ -94,6 +94,18 @@ function optimize_model(build_result::BuildResult, solver::BendersSolver)::OptRe
     isempty(st.stop_reason) && (st.stop_reason = "iteration_limit")
 
     runtime_sec = time() - st.start_time
+    if solver.verbose
+        # The cut trajectory in one line, which is the summary this method is judged on:
+        # iterations and cuts are what the decomposition is supposed to keep small, and
+        # `cuts/iter` says whether MultiCut is actually contributing one per scenario or
+        # collapsing to fewer through deduplication.
+        @printf("  [benders done] %s after %d iterations, %d cuts (%.1f per iteration) | LB %.6f UB %.6f gap %.3e | master %.2fs sub %.1fs of %.1fs total\n",
+                st.stop_reason, st.iterations, st.cuts_added,
+                st.iterations == 0 ? 0.0 : st.cuts_added / st.iterations,
+                st.lower_bound, st.upper_bound, _benders_gap(st),
+                st.master_sec, st.subproblem_sec, runtime_sec)
+        flush(stdout)
+    end
     return _benders_package_result(build_result, st, solver, m, runtime_sec)
 end
 
@@ -177,6 +189,37 @@ found-early-then-prove pattern visible instead of hidden behind a monotone envel
 function _benders_report_iteration(st::BendersLoopState, solver::BendersSolver,
         iteration::Int, incumbent, incumbent_objective::Float64, n_added::Int,
         subproblem_result=nothing)
+    if solver.verbose
+        # CUTS FIRST: `+a/p` is accepted-of-proposed. One cut is proposed per scenario per
+        # iteration under MultiCut, and `add_benders_cut!` drops any whose signature is
+        # already present -- so `a < p` means duplicate cuts, i.e. scenarios handing back
+        # the same supporting hyperplane twice and the iteration buying less than it looks
+        # like it did. That distinction is invisible in the totals.
+        n_proposed = isnothing(subproblem_result) ? n_added :
+            length(subproblem_result.scenarios)
+        @printf("  [benders it=%d] LB %.6f  UB %.6f  gap %.3e | cuts +%d/%d (total %d) | built %d | master %.2fs sub %.1fs\n",
+                iteration, st.lower_bound, st.upper_bound, _benders_gap(st),
+                n_added, n_proposed, st.cuts_added,
+                count(v -> v > 0.5, incumbent), st.master_sec, st.subproblem_sec)
+        if !isnothing(subproblem_result)
+            for r in subproblem_result.scenarios
+                # `nnz` is how many stations the scenario's cut actually prices. A cut with
+                # few nonzeros constrains few station sets, which is what "weak cut" means
+                # concretely -- and it is the number that separated a real explanation of
+                # the flat cut count from two wrong ones earlier.
+                nnz = count(v -> abs(v) > 1e-9, values(r.y_coefficients))
+                cg = r.cg
+                @printf("      s=%d Q=%.4f cut const %.4f nnz %d%s\n",
+                        r.scenario, r.objective, r.cut_constant, nnz,
+                        isnothing(cg) ? "" :
+                        @sprintf(" | cg %d it, %d cols, %s%s", cg.cg_iterations,
+                                 cg.columns_added, cg.stop_reason,
+                                 cg.certifications > 0 ?
+                                 " ($(cg.certifications) cert attempts)" : ""))
+            end
+        end
+        flush(stdout)
+    end
     isnothing(solver.iteration_callback) && return nothing
     solver.iteration_callback((
         iteration = iteration,

@@ -17,7 +17,7 @@ DISPERSION of the cells demand actually touches -- not with raw instance size, n
 spread of the stations overall, and not with how far apart the OD endpoints are.
 
 That predicts something falsifiable: certifying seeds should have demand concentrated in
-singleton or geographically tight cells, and refuting seeds should have demand landing in
+singleton or geographically tight cells, and non-certifying seeds should have demand landing in
 fat, spread-out cells. If instead the certifying seeds merely have shorter OD trips or fewer
 distinct endpoints, the story is ordinary instance easiness and the clustering is incidental.
 
@@ -143,11 +143,11 @@ end
 df = DataFrame(rows)
 yes = df[df.cert, :]; no = df[.!df.cert, :]
 println()
-@printf("%-12s %12s %12s %12s\n", "column", "certified", "refuted", "separation")
+@printf("%-12s %12s %12s %12s\n", "column", "certified", "uncertified", "separation")
 for c in (:cells_hit, :multi_hit, :disp_hit, :disp_all, :od_mean, :od_spread)
     a = mean(skipmissing(getproperty(yes, c))); b = mean(skipmissing(getproperty(no, c)))
     # Overlap matters more than the gap in means at this sample size: a column only
-    # SEPARATES if every certified value sits on one side of every refuted one.
+    # SEPARATES if every certified value sits on one side of every uncertified one.
     va = collect(getproperty(yes, c)); vb = collect(getproperty(no, c))
     clean = maximum(va) < minimum(vb) || minimum(va) > maximum(vb)
     @printf("%-12s %12.2f %12.2f %12s\n", c, a, b, clean ? "CLEAN" : "overlaps")

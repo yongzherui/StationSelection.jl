@@ -5,8 +5,8 @@ where they were copies of each other.
 `certify.jl`'s one-tier loop and `two_tier/loop.jl`'s two-tier loop are different SEARCH
 strategies over the same machinery: both read the same five encoding parameters off the
 model, both dedupe their harvest against the same scenario column pool, and both end every
-round in the same "exact-price this station subset -- refute it, or prove it barren"
-search. Those three had drifted into near-copies, which is the dangerous kind of
+round in the same "exact-price this station subset -- find a column in it, or prove it
+barren" search. Those three had drifted into near-copies, which is the dangerous kind of
 duplication here: the station search in particular is where soundness lives (only an
 EXHAUSTED search may be cut on), so two versions of it are two places to get that wrong.
 """
@@ -58,8 +58,10 @@ is the only place either of them touches the real pricer.
 
 It has two jobs at once, which is why it is shaped the way it is:
 
-  * **refute** -- return `rc < -reduced_cost_tol`, meaning the relaxation pointed at a
-    support that really does hold an improving column, and keep that column. The labels
+  * **price** -- return `rc < -reduced_cost_tol`, meaning the relaxation pointed at a
+    support that really does hold an improving column, and keep that column. This is the
+    `:negative_rc_column_found` outcome, and it is what the mode spends most of a solve
+    doing; it is a successful pricing round, not a failed certification. The labels
     are scored through `_pricing_accept_closure` (`../../../../round.jl`), so a survivor is
     deduped against the pool and against earlier rounds exactly as a pricing round's
     phase 2 would do it, and is indistinguishable from a priced column downstream.

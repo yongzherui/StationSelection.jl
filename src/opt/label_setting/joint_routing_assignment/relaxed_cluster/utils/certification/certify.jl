@@ -35,15 +35,24 @@ unsound.
   has no improving route. Every cut removed only cluster supports an exhaustive
   exact search had already found barren, so no real improving route's image was
   ever removed: this is a certificate over the **full** route universe.
-- **refuted** -- an exhaustive exact search over some `stations(T)` produced a
-  genuinely improving column. Not a failure of the relaxation; a true negative.
+- **negative_rc_column_found** -- an exhaustive exact search over some
+  `stations(T)` produced a genuinely improving column. **This is the mode
+  pricing, and it is the normal outcome for most of a solve.** The column goes
+  to the master and CG iterates again; the attempt replaced the ordinary pricing
+  round rather than costing anything on top of it. It says nothing against the
+  relaxation and nothing against the instance -- a support that yields a column
+  simply is not barren, which is information the loop needs before it can prove
+  anything. (This outcome was called `:refuted` until 2026-09-10. The name read
+  as a failure and was repeatedly misread as one, including in our own write-ups,
+  when it is in fact the productive half of the mode.)
 - **inconclusive** -- a search timed out, or the round cap or cut cap was hit.
-  Proves nothing, exactly as before.
+  This is the only outcome that proves nothing, and the only one an escalation
+  can rescue.
 
 # Termination
 
 Each cut forbids every route confined to a subset of its cluster set, so a
-support once refuted can never come back and the loop cannot cycle. With `K`
+support once cut can never come back and the loop cannot cycle. With `K`
 clusters there are `2^K` supports, so it terminates; the caller's wall-clock deadline,
 `RELAXED_CLUSTER_MAX_CUTS` (simultaneously ACTIVE cuts, since subsumed ones are pruned)
 and the caller's wall-clock deadline bound it well below that in
@@ -69,14 +78,21 @@ measure how many times the loop ran, not how deep any one of them went; the
 depth of a single loop is its round count, which is what
 `RELAXED_CLUSTER_MAX_CUT_ROUNDS` bounds.
 
-# Harvesting: a refuted attempt is a pricing round, not waste
+# Harvesting: a `:negative_rc_column_found` attempt IS a pricing round
 
 Step 4 runs the **real** exact pricer over `stations(T)` -- real stations, real duals, real
-reward structure -- so when it refutes, the labels it just found ARE improving columns for
-the master. This loop originally discarded them, and that is what made certification look
-expensive: **753 of 788 attempts (96%) were refuted** (`notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`),
-each one throwing
-away a completed pricing search. `failed_certification_sec` was most of
+reward structure -- so when it finds something, the labels it just found ARE improving
+columns for the master. This loop originally discarded them, and that is what made
+certification look expensive: **753 of 788 attempts (96%) priced a column**
+(`notes/2026-09-06_relaxed_cluster_harvesting_refinement_and_cuts.md`), each one throwing
+away a completed pricing search.
+
+That 96% is the reason the outcome must not be read as a failure rate. The mode **prices
+first and certifies second**: for almost the whole solve it behaves as a pricer that also
+happens to accumulate barrenness proofs, and only once the master's duals stop admitting
+any improving route in any searched support does the accumulated evidence become a
+certificate. A run with 96% column-finding attempts and one certifying attempt at the end
+is the mode working exactly as designed. `failed_certification_sec` was most of
 `certification_sec` in every arm, and at n=25/K=10 it was 100% of it.
 
 So step 4 now scores its labels through `_pricing_accept_closure` (`../../../../round.jl`),
@@ -100,7 +116,8 @@ exact search is the expensive half, and it is exactly the work `../guiding/guide
 already does -- so on rounds where step 4 finds a column this loop costs what guided
 pricing costs and, with harvesting, returns that column too.
 
-What reduces that is harvesting: a refuting round's search *is* a pricing round.
+What reduces that is harvesting: the search on a `:negative_rc_column_found` round *is* a
+pricing round.
 
 A barren-support cache (infer `T'` barren from an already-proven `T` when everything
 between them is reward-free) would skip step 4 on some rounds entirely, and active-cut
@@ -126,7 +143,8 @@ Each round is the four steps of the module docstring:
      `:inconclusive` (a truncated search proves nothing)
   3. `T` := the clusters the best few relaxed routes visit
   4. exact search over `stations(T)` (`_certification_station_search`, shared with the
-     two-tier loop) -> refuted, or barren and therefore cut; then refine and go to 1
+     two-tier loop) -> `:negative_rc_column_found` (harvest and return), or barren and
+     therefore cut; then refine and go to 1
 """
 function _relaxed_cluster_certify_scenario(
     m::JuMP.Model, s::Int,
@@ -327,7 +345,7 @@ function _relaxed_cluster_certify_scenario(
 
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.
-        search.rc < -tol && return _result(:refuted, round)
+        search.rc < -tol && return _result(:negative_rc_column_found, round)
         # Only an EXHAUSTED subset search proves the support barren. Cutting on a
         # timed-out one would remove a support that may well hold an improving route,
         # and the loop could then certify falsely.

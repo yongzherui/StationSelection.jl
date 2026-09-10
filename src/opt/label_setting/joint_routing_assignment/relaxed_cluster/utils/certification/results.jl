@@ -18,14 +18,21 @@ Outcome of one certification round, over every scenario -- the shape
 
 - `certified` -- the whole point: no improving relaxed route survives the cuts
   anywhere, proved by exhaustion. Only this makes CG's convergence claim valid.
-- `improving_found` -- some scenario was *refuted*: an exhaustive exact search
-  over a cluster support found a genuinely improving real column. A true
-  negative, and it says nothing against the relaxation. Mutually exclusive with
-  `certified`.
+- `improving_found` -- some scenario came back `:negative_rc_column_found`: an
+  exhaustive exact search over a cluster support found a genuinely improving
+  real column. **This is the mode PRICING, and it is the expected outcome for
+  most of a solve** -- the column goes into the master and CG continues, so the
+  attempt did the work an ordinary pricing round would have done. It is not a
+  failure of the relaxation and not a wasted attempt; it simply means this
+  iteration produced a column instead of a proof. Mutually exclusive with
+  `certified`, because a support that yields a column is not barren.
 - `exhausted` -- every scenario reached a conclusion (none came back
-  `:inconclusive`) and none was refuted. `certified == exhausted`, kept
-  separately so a failure can be attributed to refutation (`improving_found`)
-  or to budget (`!exhausted`). Those point at different fixes: the budget is a
+  `:inconclusive`) and none found a column. `certified == exhausted`, kept
+  separately so a round that did not certify can be attributed to *having
+  priced* (`improving_found`) or to budget (`!exhausted`). Those are different
+  situations, not two failures: pricing means CG is still making progress and
+  should iterate again, while `!exhausted` means this attempt learned nothing
+  either way and is the only case an escalation can rescue. The budget is a
   solver setting this run could be given more of, while the partition is fixed
   at build time, so looseness is only ever something to observe *across*
   runs -- see `../../clustering.jl`, and note tightness is not guaranteed
@@ -33,8 +40,11 @@ Outcome of one certification round, over every scenario -- the shape
 - `scenarios_certified` / `n_scenarios` -- how many scenarios certified. A
   scenario with nothing to price counts as certified (the real pricer skips it
   on the same test).
-- `candidates` -- improving columns harvested from the step-4 searches while
-  FAILING to certify, for `CGSolver` to add to the master. Empty on a certified
+- `candidates` -- improving columns harvested from the step-4 searches on any
+  round that did not certify, for `CGSolver` to add to the master. On a
+  `:negative_rc_column_found` round these ARE that iteration's priced columns,
+  which is why such a round displaces the ordinary pricing round rather than
+  adding to it. Empty on a certified
   round, which drops its harvest on purpose: CG is about to stop, and adding
   columns to a master just proved optimal would only churn it. See the module
   docstring's "Harvesting" section.
@@ -42,7 +52,7 @@ Outcome of one certification round, over every scenario -- the shape
   whole real route universe, across every scenario, or `NaN` when no such bound
   was established this round. This is the number the round already computes and
   then throws away after testing it against `-tol`; recording it is what turns a
-  refuted round from a pass/fail into a measurement.
+  round that priced instead of certifying from a pass/fail into a measurement.
 
   Why the final `relaxed_rc` bounds *real* routes: a real route either escapes
   every cut, in which case its image escapes too and its reduced cost is at
@@ -64,7 +74,7 @@ Outcome of one certification round, over every scenario -- the shape
   them is what lets `CGSolver` escalate PER SCENARIO instead of re-running the
   whole round. Without it a round is only escalatable as a unit, so a single
   productive scenario masks a permanently stuck one -- MEASURED at n=40 seed 47,
-  where scenario 2 refuted in all 38 iterations, the round therefore always had
+  where scenario 2 priced a column in all 38 iterations, the round therefore always had
   columns to show, and scenario 1 replayed the identical 262 s inconclusive
   search 24 times without ever reaching the escalated tier.
 - `scenarios_run` -- which scenarios this round actually priced. Equal to every
@@ -102,7 +112,8 @@ actually cheap), and `trace` -- one row per round recording how the bound moved.
   so far. On the FINAL row this is the surviving minimum that is `>= -tol`, i.e.
   the value that certifies; it is a real number, not a sentinel.
 - `subset_rc` -- the best REAL reduced cost the exact search found inside
-  `stations(support)`. `< -tol` refutes; `>= -tol` (including `Inf`, meaning no
+  `stations(support)`. `< -tol` is a priced column (`:negative_rc_column_found`);
+  `>= -tol` (including `Inf`, meaning no
   reward-carrying route exists there at all) means the support is **barren** and
   a cut is added. So the barren rounds are the ones whose `subset_rc` sits at
   about zero -- not the final row.
@@ -119,7 +130,7 @@ previous round's cut should already have excluded.
 see the module docstring's "Harvesting" section.
 """
 struct RelaxedClusterNoGoodResult
-    outcome::Symbol          # :certified, :refuted, :inconclusive
+    outcome::Symbol          # :certified, :negative_rc_column_found, :inconclusive
     rounds::Int
     cuts_added::Int
     last_subset_size::Int

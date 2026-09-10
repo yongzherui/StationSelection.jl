@@ -264,7 +264,7 @@ drifted from the master itself.
 
 Split out of `_run_pricing_round` because it is not specific to a pricing *round*: the
 no-good certification loop (`joint_routing_assignment/relaxed_cluster/utils/certification/certify.jl`)
-harvests candidates from the exhaustive subset searches it runs to refute the relaxation,
+harvests candidates from the exhaustive subset searches it runs over cluster supports,
 and those become columns by exactly this path -- same id allocation, same verification
 against the master. Sharing the code is what guarantees a harvested column is
 indistinguishable from a priced one.

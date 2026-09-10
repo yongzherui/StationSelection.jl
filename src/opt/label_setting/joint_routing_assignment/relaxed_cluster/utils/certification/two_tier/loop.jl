@@ -181,8 +181,8 @@ end
         deadline, attempt_budget, tol) -> (; rc, exhausted, cells, stations,
                                              macro_cut_cells, sec, slice)
 
-The exact station search that consumes a meso round's support: refute and harvest, or prove
-the support barren.
+The exact station search that consumes a meso round's support: price a column out of it and
+harvest, or prove the support barren.
 
 Runs up to THREE times on a decreasing ladder, and the order is the point:
 
@@ -281,7 +281,7 @@ cuts.
   * not exhausted                 ->  `:inconclusive`
   * otherwise, align the meso support and exact-price its stations
     (`_two_tier_station_phase!`):
-        improving found          ->  `:refuted`, having harvested real columns
+        improving found          ->  `:negative_rc_column_found`, having harvested real columns
         exhausted, barren        ->  meso cut, plus a macro cut when alignment applied
         not exhausted            ->  `:inconclusive` (a truncated search proves nothing)
 
@@ -453,7 +453,7 @@ function _two_tier_certify_scenario(
             isnothing(macro_cut_cells) && (st.align_skipped += 1)
             st.last_subset_size = length(stations)
 
-            # ---- (3) the exact station search: refute-and-harvest, or prove barren
+            # ---- (3) the exact station search: price-and-harvest, or prove barren
             station = _two_tier_station_phase!(
                 st, s, cells, stations, macro_cut_cells, support_global, meso,
                 candidates, travel_cost, shared, existing_columns, solver;
@@ -466,7 +466,7 @@ function _two_tier_certify_scenario(
                              sec=station.sec, slice=station.slice,
                              exhausted=station.exhausted)
 
-            station.rc < -tol && return _two_tier_result(st, :refuted)
+            station.rc < -tol && return _two_tier_result(st, :negative_rc_column_found)
             # Only an EXHAUSTED station search proves barrenness. Cutting on a timed-out one
             # -- at either layer -- is the false-certificate failure.
             station.exhausted ||

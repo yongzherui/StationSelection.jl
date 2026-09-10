@@ -101,7 +101,7 @@ function build_model(
     pricing_oracle = solver.subproblem.oracle in
         (:column_generation, :column_generation_activated,
          :column_generation_activated_lpo,
-         :column_generation_activated_warm_start)
+         :column_generation_warm_start)
     t_enum = time()
     columns = if pricing_oracle
         joint_routing_assignment_two_stop_seed_columns(data, mapping)

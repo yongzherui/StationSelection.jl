@@ -49,10 +49,12 @@ producing one. Cluster guidance and certification now form one pricing mode:
   `utils/certification/certify.jl`, the no-good-cut loop. It is the only mode: a
   cut-free round is the loop's round 1, and round 1 has never certified anything.
   Unlike the bare relaxation, the loop *does* produce columns, harvested from the
-  exhaustive subset searches behind each refutation.
+  exhaustive subset searches it runs over cluster supports -- it prices first and
+  certifies second.
   Every cut round keeps several promising cluster routes, unions their clusters into a
   station subset, and runs the ordinary exact pricer there. Those searches return real
-  columns when they refute the relaxation and prove supports barren otherwise.
+  columns (`:negative_rc_column_found`, the ordinary outcome) and prove supports barren
+  otherwise, the barren ones becoming the cuts a later round certifies from.
 
 Its top level is **label-setting core only**; everything that *drives* that core
 lives under `utils/`, one subdirectory per optimization:

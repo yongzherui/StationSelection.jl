@@ -18,7 +18,7 @@ the paired verdicts.
 | `column_generation` | all n stations | LP duals | 4 it / 5 cuts |
 | `column_generation_activated` | built only | closed-form completion | 30 it / 77 cuts |
 | `column_generation_activated_lpo` | built only | Pareto completion | 3 it / 6 cuts |
-| `column_generation_activated_warm_start` | built only, THEN all | phase-2 LP duals | 4 it / 7 cuts |
+| `column_generation_warm_start` | built only, THEN all | phase-2 LP duals | 4 it / 7 cuts |
 
 `:column_generation_activated` is a settled negative -- non-convergent at n=15 (657 it /
 1971 cuts, gap 1404 at 900 s) and n=20 -- so it is not in the default grid. Name it
@@ -59,7 +59,7 @@ const ALIGNED_MAX = parse(Int, get(ENV, "LP_ALIGNED_MAX", "15"))
 # How many improving relaxed routes get their supports unioned to form the station subset
 # the EXACT search then has to exhaust. Default 5. It is the direct lever on
 # `:subset_not_exhausted`: fewer guides -> smaller union -> smaller station set -> a search
-# that can actually finish. The cost is fewer real columns harvested per refuted round.
+# that can actually finish. The cost is fewer real columns harvested per pricing round.
 const GUIDE_ROUTES = parse(Int, get(ENV, "LP_GUIDE_ROUTES", "5"))
 const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "separation"))
 const THREADS = parse(Int, get(ENV, "LP_THREADS", "1"))

@@ -59,7 +59,7 @@ function _cg_build_metadata(
             (st.final_pricing_mode in (:relaxed_cluster, :relaxed_cluster_two_tier) ?
                 st.final_pricing_mode : nothing),
         "cg_certification_rounds" => st.certification_rounds,
-        "cg_certification_refuted_rounds" => st.certification_refuted_rounds,
+        "cg_certification_negative_rc_column_rounds" => st.certification_negative_rc_column_rounds,
         "cg_certification_inconclusive_rounds" => st.certification_inconclusive_rounds,
         # Columns recovered from failed certification attempts. Read against
         # `cg_certification_sec` to judge the feature's NET cost: a failed attempt that

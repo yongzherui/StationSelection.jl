@@ -10,7 +10,7 @@ iteration (140 vs 148), use the same subset sizes (8.2 vs 9.9) and cut at the sa
 with no overlap. The expense is the relaxed cluster-graph sweep itself.
 
 So the question is which geometric property of the 16-pair draw makes that sweep expensive.
-`cert_s/round` is used as the difficulty scale rather than the certified/refuted label,
+`cert_s/round` is used as the difficulty scale rather than the certified/uncertified label,
 because it is continuous, it separated cleanly, and a TREND is the claim worth testing at
 n=9 -- a binary split throws away the ordering that carries most of the signal.
 

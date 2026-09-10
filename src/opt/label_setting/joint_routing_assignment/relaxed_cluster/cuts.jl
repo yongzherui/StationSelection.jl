@@ -16,7 +16,8 @@ The loop's step is:
 
     relaxed search  ->  best improving cluster routes, combined support T
     exact search over stations(T)
-        found an improving real column  ->  refuted, stop
+        found an improving real column  ->  :negative_rc_column_found; harvest it and
+                                            stop (this iteration priced, and CG iterates)
         exhausted with nothing          ->  T is BARREN; cut it and search again
 
 # The cut, and why it is shaped this way
@@ -90,7 +91,7 @@ end
 
 """Cap on simultaneously active cuts, set by the `UInt64` mask. The
 certification loop stops adding cuts here and reports itself inconclusive
-rather than silently dropping one (which would re-admit an already-refuted
+rather than silently dropping one (which would re-admit an already-cut
 cluster support and could loop forever)."""
 const RELAXED_CLUSTER_MAX_CUTS = 64
 

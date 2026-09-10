@@ -14,7 +14,8 @@ A relaxation that is even slightly loose therefore certifies never, not sometime
 probe measures that directly and cheaply, before committing queue time to Study 9's sweep.
 
 For each `K` it reports, per run: whether the relaxation ended the solve, how many attempts
-it took, and the refuted/inconclusive split of the failures -- plus the *margin*, which is
+it took, and the negative_rc_column_found/inconclusive split of the non-certifying attempts
+(the first is the mode pricing, not failing) -- plus the *margin*, which is
 the number that actually explains the outcome. The margin is measured at the FINAL duals
 (the ones a certifying round faces) as
 
@@ -118,7 +119,7 @@ end
 # sit far below zero even on a run that certifies; the loop certifies over routes that
 # escape every cut, not over all relaxed routes.
 @printf("%-6s %-10s %14s %-24s %10s %8s %9s %12s %14s %14s %s\n",
-        "K", "certified", "lp_objective", "stop_reason", "wall_s", "rounds", "refuted",
+        "K", "certified", "lp_objective", "stop_reason", "wall_s", "rounds", "priced",
         "inconclusive", "exact_min_rc", "relaxed_min_rc", "cluster sizes")
 probe_ks = Any[x == "base" ? nothing : parse(Int, x)
                for x in split(get(ENV, "PROBE_K", "base,3,6,9,12,$(n_stations)"), ',')]
@@ -145,7 +146,7 @@ for K in probe_ks
     # is therefore the count on the rows whose outcome was :certified.
     stats = get(md, "cg_relaxed_cluster_guide_stats", Any[])
     certified_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :certified]
-    refuted_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :refuted]
+    priced_rows = [r for r in stats if get(r, :nogood_outcome, nothing) === :negative_rc_column_found]
     if !isempty(stats)
         @printf("       cuts-to-certify per scenario: %s | rounds: %s\n",
                 isempty(certified_rows) ? "none" :
@@ -169,10 +170,10 @@ for K in probe_ks
                           for (sz, c) in zip(r.nogood_subset_size_trace,
                                              r.nogood_subset_checked_trace)], " -> "))
         end
-        @printf("       refuted attempts: %d (median rounds %.1f, median cuts %.1f) | attempts total %d\n",
-                length(refuted_rows),
-                isempty(refuted_rows) ? NaN : median([r.nogood_rounds for r in refuted_rows]),
-                isempty(refuted_rows) ? NaN : median([r.nogood_cuts for r in refuted_rows]),
+        @printf("       priced-a-column attempts: %d (median rounds %.1f, median cuts %.1f) | attempts total %d\n",
+                length(priced_rows),
+                isempty(priced_rows) ? NaN : median([r.nogood_rounds for r in priced_rows]),
+                isempty(priced_rows) ? NaN : median([r.nogood_cuts for r in priced_rows]),
                 length(stats))
     end
     @printf("%-6s %-10s %14.4f %-24s %10.1f %8d %9d %12d %14.4f %14.4f %s\n",
@@ -182,7 +183,7 @@ for K in probe_ks
             string(get(md, "cg_stop_reason", "?")),
             wall,
             Int(get(md, "cg_certification_rounds", 0)),
-            Int(get(md, "cg_certification_refuted_rounds", 0)),
+            Int(get(md, "cg_certification_negative_rc_column_rounds", 0)),
             Int(get(md, "cg_certification_inconclusive_rounds", 0)),
             exact_min, relaxed_min, sizes)
     flush(stdout)

@@ -52,15 +52,25 @@ buys back cut strength.
   separation's per-completion gain. Kept because it is the pricing-free option and the
   comparison is worth being able to re-run, not because it works.
 
-`:column_generation_activated_warm_start` uses the activated restriction as a WARM START
-only, and takes no completion at all. Phase 1 prices built-only to exhaustion; phase 2 drops
-the restriction and prices the full universe to exhaustion, and the cut comes from phase 2's
-raw duals by the ordinary argument. It exists to measure one thing: phase 1 already attains
-the EXACT `Q_s(yhat)` (a column touching an unbuilt station is pinned to `theta = 0` by its
-own `theta - y_j <= 0` row, so it cannot improve the objective at a fixed `yhat`), which means
-every second of full-station pricing in `:column_generation` buys duals rather than value.
-This arm asks whether warm-starting the pool makes that dual-only grind cheaper -- the null
-hypothesis against which the two completions above are the alternatives.
+`:column_generation_warm_start` is NOT part of the activated family, despite borrowing its
+restriction for one phase. It takes **no dual completion at all**: phase 1 prices built-only
+to exhaustion purely to fill the pool, phase 2 then drops the restriction and prices the full
+universe to exhaustion, and the cut is read off phase 2's RAW duals by the ordinary argument.
+Nothing about its cut needs a new soundness claim -- which is why it is named for what it
+does rather than for the restriction it reuses.
+
+It exists to measure one thing. Phase 1 already attains the EXACT `Q_s(yhat)`: a column
+touching an unbuilt station is pinned to `theta = 0` by its own `theta - y_j <= 0` row, so it
+cannot improve the objective at a fixed `yhat`. Every second of full-station pricing in
+`:column_generation` therefore buys DUALS, not value. This arm asks whether warming the pool
+first makes that dual-only phase cheaper -- the null hypothesis the two completions above
+have to beat.
+
+MEASURED: it beats them. The completions are 40-100% gap at n>=30 with `gain = 0.0` (the
+completion falls back to the closed-form bound every call, so the cuts are vacuous), while
+this arm certifies n=40 s=3 and n=50 s=3. Its own weakness is different: the split counter
+shows phase 1 is under 2% of its pricing, so the warm pool is not shortening phase 2 much --
+it is close to plain `:column_generation` with a cheap prologue.
 
 # The activated subproblem and its dual completion
 
@@ -220,11 +230,11 @@ struct BendersSubproblemConfig
         oracle in (:direct_enumeration, :column_generation,
                    :column_generation_activated,
                    :column_generation_activated_lpo,
-                   :column_generation_activated_warm_start) || throw(ArgumentError(
+                   :column_generation_warm_start) || throw(ArgumentError(
             "unsupported Benders subproblem oracle $(repr(oracle)); expected " *
             ":direct_enumeration, :column_generation, :column_generation_activated, " *
             ":column_generation_activated_lpo or " *
-            ":column_generation_activated_warm_start",
+            ":column_generation_warm_start",
         ))
         # `max_stops` defaults PER ORACLE, which is why the keyword takes `missing` rather
         # than a plain value: enumeration needs the cap (its pool is exponential in it), and

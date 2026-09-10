@@ -15,16 +15,20 @@ second copy of them is a second place for the two modes to drift apart on the me
 
 The `cg_certification_round` body -- the only one, since `:relaxed_cluster` is the only
 certification mode. `certified` only when EVERY scenario certified, and the
-refuted/inconclusive split says which fix a failure calls for.
+`:negative_rc_column_found`/`:inconclusive` split says what actually happened on a round
+that did not: the first means the mode priced (columns are on the way to the master and CG
+should iterate), the second means the attempt learned nothing and is the only one worth
+escalating.
 
 # Scenarios run CONCURRENTLY, and every scenario is always searched
 
 Both of those changed when harvesting landed, and both were the opposite before.
 
-The round used to walk scenarios serially and `break` at the first refutation, on the
-reasoning that one refuted scenario already settles the round so the rest is wasted work.
-That reasoning died with harvesting: a refuted scenario is now a *pricing round*, so the
-scenarios after it are not wasted work -- skipping them forfeits their columns. Every
+The round used to walk scenarios serially and `break` as soon as one scenario found an
+improving column, on the reasoning that this already settles the round so the rest is
+wasted work. That reasoning died with harvesting: a scenario that finds a column is now a
+*pricing round*, so the scenarios after it are not wasted work -- skipping them forfeits
+their columns. Every
 scenario is therefore searched, and the round's conclusion is reduced afterwards.
 
 Serial execution died with it for a blunter reason. Harvesting moved essentially the whole
@@ -56,8 +60,9 @@ function _run_relaxed_cluster_certification_round(
     all_scenarios = _pricing_scenarios(formulation, mapping, m)
     # A restricted round prices only the scenarios named, which is how an escalation buys
     # the longer budget for the scenarios that need it WITHOUT re-running the ones that
-    # already reached a verdict. Re-running a refuted scenario would re-find columns already
-    # in the pool; re-running a certified one would re-prove what is proved.
+    # already reached a verdict. Re-running a scenario that already priced a column would
+    # re-find columns already in the pool; re-running a certified one would re-prove what is
+    # proved.
     scenarios = if isnothing(only_scenarios)
         collect(all_scenarios)
     else
@@ -101,7 +106,7 @@ function _run_relaxed_cluster_certification_round(
     end
 
     certified_count = 0
-    any_refuted = false
+    any_negative_rc_column = false
     all_conclusive = true
     harvested = Any[]
     # The round's lower bound on the real minimum reduced cost. `Inf` is the identity of
@@ -118,8 +123,8 @@ function _run_relaxed_cluster_certification_round(
         append!(harvested, r.candidates)
         if r.outcome === :certified
             certified_count += 1
-        elseif r.outcome === :refuted
-            any_refuted = true
+        elseif r.outcome === :negative_rc_column_found
+            any_negative_rc_column = true
         else
             all_conclusive = false
             push!(inconclusive_scenarios, scenarios[i])
@@ -132,15 +137,15 @@ function _run_relaxed_cluster_certification_round(
             min(rc_bound, isempty(r.trace) ? Inf : Float64(r.trace[end].relaxed_rc))
     end
 
-    certified = !any_refuted && all_conclusive && certified_count == length(scenarios)
+    certified = !any_negative_rc_column && all_conclusive && certified_count == length(scenarios)
     # `exhausted` means: every scenario reached a conclusion AND none was skipped. Now that
     # no scenario is ever skipped, this is exactly "nothing came back inconclusive, and
-    # nothing was refuted".
-    conclusive_and_complete = all_conclusive && !any_refuted
+    # nothing found a column".
+    conclusive_and_complete = all_conclusive && !any_negative_rc_column
     # A certified round's harvest is dropped on purpose: CG is about to stop, and adding
     # columns to a master that has just been proved optimal would only churn it.
     return RelaxedClusterCertificationResult(
-        certified, any_refuted, conclusive_and_complete, certified_count, length(scenarios),
+        certified, any_negative_rc_column, conclusive_and_complete, certified_count, length(scenarios),
         clustering.n_clusters, time() - t_start, certified ? Any[] : harvested, rc_bound,
         inconclusive_scenarios, collect(scenarios), inconclusive_reasons,
     )

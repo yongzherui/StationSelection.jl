@@ -73,7 +73,7 @@ end
 
 Optional hook pair backing the `:relaxed_cluster` pricing mode: a *relaxation* round that
 answers "can an improving column still exist for these duals?", and harvests the real
-columns its refutation searches turn up on the way.
+columns its exact subset searches turn up on the way.
 
 This is a wider contract than `price_columns`, not a narrower one. The round searches a
 relaxed problem whose solutions need not correspond to real columns, so on its own it
@@ -85,8 +85,10 @@ having: it must lower-bound the real pricing problem's minimum reduced cost, so
 and the loop can stop *certified* without ever running the expensive exhaustive search
 that would otherwise be needed to prove the same thing. `certified=false` proves nothing
 (the relaxation may simply be loose); what it does carry is `candidates`, the improving
-columns the exhaustive sub-searches behind a refutation found, which the loop materializes
-as that iteration's pricing result.
+columns the exhaustive sub-searches found, which the loop materializes as that iteration's
+pricing result. That is the `:negative_rc_column_found` outcome, and it is the hook's
+ordinary return -- the round is a pricing round that may also certify, not a certification
+attempt that may fail.
 
 The result must have `certified::Bool`, `improving_found::Bool` and `candidates`; anything
 else on it is the pricer's own diagnostics. The defaults make the mode unavailable:
@@ -112,8 +114,8 @@ same path a pricing round uses (`_materialize_pricing_columns` -- same id alloca
 `_pricing_verify_column` cross-check against the master's own duals), so a harvested column
 is indistinguishable from a priced one.
 
-Empty in, empty out: a successful attempt drops its harvest (CG is about to stop), so this
-is a no-op unless the attempt actually refuted something. Generic over formulations rather
+Empty in, empty out: a certifying attempt drops its harvest (CG is about to stop), so this
+is a no-op unless the attempt actually priced something. Generic over formulations rather
 than dispatched, because the candidates already
 carry the search context that knows how to build their columns.
 """
