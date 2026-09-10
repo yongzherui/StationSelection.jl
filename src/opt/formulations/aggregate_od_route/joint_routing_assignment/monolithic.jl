@@ -60,7 +60,7 @@ The compatible pricers' `compensated_dominance` toggle lives on `CGPricingConfig
 No `assignment_policy` field: this
 formulation's `build_model` only ever supported free assignment in practice, so free
 assignment is simply the only behavior now. No `allow_walk_only` field either -- unlike
-`AggregateODRouteBaseFormulation`/`AggregateODRouteBendersYXFormulation`, direct walking
+`AggregateODRouteBaseFormulation`, direct walking
 (`WALK_ONLY_PAIR`) is not optional here: it's the only station-free coverage option once
 same-station pairs are gone (`compute_valid_jk_pairs` no longer produces `j==k` pairs at
 all), so it must always be available for the build-time feasibility guarantee

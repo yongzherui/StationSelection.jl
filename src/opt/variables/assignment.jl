@@ -158,7 +158,8 @@ assignment directly and there is no separate `x`.
 station-free option through `x` itself).
 
 `scenarios` restricts variable creation to a subset of scenarios -- used by
-`AggregateODRouteBendersYXFormulation`'s subproblem, which is solved one scenario at a
+`AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation`'s
+subproblem, which is solved one scenario at a
 time (default keeps every existing caller's behavior unchanged). `relax_integrality`
 declares `x` continuous on `[0,1]` instead of binary, mirroring
 `add_route_variables!`'s own kwarg -- the Benders subproblem needs

@@ -11,7 +11,8 @@ One row per demand group `(s,p)` with `s in scenarios`: exactly one feasible ass
 `sum_{(j,k)} x[s,p,j,k] + x_walk[s,p] == 1` (the `x_walk` term omitted when no such key
 exists, i.e. direct walking isn't available for that OD). `scenarios` mirrors
 `add_assignment_variables!`'s own kwarg -- used by
-`AggregateODRouteBendersYXFormulation`'s per-scenario subproblem.
+`AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation`'s
+per-scenario subproblem.
 
 Every row is guaranteed at least one term: `build_model` calls
 `aggregate_od_route_validate_feasible_coverage` before any variable exists, which proves

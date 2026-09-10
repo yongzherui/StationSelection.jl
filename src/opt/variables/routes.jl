@@ -28,7 +28,8 @@ One `theta[(column.id, s)]` per `column in mapping.columns` Ã— `s in scenario
 `AggregateODRouteColumn` is scenario-agnostic geometry (which `(j,k)` pairs a route
 covers), so `theta` is what actually decides whether that route is *activated* in a given
 scenario. `scenarios` restricts variable creation to a subset of scenarios -- used by
-`AggregateODRouteBendersYXFormulation`'s subproblem, which is solved one scenario at a
+`AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation`'s
+subproblem, which is solved one scenario at a
 time (default keeps every existing caller's behavior unchanged).
 """
 function add_route_variables!(

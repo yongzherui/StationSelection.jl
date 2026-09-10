@@ -191,11 +191,6 @@ subproblem whose `mapping` disagrees with the master's.
 Not dead code — deliberately preserved as a starting point for future work, but not
 reachable from any `build_model`/`Solver` today:
 
-- Five Benders formulation marker structs under `opt/formulations/aggregate_od_route/
-  benders/` (`{y,xy,yz,yzh,yx}.jl`) — pre-split scaffolding, superseded by the live
-  master/subproblem pair above and still wired to nothing. `cut_mode.jl`
-  (`AbstractBendersCutMode`/`SingleCut`/`MultiCut`) in that same directory is NOT
-  scaffolding — it is live, read by the master formulation.
 - `RouteCoveringProblem` (`opt/problems/route_covering.jl`) — fixed-`y`/fixed-assignment
   shape; the live Benders subproblem fixes `y` but leaves assignment to `θ`, so this
   remains the shape a `:column_generation` subproblem oracle would reuse rather than one
@@ -205,6 +200,17 @@ See `notes/2026-08-11_problem_formulation_solver_split_progress.md` for the full
 writeup, migration history, and remaining-work list.
 
 ## Removed entirely
+
+The five pre-split Benders formulation marker structs under
+`opt/formulations/aggregate_od_route/benders/` (`{y,xy,yz,yzh,yx}.jl` —
+`AggregateODRouteBenders{Y,XY,YZ,YZH,YX}Formulation`) are gone as of 2026-09-10. They were
+documented as "kept as a starting point", but they decomposed the **Base** formulation's
+`y`/`z`/`x` staging and were counterparts to `BendersY`/`XY`/`YZ`/`YZH` *solver* markers
+that had already been removed — and the decomposition they stood in for now exists and is
+measured exact (the master/subproblem pair above). Recoverable from git history if a
+Base-formulation decomposition is ever wanted. **`cut_mode.jl` in that same directory is
+NOT scaffolding and remains** — `AbstractBendersCutMode`/`SingleCut`/`MultiCut` are live,
+read by `…JointRoutingAssignmentMasterFormulation`.
 
 The pre-split `AbstractStationSelectionModel` hierarchy and every model built on it are
 gone — not migrated, just absent. If old scripts, notes, or slides reference

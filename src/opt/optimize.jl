@@ -1,14 +1,16 @@
 # `optimize/aggregate_od_route/solver_types.jl` and `optimize/formulations/aggregate_od_route/*`
 # no longer exist -- superseded by `opt/solvers/*.jl` and `opt/formulations/aggregate_od_route/*.jl`,
-# included directly from `StationSelection.jl`. None of the five Benders formulation
-# marker structs (`benders/{y,xy,yz,yzh,yx}.jl`) are wired into a build_model/Solver here --
-# kept purely as a reminder of the decompositions to (re)build, see those files' own
-# docstrings and `opt/problems/route_covering.jl` (`RouteCoveringProblem`, likewise kept
-# unwired). A first working attempt (`AggregateODRouteBendersYXFormulation` against
-# `AggregateODRouteBaseFormulation`'s free-assignment machinery) was built, verified
-# exact against `DirectMIPSolver`, and then deliberately removed in favor of restarting
-# against `RouteCoveringProblem` + column generation -- see git history
-# ("AggregateODRouteBendersYXFormulation") if useful.
+# included directly from `StationSelection.jl`. The live Benders path is the
+# `AggregateODRouteJointRoutingAssignment{Master,BendersSubproblem}Formulation` pair, derived
+# by `build_model(problem, ::Monolith, ::BendersSolver)`. The five pre-split Benders marker
+# structs (`benders/{y,xy,yz,yzh,yx}.jl`) that used to sit here unwired are deleted --
+# they were counterparts to `BendersY`/`XY`/`YZ`/`YZH` solver markers that no longer exist,
+# and the decomposition they were a placeholder for now works. Recoverable from git history
+# ("AggregateODRouteBendersYXFormulation"), which also holds an earlier working YX attempt
+# against `AggregateODRouteBaseFormulation`'s free-assignment machinery -- verified exact
+# against `DirectMIPSolver`, then removed in favor of restarting against
+# `RouteCoveringProblem` + column generation. `RouteCoveringProblem`
+# (`opt/problems/route_covering.jl`) is still kept unwired.
 #
 # `optimize/iterative_strategy_types.jl` (old `AbstractStationSelectionSolver`/
 # `SolverConfig`/`DirectSolver`/`ColumnGenerationSolver`/iterative-solve-strategy types),

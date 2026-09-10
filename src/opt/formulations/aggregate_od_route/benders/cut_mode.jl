@@ -1,8 +1,8 @@
 """
-Cut-aggregation modes shared by every Benders-decomposed `AggregateODRoute` formulation
-(`AggregateODRouteBendersYXFormulation` and friends) -- *how many* `theta` cut-placeholder
-variables the master carries and how subproblem cut groups are formed, independent of
-which first-stage variables the master fixes.
+Cut-aggregation modes for the Benders-decomposed `AggregateODRoute` formulations -- *how
+many* `theta` cut-placeholder variables the master carries and how subproblem cut groups
+are formed, independent of which first-stage variables the master fixes. Read today by
+`AggregateODRouteJointRoutingAssignmentMasterFormulation`.
 """
 
 export AbstractBendersCutMode

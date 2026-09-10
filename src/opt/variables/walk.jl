@@ -40,7 +40,8 @@ is exactly one implementation to keep in sync rather than two near-duplicates dr
 apart.
 
 `scenarios` restricts variable creation to a subset of scenarios -- used by
-`AggregateODRouteBendersYXFormulation`'s subproblem, which is solved one scenario at a
+`AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation`'s
+subproblem, which is solved one scenario at a
 time (default keeps every existing caller's behavior unchanged). `relax_integrality`
 declares `x_walk[s,p] >= 0` (no upper bound -- primal-redundant for this positive-cost
 covering row, same reasoning as `add_route_variables!`'s own

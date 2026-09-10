@@ -35,13 +35,8 @@ per formulation. Note that no member of `AnyJointRoutingAssignmentFormulation` c
 field set otherwise -- `create_aggregate_od_route_map` resolves that one field via
 `_aggregate_od_route_allow_walk_only` instead of direct field access. Mirrors
 `AnyAggregateODRouteProblem` (`opt/problems/route_covering.jl`) for the same reason.
-`AggregateODRouteBendersYXFormulation` (`../benders/yx.jl`) shares this field set too --
-it is unwired scaffolding from the pre-split era, kept only as a reminder, and is not part
-of the live Benders path (that is `AnyJointRoutingAssignmentFormulation`'s master/
-subproblem pair).
 """
 const AnyAggregateODRouteFormulation = Union{
     AggregateODRouteBaseFormulation,
-    AggregateODRouteBendersYXFormulation,
     AnyJointRoutingAssignmentFormulation,
 }

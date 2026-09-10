@@ -101,11 +101,6 @@ include("opt/problems/route_covering.jl")
 include("opt/formulations/clustering.jl")
 include("opt/formulations/aggregate_od_route/base.jl")
 include("opt/formulations/aggregate_od_route/benders/cut_mode.jl")
-include("opt/formulations/aggregate_od_route/benders/y.jl")
-include("opt/formulations/aggregate_od_route/benders/xy.jl")
-include("opt/formulations/aggregate_od_route/benders/yz.jl")
-include("opt/formulations/aggregate_od_route/benders/yzh.jl")
-include("opt/formulations/aggregate_od_route/benders/yx.jl")
 # opt/formulations/aggregate_od_route/joint_routing_assignment/: the joint routing+assignment
 # formulation FAMILY -- the monolith (DirectMIPSolver/CGSolver) plus the master/subproblem
 # pair it decomposes into under BendersSolver. Load order is bottom-up: shared.jl's field
