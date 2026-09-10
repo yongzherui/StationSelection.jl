@@ -474,10 +474,22 @@ violation), so this is a cross-cutting precondition, not a local assumption.
 proof recorded it as one. Both route-feasibility conditions bound ELAPSED durations from
 above -- the pickup window is `label.time <= max_wait_time`, the ride limit is
 `origin_age + travel <= detour_factor * routing_cost(j,k)` -- and removing a stop only
-decreases both. Nothing here measures wait against a fixed request clock, so a shortened
-route cannot make a retained passenger wait longer. (`A -> U -> A -> B` with the pickup at
-the second `A` is fine too: age is measured from the last visit to that station, so
-collapsing the two visits leaves the in-vehicle time unchanged.)
+decreases each left-hand side.
+
+**Both right-hand sides are also unchanged by the shortcut, and for the ride limit that is
+a real step, not a formality.** `max_wait_time` is a constant. `routing_cost(j,k)` looks
+route-dependent and is not: `j` and `k` are the ASSIGNMENT's pickup/dropoff stations, and
+the limit is computed per candidate before any route exists
+(`pricing_round.jl`: `ride_limit = detour_factor * get_routing_cost(data, j, k)` over
+`get_valid_jk_pairs(mapping, o, d)`). Removing an intermediate route node therefore cannot
+move it. Spelled out because this whole argument is about route NODES, so a reader arriving
+here is primed to read `(j,k)` as route positions -- and reading it that way makes the
+shortcut look unsound.
+
+Nothing here measures wait against a fixed request clock either, so a shortened route
+cannot make a retained passenger wait longer. (`A -> U -> A -> B` with the pickup at the
+second `A` is fine too: age is measured from the last visit to that station, so collapsing
+the two visits leaves the in-vehicle time unchanged.)
 
 For the same reason, "a column touching an unbuilt station is pinned to `theta = 0` by its
 own linking row" -- true of a column with an unbuilt ASSIGNMENT -- does NOT cover one whose
