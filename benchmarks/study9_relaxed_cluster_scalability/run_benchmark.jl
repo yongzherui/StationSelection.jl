@@ -28,9 +28,12 @@ macro_count = length(f) >= 18 ? parse(Int, f[18]) : 0
 # used 6% of it).
 aligned_subset_max = length(f) >= 19 ? parse(Int, f[19]) : 15
 # `twotier_k60m14` names a two-tier arm with an explicit K1, so two K1 settings at the same
-# K2 can run without colliding on the output filename (which is keyed by arm).
+# K2 can run without colliding on the output filename (which is keyed by arm). The optional
+# `c<N>`/`g<N>`/`p<N>` suffixes name the aligned-subset cap, the guide-route count and the
+# ordinary pricing-round budget respectively, for the same reason: any two arms that differ
+# in a swept parameter must differ in their filename.
 arm in ("exact", "relaxed_k60", "relaxed_k80", "twotier_k60", "twotier_k80") ||
-    occursin(r"^twotier_k\d+m\d+([gc]\d+)*$", arm) ||
+    occursin(r"^twotier_k\d+m\d+([gcp]\d+)*$", arm) ||
     error("unknown arm $arm")
 two_tier = startswith(arm, "twotier")
 Threads.nthreads() == n_threads || error(

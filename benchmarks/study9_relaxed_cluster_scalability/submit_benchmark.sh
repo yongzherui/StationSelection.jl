@@ -21,6 +21,11 @@
 # with 24G on that pricer. Study 9's exact arms stop at n=25 (peak 12.1G), so pass an
 # explicit larger `--mem` if that pricer is ever run big again.
 #SBATCH --mem=16G
+# MEASURED 2026-09-09 on the reach3 array (job 22356068, the same 7200 s solve budget as
+# the reach5 arms): worst elapsed 2:05:21, so 2.5 h covers it with ~25 min of headroom. The
+# 6.5 h default belongs to the 21600 s frontier arms; pass `--time` explicitly when a table
+# uses a different total_limit_sec rather than reserving 3x what the job can possibly use --
+# a reservation is held against the partition whether or not it is consumed.
 #SBATCH --time=06:30:00
 #SBATCH --output=slurm_logs/%x-%A_%a.out
 #SBATCH --error=slurm_logs/%x-%A_%a.err
@@ -32,7 +37,7 @@ PROJECT_ROOT="$(cd "$STUDY_DIR/../.." && pwd)"
 TASK="${SLURM_ARRAY_TASK_ID:?submit via sbatch --array}"
 TABLE="${1:?usage: submit_benchmark.sh <validation.tsv|nNN.tsv>}"
 case "$TABLE" in
-    smoke.tsv|smoke_twotier.tsv|n30_twotier.tsv|n40_twotier.tsv|n40_anytime.tsv|n40_reach.tsv|n40_reach2.tsv|n40_reach3.tsv|n40_reach4.tsv|n40_reach3b.tsv|n30_twotier_m14.tsv|n50_twotier.tsv|validation.tsv|n20.tsv|n25.tsv|n30.tsv|n35.tsv|n40.tsv|n45.tsv|n50.tsv|n55.tsv|n60.tsv|n65.tsv|n70.tsv|n75.tsv|n80.tsv|n84.tsv) ;;
+    smoke.tsv|smoke_twotier.tsv|smoke_reach5.tsv|smoke_s1.tsv|s1_frontier.tsv|n30_twotier.tsv|n40_twotier.tsv|n40_anytime.tsv|n40_reach.tsv|n40_reach2.tsv|n40_reach3.tsv|n40_reach4.tsv|n40_reach5.tsv|n40_reach3b.tsv|n30_twotier_m14.tsv|n50_twotier.tsv|validation.tsv|n20.tsv|n25.tsv|n30.tsv|n35.tsv|n40.tsv|n45.tsv|n50.tsv|n55.tsv|n60.tsv|n65.tsv|n70.tsv|n75.tsv|n80.tsv|n84.tsv) ;;
     *) echo "invalid job table: $TABLE" >&2; exit 2 ;;
 esac
 RUN_ID="${STUDY9_RUN_ID:?set STUDY9_RUN_ID in the submitting shell}"
