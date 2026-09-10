@@ -1,5 +1,13 @@
 # Per-scenario escalation and a 600 s pricing round: NEGATIVE at n=40
 
+> **Naming note (added 2026-09-10).** The outcome this note calls `:refuted` is now
+> `:negative_rc_column_found`, and the metadata counter `cg_certification_refuted_rounds` is
+> now `cg_certification_negative_rc_column_rounds`. The rename is because "refuted" read as
+> a failure and was repeatedly misread as one: the relaxed-cluster mode **prices first and
+> certifies second**, so an attempt that finds an improving real column is that iteration's
+> pricing round doing its job, not a failed certification. Read every "refuted" below as
+> "priced a column, so CG iterates again".
+
 Status 2026-09-09. Companion to `2026-09-09_n40_certification_frontier_5_of_10.md`, whose
 cap table, exhaustion cliff and bottom line this run's analysis also corrected in place.
 
@@ -60,6 +68,31 @@ value with FEWER columns (3373 vs 3424).
 It is also cheaper where it was wasteful. Escalated attempts fell 48 -> 26 (p300) -> 14
 (p600), because 29 of the baseline's 48 were re-runs of scenarios that already had a verdict.
 That is where seed 46's 1966 s -> 582 s and seed 48's 533 s -> 233 s come from.
+
+**And the reason escalation is worth having at all is a false-negative one, not a
+certificate-buying one.** The 48 escalated attempts in reach3 are PAIRED observations -- the
+same duals and the same subset searched at two budgets:
+
+| ordinary -> escalated | n |
+| --- | --- |
+| inconclusive -> **refuted** | 12 |
+| inconclusive -> certified | 3 |
+| inconclusive -> inconclusive | 4 |
+| certified -> certified (pure waste) | 29 |
+
+79% of inconclusive attempts resolve when escalated, and **63% resolve by finding improving
+columns the truncated search had reported as absent**. The cleanest single case is seed 45
+scenario 2: `subset_rc = 0.0` (nothing improving) at a 150 s slice, and **-1854.2** at
+1800 s -- identical duals, identical subset. A truncated "nothing improving" is a false
+negative that CG then believes.
+
+Those columns do drive real LP progress: master drops of 146 / 626 / 714 / 888 on objectives
+around 32000 (0.5-2.8%). Set against seed 47's baseline, which sat frozen at 32043.0090 for
+20 iterations while scenario 2 dribbled in 1-5 worthless columns.
+
+Cost of resolving: median 632 s, p75 987 s, only 1 of 15 under 300 s -- which is why the
+150 s derived slice cannot buy them. 47% (7/15) of resolved scenarios go inconclusive again
+the next iteration.
 
 **But none of it certifies anything new.** Seed 47's gain is -5.06 on ~32040, i.e. 0.016% --
 noise at the scale that matters. An earlier reading of this run called it "breaking the
