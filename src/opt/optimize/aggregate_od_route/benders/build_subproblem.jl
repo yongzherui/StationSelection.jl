@@ -93,7 +93,9 @@ function _build_joint_routing_assignment_subproblem_model(
         mapping::AggregateODRouteMap,
         formulation::AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation,
         scenario::Int,
-        columns,
+        columns;
+        pricing_enabled::Bool=false,
+        pricing::CGPricingConfig=CGPricingConfig(),
     )::BuildResult
     1 <= scenario <= n_scenarios(data) ||
         throw(ArgumentError("scenario $scenario out of range 1:$(n_scenarios(data))"))
@@ -106,6 +108,9 @@ function _build_joint_routing_assignment_subproblem_model(
         m, data, formulation; relax_integrality = true,
     )
     m[:benders_subproblem_scenario] = scenario
+    pricing_enabled && _stash_joint_routing_assignment_subproblem_pricing!(
+        m, data, formulation, pricing,
+    )
 
     # ---- 2. Variables ----
     variable_counts = Dict{String, Int}()
@@ -153,4 +158,61 @@ function _build_joint_routing_assignment_subproblem_model(
     )
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
+end
+
+"""
+    _stash_joint_routing_assignment_subproblem_pricing!(m, data, formulation, pricing)
+
+The extra model state a subproblem needs to be solved by COLUMN GENERATION rather than over
+an enumerated pool. Called only for `oracle = :column_generation`; the enumeration oracle
+never prices, and stashing pricing state it cannot use would assert a capability the model
+does not have (the same reason `_stash_joint_routing_assignment_cost_parameters!` leaves all
+of this out).
+
+Two pieces beyond the obvious node list and travel-cost table:
+
+**`:joint_routing_assignment_pricing_formulation` is a MONOLITH**, derived from this
+subproblem formulation, and it is what gets handed to `_run_pricing_round`. Every pricing
+hook in `label_setting/joint_routing_assignment/pricing_round.jl` dispatches on
+`AggregateODRouteJointRoutingAssignmentFormulation` specifically, so passing the subproblem
+type would find no methods. Deriving the monolith from this formulation (rather than
+stashing it under `:aggregate_od_route_formulation` and pretending) keeps the model's own
+identity honest while giving the pricer the type it dispatches on -- and since the two carry
+the identical six encoding fields, the route universe and costs it prices against are
+exactly this subproblem's.
+
+**`max_stops` is the FORMULATION's**, with no oracle cap. That is the point of this oracle:
+the pricer explores on demand, so there is nothing to bound up front, and the run keeps a
+`full_route_universe` optimality scope.
+"""
+function _stash_joint_routing_assignment_subproblem_pricing!(
+        m::Model,
+        data::StationSelectionData,
+        formulation::AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation,
+        pricing::CGPricingConfig,
+    )
+    n = data.n_stations
+    m[:joint_routing_assignment_pricing_formulation] =
+        AggregateODRouteJointRoutingAssignmentFormulation(
+            route_regularization_weight = formulation.route_regularization_weight,
+            walk_cost_weight = formulation.walk_cost_weight,
+            repositioning_time = formulation.repositioning_time,
+            max_wait_time = formulation.max_wait_time,
+            detour_factor = formulation.detour_factor,
+            max_stops = formulation.max_stops,
+        )
+    m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
+    m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
+    m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
+    m[:joint_routing_assignment_aligned_subset_max] = pricing.relaxed_cluster_aligned_subset_max
+    m[:joint_routing_assignment_relaxed_cluster_max_count] = pricing.relaxed_cluster_max_count
+    m[:joint_routing_assignment_nodes] = collect(1:n)
+    travel_cost = Dict{Tuple{Int, Int}, Float64}()
+    for i in 1:n, j in 1:n
+        i == j && continue
+        cost = get_routing_cost(data, i, j)
+        isfinite(cost) && (travel_cost[(i, j)] = cost)
+    end
+    m[:joint_routing_assignment_travel_cost] = travel_cost
+    return nothing
 end

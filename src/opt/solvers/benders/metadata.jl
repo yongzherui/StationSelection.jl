@@ -41,5 +41,14 @@ function _benders_build_metadata(build_result::BuildResult, st::BendersLoopState
     for (key, value) in build_result.metadata
         metadata[key] = value
     end
+    # Oracle-specific, present only when the subproblems actually priced columns
+    # (`_accumulate_benders_cg_stats!`, benders/subproblem.jl). Absent for
+    # :direct_enumeration rather than reported as zeros, so a reader can tell "did not price"
+    # from "priced nothing".
+    if haskey(m.obj_dict, :benders_cg_stats)
+        for (key, value) in m[:benders_cg_stats]
+            metadata["benders_cg_$(key)"] = value
+        end
+    end
     return metadata
 end

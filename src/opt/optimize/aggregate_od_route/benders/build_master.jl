@@ -89,12 +89,21 @@ function build_model(
         max_stops = _benders_subproblem_max_stops(formulation, solver.subproblem),
     )
 
+    # The oracle decides where the subproblems' columns come from. `:direct_enumeration`
+    # builds the whole universe here, once. `:column_generation` seeds each subproblem with
+    # the two-stop routes -- enough to guarantee every coverage row has a term -- and lets
+    # pricing grow the pool on demand, so nothing is enumerated at all.
+    pricing_oracle = solver.subproblem.oracle === :column_generation
     t_enum = time()
-    columns = enumerate_joint_routing_assignment_columns(
-        problem, subproblem_formulation, data;
-        max_routes = solver.subproblem.max_routes,
-        time_limit_sec = solver.subproblem.enumeration_time_limit_sec,
-    )
+    columns = if pricing_oracle
+        joint_routing_assignment_two_stop_seed_columns(data, mapping)
+    else
+        enumerate_joint_routing_assignment_columns(
+            problem, subproblem_formulation, data;
+            max_routes = solver.subproblem.max_routes,
+            time_limit_sec = solver.subproblem.enumeration_time_limit_sec,
+        )
+    end
     enumeration_sec = time() - t_enum
 
     m = Model(() -> Gurobi.Optimizer())
@@ -135,7 +144,9 @@ function build_model(
     # ---- 5. Second stage ----
     subproblem_builds = BuildResult[
         _build_joint_routing_assignment_subproblem_model(
-            data, mapping, subproblem_formulation, s, columns,
+            data, mapping, subproblem_formulation, s, columns;
+            pricing_enabled = pricing_oracle,
+            pricing = solver.subproblem.pricing,
         )
         for s in 1:n_scenarios(data)
     ]
@@ -149,7 +160,11 @@ function build_model(
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
 
     metadata = Dict{String, Any}(
-        "benders_enumerated_columns" => length(columns),
+        "benders_subproblem_oracle" => solver.subproblem.oracle,
+        # Under :column_generation this is the SEED size, not a universe -- the pool grows
+        # per scenario as pricing runs, so read `benders_cg_pool_final` for the real count.
+        "benders_seed_columns" => length(columns),
+        "benders_enumerated_columns" => pricing_oracle ? 0 : length(columns),
         "benders_enumeration_sec" => enumeration_sec,
         "benders_subproblem_max_stops" => subproblem_formulation.max_stops,
         "benders_formulation_max_stops" => formulation.max_stops,

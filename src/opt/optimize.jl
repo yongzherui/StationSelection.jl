@@ -242,6 +242,7 @@ include("optimize/aggregate_od_route/direct/build_joint_routing_assignment.jl")
 # one model per scenario), then the solve/dual extraction, then the cut builder, then the
 # master build, and dispatch.jl last -- its hooks forward to everything above.
 include("optimize/aggregate_od_route/benders/build_subproblem.jl")
+include("optimize/aggregate_od_route/benders/subproblem_cg.jl")
 include("optimize/aggregate_od_route/benders/subproblem.jl")
 include("optimize/aggregate_od_route/benders/cuts.jl")
 include("optimize/aggregate_od_route/benders/build_master.jl")

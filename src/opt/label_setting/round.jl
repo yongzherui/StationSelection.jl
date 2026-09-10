@@ -104,12 +104,22 @@ function _run_pricing_round(
     max_new_columns::Int=typemax(Int) ÷ 2,
     time_limit::Float64=30.0,
     profile::Bool=false,
+    only_scenarios::Union{Nothing, AbstractVector{Int}}=nothing,
 )
     # Each scenario is priced independently below, then results are merged
     # across scenarios after the loop. Scenarios are independent, so both
     # phases below parallelize across them when the formulation opts in and
     # there's more than one thread to use.
     scenarios = _pricing_scenarios(formulation, mapping, m)
+    # `only_scenarios` restricts the round to a subset, mirroring `cg_certification_round`'s
+    # kwarg of the same name. Needed by the Benders subproblem oracle
+    # (`optimize/aggregate_od_route/benders/subproblem_cg.jl`): each subproblem model holds
+    # exactly ONE scenario's coverage/linking rows, so pricing any other scenario there would
+    # read duals for keys the model does not have. `m[:label_setting_pricing_exhausted]` below
+    # then reports exhaustion for the subset, which is precisely the per-scenario convergence
+    # signal that Benders' cut validity depends on.
+    isnothing(only_scenarios) ||
+        (scenarios = [s for s in scenarios if s in only_scenarios])
     parallel = (solver.parallel_scenario_pricing || _pricing_parallel_scenarios(formulation)) &&
         length(scenarios) > 1 && Threads.nthreads() > 1
 

@@ -237,6 +237,7 @@ export AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation
 export add_benders_cut_variables!, benders_cut_group
 export add_benders_optimality_cut!, set_benders_master_objective!
 export JointRoutingAssignmentBendersScenarioResult, JointRoutingAssignmentBendersSubproblemResult
+export BendersSubproblemCGResult
 export add_station_selection_variables!, add_scenario_activation_variables!
 export add_assignment_variables!
 export add_flow_variables!

@@ -148,6 +148,11 @@ One scenario's second-stage evaluation: its exact cost at the incumbent, and the
 derived from it (`cut_constant` = `sum_p alpha`, `y_coefficients[j]` = `Gamma[s,j]`,
 sparse -- a station in no linking row of this scenario is simply absent).
 
+`cg` is the inner CG outcome under the `:column_generation` oracle and `nothing` under
+`:direct_enumeration`. It is kept rather than discarded because its `converged` bit is what
+licensed the cut in the first place, and its iteration/column counts are the only way to see
+whether pool accumulation across Benders iterations is doing its job.
+
 `reduced_cost_mismatch` is a diagnostic, not a check: with `y` fixed, JuMP's
 `reduced_cost(y[j])` is a second, independent route to `-Gamma[s,j]`, and this records the
 largest disagreement between the two. It is reported rather than enforced because the
@@ -161,6 +166,7 @@ struct JointRoutingAssignmentBendersScenarioResult
     cut_constant::Float64
     y_coefficients::Dict{Int, Float64}
     reduced_cost_mismatch::Float64
+    cg::Union{Nothing, BendersSubproblemCGResult}
 end
 
 """
@@ -201,6 +207,7 @@ function _solve_joint_routing_assignment_benders_subproblems(
         ))
         total += results[end].objective
     end
+    _accumulate_benders_cg_stats!(m, results)
     return JointRoutingAssignmentBendersSubproblemResult(results, total, time() - t0)
 end
 
@@ -221,7 +228,27 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     isnothing(solver.subproblem.time_limit_sec) ||
         set_time_limit_sec(sm, solver.subproblem.time_limit_sec)
 
-    optimize!(sm)
+    # Oracle split. `:direct_enumeration` solves the LP once over the complete pool.
+    # `:column_generation` runs CG to EXHAUSTION first -- and its convergence is a hard
+    # precondition for taking a cut, not a quality preference: duals from a non-exhausted
+    # CG are feasible only for the restricted dual, so the cut can over-estimate the true
+    # second-stage cost and prune the optimum (see subproblem_cg.jl).
+    cg_result = nothing
+    if solver.subproblem.oracle === :column_generation
+        cg_result = _solve_joint_routing_assignment_subproblem_by_cg!(build, solver.subproblem)
+        cg_result.converged || error(
+            "Benders subproblem for scenario $scenario did not converge under the " *
+            ":column_generation oracle (stop_reason=$(cg_result.stop_reason), " *
+            "$(cg_result.cg_iterations) CG iterations, $(cg_result.columns_added) columns " *
+            "added). A cut may only be derived from an EXHAUSTED pricing round: duals from " *
+            "a restricted pool are feasible for the restricted dual only, and the resulting " *
+            "cut can exclude the true optimum. Raise cg_pricing_time_limit_sec or " *
+            "max_cg_iterations; a 'dedup_stall' instead indicates the stale-tau column " *
+            "livelock rather than a budget shortfall.",
+        )
+    else
+        optimize!(sm)
+    end
     status = JuMP.termination_status(sm)
     status == MOI.OPTIMAL || error(
         "Benders subproblem for scenario $scenario returned $status, not OPTIMAL. A cut " *
@@ -276,6 +303,41 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     end
 
     return JointRoutingAssignmentBendersScenarioResult(
-        scenario, objective, alpha_sum, coefficients, mismatch,
+        scenario, objective, alpha_sum, coefficients, mismatch, cg_result,
     )
+end
+
+"""
+    _accumulate_benders_cg_stats!(m, results)
+
+Accumulate the inner-CG totals for the whole run onto the MASTER model, under
+`:benders_cg_stats`.
+
+Lives here rather than in the generic loop because it is oracle-specific: the Benders loop
+knows nothing about column generation, and `_benders_build_metadata` reads this key only if
+it exists (a `:direct_enumeration` run never creates it). A no-op unless the subproblem
+results actually carry CG outcomes.
+
+`pool_final` is worth watching more than the totals: the whole bet of accumulating columns
+across Benders iterations is that later iterations exhaust in one or two rounds, and
+`iterations / rounds` per Benders iteration is what shows whether that is happening or
+whether every iteration is re-pricing from cold.
+"""
+function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
+    any(r -> !isnothing(r.cg), results) || return nothing
+    stats = get!(m.obj_dict, :benders_cg_stats) do
+        Dict{String, Any}("iterations" => 0, "columns_added" => 0,
+                          "pricing_sec" => 0.0, "lp_sec" => 0.0, "rounds" => 0)
+    end
+    for r in results
+        isnothing(r.cg) && continue
+        stats["iterations"] += r.cg.cg_iterations
+        stats["columns_added"] += r.cg.columns_added
+        stats["pricing_sec"] += r.cg.pricing_sec
+        stats["lp_sec"] += r.cg.lp_sec
+        stats["rounds"] += 1
+    end
+    builds = m[:benders_subproblem_builds]::Vector{BuildResult}
+    stats["pool_final"] = sum(length(b.model[:joint_routing_assignment_columns]) for b in builds)
+    return nothing
 end
