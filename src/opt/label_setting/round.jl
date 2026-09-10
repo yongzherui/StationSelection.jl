@@ -167,7 +167,19 @@ function _run_pricing_round(
 
     # Phase 2: the label search itself, per scenario.
     candidates_by_scenario = Vector{Vector{Any}}(undef, length(scenarios))
-    exhausted_by_scenario = trues(length(scenarios))
+    # `Vector{Bool}`, NOT `trues()`. A BitVector packs 64 flags per UInt64 word, so two
+    # threads writing DIFFERENT indices of the same word do a read-modify-write on that
+    # shared word and one write can clobber the other. The value clobbered back to `true`
+    # would be an `exhausted = false`, and `all(exhausted_by_scenario)` below becomes
+    # `m[:label_setting_pricing_exhausted]` -- the exact flag cut validity and CG
+    # convergence hang on. A lost `false` is a FALSE exhaustion claim: a cut derived from a
+    # non-exhausted round, or a `SOLVE_OPTIMAL` over an incomplete pool, with nothing
+    # raising. `Vector{Bool}` is one byte per element and byte stores do not share a word.
+    #
+    # This path is default-parallel for the Joint formulation
+    # (`_pricing_parallel_scenarios` is `true` there), so it is reachable by any multi-
+    # scenario `CGSolver` run on more than one thread -- not a hypothetical.
+    exhausted_by_scenario = fill(true, length(scenarios))
     stats_by_scenario = Vector{Any}(undef, length(scenarios))
     fill!(stats_by_scenario, nothing)
     if parallel

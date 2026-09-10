@@ -166,6 +166,7 @@ function build_model(
             pricing_enabled = pricing_oracle,
             pricing = solver.subproblem.pricing,
             core_point = get(m.obj_dict, :benders_core_point, nothing),
+            config = solver.config,
         )
         for s in 1:n_scenarios(data)
     ]

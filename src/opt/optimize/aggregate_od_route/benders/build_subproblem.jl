@@ -97,11 +97,25 @@ function _build_joint_routing_assignment_subproblem_model(
         pricing_enabled::Bool=false,
         pricing::CGPricingConfig=CGPricingConfig(),
         core_point::Union{Nothing, Vector{Float64}}=nothing,
+        config::Union{Nothing, SolverOptions}=nothing,
     )::BuildResult
     1 <= scenario <= n_scenarios(data) ||
         throw(ArgumentError("scenario $scenario out of range 1:$(n_scenarios(data))"))
     m = Model(() -> Gurobi.Optimizer())
     set_silent(m)
+    # The solver's own options reach these models too, which matters for exactly one
+    # setting: `threads`. Without it every subproblem LP defaults Gurobi to ALL cores, so
+    # solving the scenarios concurrently (`BendersSolver.parallel_scenarios`) oversubscribes
+    # by n_scenarios x ncores on top of whatever the label search is using -- which would
+    # make the parallel arm slower and the comparison meaningless. `time_limit_sec` is
+    # deliberately NOT taken from here: the per-subproblem LP limit is
+    # `BendersSubproblemConfig.time_limit_sec`, applied by the solve path, because a
+    # truncated subproblem LP has invalid duals and must be a hard error rather than
+    # inheriting the master's wall.
+    if !isnothing(config)
+        isnothing(config.threads) || set_optimizer_attribute(m, "Threads", config.threads)
+        isnothing(config.mip_gap) || set_optimizer_attribute(m, "MIPGap", config.mip_gap)
+    end
     scenarios = [scenario]
 
     # ---- 1. Parameters ----
