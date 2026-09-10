@@ -93,7 +93,15 @@ function build_model(
     # builds the whole universe here, once. `:column_generation` seeds each subproblem with
     # the two-stop routes -- enough to guarantee every coverage row has a term -- and lets
     # pricing grow the pool on demand, so nothing is enumerated at all.
-    pricing_oracle = solver.subproblem.oracle === :column_generation
+    # Every CG-based oracle, not just the plain one. Written as set membership because a
+    # bare `=== :column_generation` here is what broke `:column_generation_activated` on its
+    # first run: the build silently enumerated instead of seeding and never stashed the
+    # pricing state, so the subproblem died on a missing
+    # `:joint_routing_assignment_pricing_formulation`.
+    pricing_oracle = solver.subproblem.oracle in
+        (:column_generation, :column_generation_activated,
+         :column_generation_activated_lpo,
+         :column_generation_activated_warm_start)
     t_enum = time()
     columns = if pricing_oracle
         joint_routing_assignment_two_stop_seed_columns(data, mapping)
@@ -137,6 +145,16 @@ function build_model(
     # above, which is rounded for dedup and therefore unusable for auditing validity -- see
     # `cuts.jl`. Keeping the refs also makes the accumulated cuts inspectable after a solve.
     m[:benders_cuts] = Tuple{Int, ConstraintRef}[]
+    # Interior point for the locally Pareto-optimal completion, computed ONCE here: it
+    # depends only on the master's own feasible region (budget + endpoint rows), not on any
+    # incumbent, so recomputing it per iteration would be waste. `core_slack` is the
+    # max-min slack achieved -- 0 means some face is structurally tight, which weakens the
+    # Pareto claim on that face (see `_benders_core_point`).
+    if solver.subproblem.oracle === :column_generation_activated_lpo
+        core_point, core_slack = _benders_core_point(data, mapping, problem.k)
+        m[:benders_core_point] = core_point
+        m[:benders_core_slack] = core_slack
+    end
 
     # ---- 4. Objective ----
     set_benders_master_objective!(m, theta_cuts)
@@ -147,6 +165,7 @@ function build_model(
             data, mapping, subproblem_formulation, s, columns;
             pricing_enabled = pricing_oracle,
             pricing = solver.subproblem.pricing,
+            core_point = get(m.obj_dict, :benders_core_point, nothing),
         )
         for s in 1:n_scenarios(data)
     ]
@@ -173,6 +192,9 @@ function build_model(
             "max_stops_restricted" : "full_route_universe",
         "benders_cut_mode" => string(typeof(formulation.cut_mode).name.name),
     )
+    if haskey(m.obj_dict, :benders_core_slack)
+        metadata["benders_core_slack"] = m[:benders_core_slack]
+    end
     return BuildResult(m, mapping, nothing, counts, metadata)
 end
 

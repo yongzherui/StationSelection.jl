@@ -167,6 +167,7 @@ struct JointRoutingAssignmentBendersScenarioResult
     y_coefficients::Dict{Int, Float64}
     reduced_cost_mismatch::Float64
     cg::Union{Nothing, BendersSubproblemCGResult}
+    lpo::Any
 end
 
 """
@@ -217,6 +218,7 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
         solver::BendersSolver,
     )::JointRoutingAssignmentBendersScenarioResult
     sm = build.model
+    mapping = build.mapping
     scenario = Int(sm[:benders_subproblem_scenario])
     y = sm[:y]
     # `force=true` is required, not optional: `add_station_selection_variables!` gives the
@@ -234,8 +236,12 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     # CG are feasible only for the restricted dual, so the cut can over-estimate the true
     # second-stage cost and prune the optimum (see subproblem_cg.jl).
     cg_result = nothing
-    if solver.subproblem.oracle === :column_generation
-        cg_result = _solve_joint_routing_assignment_subproblem_by_cg!(build, solver.subproblem)
+    if solver.subproblem.oracle in (:column_generation, :column_generation_activated,
+                                    :column_generation_activated_lpo,
+                                    :column_generation_activated_warm_start)
+        cg_result = _solve_joint_routing_assignment_subproblem_by_cg!(
+            build, solver.subproblem, incumbent,
+        )
         cg_result.converged || error(
             "Benders subproblem for scenario $scenario did not converge under the " *
             ":column_generation oracle (stop_reason=$(cg_result.stop_reason), " *
@@ -244,7 +250,9 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
             "a restricted pool are feasible for the restricted dual only, and the resulting " *
             "cut can exclude the true optimum. Raise cg_pricing_time_limit_sec or " *
             "max_cg_iterations; a 'dedup_stall' instead indicates the stale-tau column " *
-            "livelock rather than a budget shortfall.",
+            "livelock rather than a budget shortfall, and " *
+            "'certification_inconclusive' means a relaxed-cluster attempt proved nothing -- " *
+            "raise its budget, lower relaxed_cluster_count, or fall back to :exact.",
         )
     else
         optimize!(sm)
@@ -259,17 +267,40 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     )
     objective = JuMP.objective_value(sm)
 
-    alpha_sum = 0.0
-    for (_key, con) in sm[:joint_routing_assignment_coverage]
-        alpha_sum += dual(con)
+    # One dual extraction, via the same function the CG master uses, so the sign convention
+    # (`gamma = -dual` on the `<=` rows) is defined in exactly one place.
+    alpha, gamma_o, gamma_d = extract_joint_routing_assignment_duals(sm)
+    lpo_stats = nothing
+    # NOT `:column_generation_activated_warm_start`: its phase 2 exhausted the full universe
+    # at the RAW duals, so those are already dual-feasible and completing them would only
+    # inflate `Gamma` and weaken the cut for no reason.
+    if solver.subproblem.oracle in (:column_generation_activated,
+                                    :column_generation_activated_lpo)
+        # Repairs the duals the restricted pricing left incomplete. Must run before the cut
+        # is built, and (inside the CG loop) before each pricing round -- see the helper.
+        _benders_activated_complete_duals!(
+            alpha, gamma_o, gamma_d, incumbent,
+            sm[:joint_routing_assignment_data], mapping, scenario,
+            Float64(sm[:joint_routing_assignment_walk_cost_weight]),
+        )
+        if solver.subproblem.oracle === :column_generation_activated_lpo
+            # Then trade the conservative closed-form bound for the strongest completion
+            # that still passes separation. Runs only here, NOT inside the CG loop: during
+            # pricing we WANT the aggressive restriction (it is what makes the search cheap);
+            # for the cut we want the weakest valid penalties. The closed-form values just
+            # written are this call's feasible fallback.
+            lpo_stats = _benders_lpo_completion!(
+                alpha, gamma_o, gamma_d, incumbent,
+                sm[:joint_routing_assignment_data], mapping, scenario,
+                build, solver.subproblem, _benders_lpo_core_point(sm),
+            )
+        end
     end
-    # Gamma[j], aggregated over both linking families and every demand group. Same sign
-    # convention as extract_joint_routing_assignment_duals: negate the `<=` rows' duals so
-    # gamma >= 0.
+    alpha_sum = sum(values(alpha); init = 0.0)
+    # Gamma[j], aggregated over both linking families and every demand group.
     coefficients = Dict{Int, Float64}()
-    for links in (sm[:joint_routing_assignment_pickup_link], sm[:joint_routing_assignment_dropoff_link])
-        for (key, con) in links
-            gamma = -dual(con)
+    for gammas in (gamma_o, gamma_d)
+        for (key, gamma) in gammas
             gamma == 0.0 && continue
             j = key[2]
             coefficients[j] = get(coefficients, j, 0.0) + gamma
@@ -280,6 +311,9 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     for (j, gamma) in coefficients
         implied -= gamma * incumbent[j]
     end
+    # Also a free check on the activated completion: it may only raise `gamma` on stations
+    # with `incumbent[j] == 0`, whose terms drop out of `implied`. A completion that touched a
+    # BUILT station would break this identity immediately.
     isapprox(implied, objective; rtol = 1e-6, atol = 1e-6) || error(
         "Benders subproblem scenario $scenario failed the strong-duality check: the dual " *
         "objective implied by the extracted duals is $implied but the primal optimum is " *
@@ -303,7 +337,7 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     end
 
     return JointRoutingAssignmentBendersScenarioResult(
-        scenario, objective, alpha_sum, coefficients, mismatch, cg_result,
+        scenario, objective, alpha_sum, coefficients, mismatch, cg_result, lpo_stats,
     )
 end
 
@@ -327,7 +361,8 @@ function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
     any(r -> !isnothing(r.cg), results) || return nothing
     stats = get!(m.obj_dict, :benders_cg_stats) do
         Dict{String, Any}("iterations" => 0, "columns_added" => 0,
-                          "pricing_sec" => 0.0, "lp_sec" => 0.0, "rounds" => 0)
+                          "pricing_sec" => 0.0, "lp_sec" => 0.0, "rounds" => 0,
+                          "certifications" => 0)
     end
     for r in results
         isnothing(r.cg) && continue
@@ -335,9 +370,149 @@ function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
         stats["columns_added"] += r.cg.columns_added
         stats["pricing_sec"] += r.cg.pricing_sec
         stats["lp_sec"] += r.cg.lp_sec
+        stats["certifications"] += r.cg.certifications
         stats["rounds"] += 1
     end
     builds = m[:benders_subproblem_builds]::Vector{BuildResult}
     stats["pool_final"] = sum(length(b.model[:joint_routing_assignment_columns]) for b in builds)
+    # LPO completion accounting, present only under the lpo oracle. `improved` is the
+    # core-point-weighted reduction against the closed-form bound -- i.e. exactly how much
+    # cut strength the Pareto selection bought, in the units it optimises.
+    lpo = [r.lpo for r in results if !isnothing(r.lpo)]
+    if !isempty(lpo)
+        stats["lpo_rounds"] = get(stats, "lpo_rounds", 0) + sum(x.rounds for x in lpo)
+        stats["lpo_rows"] = get(stats, "lpo_rows", 0) + sum(x.rows for x in lpo)
+        stats["lpo_improved"] = get(stats, "lpo_improved", 0.0) + sum(x.improved for x in lpo)
+        stats["lpo_optimal"] = get(stats, "lpo_optimal", 0) +
+            count(x -> x.status == "optimal", lpo)
+        stats["lpo_calls"] = get(stats, "lpo_calls", 0) + length(lpo)
+        stats["lpo_pricing_sec"] = get(stats, "lpo_pricing_sec", 0.0) +
+            sum(x.pricing_sec for x in lpo)
+    end
     return nothing
+end
+
+"""
+    _benders_activated_complete_duals!(alpha, gamma_o, gamma_d, incumbent, data, mapping,
+                                       scenario, walk_cost_weight)
+
+Repair the duals of an ACTIVATED subproblem so they are feasible for the full-universe dual:
+raise `gamma` on every `(p, station)` linking row whose station is NOT built at `incumbent`,
+to the smallest value that forces that triple's net reward non-positive.
+
+See `BendersSubproblemConfig`'s "activated subproblem" section for the validity proof. What
+this function has to get exactly right is HOW MUCH to raise, since that is the cut's
+strength.
+
+# The bound, and why it credits the walking term
+
+A triple's net reward is `alpha_p - gammaO_pj - gammaD_pk - w * walk(o, d, (j,k))`. The naive
+completion sets `gamma := alpha_p`, which forces it non-positive using nothing but `alpha`.
+But the walking term is already there and always non-negative, so it can be credited:
+
+    gammaO_pj := max(0, alpha_p - w * min_k walk(o, d, (j,k)))
+
+Then for every `k`, `net <= w * (walk_min - walk(o,d,(j,k))) <= 0`. Strictly smaller than
+`alpha_p` whenever the walk cost is positive -- which it always is -- so a strictly stronger
+cut at no cost. Clamping at zero is safe: if `alpha_p <= w * walk_min` the net is already
+non-positive with no completion at all.
+
+# Why NO demand factor, although `f_c` has one
+
+The walk term enters the column cost as `w * demand_p * walk(...)`
+(`joint_routing_assignment_column_cost`) but the pricer's candidate reward as
+`w * walk(...)` with no demand (`joint_routing_assignment_pricing_candidates`). Those agree
+only when `demand_p == 1`; the package guards the difference with a per-column assertion
+(`_verify_joint_routing_assignment_master_reduced_cost`), which fires rather than drifting.
+
+This function credits `w * walk_min` WITHOUT demand, which is the safe choice for both
+requirements at once, because `demand_p >= 1`:
+
+- against the DUAL CONSTRAINT (walk term `w * demand_p * walk`), crediting only
+  `w * walk_min <= w * demand_p * walk_min` under-credits, so the resulting `gamma` is at
+  least as large as required -- sound.
+- against the PRICER's reward (walk term `w * walk`), it matches exactly, so the candidate is
+  driven to `rho <= 0` and dropped by the `rho > 0` filter -- which is what makes the
+  completion double as the search restriction.
+
+Crediting `w * demand_p * walk_min` instead would still be sound for the dual but could leave
+the pricer's `rho > 0` for a group with `demand_p > 1`, losing the restriction.
+
+# Other properties
+
+- `max` rather than assignment: the pool accumulates across Benders iterations, so it can
+  already hold columns through currently-unbuilt stations whose rows carry a dual above this
+  bound. Raising a `gamma` only relaxes an already-satisfied dual constraint, so `max` is safe
+  and strictly tighter than overwriting.
+- Only `(p, j)` pairs that appear in `get_valid_jk_pairs` are touched. A pair with no valid
+  `(j,k)` has no linking row and no column can assign `p` there, so no dual constraint
+  mentions it -- leaving it at zero is correct and a stronger cut.
+- Never touches a station with `incumbent[j] == 1`, which keeps the cut tight at the anchor
+  and is checked for free by the strong-duality assertion in
+  `_solve_one_joint_routing_assignment_benders_subproblem`.
+"""
+function _benders_activated_complete_duals!(
+        alpha::Dict{Tuple{Int, Int}, Float64},
+        gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+        gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+        incumbent::Vector{Float64},
+        data::StationSelectionData,
+        mapping::AggregateODRouteMap,
+        scenario::Int,
+        walk_cost_weight::Float64,
+    )
+    built(j) = incumbent[j] > 0.5
+    for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
+        mapping.Q_s[scenario][p] > 0 || continue
+        key2 = (scenario, p)
+        a = get(alpha, key2, 0.0)
+        a > 0.0 || continue
+
+        # Per-station minimum walking cost over this group's valid pairs. Pickup side takes
+        # the min over the partner dropoff, and vice versa -- each side must hold for EVERY
+        # partner, so the binding case is the cheapest walk, not the average.
+        walk_min_o = Dict{Int, Float64}()
+        walk_min_d = Dict{Int, Float64}()
+        for pair in get_valid_jk_pairs(mapping, o, d)
+            is_walk_only_pair(pair) && continue
+            j, k = pair
+            cost = od_pair_walking_cost(data, o, d, pair)
+            walk_min_o[j] = min(get(walk_min_o, j, Inf), cost)
+            walk_min_d[k] = min(get(walk_min_d, k, Inf), cost)
+        end
+
+        for (j, wmin) in walk_min_o
+            built(j) && continue
+            needed = max(0.0, a - walk_cost_weight * wmin)
+            gamma_o[(key2, j)] = max(get(gamma_o, (key2, j), 0.0), needed)
+        end
+        for (k, wmin) in walk_min_d
+            built(k) && continue
+            needed = max(0.0, a - walk_cost_weight * wmin)
+            gamma_d[(key2, k)] = max(get(gamma_d, (key2, k), 0.0), needed)
+        end
+    end
+    return nothing
+end
+
+"""
+    _benders_lpo_core_point(sm) -> Vector{Float64}
+
+The interior point the LPO completion optimises against, read off the model the MASTER build
+stashed it on.
+
+Each subproblem model is separate from the master, so the point has to be reachable from
+here. It is stashed on the subproblem models too (the master build hands it over at
+construction) rather than recomputed, because it depends only on the master's feasible
+region and recomputing it per scenario per iteration would be pure waste -- and two
+scenarios optimising against different interior points would select completions that are
+Pareto-optimal with respect to different objectives, which is not what the cut wants.
+"""
+function _benders_lpo_core_point(sm::JuMP.Model)::Vector{Float64}
+    haskey(sm.obj_dict, :benders_core_point) || error(
+        "the :column_generation_activated_lpo oracle needs an interior point on the " *
+        "subproblem model (:benders_core_point); the master build stashes it, so a model " *
+        "without it was not built for this oracle",
+    )
+    return sm[:benders_core_point]::Vector{Float64}
 end

@@ -48,6 +48,12 @@ separately by `benders_cg_oracle.jl`'s `unbounded` arm). What THIS script decide
 CG's cuts are as GOOD, which is the part that would compound against it at any size.
 
 Usage: sbatch --array=1-10 benchmarks/diagnostics/run_benders_oracle_cut_parity.sh
+Three oracles per seed: `:direct_enumeration`, `:column_generation`, and
+`:column_generation_activated`. The activated one prices only over the built stations and
+repairs its duals with a closed-form completion, so it is expected to need MORE cuts (its
+coefficients on unbuilt stations are a bound, not the true shadow value) in exchange for
+cheaper pricing. This measures both halves of that trade.
+
 Env: CP_N CP_SEEDS CP_P CP_S CP_MAX_STOPS CP_REPRO
 """
 
@@ -121,8 +127,18 @@ for seed in SEEDS
         @printf("              CG %d iters / %d rounds (%.2f per round) | pool %d | price %.1fs\n",
                 c.cg_iters, c.cg_rounds,
                 c.cg_rounds == 0 ? NaN : c.cg_iters / c.cg_rounds, c.cg_pool, c.cg_price_sec)
-        @printf("PAIRED      : cuts %+d (cg %d - enum %d) | iters %+d\n",
-                c.cuts - e.cuts, c.cuts, e.cuts, c.iters - e.iters)
+        flush(stdout)
+
+        a = run_oracle(problem, formulation, :column_generation_activated)
+        @printf("activated   : %s %.6f | iters %2d cuts %2d | loop %.1fs | wall %.1fs\n",
+                a.status, a.objective, a.iters, a.cuts,
+                a.master_sec + a.sub_sec, a.wall)
+        @printf("              CG %d iters / %d rounds (%.2f per round) | pool %d | price %.1fs\n",
+                a.cg_iters, a.cg_rounds,
+                a.cg_rounds == 0 ? NaN : a.cg_iters / a.cg_rounds, a.cg_pool, a.cg_price_sec)
+        @printf("PAIRED      : cuts cg %+d, activated %+d (enum %d) | iters cg %+d, activated %+d\n",
+                c.cuts - e.cuts, a.cuts - e.cuts, e.cuts,
+                c.iters - e.iters, a.iters - e.iters)
         flush(stdout)
 
         repro_cuts = -1
@@ -134,7 +150,7 @@ for seed in SEEDS
             flush(stdout)
         end
 
-        push!(rows, (seed=seed, ok=true, e=e, c=c, repro_cuts=repro_cuts, error=nothing))
+        push!(rows, (seed=seed, ok=true, e=e, c=c, a=a, repro_cuts=repro_cuts, error=nothing))
     catch err
         msg = sprint(showerror, err)
         @printf("!! seed %d FAILED: %s\n", seed, first(msg, 400))
@@ -144,13 +160,16 @@ for seed in SEEDS
 end
 
 println("\n", repeat("=", 74))
-@printf("%6s %6s %6s %7s %6s %6s %7s %9s %9s\n",
-        "seed", "cutsE", "cutsC", "d_cuts", "itE", "itC", "d_it", "wallE", "wallC")
+@printf("%6s %6s %6s %6s %8s %8s %6s %6s %6s %8s %8s %8s\n",
+        "seed", "cutE", "cutC", "cutA", "dC", "dA", "itE", "itC", "itA",
+        "wallE", "wallC", "wallA")
 for r in rows
     r.ok || (@printf("%6d  FAILED\n", r.seed); continue)
-    @printf("%6d %6d %6d %+7d %6d %6d %+7d %9.1f %9.1f\n",
-            r.seed, r.e.cuts, r.c.cuts, r.c.cuts - r.e.cuts,
-            r.e.iters, r.c.iters, r.c.iters - r.e.iters, r.e.wall, r.c.wall)
+    @printf("%6d %6d %6d %6d %+8d %+8d %6d %6d %6d %8.1f %8.1f %8.1f\n",
+            r.seed, r.e.cuts, r.c.cuts, r.a.cuts,
+            r.c.cuts - r.e.cuts, r.a.cuts - r.e.cuts,
+            r.e.iters, r.c.iters, r.a.iters,
+            r.e.wall, r.c.wall, r.a.wall)
 end
 
 println("\n=== checks ===")
@@ -163,9 +182,17 @@ for r in rows
         isapprox(r.c.objective, r.e.objective; rtol=1e-6, atol=1e-6),
         @sprintf("%.6f vs %.6f (diff %.3e)", r.c.objective, r.e.objective,
                  r.c.objective - r.e.objective)))
-    push!(checks, ("seed $(r.seed): both OPTIMAL",
-        r.e.status == "OPTIMAL" && r.c.status == "OPTIMAL",
-        "enum $(r.e.status) / cg $(r.c.status)"))
+    # The activated oracle prices only over built stations and repairs the duals with a
+    # closed-form completion. A wrong completion prunes the optimum, which surfaces as a
+    # HIGHER objective -- so this equality is the completion's correctness gate and must be
+    # checked before its cut count means anything.
+    push!(checks, ("seed $(r.seed): activated objective agrees",
+        isapprox(r.a.objective, r.e.objective; rtol=1e-6, atol=1e-6),
+        @sprintf("%.6f vs %.6f (diff %.3e)", r.a.objective, r.e.objective,
+                 r.a.objective - r.e.objective)))
+    push!(checks, ("seed $(r.seed): all three OPTIMAL",
+        r.e.status == "OPTIMAL" && r.c.status == "OPTIMAL" && r.a.status == "OPTIMAL",
+        "enum $(r.e.status) / cg $(r.c.status) / act $(r.a.status)"))
     if r.repro_cuts >= 0
         push!(checks, ("seed $(r.seed): master deterministic",
             r.repro_cuts == r.e.cuts,
@@ -180,20 +207,22 @@ n_fail = count(c -> !c[2], checks)
 
 good = [r for r in rows if r.ok]
 if !isempty(good)
-    d = [r.c.cuts - r.e.cuts for r in good]
-    println("\nPAIRED CUT DIFFERENCE (cg - enum)")
-    @printf("  per seed: %s\n", string(d))
-    @printf("  mean %+.2f | worse on %d seed(s) | equal on %d | better on %d\n",
-            sum(d) / length(d), count(>(0), d), count(==(0), d), count(<(0), d))
-    if all(==(0), d)
-        println("  => CG cuts are exactly as effective as enumeration's on every seed.")
-    elseif sum(d) > 0
-        println("  => CG needs MORE cuts. Since each CG Benders iteration also costs a full")
-        println("     pricing solve per scenario, this compounds against the oracle -- read it")
-        println("     alongside the wall columns before concluding it is viable.")
-    else
-        println("  => CG needs FEWER cuts, i.e. its dual vertex gives stronger subgradients here.")
+    for (label, d) in (("cg - enum", [r.c.cuts - r.e.cuts for r in good]),
+                       ("activated - enum", [r.a.cuts - r.e.cuts for r in good]),
+                       ("activated - cg", [r.a.cuts - r.c.cuts for r in good]))
+        @printf("\nPAIRED CUT DIFFERENCE (%s)\n", label)
+        @printf("  per seed: %s\n", string(d))
+        @printf("  mean %+.2f | worse on %d seed(s) | equal on %d | better on %d\n",
+                sum(d) / length(d), count(>(0), d), count(==(0), d), count(<(0), d))
     end
+    # The activated oracle's whole bet: weaker cuts (it credits only a bound on the unbuilt
+    # stations' duals) bought with cheaper pricing (it never searches them). Cut count alone
+    # does not settle it -- pair it with the wall columns.
+    da = [r.a.cuts - r.e.cuts for r in good]
+    price_ratio = sum(r.a.cg_price_sec for r in good) /
+                  max(1e-9, sum(r.c.cg_price_sec for r in good))
+    @printf("\nACTIVATED TRADE: %+.2f cuts vs enumeration on average, pricing time %.2fx of plain CG\n",
+            sum(da) / length(da), price_ratio)
 end
 n_fail == 0 || error("verification failed")
 println("\nALL CHECKS PASSED")

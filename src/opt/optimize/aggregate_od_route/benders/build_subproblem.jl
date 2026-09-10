@@ -96,6 +96,7 @@ function _build_joint_routing_assignment_subproblem_model(
         columns;
         pricing_enabled::Bool=false,
         pricing::CGPricingConfig=CGPricingConfig(),
+        core_point::Union{Nothing, Vector{Float64}}=nothing,
     )::BuildResult
     1 <= scenario <= n_scenarios(data) ||
         throw(ArgumentError("scenario $scenario out of range 1:$(n_scenarios(data))"))
@@ -108,8 +109,13 @@ function _build_joint_routing_assignment_subproblem_model(
         m, data, formulation; relax_integrality = true,
     )
     m[:benders_subproblem_scenario] = scenario
+    # The master's interior point, handed over at construction for the LPO completion. Each
+    # subproblem is a separate model, so it cannot reach the master's copy -- and it must be
+    # the SAME point for every scenario, or two scenarios would select completions that are
+    # Pareto-optimal against different objectives.
+    isnothing(core_point) || (m[:benders_core_point] = core_point)
     pricing_enabled && _stash_joint_routing_assignment_subproblem_pricing!(
-        m, data, formulation, pricing,
+        m, data, formulation, pricing, length(mapping.scenarios),
     )
 
     # ---- 2. Variables ----
@@ -190,17 +196,28 @@ function _stash_joint_routing_assignment_subproblem_pricing!(
         data::StationSelectionData,
         formulation::AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation,
         pricing::CGPricingConfig,
+        mapping_scenario_count::Int,
     )
     n = data.n_stations
-    m[:joint_routing_assignment_pricing_formulation] =
-        AggregateODRouteJointRoutingAssignmentFormulation(
-            route_regularization_weight = formulation.route_regularization_weight,
-            walk_cost_weight = formulation.walk_cost_weight,
-            repositioning_time = formulation.repositioning_time,
-            max_wait_time = formulation.max_wait_time,
-            detour_factor = formulation.detour_factor,
-            max_stops = formulation.max_stops,
-        )
+    monolith = AggregateODRouteJointRoutingAssignmentFormulation(
+        route_regularization_weight = formulation.route_regularization_weight,
+        walk_cost_weight = formulation.walk_cost_weight,
+        repositioning_time = formulation.repositioning_time,
+        max_wait_time = formulation.max_wait_time,
+        detour_factor = formulation.detour_factor,
+        max_stops = formulation.max_stops,
+    )
+    m[:joint_routing_assignment_pricing_formulation] = monolith
+    # OVERWRITES the subproblem formulation that `_stash_joint_routing_assignment_cost_parameters!`
+    # put here. Required, not cosmetic: `cg_certification_supported` tests
+    # `m[:aggregate_od_route_formulation] isa AggregateODRouteJointRoutingAssignmentFormulation`
+    # before allowing a relaxed-cluster mode, and every hook in
+    # `label_setting/joint_routing_assignment/pricing_round.jl` dispatches on that same type.
+    # The key's meaning is "the formulation whose route universe and costs this model prices
+    # against", which IS the monolith -- the six encoding fields are copied from this
+    # subproblem, so the universe is identical. The model's Benders identity is carried by
+    # `:benders_subproblem_scenario`, not by this key.
+    m[:aggregate_od_route_formulation] = monolith
     m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
     m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
     m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
@@ -214,5 +231,36 @@ function _stash_joint_routing_assignment_subproblem_pricing!(
         isfinite(cost) && (travel_cost[(i, j)] = cost)
     end
     m[:joint_routing_assignment_travel_cost] = travel_cost
+
+    # Relaxed-cluster state. Built HERE, once per subproblem model, for the same reason the
+    # CG master builds it once: the relaxation is valid for any partition, but a partition
+    # constant across every certification attempt of the run is what makes cross-attempt
+    # bounds comparable and `relaxed_cluster_count` a meaningful parameter. Absent unless a
+    # count was given, which `CGPricingConfig` already ties to the mode.
+    if !isnothing(pricing.relaxed_cluster_count)
+        m[:joint_routing_assignment_station_clustering] = cluster_stations_by_travel_cost(
+            m[:joint_routing_assignment_nodes], travel_cost, pricing.relaxed_cluster_count,
+        )
+        if !isnothing(pricing.relaxed_cluster_macro_count)
+            macro_clustering, macro_parent = _nested_macro_clustering(
+                m[:joint_routing_assignment_station_clustering],
+                pricing.relaxed_cluster_macro_count, travel_cost,
+            )
+            m[:joint_routing_assignment_macro_clustering] = macro_clustering
+            m[:joint_routing_assignment_macro_parent] = macro_parent
+        end
+        # The guide diagnostics the certification round appends to. The lock is not optional
+        # even here, where this model holds one scenario: the certification round threads its
+        # phase 1 over whatever scenarios it was given, and a shared `push!` is a data race.
+        m[:relaxed_cluster_guide_stats] = Any[]
+        m[:relaxed_cluster_guide_lock] = ReentrantLock()
+        if !isnothing(pricing.relaxed_cluster_max_count)
+            n_s = mapping_scenario_count
+            m[:joint_routing_assignment_scenario_clusterings] =
+                StationClustering[m[:joint_routing_assignment_station_clustering] for _ in 1:n_s]
+            m[:joint_routing_assignment_scenario_splits] = zeros(Int, n_s)
+            m[:joint_routing_assignment_scenario_refine_stats] = [Dict{Symbol, Int}() for _ in 1:n_s]
+        end
+    end
     return nothing
 end

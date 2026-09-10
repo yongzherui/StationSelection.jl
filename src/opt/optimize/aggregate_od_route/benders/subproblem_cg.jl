@@ -1,3 +1,5 @@
+using Printf
+
 """
 The `:column_generation` subproblem oracle: solve one scenario's second stage by pricing
 columns on demand instead of over an enumerated pool.
@@ -78,6 +80,13 @@ column whose `(scenario, signature)` is already pooled at no greater `tau`, so
 `add_joint_routing_assignment_column!` skips it and the LP cannot change. That last one is a
 real defect elsewhere in the stack, not a budget problem, and is reported as its own reason so
 it is not misread as one.
+
+Under a relaxed-cluster mode two more reasons appear: `converged_by_certification` (the
+relaxation exhausted -- a full-universe proof, so the cut is licensed) and
+`certification_inconclusive` (the attempt ran out of budget or hit the cut cap, proving
+nothing, so no cut). `certifications` counts attempts made, which is the number to watch:
+refuted attempts are productive (they harvest columns), so a high count with eventual
+certification is healthy, while a high count ending inconclusive is the known weak point.
 """
 struct BendersSubproblemCGResult
     scenario::Int
@@ -87,6 +96,7 @@ struct BendersSubproblemCGResult
     columns_added::Int
     pricing_sec::Float64
     lp_sec::Float64
+    certifications::Int
 end
 
 """
@@ -96,23 +106,54 @@ Run CG on one already-`y`-fixed subproblem model until pricing exhausts.
 
 Assumes `y` has already been fixed by the caller (`subproblem.jl` does it before dispatching
 on the oracle), so the LP solved here is `Q_s` at the master's incumbent over the current
-pool.
+pool. `incumbent` is still needed explicitly: under
+`oracle = :column_generation_activated` the dual completion has to know which stations are
+built, and reading that back off the fixed variables would be a needless round trip through
+the solver.
+
+Under the activated oracle the exhaustion this loop certifies is over the ACTIVATED
+candidate set rather than the whole universe -- which is still a full-universe certificate
+once the completion is applied, because every column outside that set has its dual
+constraint satisfied by construction. That argument is in `BendersSubproblemConfig`.
 """
 function _solve_joint_routing_assignment_subproblem_by_cg!(
         build::BuildResult,
         config::BendersSubproblemConfig,
+        incumbent::Vector{Float64},
     )::BendersSubproblemCGResult
     sm = build.model
     mapping = build.mapping
     scenario = Int(sm[:benders_subproblem_scenario])
     data = sm[:joint_routing_assignment_data]
     pricing_formulation = sm[:joint_routing_assignment_pricing_formulation]
+    mode = sm[:joint_routing_assignment_pricing_mode]::Symbol
+    # BOTH activated oracles restrict pricing the same way -- the closed-form completion is
+    # what makes the search cheap. They differ only in what the CUT is built from, which
+    # happens after this loop returns (see subproblem.jl).
+    activated = config.oracle in (:column_generation_activated,
+                                  :column_generation_activated_lpo,
+                                  :column_generation_activated_warm_start)
+    # `:column_generation_activated_warm_start` is a WARM START, not a restriction: phase 1
+    # prices built-only (cheap, and it already reaches the exact `Q_s(yhat)` -- a column
+    # touching an unbuilt station is pinned to `theta = 0` by its own `theta - y_j <= 0`
+    # row, so it can never improve the objective at a fixed `yhat`). Phase 1's exhaustion is
+    # therefore a VALUE certificate only; the duals it leaves are feasible for the
+    # completed-dual point, not for the raw one a cut would be read off here. So phase 2
+    # drops the restriction and prices the full universe to exhaustion, and the cut is taken
+    # from THOSE duals by the ordinary argument -- no completion involved.
+    #
+    # What this isolates: whether the full-station grind (columns that enter, get pinned to
+    # zero, and exist only to raise `gamma` into dual feasibility) is warm-start sensitive.
+    # It is the null hypothesis the completion approach is trying to route around.
+    warm_start = config.oracle === :column_generation_activated_warm_start
+    phase = warm_start ? 1 : 2
     settings = _benders_subproblem_cg_settings(config)
 
     cg_iterations = 0
     columns_added = 0
     pricing_sec = 0.0
     lp_sec = 0.0
+    certifications = 0
 
     for iteration in 1:config.max_cg_iterations
         cg_iterations = iteration
@@ -123,18 +164,116 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
         status = JuMP.termination_status(sm)
         status == MOI.OPTIMAL || return BendersSubproblemCGResult(
             scenario, false, "lp_$(status)", cg_iterations, columns_added,
-            pricing_sec, lp_sec,
+            pricing_sec, lp_sec, certifications,
         )
 
         duals = extract_joint_routing_assignment_duals(sm)
+        if activated && !(warm_start && phase == 2)
+            # BEFORE pricing, deliberately. The completion raises `gamma` to `alpha_p` on
+            # unbuilt stations, which drives every candidate through such a station to
+            # `rho <= 0` -- so the pricer's own filter restricts the search to the activated
+            # stations. The restriction and the dual repair are the same operation; see
+            # `_benders_activated_complete_duals!`.
+            _benders_activated_complete_duals!(
+                duals..., incumbent, data, mapping, scenario,
+                Float64(sm[:joint_routing_assignment_walk_cost_weight]),
+            )
+        end
 
+        # Two ways to establish the exhaustion this loop needs, and they differ in HOW they
+        # prove it rather than in what they prove:
+        #
+        #   search-based (:exact / :darp / :darp_modified) -- exhaust the route universe.
+        #     `_run_pricing_round` returns the improving columns and records exhaustion on
+        #     the model.
+        #   certificate-based (:relaxed_cluster / :relaxed_cluster_two_tier) -- exhaust a
+        #     RELAXATION that lower-bounds every real route's reduced cost. `certified` then
+        #     proves no real improving column exists WITHOUT having searched for one, and it
+        #     covers the full universe, so it licenses a cut exactly as a search would. A
+        #     refuted attempt is not wasted: it harvests the real columns its exhaustive
+        #     subset searches found, so it doubles as this round's pricing.
+        #
+        # This is the branch that lets the oracle work past the sizes where the exact search
+        # stops exhausting (measured CG frontier: n<=20 all scenarios, n=25 to <=5, n=30 s=1).
+        certifying = mode in (:relaxed_cluster, :relaxed_cluster_two_tier)
         t_price = time()
-        columns = _run_pricing_round(
-            pricing_formulation, mapping, sm, duals, settings;
-            only_scenarios = [scenario],
-            time_limit = config.cg_pricing_time_limit_sec,
-        )
+        certified_now = false
+        columns = if certifying
+            cert = cg_certification_round(
+                build, mapping, sm, duals, settings;
+                time_limit_sec = config.cg_pricing_time_limit_sec,
+                iteration = iteration, only_scenarios = [scenario],
+            )
+            certified_now = cert.certified
+            certifications += 1
+            cert.certified ? Any[] : _cg_materialize_certification_columns(
+                build, mapping, sm, duals, cert.candidates,
+            )
+        else
+            _run_pricing_round(
+                pricing_formulation, mapping, sm, duals, settings;
+                only_scenarios = [scenario],
+                time_limit = config.cg_pricing_time_limit_sec,
+            )
+        end
         pricing_sec += time() - t_price
+
+        if certifying && certified_now
+            # The certificate IS the exhaustion proof; nothing further to search.
+            config.verbose && (@printf("      [cg s=%d it=%d] CERTIFIED in %.1fs (cum %.1fs)\n",
+                                       scenario, iteration, time() - t_price, pricing_sec);
+                               flush(stdout))
+            return BendersSubproblemCGResult(
+                scenario, true, "converged_by_certification", cg_iterations, columns_added,
+                pricing_sec, lp_sec, certifications,
+            )
+        end
+
+        if certifying && isempty(columns)
+            # Not certified and nothing harvested: the attempt was inconclusive (budget or
+            # cut cap). No certificate means no cut -- exactly the same refusal as a
+            # non-exhausted search, for the same reason.
+            config.verbose && (@printf("      [cg s=%d it=%d] certification INCONCLUSIVE after %.1fs\n",
+                                       scenario, iteration, time() - t_price); flush(stdout))
+            return BendersSubproblemCGResult(
+                scenario, false, "certification_inconclusive", cg_iterations, columns_added,
+                pricing_sec, lp_sec, certifications,
+            )
+        end
+
+        if config.verbose
+            # How many columns the round PRICED (search productivity), and the status that
+            # licenses a cut -- which differs by branch:
+            #   search branch: `exhausted`, set by _run_pricing_round on the model.
+            #   certification branch: `refuted` (harvested columns, no proof yet). NOTHING
+            #     sets the exhausted flag there, and `_cg_pricing_exhausted` defaults to
+            #     `true` for a model that never set it -- so printing it in that branch
+            #     claimed "exhausted true" for rounds that were actually refuted. Reporting
+            #     the branch's own status avoids inventing a proof that was not made.
+            @printf("      [cg s=%d it=%d] priced %d | %s | price %.1fs cum %.1fs\n",
+                    scenario, iteration, length(columns),
+                    certifying ? "refuted" : "exhausted $(_cg_pricing_exhausted(sm))",
+                    time() - t_price, pricing_sec)
+            flush(stdout)
+        end
+
+        if isempty(columns) && warm_start && phase == 1 && _cg_pricing_exhausted(sm)
+            # Phase 1 done: the built-only universe is exhausted, so the pool now attains
+            # `Q_s(yhat)` exactly. Hand the SAME master and pool to phase 2 rather than
+            # returning -- the value is right, only the duals are not yet licensed.
+            phase = 2
+            # `println`, not `@printf`: a `*`-concatenated format string is not a literal,
+            # and `@printf` rejects it at MACRO EXPANSION -- i.e. the package fails to load,
+            # not at the call.
+            if config.verbose
+                println("      [cg s=$scenario it=$iteration] phase 1 (built-only) " *
+                        "exhausted; pool " *
+                        "$(length(sm[:joint_routing_assignment_columns])), entering " *
+                        "phase 2 (full universe)")
+                flush(stdout)
+            end
+            continue
+        end
 
         if isempty(columns)
             # Empty AND exhausted is the certificate: no column in the universe prices
@@ -145,7 +284,7 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             return BendersSubproblemCGResult(
                 scenario, exhausted,
                 exhausted ? "converged" : "pricing_inconclusive",
-                cg_iterations, columns_added, pricing_sec, lp_sec,
+                cg_iterations, columns_added, pricing_sec, lp_sec, certifications,
             )
         end
 
@@ -155,6 +294,9 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             action === :added && (n_added += 1)
         end
         columns_added += n_added
+        config.verbose && (@printf("      [cg s=%d it=%d] added %d of %d | pool %d\n",
+                                   scenario, iteration, n_added, length(columns),
+                                   length(sm[:joint_routing_assignment_columns])); flush(stdout))
         if n_added == 0
             # Improving columns were priced but every one was skipped as an already-pooled
             # `(scenario, signature)` at no greater `tau`. The LP is unchanged, so the next
@@ -164,13 +306,13 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
             # restricted-feasible and produce an invalid cut.
             return BendersSubproblemCGResult(
                 scenario, false, "dedup_stall", cg_iterations, columns_added,
-                pricing_sec, lp_sec,
+                pricing_sec, lp_sec, certifications,
             )
         end
     end
 
     return BendersSubproblemCGResult(
         scenario, false, "iteration_limit", cg_iterations, columns_added,
-        pricing_sec, lp_sec,
+        pricing_sec, lp_sec, certifications,
     )
 end

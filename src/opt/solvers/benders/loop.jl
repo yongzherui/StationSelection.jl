@@ -73,13 +73,15 @@ function optimize_model(build_result::BuildResult, solver::BendersSolver)::OptRe
             st.stop_reason = "converged"
             # Reported before breaking: the converging iteration is the one a reader most
             # wants in the trace, and it never reaches the cut phase below.
-            _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, 0)
+            _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, 0,
+                                      subproblem_result)
             break
         end
 
         n_added = add_benders_cut!(build_result, mapping, m, subproblem_result, solver)
         st.cuts_added += n_added
-        _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, n_added)
+        _benders_report_iteration(st, solver, iteration, incumbent, upper_bound, n_added,
+                                  subproblem_result)
         if n_added == 0
             # Every cut this iteration derived was already in the master, so the next
             # iteration would re-solve an unchanged master, re-derive the same incumbent
@@ -173,7 +175,8 @@ than bounded).
 found-early-then-prove pattern visible instead of hidden behind a monotone envelope.
 """
 function _benders_report_iteration(st::BendersLoopState, solver::BendersSolver,
-        iteration::Int, incumbent, incumbent_objective::Float64, n_added::Int)
+        iteration::Int, incumbent, incumbent_objective::Float64, n_added::Int,
+        subproblem_result=nothing)
     isnothing(solver.iteration_callback) && return nothing
     solver.iteration_callback((
         iteration = iteration,
@@ -186,6 +189,11 @@ function _benders_report_iteration(st::BendersLoopState, solver::BendersSolver,
         n_stations_built = count(v -> v > 0.5, incumbent),
         master_sec = st.master_sec,
         subproblem_sec = st.subproblem_sec,
+        # The whole subproblem result, so a caller can report per-scenario detail (costs,
+        # and under the CG oracle the inner iteration/column counts) without the loop having
+        # to know anything about which oracle produced it. Additive: existing callbacks that
+        # read only the scalar fields are unaffected.
+        subproblem = subproblem_result,
     ))
     return nothing
 end

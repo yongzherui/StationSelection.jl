@@ -123,12 +123,12 @@ drift from the first.
   the **mixed** model (`y` binary, `θ`/`x_walk` continuous) — NOT `DirectMIPSolver`'s
   all-binary optimum over the same pool. Those differ by this formulation's LP–IP gap,
   which is not small here.
-- **`metadata["benders_optimality_scope"]`.** The only oracle today is
-  `:direct_enumeration`, whose pool is exponential in `max_stops`, so
-  `BendersSubproblemConfig.max_stops` defaults to **4** and narrows the formulation's own
-  value when that is larger. When it does, the scope reads `"max_stops_restricted"` and
-  the claim is optimality over routes of at most that many stops — the same discipline
-  `cg_optimality_scope` enforces for `CGSolver`. `nothing` disables the cap.
+- **`metadata["benders_optimality_scope"]`.** `:direct_enumeration`'s pool is exponential
+  in `max_stops`, so `BendersSubproblemConfig.max_stops` defaults to **4** under that
+  oracle and narrows the formulation's own value when that is larger. When it does, the
+  scope reads `"max_stops_restricted"` and the claim is optimality over routes of at most
+  that many stops — the same discipline `cg_optimality_scope` enforces for `CGSolver`.
+  `nothing` disables the cap and is the default under every CG oracle.
 
 MEASURED (Zhuzhou n=10 p=8 sc=1 seed=42, k=5, `max_stops=4`, 16,320 enumerated columns):
 converges in **4 iterations / 3 cuts**, LB == UB exactly at 12249.400939, loop wall 2.3 s
@@ -151,8 +151,15 @@ the true optimum whatever the enumerated pool holds.
 `benders_scaling_s3.jl` runs n=10/15/20 at s=3 (MultiCut, 18/18 checks). All five numbers
 (`cg_lp`, `benders`, `mixed_mono`, `cg_ip`, `direct_mip`) agree at every size. **The cut
 count is near-flat in the first-stage space** -- 733x more station sets from n=10 to n=20,
-2.4x more cuts (5 -> 12) -- because `Γ_j` is the shadow price of a linking row that binds at
-`y_j = 0`, so each cut prices every station rather than one vertex. Enumeration is NOT the
+2.4x more cuts (5 -> 12). The reason is **a flat, high-floor value function**, measured:
+`Q_max/Q_min` over the master's whole feasible set is only 1.35-1.44, so almost any
+endpoint-feasible `y` is nearly as good as the best and few cuts are needed to see it. Two
+earlier explanations are refuted and should not be repeated -- "each cut prices every
+station" (cuts carry 1-2 nonzeros at n=10, though density does grow to ~10/20 at n=20) and
+"one round closes it" (round-1 closure is only 66% at n=15); both were n=10 artifacts. The
+flatness is not a fixed-charge effect either: `route_regularization_weight x
+repositioning_time` is 2.3% of the objective and removing it moves flatness 1.3528 ->
+1.3612, while route travel is 92.5% (`benders_weight_sensitivity.jl`). Enumeration is NOT the
 bottleneck at `max_stops=4`: 237,353 columns in 12.2 s at n=20/s=3. (Note `max_routes` is
 checked pre-deduplication, so it bounds *generated* columns, not the pool -- a cap that
 looks binding may not be.) Full suite: 93,086/93,086.
@@ -369,15 +376,70 @@ both relaxed-cluster modes means `relaxed_cluster_count` was set at build time; 
 `pricing.warm_start_mode=:relaxed_cluster` is rejected too: the mode never reports its own
 exhaustion, so phase 2 would be unreachable.
 
+### Subproblem oracles (4)
+
+The oracle decides how `Q_s(ŷ)` and its duals are obtained. **A cut may only be derived from
+an EXHAUSTED pricing round**: duals from a restricted pool are feasible for the restricted
+dual only, and the resulting cut can exclude the true optimum. Every oracle therefore ends in
+a proof of exhaustion, and a run that cannot produce one raises rather than emitting a cut.
+
+| `oracle` | How `Q_s` is solved | Exhaustion proof | n=10 iters/cuts |
+| --- | --- | --- | --- |
+| `:direct_enumeration` | one LP over an up-front enumerated pool | the pool IS the universe (capped at `max_stops`, default 4) | 4 / 5 |
+| `:column_generation` | inner CG loop, full-station pricing | pricer exhausts, or `:relaxed_cluster` certifies | 4 / 5 |
+| `:column_generation_activated` | inner CG loop pricing only over built stations | same, at the closed-form-completed duals | 30 / 77 |
+| `:column_generation_activated_lpo` | activated, then a Pareto-optimal recompletion | same certificate, reused | **3 / 6** |
+
+`pricing.mode` is restricted to the exhaustive-equivalent pricers (`nothing`/`:exact`/
+`:darp`/`:darp_modified`) plus the two certifying ones (`:relaxed_cluster`,
+`:relaxed_cluster_two_tier`). **`:station_simple` is rejected**, not ignored: it exhausts
+elementary routes only, so its duals are feasible for the elementary-restricted dual and its
+cut can prune the optimum (measured at 70-76% objective error for exactly this class of
+invalid cut, `notes/2026-07-27`).
+
+**The activated oracle and its completion.** Pricing over all `n` stations when only `k` are
+built wastes most of the search. The activated oracles install a closed-form completion
+`γᴼ_pj := max(γᴼ_pj, max(0, αₚ − w·min_k walk))` on unbuilt stations **before** pricing — the
+restriction and the dual repair are the SAME operation, since raising `γ` to `αₚ` drives every
+candidate through an unbuilt station to `rho ≤ 0` and out of the pricer's own filter. So the
+exhaustion the loop certifies is already full-universe at those duals; the completion is not a
+repair applied afterwards.
+
+That makes pricing nearly free and the cuts very weak — 77 cuts / 30 iterations at n=10, and
+at n=20 iteration 588 with 1,764 cuts and a 25% gap still open, with pricing at 0.0 s and all
+the cost in master MIP solves. `:column_generation_activated_lpo` fixes that by replacing the
+CUT's completion with a locally Pareto-optimal one (Magnanti-Wong, against an interior point
+from `_benders_core_point`'s max-min-slack LP), leaving `α` and the built-station `γ` fixed.
+
+**The LPO completion does no pricing and no row generation** — this is the whole point, and
+reintroducing separation would hand back the saving the activated solve bought. The completion
+problem has one row per column, but the activated certificate discharges all but a route-free
+family: a column touching no unbuilt station has its reduced cost unchanged by ANY completion,
+and one that does is discharged by *shortcutting* it past its unbuilt stations (`τ_{c'} ≤ τ_c`
+by the triangle inequality, which the travel matrix is required to satisfy package-wide). What
+survives is a condition on individual triples, written out in full and solved once:
+
+    gᴼ_pj + gᴰ_pk ≥ αₚ − w·demand_p·walk(o_p, d_p, (j,k))   for every triple with an unbuilt end
+
+This is a *relaxation* of the closed-form bound (which loads the whole requirement onto one
+side at the cheapest partner, and drops the `demand_p` factor the column cost actually
+charges — conservative, hence valid, but slack), so the closed-form point is always feasible
+for it and the LP can only match or beat it; `completion_lpo.jl` asserts that rather than
+assuming it. Note MW's usual normalisation row is **vacuous** here: every free variable sits
+on a coordinate with `ŷ_j = 0`, so every feasible completion is already tight at `ŷ` and the
+cut's value at the anchor is untouched — only its slope elsewhere changes.
+
 `BendersSolver` carries `max_iterations`, `optimality_tol`, `total_time_limit_sec` (a wall
 cap over the whole loop, distinct from `config.time_limit_sec`, which reaches only the
 master's own `optimize!`), and `subproblem` — a `BendersSubproblemConfig`
 (`opt/solvers/benders/subproblem_config.jl`). **The subproblem oracle is a solver setting,
 not a formulation one**, for exactly the reason pricers are: it is a search algorithm, so
-two runs differing only in it solve the identical model. It carries `oracle`
-(`:direct_enumeration` only today; `:column_generation` is the intended next value and is
-rejected rather than ignored), `max_stops` (the enumeration cap — **default 4**, see the
-scope note under "Benders decomposition"), `max_routes` and
+two runs differing only in it solve the identical model. It carries `oracle` (one of the
+four in the table below), `max_stops` (the enumeration cap — **default 4** under
+`:direct_enumeration`, `nothing` under the CG oracles; see the scope note under "Benders
+decomposition"), `pricing` (a `CGPricingConfig`, for the CG oracles — restricted to
+exhaustive-equivalent modes, see below), `max_cg_iterations` and
+`cg_pricing_time_limit_sec`, `max_routes` and
 `enumeration_time_limit_sec` (the enumerator's own guard rails, which throw rather than
 truncate), and `time_limit_sec` (per subproblem LP; a subproblem that hits it is a hard
 error, since a truncated LP's duals are not a valid underestimator).

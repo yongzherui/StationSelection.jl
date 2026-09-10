@@ -36,6 +36,13 @@ export OR_S="${FR_S:-3}"
 export OR_SEED=$(( ${FR_SEED_BASE:-42} + TASK - 1 ))
 export OR_FULL_MS="${FR_MAX_STOPS:-10}"
 export OR_REQUIRE_CG_REF=0
+# Subproblem pricer. :relaxed_cluster at n=30 because that is past where the exact search
+# still exhausts (measured CG frontier: n<=20 all scenarios, n=25 to <=5, n=30 only s=1).
+# It exhausts by CERTIFYING a relaxation that lower-bounds every real route's reduced cost,
+# which licenses a Benders cut exactly as an exhaustive search does. K defaults to 60% of n,
+# the ratio Study 10 found workable (K/n 0.6-0.8 certified; 0.4 was 0/5 AND slower).
+export OR_SUB_MODE="${FR_SUB_MODE:-relaxed_cluster}"
+export OR_SUB_K="${FR_SUB_K:-$(( (${FR_N:-30} * 6 + 9) / 10 ))}"
 export CS_COPY_DEPOT="${CS_COPY_DEPOT:-1}"
 source "$PROJECT_ROOT/scripts/lib/slurm_modules.sh"
 source "$PROJECT_ROOT/scripts/lib/slurm_array_task_env.sh"
