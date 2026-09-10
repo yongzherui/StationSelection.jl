@@ -65,7 +65,7 @@ const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "separation"))
 const THREADS = parse(Int, get(ENV, "LP_THREADS", "1"))
 # Solve the per-scenario subproblems concurrently. Shortens the wall only -- it does not
 # change any budget, so it cannot make a stuck certification succeed.
-const PARALLEL = get(ENV, "LP_PARALLEL_SCENARIOS", "0") == "1"
+const PARALLEL = get(ENV, "LP_PARALLEL_SCENARIOS", "1") == "1"
 const MAX_ITERS = parse(Int, get(ENV, "LP_MAX_ITERS", "3000"))
 const TOTAL_LIMIT = parse(Float64, get(ENV, "LP_TOTAL_LIMIT", "1800.0"))
 const OUT_DIR = get(ENV, "LP_OUT",

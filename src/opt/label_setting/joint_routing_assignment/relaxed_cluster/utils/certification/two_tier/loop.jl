@@ -100,9 +100,14 @@ them apart. Diagnosing the n=40 stall without this meant guessing from per-round
 which one had fired.
 """
 _two_tier_result(st::_TwoTierState, outcome::Symbol, reason::Symbol=:none) = (
+    # `reason` goes on the RESULT as well as into `tiers`. It was only in `tiers`, so the
+    # per-scenario reason the round collects (`RelaxedClusterCertificationResult
+    # .inconclusive_reasons`, read off `NoGoodResult.reason`) defaulted to `:none` for every
+    # two-tier attempt -- leaving the arm that certifies the most cells as the one arm with
+    # no failure diagnosis, which is precisely backwards.
     result = RelaxedClusterNoGoodResult(
         outcome, st.rounds, length(st.meso_cuts) + length(st.macro_cuts),
-        st.last_subset_size, st.trace, collect(values(st.harvested)),
+        st.last_subset_size, st.trace, collect(values(st.harvested)), reason,
     ),
     tiers = (macro_rounds=st.macro_rounds, macro_sec=round(st.macro_sec; digits=2),
              meso_rounds=st.meso_rounds, meso_sec=round(st.meso_sec; digits=2),
@@ -364,7 +369,8 @@ function _two_tier_certify_scenario(
         restricted_candidates = _restrict_candidates_to_subset(candidates, restricted.nodes)
         meso_relaxed = if isempty(restricted_candidates)
             # No reward-carrying candidate lives in this region at all, so it is barren
-            # without a search -- exactly the vacuous case the one-tier loop also allows.
+            # without a search -- exactly the `:no_passenger_served` case the one-tier loop
+            # also allows.
             nothing
         else
             built = create_joint_routing_assignment_relaxed_cluster_pricing_data(

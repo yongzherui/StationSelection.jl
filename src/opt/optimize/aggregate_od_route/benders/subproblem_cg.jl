@@ -313,6 +313,19 @@ function _solve_joint_routing_assignment_subproblem_by_cg!(
                     @printf("        cut cost: %d rounds | active cuts %d -> %d (max %d) | relaxed sweep %.3fs -> %.3fs (total %.1fs) | rounds whose sweep did NOT exhaust: %d\n",
                             length(tr), first(cuts_seq), last(cuts_seq), maximum(cuts_seq),
                             first(secs), last(secs), sum(secs), n_unexh)
+                    # A `:no_passenger_served` subset search means the station subset held no candidate
+                    # with BOTH endpoints inside it -- nothing was searched, yet it earns a
+                    # cut for free. Many of those means the SUPPORT CONSTRUCTION is
+                    # degenerate, not that the proof genuinely needs many cuts, and the two
+                    # want completely different fixes.
+                    if haskey(first(tr), :subset_outcome)
+                        oc = Dict{Symbol,Int}()
+                        for r in tr; oc[r.subset_outcome] = get(oc, r.subset_outcome, 0) + 1; end
+                        @printf("        subset searches: %s | median support %d cells -> %d stations\n",
+                                join(("$k=$v" for (k, v) in sort(collect(oc); by=x->-x[2])), ", "),
+                                sort([r.support_size for r in tr])[max(1, end ÷ 2)],
+                                sort([r.subset_size for r in tr])[max(1, end ÷ 2)])
+                    end
                     flush(stdout)
                 end
             end

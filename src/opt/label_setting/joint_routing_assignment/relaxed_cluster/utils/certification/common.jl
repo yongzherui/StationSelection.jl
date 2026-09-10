@@ -75,7 +75,7 @@ of this search is how both modes stay on the right side of it.
 `outcome` distinguishes the three ways this can return without having searched:
 
   * `:searched` -- a real search ran; `exhausted` says whether it finished its frontier.
-  * `:vacuous` -- no reward-carrying candidate, or no opportunity, exists over these
+  * `:no_passenger_served` -- no reward-carrying candidate, or no opportunity, exists over these
     stations at all. Barren, and provably so, without a search: `rc = Inf`,
     `exhausted = true`.
   * `:no_time` -- `time_limit` was non-positive, so nothing ran and nothing is known. The
@@ -88,12 +88,12 @@ function _certification_station_search(
 )
     subset_candidates = _restrict_candidates_to_subset(candidates, station_set)
     isempty(subset_candidates) &&
-        return (outcome=:vacuous, rc=Inf, exhausted=true, elapsed_sec=0.0)
+        return (outcome=:no_passenger_served, rc=Inf, exhausted=true, elapsed_sec=0.0)
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, station_set, travel_cost, subset_candidates; shared...,
     )
     isempty(pricing_data.opportunities) &&
-        return (outcome=:vacuous, rc=Inf, exhausted=true, elapsed_sec=0.0)
+        return (outcome=:no_passenger_served, rc=Inf, exhausted=true, elapsed_sec=0.0)
     time_limit > 0 ||
         return (outcome=:no_time, rc=Inf, exhausted=false, elapsed_sec=0.0)
 

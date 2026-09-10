@@ -192,7 +192,8 @@ function _relaxed_cluster_certify_scenario(
     # `benchmarks/diagnostics/nogood_cut_nesting_probe.jl` and `../../README.md`.
     _trace_row!(round, relaxed_rc, support_size, subset_size, subset_rc, subset_checked;
                 support = Set{Int}(), guide_routes = 0,
-                n_active_cuts = 0, relaxed_sec = 0.0, relaxed_exhausted = true) =
+                n_active_cuts = 0, relaxed_sec = 0.0, relaxed_exhausted = true,
+                subset_outcome = :none) =
         push!(trace, (
             round=round, relaxed_rc=relaxed_rc, support_size=support_size,
             subset_size=subset_size, subset_rc=subset_rc, subset_checked=subset_checked,
@@ -249,7 +250,7 @@ function _relaxed_cluster_certify_scenario(
             surviving_min = isempty(labels) ? Inf : minimum(l.reduced_cost for l in labels)
             _trace_row!(round, surviving_min, 0, 0, Inf, false;
                         n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
-                        relaxed_exhausted=exhausted)
+                        relaxed_exhausted=exhausted, subset_outcome=:no_search)
             return _result(exhausted ? :certified : :inconclusive, round,
                            exhausted ? :none : :relaxed_not_exhausted)
         end
@@ -280,7 +281,7 @@ function _relaxed_cluster_certify_scenario(
             _trace_row!(round, first(guides).reduced_cost, length(support), length(subset),
                         Inf, false; support=copy(support), guide_routes=length(guides),
                         n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
-                        relaxed_exhausted=exhausted)
+                        relaxed_exhausted=exhausted, subset_outcome=:cache_hit)
             _relaxed_cluster_add_cut!(cluster_sets, support;
                                       barren_supports=barren_supports) ||
                 return _result(:inconclusive, round, :cut_mask_full)
@@ -312,14 +313,17 @@ function _relaxed_cluster_certify_scenario(
         # improving route.
         search.outcome === :no_time && return _result(:inconclusive, round, :subset_no_time)
 
-        # `subset_checked = true`: a subset search really ran (or was vacuously settled by
-        # there being no candidates in `S`). `rc >= -tol` -- including `Inf`, meaning no
-        # reward-carrying route exists in `S` at all -- is what "barren" actually means,
-        # and it is the condition that adds a cut below.
+        # `subset_checked = true`: a subset search really ran, OR it returned
+        # `:no_passenger_served` because no candidate had both endpoints inside `S`, so
+        # there was nothing to search. `rc >= -tol` -- including `Inf` -- is what "barren"
+        # means and is the condition that adds a cut below, and those two cases are
+        # indistinguishable in `rc`/`exhausted`. `subset_outcome` in the trace is what
+        # separates them: a proof that cost a real search, versus a support that could
+        # never have held an improving route because nobody is serveable there.
         _trace_row!(round, first(guides).reduced_cost, length(support), length(subset),
                     search.rc, true; support=copy(support), guide_routes=length(guides),
                     n_active_cuts=n_active_cuts, relaxed_sec=relaxed_sec,
-                    relaxed_exhausted=exhausted)
+                    relaxed_exhausted=exhausted, subset_outcome=search.outcome)
 
         # A real improving column exists -- the relaxation was right, and this is a true
         # negative rather than a failure of the bound.

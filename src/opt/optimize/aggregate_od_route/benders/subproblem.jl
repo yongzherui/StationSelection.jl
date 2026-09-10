@@ -210,9 +210,10 @@ function _solve_joint_routing_assignment_benders_subproblems(
     # the stats accumulation that does is called after the loop, single-threaded. So this is
     # a wall-clock win with no shared state, and subproblems are ~99% of the loop's time.
     #
-    # Opt-in, because the pricer inside each subproblem may thread internally and running
-    # both levels oversubscribes: with `nthreads` at 4 and 3 scenarios there is nothing left
-    # for the label search. Measure before turning it on for a given cell.
+    # On by default: the pricer has no internal threading to collide with. Every
+    # `Threads.@threads` in the package is a loop over scenarios guarded by
+    # `length(scenarios) > 1`, and a subproblem model holds one scenario, so those loops are
+    # inert here. See `BendersSolver.parallel_scenarios`.
     parallel = solver.parallel_scenarios && length(builds) > 1 && Threads.nthreads() > 1
     if parallel
         Threads.@threads for i in eachindex(builds)

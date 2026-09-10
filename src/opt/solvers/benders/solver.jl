@@ -79,10 +79,19 @@ struct BendersSolver <: AbstractSolver
     # docstring says so: a Benders subproblem model holds ONE scenario, so there is nothing
     # to parallelise inside a round).
     #
-    # Default `false` because the label-setting pricer may thread internally, and running
-    # both levels oversubscribes: 3 scenarios on 4 threads leaves the searches nothing.
-    # It shortens the wall; it does NOT enlarge any budget, and it cannot turn an
-    # inconclusive certification into a conclusive one.
+    # Default `true`, and there is no nested-threading hazard to weigh against it. The
+    # package contains exactly three `Threads.@threads` sites (`label_setting/round.jl` x2
+    # and `relaxed_cluster/utils/certification/round.jl`), every one a loop over SCENARIOS
+    # guarded by `length(scenarios) > 1`, and the label-setting core itself has none. A
+    # Benders subproblem model holds exactly ONE scenario and every pricing call passes
+    # `only_scenarios = [scenario]`, so all three are inert here. This is the only level at
+    # which the work can be parallelised at all.
+    #
+    # It shortens the wall and nothing else: it enlarges no budget and cannot turn an
+    # inconclusive certification into a conclusive one. The one thing to watch is
+    # `config.threads` -- left unset, each concurrent subproblem LP lets Gurobi take every
+    # core. Those LPs are a small share of the wall next to pricing, but set `threads` when
+    # scenarios are many relative to cores.
     parallel_scenarios::Bool
     iteration_callback::Union{Nothing, Function}
 
@@ -92,7 +101,7 @@ struct BendersSolver <: AbstractSolver
             optimality_tol::Number=1e-6,
             subproblem::BendersSubproblemConfig=BendersSubproblemConfig(),
             total_time_limit_sec::Number=Inf,
-            parallel_scenarios::Bool=false,
+            parallel_scenarios::Bool=true,
             iteration_callback::Union{Nothing, Function}=nothing,
         )
         max_iterations > 0 || throw(ArgumentError("max_iterations must be positive"))
