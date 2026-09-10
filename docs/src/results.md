@@ -2,6 +2,8 @@
 
 ```@docs
 OptResult
+ModelCounts
+DetourComboData
 ```
 
 ## SolveStatus is not a MOI code
