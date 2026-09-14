@@ -56,3 +56,11 @@ results/nearest_open_pricer_mechanics_ab/
 tmp_ss_bench/pfa_n15_rho_pair_exhaustive_*/
 tmp_ss_bench/pfa_n15_route_rho_*/
 tmp_ss_bench/pfa_n15_theta_rho_*/
+
+# `*.csv` above already excludes the benchmarks/diagnostics/results/ exports, so the
+# curated ones are force-added deliberately. Do NOT force-add the raw per-column dumps
+# `pool_anatomy/*/columns.csv` (~12 MB) or `pool_trajectory/*/trajectory_columns.csv`
+# (~750 KB): both are regenerable by the script that wrote them, and the largest file
+# otherwise tracked in this repo is 127 KB. The summaries the notes actually cite --
+# station_need, duals, cuts, anchors, pool_not_in_universe, route_min_rc, the trajectory
+# summaries and each directory's README -- are tracked instead.
