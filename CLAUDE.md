@@ -409,7 +409,7 @@ both relaxed-cluster modes means `relaxed_cluster_count` was set at build time; 
 `pricing.warm_start_mode=:relaxed_cluster` is rejected too: the mode never reports its own
 exhaustion, so phase 2 would be unreachable.
 
-### Subproblem oracles (4)
+### Subproblem oracles (5)
 
 The oracle decides how `Q_s(ŷ)` and its duals are obtained. **A cut may only be derived from
 an EXHAUSTED pricing round**: duals from a restricted pool are feasible for the restricted
@@ -421,7 +421,8 @@ a proof of exhaustion, and a run that cannot produce one raises rather than emit
 | `:direct_enumeration` | one LP over an up-front enumerated pool | the pool IS the universe (capped at `max_stops`, default 4) | 4 / 5 |
 | `:column_generation` | inner CG loop, full-station pricing | pricer exhausts, or `:relaxed_cluster` certifies | 4 / 5 |
 | `:column_generation_activated` | inner CG loop pricing only over built stations | same, at the closed-form-completed duals | 30 / 77 |
-| `:column_generation_activated_lpo` | activated, then a Pareto-optimal recompletion | same certificate, reused | **3 / 6** |
+| `:column_generation_activated_lpo` | the same activated loop, then the CUT's dual point is re-chosen: locally Pareto-optimal over the optimal face (`lpo_completion=:pareto`) or damage-minimising on the unbuilt stations only (`:baseline`) | the activated round's, plus -- for `:pareto` -- a further exhausted round at the re-optimised duals | see the note |
+| `:column_generation_warm_start` | built-only phase 1 to fill the pool, then full-universe phase 2 | phase 2's exhaustion, at the RAW duals | 4 / 7 |
 
 `pricing.mode` is restricted to the exhaustive-equivalent pricers (`nothing`/`:exact`/
 `:darp`/`:darp_modified`) plus the two certifying ones (`:relaxed_cluster`,
@@ -440,49 +441,82 @@ repair applied afterwards.
 
 That makes pricing nearly free and the cuts very weak — 77 cuts / 30 iterations at n=10, and
 at n=20 iteration 588 with 1,764 cuts and a 25% gap still open, with pricing at 0.0 s and all
-the cost in master MIP solves. `:column_generation_activated_lpo` fixes that by replacing the
-CUT's completion with a locally Pareto-optimal one (Magnanti-Wong, against an interior point
-from `_benders_core_point`'s max-min-slack LP), leaving `α` and the built-station `γ` fixed.
+the cost in master MIP solves. The weakness is traceable to WHICH TERM the closed form
+credits: per unbuilt `(p,j)` it must cancel `αₚ` and credits only the walking term (0.26–0.95%
+of it), ignoring the route travel it should charge for (median 33% of `αₚ`).
 
-**The LPO completion DOES price — `lpo_completion=:separation` is the default and the only
-family that works.** The completion problem has one row per column; separation seeds those
-rows from the pool and generates the rest by pricing against each candidate `g`, and lowering
-`g` on the unbuilt stations re-admits them to the pricer's filter, so each separation round is
-a FULL-universe label search. Truncating is safe (it returns the last separation-verified
-completion, initialised to the closed-form bound), so validity never depends on the row
-generation converging.
+**Two directions have been tried for buying that strength back, and they are not the same
+idea.** Both are recorded here because the first was removed and the second reuses its name.
 
-The pricing-free alternative exists and is `lpo_completion=:route_free`. It discharges the
-rows the activated certificate already holds (a column touching no unbuilt station has its
-reduced cost unchanged by ANY completion) and the rest by *shortcutting* past the unbuilt
-stations (`τ_{c''} ≤ τ_c` by the triangle inequality, required package-wide), leaving a
-condition on individual triples:
+- **REMOVED 2026-09-10 — row generation / the separation completion**
+  (`lpo_completion=:separation|:route_free`). It held `α` and the built `γ` fixed and
+  generated the REAL route rows for the unbuilt multipliers. It worked — 3 iterations / 6 cuts
+  at n=10 s=3 — but lowering `γ` on the unbuilt stations re-admits them to the pricer's
+  `rho > 0` filter, so every separation round became a full-universe search: **6.8 s of
+  built-only pricing against 501 s of row generation** at n=30 s=3. It handed back exactly the
+  saving the activated oracle bought. `:route_free`, its pricing-free variant, was valid and
+  recovered nothing (30 iters / 77 cuts, identical to the plain completion).
+- **LIVE — the locally Pareto-optimal completion** (`:column_generation_activated_lpo`,
+  `lpo_completion=:pareto|:baseline`, `completion_lpo.jl`). Cummings/Jacquillat/Vaze's
+  principle: keep only the VALUE `z*`, re-optimise the WHOLE dual over the optimal face
+  (`Σα − Σ_{J⁺} g = z*`) against a core point. Its completion rule is the conservative
+  `ρ_pjk ≤ 0` on every triple touching an unbuilt station — and **that rule is what makes it
+  structurally different from the removed one**: those rows are IN the auxiliary LP, so every
+  candidate it can propose already has `ρ ≤ 0` through unbuilt stations and the pricer's own
+  filter drops them, keeping each separation round BUILT-ONLY. Because the route rows are
+  column-generated, solving the auxiliary LP once over the pool is NOT sufficient (the pool
+  certified the *original* duals); it re-prices after every LP solve and adds each
+  negative-reduced-cost route as a new DUAL ROW until pricing certifies. An uncertified loop
+  installs the closed-form point unchanged, so it degrades to the plain activated cut and
+  cannot emit an invalid one — check `benders_lpo_certified` against `benders_lpo_calls`
+  before reporting a run as a Pareto arm.
 
-    gᴼ_pj + gᴰ_pk ≥ αₚ − w·demand_p·walk(o_p, d_p, (j,k))   for every triple with an unbuilt end
+  MEASURED (job 22525353, n=10 p=8 k=5 max_stops=4, 3 seeds x {1,3} scenarios, 34/34 checks on
+  every task; all five oracles agree on the objective to 0.000e+00). **Valid and certified,
+  and a real but SMALL gain.** Against the exact value function it recovers a median of
+  **2.0%** (range 1.7-12.7%) of the gap between the closed form and plain full-station CG on
+  the mean one-swap cut gap `Q(y') - C(y')`; mean unbuilt `g_j` falls 1-13%, against plain CG
+  being 20-30x smaller. **Loop behaviour is unchanged** -- 30 iterations / 77 cuts at n=10
+  s=3, identical to the closed form. The one qualitative win: the fraction of one-swap
+  neighbours where the cut predicts `<= 0` and therefore says nothing goes from 5-10% to
+  **0.0% on five of six tasks**. Cost is negligible (1.4-2.8 Pareto rounds, 0.8-3.5 generated
+  rows, ~0.05 s per completion), which confirms the built-only-separation claim. The one cell
+  where it changes the OUTCOME and not just the metrics is n=12 s=1 (job 22525622): the closed
+  form and `:baseline` both hit the 200-iteration cap at `FEASIBLE`, `:pareto` converges in
+  177 -- still 30x plain CG's 6, so read it as "the completion family is the wrong place to
+  be", not as a scaling win.
 
-That is a *relaxation* of the closed-form bound (which loads the whole requirement onto one
-side at the cheapest partner and drops the `demand_p` factor), so the closed-form point is
-feasible for it and the LP can only match or beat it — `completion_lpo.jl` asserts that rather
-than assuming it. **MEASURED, and it recovers nothing:** 30 iterations / 77 cuts at n=10 s=3,
-identical to the plain closed form, versus 3 / 6 for separation. The reason is now measured
-too (`notes/2026-09-10_activated_dual_completion_verified_and_why_weak.md`): `demand_p == 1`
-on these instances, so `(T)` and the closed form are the same number up to letting the two
-endpoints split the requirement, and both credit the WALKING term (0.2–1.2% of the `αₚ` they
-must cancel) while ignoring route travel (median 33%). Do not read the route-free family as the
-LPO oracle's mechanism.
+  **The conclusion is a diagnosis, not a win:** the binding constraint on activated cut
+  strength is not which dual comes back from the optimal face -- it is the `rho <= 0`
+  completion itself, which pins `g_j` near `alpha_p` because the only term it can credit
+  (`w * walk`) is 0.26-0.95% of `alpha_p`. Choosing optimally *within* that constraint buys a
+  few percent; escaping it is what would matter.
 
-Note MW's usual normalisation row is **vacuous** here: every free variable sits on a
-coordinate with `ŷ_j = 0`, so every feasible completion is already tight at `ŷ` and the cut's
-value at the anchor is untouched — only its slope elsewhere changes.
+  **A trap this found, worth not re-discovering:** `C(y^c)` ignores any coordinate with
+  `y^c_j = 0`, so a core point with a zero coordinate makes the objective a SEMINORM and hands
+  a built station's `g_j` an unbounded ray. The obvious max-min-slack core point returns a
+  VERTEX whenever one face is structurally tight, and did: mean unbuilt `g_j` 7.1e3 -> 1.8e6,
+  half the neighbourhood uninformative, every cut still valid. Hence
+  `lpo_core_point = :relative_interior` as the default.
 
-**The completion is verified sound** — dual feasibility measured directly against the
-exhaustive 16,320-column pool at 8 anchors (`min rc = −1.8e-12`), every cut valid at all 86
-master-feasible `y`, tight at its anchor, and the restricted solve attaining the exact
-`Q_s(ŷ)`: `benchmarks/diagnostics/benders_activated_completion_audit.jl`, 17/17. What was
-wrong was the *proof of record*, not the code — it claimed the restricted search leaves the
-route universe unrestricted, which reward-driven candidate generation makes false; the
-argument that actually holds goes through the shortcut above. See the note and
-`subproblem_config.jl`.
+  **The gold standard settles it** (`benders_lpo_gold_standard.jl`, job 22525969, 10/10 checks
+  x 4 tasks). A true Magnanti-Wong dual over the enumerated `R` with NO `rho <= 0` condition
+  reaches a mean one-swap gap of 219.7 against the closed form's 6155.1 -- **28x**, essentially
+  plain CG -- and `gold - pareto` is **90-99%** of `gold - closed_form`. So the conservative
+  completion accounts for nearly all the lost strength and the dual choice for 1-10%. The live
+  direction is a completion that charges the per-station DETOUR
+  `delta_j = min_{a,b built}[travel(a,j) + travel(j,b) - travel(a,b)]` with a share-out rule,
+  not a per-triple walk. Derivation, full tables and the core-point failure:
+  `notes/2026-09-10_locally_pareto_optimal_activated_cut.md`.
+
+A third direction is to widen the PRICED SET rather than change the duals: rotate `r`
+unbuilt stations into the search each iteration, keeping the strict closed-form completion.
+MEASURED at n=10 s=3, max_stops=10 — `r=0` 31 iterations, `r=1` 18, `r=2` 15, `r=3` 8–12,
+against plain full pricing's 4 — and 0.2 s of wall against plain's 8.0 s. It does NOT scale
+past n=10 as it stands: at n=15 no `r` converges within 60 iterations while plain converges
+in 4. `benchmarks/diagnostics/benders_rotating_activated_set.jl`,
+`notes/2026-09-10_rotating_activated_set.md`.
+
 
 `BendersSolver` carries `max_iterations`, `optimality_tol`, `total_time_limit_sec` (a wall
 cap over the whole loop, distinct from `config.time_limit_sec`, which reaches only the
@@ -490,14 +524,20 @@ master's own `optimize!`), and `subproblem` — a `BendersSubproblemConfig`
 (`opt/solvers/benders/subproblem_config.jl`). **The subproblem oracle is a solver setting,
 not a formulation one**, for exactly the reason pricers are: it is a search algorithm, so
 two runs differing only in it solve the identical model. It carries `oracle` (one of the
-four in the table below), `max_stops` (the enumeration cap — **default 4** under
+five in the table above), `max_stops` (the enumeration cap — **default 4** under
 `:direct_enumeration`, `nothing` under the CG oracles; see the scope note under "Benders
 decomposition"), `pricing` (a `CGPricingConfig`, for the CG oracles — restricted to
 exhaustive-equivalent modes, see below), `max_cg_iterations` and
 `cg_pricing_time_limit_sec`, `max_routes` and
 `enumeration_time_limit_sec` (the enumerator's own guard rails, which throw rather than
 truncate), and `time_limit_sec` (per subproblem LP; a subproblem that hits it is a hard
-error, since a truncated LP's duals are not a valid underestimator).
+error, since a truncated LP's duals are not a valid underestimator). Under
+`:column_generation_activated_lpo` it additionally carries `lpo_completion`
+(`:pareto`/`:baseline`), `lpo_core_point` (`:max_min_slack`, an auxiliary LP, or `:uniform`,
+`y^c_j = k/n` — which is NOT in general relatively interior, since it can sit exactly on an
+endpoint-feasibility row), `lpo_max_rounds`, `lpo_pricing_time_limit_sec`, and
+`lpo_variable_bound` (a safety box whose only job is to turn an unbounded auxiliary LP into a
+reported `bound_binding` status).
 
 ## Key Constraints
 
