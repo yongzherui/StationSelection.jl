@@ -50,5 +50,17 @@ function _benders_build_metadata(build_result::BuildResult, st::BendersLoopState
             metadata["benders_cg_$(key)"] = value
         end
     end
+    # Present only under `:column_generation_activated_lpo`. `benders_lpo_certified` against
+    # `benders_lpo_calls` is the key to read first: an uncertified completion installed the
+    # closed-form fallback, so a run whose ratio is low produced the plain activated oracle's
+    # cuts and must not be reported as a Pareto arm.
+    if haskey(m.obj_dict, :benders_lpo_stats)
+        for (key, value) in m[:benders_lpo_stats]
+            metadata["benders_lpo_$(key)"] = value
+        end
+        metadata["benders_lpo_completion"] = solver.subproblem.lpo_completion
+        haskey(m.obj_dict, :benders_core_slack) &&
+            (metadata["benders_lpo_core_slack"] = m[:benders_core_slack])
+    end
     return metadata
 end

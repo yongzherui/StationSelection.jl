@@ -123,10 +123,9 @@ function _build_joint_routing_assignment_subproblem_model(
         m, data, formulation; relax_integrality = true,
     )
     m[:benders_subproblem_scenario] = scenario
-    # The master's interior point, handed over at construction for the LPO completion. Each
-    # subproblem is a separate model, so it cannot reach the master's copy -- and it must be
-    # the SAME point for every scenario, or two scenarios would select completions that are
-    # Pareto-optimal against different objectives.
+    # The master's core point, handed over at construction for the locally Pareto-optimal
+    # completion. Each subproblem is a separate model, so it cannot reach the master's copy --
+    # and it must be the SAME point for every scenario (see `build_master.jl`).
     isnothing(core_point) || (m[:benders_core_point] = core_point)
     pricing_enabled && _stash_joint_routing_assignment_subproblem_pricing!(
         m, data, formulation, pricing, length(mapping.scenarios),

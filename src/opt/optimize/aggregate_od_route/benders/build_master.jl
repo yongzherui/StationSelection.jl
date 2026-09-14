@@ -145,13 +145,16 @@ function build_model(
     # above, which is rounded for dedup and therefore unusable for auditing validity -- see
     # `cuts.jl`. Keeping the refs also makes the accumulated cuts inspectable after a solve.
     m[:benders_cuts] = Tuple{Int, ConstraintRef}[]
-    # Interior point for the locally Pareto-optimal completion, computed ONCE here: it
-    # depends only on the master's own feasible region (budget + endpoint rows), not on any
-    # incumbent, so recomputing it per iteration would be waste. `core_slack` is the
-    # max-min slack achieved -- 0 means some face is structurally tight, which weakens the
-    # Pareto claim on that face (see `_benders_core_point`).
+    # Core point for the locally Pareto-optimal completion, computed ONCE here: it depends
+    # only on the master's own feasible region (budget + endpoint rows), not on any
+    # incumbent, so recomputing it per iteration would be waste -- and it must be the SAME
+    # point for every scenario, or two scenarios would select completions that are
+    # Pareto-optimal against different objectives. `core_slack` is the max-min slack
+    # achieved; 0 means some face is structurally tight, which weakens the Pareto claim on
+    # that face without touching validity (see `_benders_core_point`).
     if solver.subproblem.oracle === :column_generation_activated_lpo
-        core_point, core_slack = _benders_core_point(data, mapping, problem.k)
+        core_point, core_slack = _benders_core_point(
+            data, mapping, problem.k; mode = solver.subproblem.lpo_core_point)
         m[:benders_core_point] = core_point
         m[:benders_core_slack] = core_slack
     end

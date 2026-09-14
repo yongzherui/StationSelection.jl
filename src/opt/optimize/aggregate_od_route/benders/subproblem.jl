@@ -148,6 +148,12 @@ One scenario's second-stage evaluation: its exact cost at the incumbent, and the
 derived from it (`cut_constant` = `sum_p alpha`, `y_coefficients[j]` = `Gamma[s,j]`,
 sparse -- a station in no linking row of this scenario is simply absent).
 
+`lpo` is the locally Pareto-optimal completion's outcome under
+`:column_generation_activated_lpo` and `nothing` otherwise. Its `certified` bit records
+whether the Pareto point was actually installed or the run fell back to the closed-form
+completion -- the two produce different cuts, so a comparison that does not read it is
+comparing arms that may not have differed.
+
 `cg` is the inner CG outcome under the `:column_generation` oracle and `nothing` under
 `:direct_enumeration`. It is kept rather than discarded because its `converged` bit is what
 licensed the cut in the first place, and its iteration/column counts are the only way to see
@@ -167,7 +173,7 @@ struct JointRoutingAssignmentBendersScenarioResult
     y_coefficients::Dict{Int, Float64}
     reduced_cost_mismatch::Float64
     cg::Union{Nothing, BendersSubproblemCGResult}
-    lpo::Any
+    lpo::Union{Nothing, BendersLPOResult}
 end
 
 """
@@ -231,6 +237,7 @@ function _solve_joint_routing_assignment_benders_subproblems(
 
     total = sum(r.objective for r in results; init = 0.0)
     _accumulate_benders_cg_stats!(m, results)
+    _accumulate_benders_lpo_stats!(m, results)
     return JointRoutingAssignmentBendersSubproblemResult(collect(results), total,
                                                          time() - t0)
 end
@@ -293,10 +300,10 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     # One dual extraction, via the same function the CG master uses, so the sign convention
     # (`gamma = -dual` on the `<=` rows) is defined in exactly one place.
     alpha, gamma_o, gamma_d = extract_joint_routing_assignment_duals(sm)
-    lpo_stats = nothing
     # NOT `:column_generation_warm_start`: its phase 2 exhausted the full universe
     # at the RAW duals, so those are already dual-feasible and completing them would only
     # inflate `Gamma` and weaken the cut for no reason.
+    lpo_result = nothing
     if solver.subproblem.oracle in (:column_generation_activated,
                                     :column_generation_activated_lpo)
         # Repairs the duals the restricted pricing left incomplete. Must run before the cut
@@ -307,16 +314,19 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
             Float64(sm[:joint_routing_assignment_walk_cost_weight]),
         )
         if solver.subproblem.oracle === :column_generation_activated_lpo
-            # Then trade the conservative closed-form bound for the strongest completion
-            # that still passes separation. Runs only here, NOT inside the CG loop: during
-            # pricing we WANT the aggressive restriction (it is what makes the search cheap);
-            # for the cut we want the weakest valid penalties. The closed-form values just
-            # written are this call's feasible fallback.
-            lpo_stats = _benders_lpo_completion!(
+            # ...and then REPLACES that point with a locally Pareto-optimal one. The
+            # closed-form completion above is not redundant work: it is this call's certified
+            # fallback, the reference its reported gain is measured against, and (under
+            # `:baseline`) the fixed multipliers it completes around. Only `objective` --
+            # `z* = Q_s(yhat)` -- survives from the original dual solution under `:pareto`.
+            lpo_result = _benders_lpo_completion!(
                 alpha, gamma_o, gamma_d, incumbent,
                 sm[:joint_routing_assignment_data], mapping, scenario,
-                build, solver.subproblem, _benders_lpo_core_point(sm),
+                build, solver.subproblem, _benders_lpo_core_point(sm), objective,
             )
+            if solver.subproblem.verbose
+                _benders_lpo_log(scenario, lpo_result)
+            end
         end
     end
     alpha_sum = sum(values(alpha); init = 0.0)
@@ -334,9 +344,12 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     for (j, gamma) in coefficients
         implied -= gamma * incumbent[j]
     end
-    # Also a free check on the activated completion: it may only raise `gamma` on stations
-    # with `incumbent[j] == 0`, whose terms drop out of `implied`. A completion that touched a
-    # BUILT station would break this identity immediately.
+    # Also a free check on whichever completion ran. The closed-form one may only raise
+    # `gamma` on stations with `incumbent[j] == 0`, whose terms drop out of `implied`, so a
+    # completion that touched a BUILT station breaks this identity immediately. The locally
+    # Pareto-optimal one DOES move built-station multipliers -- and the identity is exactly
+    # the optimal-face equality `sum alpha - sum_{J+} g == z*` it is constrained by, so this
+    # assertion is a direct check that the face row was written and solved correctly.
     isapprox(implied, objective; rtol = 1e-6, atol = 1e-6) || error(
         "Benders subproblem scenario $scenario failed the strong-duality check: the dual " *
         "objective implied by the extracted duals is $implied but the primal optimum is " *
@@ -360,7 +373,7 @@ function _solve_one_joint_routing_assignment_benders_subproblem(
     end
 
     return JointRoutingAssignmentBendersScenarioResult(
-        scenario, objective, alpha_sum, coefficients, mismatch, cg_result, lpo_stats,
+        scenario, objective, alpha_sum, coefficients, mismatch, cg_result, lpo_result,
     )
 end
 
@@ -403,20 +416,6 @@ function _accumulate_benders_cg_stats!(m::JuMP.Model, results)
     end
     builds = m[:benders_subproblem_builds]::Vector{BuildResult}
     stats["pool_final"] = sum(length(b.model[:joint_routing_assignment_columns]) for b in builds)
-    # LPO completion accounting, present only under the lpo oracle. `improved` is the
-    # core-point-weighted reduction against the closed-form bound -- i.e. exactly how much
-    # cut strength the Pareto selection bought, in the units it optimises.
-    lpo = [r.lpo for r in results if !isnothing(r.lpo)]
-    if !isempty(lpo)
-        stats["lpo_rounds"] = get(stats, "lpo_rounds", 0) + sum(x.rounds for x in lpo)
-        stats["lpo_rows"] = get(stats, "lpo_rows", 0) + sum(x.rows for x in lpo)
-        stats["lpo_improved"] = get(stats, "lpo_improved", 0.0) + sum(x.improved for x in lpo)
-        stats["lpo_optimal"] = get(stats, "lpo_optimal", 0) +
-            count(x -> x.status == "optimal", lpo)
-        stats["lpo_calls"] = get(stats, "lpo_calls", 0) + length(lpo)
-        stats["lpo_pricing_sec"] = get(stats, "lpo_pricing_sec", 0.0) +
-            sum(x.pricing_sec for x in lpo)
-    end
     return nothing
 end
 
@@ -514,8 +513,11 @@ The consequence is not "more iterations" but no convergence beyond n=10. Measure
 strength against the exact value function, and the numbers behind both claims, are in
 `notes/2026-09-10_activated_dual_completion_verified_and_why_weak.md` (job 22472084:
 17/17 checks, 8 anchors, all 86 master-feasible station sets, `min rc = -1.8e-12`).
-`:column_generation_activated_lpo` exists to buy that strength back -- see
-`benders/completion_lpo.jl`.
+Row generation and the locally Pareto-optimal completion used to exist to buy that strength
+back; both were removed 2026-09-10 -- they recovered the full strength but re-admitted every
+station to the pricer, so each round became a full-universe search (6.8 s of built-only
+pricing against 501 s of row generation at n=30 s=3). The live answer is to widen the PRICED
+SET instead: see `benchmarks/diagnostics/benders_rotating_activated_set.jl`.
 
 # The bound, and why it credits the walking term
 
@@ -608,24 +610,3 @@ function _benders_activated_complete_duals!(
     return nothing
 end
 
-"""
-    _benders_lpo_core_point(sm) -> Vector{Float64}
-
-The interior point the LPO completion optimises against, read off the model the MASTER build
-stashed it on.
-
-Each subproblem model is separate from the master, so the point has to be reachable from
-here. It is stashed on the subproblem models too (the master build hands it over at
-construction) rather than recomputed, because it depends only on the master's feasible
-region and recomputing it per scenario per iteration would be pure waste -- and two
-scenarios optimising against different interior points would select completions that are
-Pareto-optimal with respect to different objectives, which is not what the cut wants.
-"""
-function _benders_lpo_core_point(sm::JuMP.Model)::Vector{Float64}
-    haskey(sm.obj_dict, :benders_core_point) || error(
-        "the :column_generation_activated_lpo oracle needs an interior point on the " *
-        "subproblem model (:benders_core_point); the master build stashes it, so a model " *
-        "without it was not built for this oracle",
-    )
-    return sm[:benders_core_point]::Vector{Float64}
-end

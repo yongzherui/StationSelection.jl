@@ -102,7 +102,7 @@ struct BendersSubproblemCGResult
     #   restricted -- the dual completion was installed before pricing, so unbuilt stations
     #     were driven out of the pricer's filter and the search was effectively built-only.
     #   full -- no completion installed; the search covered every station.
-    # plain CG is all `full`; activated and activated_lpo are all `restricted`; only
+    # plain CG is all `full`; activated is all `restricted`; only
     # `:column_generation_warm_start` has both, one per phase.
     restricted_pricing_sec::Float64
     full_pricing_sec::Float64
