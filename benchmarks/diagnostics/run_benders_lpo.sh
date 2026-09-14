@@ -54,7 +54,11 @@ TASK="${SLURM_ARRAY_TASK_ID:?submit via sbatch --array}"
 #   LPO_NS="25 30" sbatch --array=1-8 ...
 read -r -a NS <<< "${LPO_NS:-10 15 20}"
 read -r -a SEEDS <<< "${LPO_SEEDS:-42}"
-read -r -a ARMS <<< "${LPO_ARMS:-direct_enumeration column_generation column_generation_activated_lpo column_generation_warm_start}"
+# An arm is `oracle` or `oracle:completion`. The second form is needed because
+# `column_generation_activated_lpo` is TWO arms -- `:pareto` (the optimal-face
+# re-optimisation) and `:baseline` (its control) -- and the oracle name alone no longer
+# identifies which one ran, including in the TSV filename.
+read -r -a ARMS <<< "${LPO_ARMS:-direct_enumeration column_generation column_generation_activated_lpo:baseline column_generation_activated_lpo:pareto column_generation_warm_start}"
 
 N_ARMS=${#ARMS[@]}
 N_SEEDS=${#SEEDS[@]}
@@ -65,12 +69,18 @@ if (( TASK < 1 || TASK > TOTAL )); then
     exit 2
 fi
 IDX=$(( TASK - 1 ))
-export LP_ORACLE="${ARMS[$(( IDX % N_ARMS ))]}"
+ARM_SPEC="${ARMS[$(( IDX % N_ARMS ))]}"
+export LP_ORACLE="${ARM_SPEC%%:*}"
+if [[ "$ARM_SPEC" == *:* ]]; then
+    export LP_LPO_COMPLETION="${ARM_SPEC#*:}"
+else
+    export LP_LPO_COMPLETION=pareto
+fi
 CELL=$(( IDX / N_ARMS ))
 export LP_SEED="${SEEDS[$(( CELL % N_SEEDS ))]}"
 export LP_N="${NS[$(( CELL / N_SEEDS ))]}"
 
-echo "===== task $TASK/$TOTAL -> n=$LP_N seed=$LP_SEED oracle=$LP_ORACLE on $(hostname) ====="
+echo "===== task $TASK/$TOTAL -> n=$LP_N seed=$LP_SEED arm=$ARM_SPEC on $(hostname) ====="
 
 export LP_S="${LP_S:-3}"
 export LP_P="${LP_P:-8}"

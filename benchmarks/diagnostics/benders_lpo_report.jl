@@ -1,4 +1,3 @@
-"""Aggregate the per-arm TSV rows `benders_lpo_arm.jl` writes, and apply the cross-arm gates.
 
 Each arm runs as its own job so it cannot be checked against the others in-process. This
 reads whatever rows exist and does the three things a single arm cannot:
@@ -14,13 +13,11 @@ reads whatever rows exist and does the three things a single arm cannot:
 Missing arms are reported as missing rather than silently skipped -- a comparison drawn over
 whichever jobs happened to finish is how a direction gets claimed from noise.
 
-Usage: julia --project=. benchmarks/diagnostics/benders_lpo_report.jl [results_dir]
 """
 
 using Printf
 
 const DIR = length(ARGS) >= 1 ? ARGS[1] :
-    joinpath(@__DIR__, "results", "benders_lpo")
 const TOL = 1e-6
 
 isdir(DIR) || error("no results directory at $DIR")
@@ -41,13 +38,19 @@ num(r, key, default=NaN) = something(tryparse(Float64, get(r, key, "")), default
 int(r, key, default=-1) = something(tryparse(Int, get(r, key, "")), default)
 inst(r) = "n=$(r["n"]) s=$(r["s"]) p=$(r["p"]) seed=$(r["seed"]) ms=$(r["max_stops"])"
 
+# `column_generation_activated_lpo` is TWO arms, so the row's `oracle` column carries the
+# arm name (`oracle_completion`) rather than the bare oracle -- see `benders_lpo_arm.jl`'s
+# `ARM`. Reading the bare oracle here would silently collapse the Pareto arm and its control
+# into one row and report whichever job finished last.
 const ARMS = ["direct_enumeration", "column_generation", "column_generation_activated",
-              "column_generation_activated_lpo",
+              "column_generation_activated_lpo_baseline",
+              "column_generation_activated_lpo_pareto",
               "column_generation_warm_start"]
 short = Dict("direct_enumeration" => "enumeration",
              "column_generation" => "plain CG",
              "column_generation_activated" => "activated",
-             "column_generation_activated_lpo" => "activated_lpo",
+             "column_generation_activated_lpo_baseline" => "lpo_baseline",
+             "column_generation_activated_lpo_pareto" => "lpo_pareto",
              "column_generation_warm_start" => "warm_start")
 
 instances = unique(inst.(rows))
@@ -92,14 +95,43 @@ for key in sort(instances)
         push!(checks, ("$key: any arm converged", false, "none"))
     end
 
-    # --- verdict A: does the Pareto completion fix the activated blowup? ---
-    if haskey(byarm, "column_generation_activated") &&
-       haskey(byarm, "column_generation_activated_lpo")
-        a, l = byarm["column_generation_activated"], byarm["column_generation_activated_lpo"]
-        @printf("  LPO vs activated: cuts %d -> %d (%.2fx), iters %d -> %d, wall %.1fs -> %.1fs\n",
-                int(a, "cuts"), int(l, "cuts"),
-                int(a, "cuts") == 0 ? NaN : int(l, "cuts") / int(a, "cuts"),
-                int(a, "iters"), int(l, "iters"), num(a, "wall"), num(l, "wall"))
+    # --- verdict A: does either completion fix the activated blowup? ---
+    # The closed-form activated arm is the incumbent practice and the thing to beat: at n=10
+    # it needs 30 iterations / 77 cuts against enumeration's 4 / 5. Both LPO arms are scored
+    # against it and against EACH OTHER, since `lpo_baseline` is `lpo_pareto`'s control --
+    # the two differ only in whether the optimal-face re-optimisation ran, so the
+    # baseline->pareto delta is the Pareto step's own effect and the activated->baseline
+    # delta is the completion LP's.
+    if haskey(byarm, "column_generation_activated")
+        a = byarm["column_generation_activated"]
+        for lpo_arm in ("column_generation_activated_lpo_baseline",
+                        "column_generation_activated_lpo_pareto")
+            haskey(byarm, lpo_arm) || continue
+            l = byarm[lpo_arm]
+            @printf("  %-12s vs activated: cuts %d -> %d (%.2fx), iters %d -> %d, wall %.1fs -> %.1fs\n",
+                    short[lpo_arm], int(a, "cuts"), int(l, "cuts"),
+                    int(a, "cuts") == 0 ? NaN : int(l, "cuts") / int(a, "cuts"),
+                    int(a, "iters"), int(l, "iters"), num(a, "wall"), num(l, "wall"))
+            # An uncertified completion installed the closed-form fallback, so the arm is
+            # secretly the activated one. Without this line a fallback-heavy run reads as a
+            # Pareto result that happened to match the control.
+            calls, cert = int(l, "lpo_calls", 0), int(l, "lpo_certified", 0)
+            calls == 0 || @printf("    %-10s completions: %d of %d certified | %d rounds, %d generated rows | core gain %+.3f | lp %.1fs price %.1fs%s\n",
+                    short[lpo_arm], cert, calls, int(l, "lpo_rounds", 0),
+                    int(l, "lpo_gen_rows", 0), num(l, "lpo_core_gain", 0.0),
+                    num(l, "lpo_lp_sec", 0.0), num(l, "lpo_price_sec", 0.0),
+                    cert == calls ? "" :
+                        "  <-- $(calls - cert) fell back to the closed form; NOT a pure arm")
+        end
+    end
+    if haskey(byarm, "column_generation_activated_lpo_baseline") &&
+       haskey(byarm, "column_generation_activated_lpo_pareto")
+        b = byarm["column_generation_activated_lpo_baseline"]
+        pr = byarm["column_generation_activated_lpo_pareto"]
+        @printf("  the Pareto step alone (baseline -> pareto): cuts %d -> %d, iters %d -> %d, core gain %+.3f -> %+.3f, extra pricing %.1fs\n",
+                int(b, "cuts"), int(pr, "cuts"), int(b, "iters"), int(pr, "iters"),
+                num(b, "lpo_core_gain", 0.0), num(pr, "lpo_core_gain", 0.0),
+                num(pr, "lpo_price_sec", 0.0) - num(b, "lpo_price_sec", 0.0))
     end
 
     # --- verdict B: the warm start, against plain CG ---
@@ -137,8 +169,6 @@ n_fail = count(c -> !c[2], checks)
 for (label, arm_a, arm_b) in
         (("warm_start vs plain CG", "column_generation",
           "column_generation_warm_start"),
-         ("activated_lpo vs plain CG", "column_generation",
-          "column_generation_activated_lpo"))
     pairs = Tuple{String, Float64, Float64, Int, Int}[]
     for key in sort(instances)
         here = Dict(r["oracle"] => r for r in rows if inst(r) == key)

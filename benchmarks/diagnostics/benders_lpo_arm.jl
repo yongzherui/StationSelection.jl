@@ -17,7 +17,8 @@ the paired verdicts.
 | `direct_enumeration` | (enumerated pool) | LP duals | 4 it / 5 cuts |
 | `column_generation` | all n stations | LP duals | 4 it / 5 cuts |
 | `column_generation_activated` | built only | closed-form completion | 30 it / 77 cuts |
-| `column_generation_activated_lpo` | built only | Pareto completion | 3 it / 6 cuts |
+| `column_generation_activated_lpo` (`LP_LPO_COMPLETION=baseline`) | built only | activated dual, unbuilt multipliers minimised at the core point | -- |
+| `column_generation_activated_lpo` (`=pareto`) | built only | whole dual re-optimised over the optimal face, route rows re-priced to certification | -- |
 | `column_generation_warm_start` | built only, THEN all | phase-2 LP duals | 4 it / 7 cuts |
 
 `:column_generation_activated` is a settled negative -- non-convergent at n=15 (657 it /
@@ -32,8 +33,8 @@ the oracle effects here, so `LP_THREADS` defaults to 1. Wall times are then sing
 `LP_THREADS=0` lets Gurobi choose and makes the cut columns indicative only.
 
 Usage: sbatch --array=1-12 benchmarks/diagnostics/run_benders_lpo.sh
-Env: LP_N LP_S LP_P LP_SEED LP_MAX_STOPS LP_ORACLE LP_SUB_MODE LP_SUB_K LP_THREADS
-     LP_LPO_COMPLETION LP_MAX_ITERS LP_TOTAL_LIMIT LP_OUT
+Env: LP_N LP_S LP_P LP_SEED LP_MAX_STOPS LP_ORACLE LP_LPO_COMPLETION LP_SUB_MODE LP_SUB_K LP_THREADS
+ LP_MAX_ITERS LP_TOTAL_LIMIT LP_OUT
 """
 
 using StationSelection
@@ -47,6 +48,11 @@ const P = parse(Int, get(ENV, "LP_P", "8"))
 const SEED = parse(Int, get(ENV, "LP_SEED", "42"))
 const MAX_STOPS = parse(Int, get(ENV, "LP_MAX_STOPS", "4"))
 const ORACLE = Symbol(get(ENV, "LP_ORACLE", "column_generation"))
+# Only read under `:column_generation_activated_lpo`, where the oracle alone no longer names
+# the arm: `:pareto` is the optimal-face re-optimisation and `:baseline` its control.
+const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "pareto"))
+const ARM = ORACLE === :column_generation_activated_lpo ?
+    Symbol(ORACLE, "_", LPO_COMPLETION) : ORACLE
 const SUB_MODE = Symbol(get(ENV, "LP_SUB_MODE", "exact"))
 const SUB_K = parse(Int, get(ENV, "LP_SUB_K", "0"))
 # Two-tier pricing (`:relaxed_cluster_two_tier`) needs a macro count K1 on top of the meso
@@ -61,7 +67,6 @@ const ALIGNED_MAX = parse(Int, get(ENV, "LP_ALIGNED_MAX", "15"))
 # `:subset_not_exhausted`: fewer guides -> smaller union -> smaller station set -> a search
 # that can actually finish. The cost is fewer real columns harvested per pricing round.
 const GUIDE_ROUTES = parse(Int, get(ENV, "LP_GUIDE_ROUTES", "5"))
-const LPO_COMPLETION = Symbol(get(ENV, "LP_LPO_COMPLETION", "separation"))
 const THREADS = parse(Int, get(ENV, "LP_THREADS", "1"))
 # Solve the per-scenario subproblems concurrently. Shortens the wall only -- it does not
 # change any budget, so it cannot make a stuck certification succeed.
@@ -80,10 +85,10 @@ const CG_PRICE_LIMIT = parse(Float64, get(ENV, "LP_CG_PRICE_LIMIT", "600.0"))
 
 @printf("n=%d s=%d p=%d seed=%d max_stops=%d | oracle %s\n",
         N, S, P, SEED, MAX_STOPS, ORACLE)
-@printf("pricer %s%s | lpo_completion %s | master threads %s\n",
+@printf("pricer %s%s | master threads %s\n",
         SUB_MODE,
         SUB_K1 > 0 ? " (K2=$SUB_K, K1=$SUB_K1, aligned<=$ALIGNED_MAX, guides=$GUIDE_ROUTES)" :
-            (SUB_K > 0 ? " (K=$SUB_K, guides=$GUIDE_ROUTES)" : ""), LPO_COMPLETION,
+            (SUB_K > 0 ? " (K=$SUB_K, guides=$GUIDE_ROUTES)" : ""),
         THREADS > 0 ? string(THREADS) : "auto")
 @printf("budgets: %.0fs per pricing round, %.0fs total Benders loop | parallel scenarios %s (%d julia threads)\n",
         CG_PRICE_LIMIT, TOTAL_LIMIT, PARALLEL ? "on" : "off", Threads.nthreads())
@@ -120,8 +125,9 @@ solver = BendersSolver(
         max_stops=is_enum ? MAX_STOPS : nothing,
         max_routes=MAX_ROUTES, enumeration_time_limit_sec=ENUM_LIMIT,
         pricing=pricing,
-        lpo_completion=LPO_COMPLETION,
         cg_pricing_time_limit_sec=CG_PRICE_LIMIT, max_cg_iterations=500,
+        lpo_completion=LPO_COMPLETION,
+        lpo_pricing_time_limit_sec=CG_PRICE_LIMIT,
         verbose=true),
     total_time_limit_sec=TOTAL_LIMIT,
     parallel_scenarios=PARALLEL)
@@ -146,31 +152,36 @@ if get(md, "benders_cg_pool_final", 0) > 0
             get(md, "benders_cg_restricted_pricing_sec", 0.0),
             get(md, "benders_cg_full_pricing_sec", 0.0))
 end
-if get(md, "benders_cg_lpo_calls", 0) > 0
-    @printf("  LPO: %d completions, %d LP rounds, %d rows, %d optimal | separation pricing %.1fs | gain %.3f | core slack %.4f\n",
-            md["benders_cg_lpo_calls"], get(md, "benders_cg_lpo_rounds", 0),
-            get(md, "benders_cg_lpo_rows", 0), get(md, "benders_cg_lpo_optimal", 0),
-            get(md, "benders_cg_lpo_pricing_sec", 0.0),
-            get(md, "benders_cg_lpo_improved", 0.0), get(md, "benders_core_slack", NaN))
-end
 flush(stdout)
 
-# Total pricing is phase-1 plus separation. Reporting only the first made the LPO arm read
-# "pricing 0.0s" while half its wall was separation.
+# Both pricing bills. The Pareto completion prices OUTSIDE the inner CG loop, so its seconds
+# are not in `benders_cg_pricing_sec` -- leaving them out would make the LPO arm look free
+# when the whole question about it is whether its pricing is cheaper than plain CG's.
 price_total = get(md, "benders_cg_pricing_sec", 0.0) +
-              get(md, "benders_cg_lpo_pricing_sec", 0.0)
+              get(md, "benders_lpo_pricing_sec", 0.0)
+
+if haskey(md, "benders_lpo_calls")
+    @printf("  LPO: %d calls, %d certified (%s) | rounds %d | rows %d seed + %d generated | core gain %+.4f | lp %.1fs price %.1fs | core slack %.4f\n",
+            md["benders_lpo_calls"], md["benders_lpo_certified"],
+            md["benders_lpo_statuses"], md["benders_lpo_rounds"],
+            md["benders_lpo_seed_rows"], md["benders_lpo_generated_rows"],
+            md["benders_lpo_core_gain"], md["benders_lpo_lp_sec"],
+            md["benders_lpo_pricing_sec"], get(md, "benders_lpo_core_slack", NaN))
+    flush(stdout)
+end
 
 mkpath(OUT_DIR)
-row = joinpath(OUT_DIR, "n$(N)_s$(S)_p$(P)_seed$(SEED)_ms$(MAX_STOPS)_$(ORACLE).tsv")
+row = joinpath(OUT_DIR, "n$(N)_s$(S)_p$(P)_seed$(SEED)_ms$(MAX_STOPS)_$(ARM).tsv")
 open(row, "w") do io
     println(io, join(["n", "s", "p", "seed", "max_stops", "oracle", "status", "objective",
                       "iters", "cuts", "lower_bound", "gap", "stop_reason", "wall",
                       "master_sec", "sub_sec", "enum_sec", "price_total", "price_cg",
                       "price_restricted", "price_full",
-                      "price_separation", "pool", "lpo_calls", "lpo_rounds", "lpo_rows",
-                      "lpo_gain", "core_slack", "scope", "node"], '\t'))
+                      "pool", "scope",
+                      "lpo_calls", "lpo_certified", "lpo_rounds", "lpo_gen_rows",
+                      "lpo_core_gain", "lpo_lp_sec", "lpo_price_sec", "node"], '\t'))
     println(io, join(string.([
-        N, S, P, SEED, MAX_STOPS, ORACLE, string(result.termination_status),
+        N, S, P, SEED, MAX_STOPS, ARM, string(result.termination_status),
         something(result.objective_value, NaN), md["benders_iterations"],
         md["benders_cuts_added"], md["benders_lower_bound"], md["benders_gap"],
         md["benders_stop_reason"], round(wall; digits=2),
@@ -181,12 +192,14 @@ open(row, "w") do io
         round(get(md, "benders_cg_pricing_sec", 0.0); digits=2),
         round(get(md, "benders_cg_restricted_pricing_sec", 0.0); digits=2),
         round(get(md, "benders_cg_full_pricing_sec", 0.0); digits=2),
-        round(get(md, "benders_cg_lpo_pricing_sec", 0.0); digits=2),
-        get(md, "benders_cg_pool_final", 0), get(md, "benders_cg_lpo_calls", 0),
-        get(md, "benders_cg_lpo_rounds", 0), get(md, "benders_cg_lpo_rows", 0),
-        round(get(md, "benders_cg_lpo_improved", 0.0); digits=3),
-        get(md, "benders_core_slack", NaN),
-        get(md, "benders_optimality_scope", "n/a"), gethostname(),
+        get(md, "benders_cg_pool_final", 0),
+        get(md, "benders_optimality_scope", "n/a"),
+        get(md, "benders_lpo_calls", 0), get(md, "benders_lpo_certified", 0),
+        get(md, "benders_lpo_rounds", 0), get(md, "benders_lpo_generated_rows", 0),
+        round(get(md, "benders_lpo_core_gain", 0.0); digits=4),
+        round(get(md, "benders_lpo_lp_sec", 0.0); digits=2),
+        round(get(md, "benders_lpo_pricing_sec", 0.0); digits=2),
+        gethostname(),
     ]), '\t'))
 end
 println("\nwrote $row")
@@ -194,7 +207,7 @@ println("\nwrote $row")
 # This job's OWN gate only. Cross-arm agreement is the aggregator's job -- it needs every
 # arm, and no single job can see them.
 if result.termination_status != StationSelection.SOLVE_OPTIMAL
-    @printf("\n!! %s did NOT converge: %s / %s\n", ORACLE,
+    @printf("\n!! %s did NOT converge: %s / %s\n", ARM,
             string(result.termination_status), md["benders_stop_reason"])
     exit(1)
 end
