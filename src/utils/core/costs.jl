@@ -24,8 +24,14 @@ function compute_station_pairwise_costs(candidate_stations::DataFrame, walking_s
             i_id = candidate_stations[i, :id]
             j_id = candidate_stations[j, :id]
             if i != j
-                p1 = [candidate_stations[i, :lat], candidate_stations[i, :lon]]
-                p2 = [candidate_stations[j, :lat], candidate_stations[j, :lon]]
+                # (lon, lat), which is the order Distances.Haversine expects -- its second
+                # slot is the latitude it takes cos() of. Passing (lat, lon) here computed
+                # every walking cost at a bogus "latitude" equal to the real longitude,
+                # understating north-south separations by cos(lon) and overstating
+                # east-west ones by 1/cos(lat): on a 150 m square lattice at lat 27.8 that
+                # read 42 s north-south against 121 s east-west, where both are 107 s.
+                p1 = [candidate_stations[i, :lon], candidate_stations[i, :lat]]
+                p2 = [candidate_stations[j, :lon], candidate_stations[j, :lat]]
                 costs[(i_id, j_id)] = evaluate(dist_func, p1, p2) / walking_speed
             elseif i == j
                 costs[(i_id, j_id)] = 0.0
