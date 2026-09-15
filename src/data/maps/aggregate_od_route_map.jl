@@ -48,9 +48,29 @@ end
 `(o,d)` pairs; position `p` within `Omega_s[s]` is that demand group's index
 (`p`), used throughout the aggregate-OD-route master/pricer as `(s,p)` instead
 of the raw `(s,o,d)` triple. `Q_s[s]::Vector{Int}` is dense and parallel to
-`Omega_s[s]` (`Q_s[s][p]` = demand for `Omega_s[s][p]`), since every position
-has positive demand by construction. `valid_jk_pairs` stays keyed by the raw
+`Omega_s[s]`. `valid_jk_pairs` stays keyed by the raw
 `(o,d)` tuple -- station-pair feasibility depends on geography, not on `s`/`p`.
+
+# MODELLING ASSUMPTION: unit demand (`Q_s[s][p] == 1` always)
+
+**The AggregateODRoute family collapses demand to 1 per OD group, by default and
+unconditionally.** `Q_s[s][p]` is 1 for every `(s,p)` regardless of how many requests
+share that OD pair in scenario `s`, and `pax_num` never reaches selection at all. This is a
+deliberate simplification of this formulation family, not a data defect: what matters for
+choosing station locations is the *shape* of the demand -- which OD pairs are active and how
+they sit relative to the network -- not how many riders sit on any one pair within a
+scenario. A group of three co-located requests is one OD pair and is counted once.
+
+Two consequences worth knowing:
+
+  - It removes the demand weighting from every walking term (objective, column cost,
+    pricer reward). The master and the label-setting pricer therefore agree by
+    construction, which is what retires the pricer/master drift error that used to make
+    `CGSolver` unusable on any instance where an OD pair repeated (the pricer used
+    `Q_s[s][p]` only as a `> 0` gate while the master multiplied by it).
+  - It does NOT apply to the Clustering formulations. They build their own `Q_s`
+    (`clustering_od_map.jl`) and keep true counts, where `Q` is a genuine weight on
+    walking cost and still carries information the clustering objective uses.
 """
 mutable struct AggregateODRouteMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -237,7 +257,11 @@ function create_aggregate_od_route_map(
     for (s, scenario_data) in enumerate(data.scenarios)
         od_count = compute_scenario_od_count(scenario_data)
         Omega_s[s] = sort!(collect(keys(od_count)))
-        Q_s[s] = [od_count[pair] for pair in Omega_s[s]]
+        # Unit demand, by design -- see the MODELLING ASSUMPTION section on
+        # `AggregateODRouteMap`. `od_count` is still what discovers WHICH pairs are active;
+        # only its multiplicity is dropped. Keeping the vector (rather than removing Q_s)
+        # preserves every `Q_s[s][p]` read site and the shared map interface.
+        Q_s[s] = ones(Int, length(Omega_s[s]))
         union!(all_od_pairs, Omega_s[s])
     end
 

@@ -83,6 +83,25 @@ Both `AggregateODRoute*` formulations validate build-time feasibility
 (`x_walk`, `WALK_ONLY_PAIR`) as a station-free coverage option — not configurable, no
 `allow_walk_only` field.
 
+### Unit demand is a modelling assumption of this family
+
+**The `AggregateODRoute*` formulations collapse demand to `Q_s[s][p] == 1` for every OD
+group, unconditionally and with no flag.** `create_aggregate_od_route_map` still uses
+`compute_scenario_od_count` to discover *which* `(o,d)` pairs are active, then discards the
+multiplicity. `pax_num` never reaches selection in any formulation. The rationale: for
+choosing station locations what matters is the *shape* of demand — which OD pairs are
+active and how they sit on the network — not how many riders share one pair inside a
+scenario.
+
+This is also what makes `CGSolver` sound on repeated-OD instances. The master multiplied
+walking cost by `Q_s[s][p]` in both places it appears while the pricer used it only as a
+`> 0` gate, so the two disagreed whenever any pair repeated and CG aborted with
+"the pricer and master formulations have drifted apart". Under unit demand they agree by
+construction. Do not reintroduce demand weighting on one side alone.
+
+**The Clustering formulations are unaffected** — `clustering_od_map.jl` builds its own
+`Q_s` and keeps true counts, where `Q` is a real weight on walking cost.
+
 ## Benders decomposition (Joint formulation)
 
 `AggregateODRouteJointRoutingAssignmentFormulation` is also solvable by `BendersSolver`.
