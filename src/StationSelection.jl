@@ -35,6 +35,7 @@ include("data/io/requests.jl")
 
 # Synthetic and file-backed experiment generators
 include("generators/grid.jl")
+include("generators/fielbaum_grid.jl")
 include("generators/zhuzhou.jl")
 
 # Synthetic test-case generators (middle-zone benchmark family)
@@ -147,6 +148,15 @@ export read_candidate_stations, read_customer_requests
 export GridStation, GridInstance, generate_grid_instance
 export grid_station_id, grid_manhattan_dist, grid_travel_cost_dict
 export create_grid_problem_data, create_grid_station_selection_data, print_grid_summary
+export FielbaumStreet, FielbaumGridInstance, generate_fielbaum_grid_instance
+export FIELBAUM_BASE_ROW_STREETS, FIELBAUM_BASE_COL_STREETS, FIELBAUM_SPEEDS_KMH
+export FIELBAUM_WALKING_SPEED_KMH, FIELBAUM_LINK_LENGTH_M, FIELBAUM_WALK_COST_WEIGHT
+export FIELBAUM_MAX_WALKING_TIME_MIN, FIELBAUM_MAX_WAITING_TIME_MIN, FIELBAUM_MAX_DELAY_MIN
+export FIELBAUM_NON_UNIFORM_CENTER_SPACING_M, FIELBAUM_NON_UNIFORM_EDGE_SPACING_M
+export fielbaum_speed_kmh, fielbaum_validate_streets, fielbaum_node_spacings
+export fielbaum_grid_travel_cost_dict
+export create_fielbaum_grid_problem_data, create_fielbaum_grid_station_selection_data
+export print_fielbaum_grid_summary, print_fielbaum_grid_street_map
 export ZhuzhouStation, ZhuzhouInstance, generate_zhuzhou_instance
 export create_zhuzhou_problem_data, create_zhuzhou_station_selection_data, print_zhuzhou_summary
 
