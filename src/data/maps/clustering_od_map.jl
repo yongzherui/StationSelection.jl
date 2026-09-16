@@ -202,6 +202,10 @@ function create_clustering_two_stage_od_map(
         union!(all_od_pairs, Omega_s[scenario_id])
     end
 
+    # Walk-only stays OFF (the default), and the AggregateODRoute family was turned off to
+    # match rather than this being turned on: the simulator has no direct-walk service mode,
+    # so a walk-only decision here is a service the pipeline cannot deliver. See
+    # `_aggregate_od_route_allow_walk_only` for the measurement.
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,

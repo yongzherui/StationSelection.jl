@@ -79,9 +79,25 @@ formulations retain the `y` (build) / `z` (activate-per-scenario) two-stage spli
 distance" test case.
 
 Both `AggregateODRoute*` formulations validate build-time feasibility
-(`aggregate_od_route_validate_feasible_coverage`) and always expose direct walking
-(`x_walk`, `WALK_ONLY_PAIR`) as a station-free coverage option — not configurable, no
-`allow_walk_only` field.
+(`aggregate_od_route_validate_feasible_coverage`). Direct walking (`x_walk`,
+`WALK_ONLY_PAIR`) is **OFF** as of 2026-09-15 — see below.
+
+### Direct walking is off, because the simulator has no walk-only mode
+
+`_aggregate_od_route_allow_walk_only` returns `false` for every live formulation.
+MicroTransitSimulator completes a request without a vehicle only when
+`assigned_pickup_station == assigned_dropoff_station` — incidental geometry under
+`fixed_closest_selected`, not a decision — and the only thing crossing the
+selection/simulation boundary is the station set (`walk_only_assignments.csv` is never
+read). With it on, selection served ~25% of demand groups on foot while the simulator put
+every one of them in a vehicle. The Clustering formulations already defaulted off, and
+that asymmetry was letting the routing family pick station sets the Clustering family
+could not represent.
+
+Turning it back on is sound only once the simulator grows a real walk-only mode. Note the
+constraint layer already handles both settings: with no fallback,
+`add_aggregate_od_route_endpoint_feasibility_constraints!` marks both endpoints of every
+group required, which is the strictly correct behaviour.
 
 ### Unit demand is a modelling assumption of this family
 

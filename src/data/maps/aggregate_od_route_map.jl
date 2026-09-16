@@ -162,19 +162,36 @@ end
     _aggregate_od_route_allow_walk_only(formulation) -> Bool
 
 Resolve the "is direct walking (`WALK_ONLY_PAIR`) available" flag per formulation type.
-No live formulation carries an `allow_walk_only` field: direct walking is mandatory for
-all of them (see their own docstrings), since
-`compute_valid_jk_pairs` no longer produces same-station pairs at all, making
-`WALK_ONLY_PAIR` the *only* station-free coverage option left, and each formulation's
-build-time feasibility guarantee (`aggregate_od_route_validate_feasible_coverage`)
-assumes it's always on.
+
+**OFF for every live formulation, because the simulator does not implement it.**
+MicroTransitSimulator has no direct-walk service mode: the only path that completes a
+request without a vehicle needs `assigned_pickup_station == assigned_dropoff_station`
+(`request_walking_handlers.jl`, logged as `WALKING_ONLY_TRANSFER_AT_PUDO`), which is
+incidental geometry under `fixed_closest_selected` rather than a decision. And the only
+thing crossing the selection/simulation boundary is the station set --
+`walk_only_assignments.csv` is never read. So with this on, selection credited itself for
+serving ~25% of demand groups on foot while the simulator put every one of them in a
+vehicle, and "which formulation picks a better station set" was partly measuring which
+one had an escape hatch. Measured on a 4x4 grid at `max_walking_distance=110`: the routing
+arm walked 20-21 of 81 groups; the simulator's incidental path fired for 0-5 of 30
+requests, for an unrelated reason.
+
+Everything downstream was already written for this: `compute_valid_jk_pairs` takes the
+flag, `add_walk_variables!` creates no `x_walk` for a group without the fallback,
+`add_aggregate_od_route_endpoint_feasibility_constraints!` then marks BOTH endpoints
+required (the strictly correct behaviour with no fallback), and
+`aggregate_od_route_validate_feasible_coverage`'s own error text names "direct walking
+either disabled or out of range".
+
+Turning it back on is only sound once the simulator grows a real walk-only mode; until
+then it makes selection optimise a service this pipeline cannot deliver.
 
 There is deliberately no generic fallback: a formulation added without a method here
 should fail with a `MethodError` naming this function, not by reaching for a field.
 """
-_aggregate_od_route_allow_walk_only(::AnyJointRoutingAssignmentFormulation) = true
-_aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = true
-_aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = true
+_aggregate_od_route_allow_walk_only(::AnyJointRoutingAssignmentFormulation) = false
+_aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = false
+_aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = false
 
 """
     aggregate_od_route_validate_feasible_coverage(data, mapping)
