@@ -31,12 +31,21 @@ struct SolverOptions
     mip_gap::Union{Nothing, Float64}
     time_limit_sec::Union{Nothing, Float64}
     threads::Union{Nothing, Int}
+    # Raw solver attributes, applied LAST so they can override anything above. The escape
+    # hatch for the knobs that only matter on a specific instance and do not belong in a
+    # shared struct -- Gurobi's NoRelHeurTime, MIPFocus, Presolve, Method and friends.
+    # Added 2026-09-16 after a ClusteringTwoStageOD model of 46.6M rows / 23.3M columns /
+    # 116.6M nonzeros OOM-killed at 64 GB with Gurobi 1500 s into a presolve that had
+    # removed zero rows: nothing in the four fields above can express "skip presolve and
+    # just find me an incumbent", and that is a solver-effort choice, not a model change.
+    attributes::Dict{String, Any}
 
     function SolverOptions(;
             silent::Bool=true,
             mip_gap::Union{Number, Nothing}=nothing,
             time_limit_sec::Union{Number, Nothing}=nothing,
             threads::Union{Integer, Nothing}=nothing,
+            attributes::AbstractDict=Dict{String, Any}(),
         )
         isnothing(mip_gap) || mip_gap >= 0 ||
             throw(ArgumentError("mip_gap must be non-negative"))
@@ -44,11 +53,13 @@ struct SolverOptions
             throw(ArgumentError("time_limit_sec must be positive"))
         isnothing(threads) || threads > 0 ||
             throw(ArgumentError("threads must be positive"))
+        attrs = Dict{String, Any}(String(k) => v for (k, v) in attributes)
         new(
             silent,
             isnothing(mip_gap) ? nothing : Float64(mip_gap),
             isnothing(time_limit_sec) ? nothing : Float64(time_limit_sec),
             isnothing(threads) ? nothing : Int(threads),
+            attrs,
         )
     end
 end
@@ -58,6 +69,10 @@ function _apply_solver_config!(m::JuMP.Model, config::SolverOptions)
     isnothing(config.mip_gap) || set_optimizer_attribute(m, "MIPGap", config.mip_gap)
     isnothing(config.time_limit_sec) || set_time_limit_sec(m, config.time_limit_sec)
     isnothing(config.threads) || set_optimizer_attribute(m, "Threads", config.threads)
+    # Last, so an explicit attribute wins over the named fields above.
+    for (k, v) in config.attributes
+        set_optimizer_attribute(m, k, v)
+    end
     return nothing
 end
 
