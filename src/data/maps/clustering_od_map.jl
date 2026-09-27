@@ -160,44 +160,38 @@ end
 
 
 """
-    drop_door_to_door_unservable_ods!(Omega_s, Q_s, valid_jk_pairs, data, max_walking_distance,
-                                      door_to_door_ratio) -> Int
+    check_door_to_door_servable(valid_jk_pairs, data, max_walking_distance, door_to_door_ratio)
 
-Remove from every scenario the OD pairs that the door-to-door filter alone left with no
-valid `(j, k)`, and return how many (scenario, OD) entries were removed. Such a rider can
-never meet G2 -- the simulator rejects it -- so requiring its demand (`sum(x) == Q`) would
-only make the model infeasible. The usual one is `o == d`, whose budget is
-`ratio * drive(o, o) = 0`; with every station a candidate, any `o != d` keeps at least
-`(o, d)` itself. An OD already empty WITHOUT the filter (no station within walking range)
-is kept, so it still fails loudly as before.
+Throw an `ArgumentError` if the door-to-door filter alone left some OD with no valid
+`(j, k)`. Such a rider can never meet G2 (the simulator rejects it), and requiring its
+demand (`sum(x) == Q`) would make the model infeasible with no pointer to the cause, so
+the build stops here and names the ODs instead. Dropping them silently was rejected: it
+changes the demand the selection is scored on. Remove those requests upstream or raise
+the ratio.
+
+The usual culprit is `o == d`, whose budget is `ratio * drive(o, o) = 0`. With every
+station a candidate, any `o != d` keeps at least `(o, d)` itself. An OD already empty
+WITHOUT the filter (no station within walking range) is not this check's business and
+fails as it did before.
 """
-function drop_door_to_door_unservable_ods!(
-    Omega_s::Dict{Int, Vector{Tuple{Int, Int}}},
-    Q_s::Dict{Int, Vector{Int}},
+function check_door_to_door_servable(
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
     data::StationSelectionData,
     max_walking_distance::Float64,
     door_to_door_ratio::Float64,
-)::Int
-    isfinite(door_to_door_ratio) || return 0
+)
+    isfinite(door_to_door_ratio) || return nothing
     empty_ods = Set(od for (od, pairs) in valid_jk_pairs if isempty(pairs))
-    isempty(empty_ods) && return 0
+    isempty(empty_ods) && return nothing
     unfiltered = compute_valid_jk_pairs(empty_ods, data, max_walking_distance)
-    unservable = Set(od for od in empty_ods if !isempty(unfiltered[od]))
-    isempty(unservable) && return 0
-
-    n_dropped = 0
-    n_riders = 0
-    for s in keys(Omega_s)
-        keep = [od ∉ unservable for od in Omega_s[s]]
-        n_dropped += count(!, keep)
-        n_riders += sum(Q_s[s][.!keep]; init=0)
-        Omega_s[s] = Omega_s[s][keep]
-        Q_s[s] = Q_s[s][keep]
-    end
-    @warn "door_to_door_ratio = $door_to_door_ratio leaves $(length(unservable)) OD pair(s) " *
-          "with no valid station pair; dropped from the model as unservable" n_scenario_entries = n_dropped n_riders example_ods = first(collect(unservable), 5)
-    return n_dropped
+    unservable = sort!([od for od in empty_ods if !isempty(unfiltered[od])])
+    isempty(unservable) && return nothing
+    ids = [(data.array_idx_to_station_id[o], data.array_idx_to_station_id[d]) for (o, d) in unservable]
+    throw(ArgumentError(
+        "door_to_door_ratio = $door_to_door_ratio leaves $(length(unservable)) OD pair(s) with " *
+        "no valid station pair, so their riders cannot be served under G2 " *
+        "(origin, destination station IDs, first 10: $(first(ids, 10))). " *
+        "An o == d request has a zero budget. Remove these requests or raise the ratio."))
 end
 
 """
@@ -272,8 +266,8 @@ function create_clustering_two_stage_od_map(
         problem.max_walking_distance;
         door_to_door_ratio=problem.door_to_door_ratio,
     )
-    drop_door_to_door_unservable_ods!(Omega_s, Q_s, valid_jk_pairs, data,
-                                      problem.max_walking_distance, problem.door_to_door_ratio)
+    check_door_to_door_servable(valid_jk_pairs, data,
+                                problem.max_walking_distance, problem.door_to_door_ratio)
 
     return ClusteringTwoStageODMap(
         data.station_id_to_array_idx,

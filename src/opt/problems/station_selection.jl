@@ -27,6 +27,8 @@ export StationSelectionProblem
   waiting and no sharing detour, so it is a necessary condition only -- a pair it keeps can
   still miss G2 in simulation, a pair it drops always does. `Inf` (the default) switches it
   off and reproduces every selection made before 2026-09-27; the simulator's default is 2.0.
+  An OD the filter leaves with no pair at all (`o == d`) is an `ArgumentError` at map build
+  (`check_door_to_door_servable`), not a silent drop.
 """
 struct StationSelectionProblem <: AbstractProblem
     data::StationSelectionData

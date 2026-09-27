@@ -42,19 +42,31 @@
               StationSelectionProblem
     end
 
-    @testset "map drops ODs the filter leaves unservable" begin
+    @testset "an OD the filter leaves unservable is an error, not a silent drop" begin
         formulation = ClusteringTwoStageODFormulation(2)
         off = StationSelection.create_map(
             StationSelectionProblem(data, 2; max_walking_distance = R), formulation, data)
         @test Set(off.Omega_s[1]) == Set([(1, 4), (2, 2)])
 
-        # o == d has budget 2.0 * drive(2, 2) = 0: no pair survives, so the OD is dropped
-        # rather than leaving `sum(x) == demand` over an empty set.
-        on = @test_logs (:warn, r"door_to_door_ratio") match_mode = :any StationSelection.create_map(
-            StationSelectionProblem(data, 2; max_walking_distance = R, door_to_door_ratio = 2.0),
-            formulation, data)
+        # o == d has budget 2.0 * drive(2, 2) = 0: no pair survives.
+        err = try
+            StationSelection.create_map(
+                StationSelectionProblem(data, 2; max_walking_distance = R, door_to_door_ratio = 2.0),
+                formulation, data)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        @test occursin("(2, 2)", err.msg)       # names the offending OD by station ID
+
+        # Without the o == d request the same ratio builds fine.
+        data_ok = StationSelection.create_station_selection_data(
+            stations, requests[1:1, :], walking_costs; routing_costs = routing_costs)
+        on = StationSelection.create_map(
+            StationSelectionProblem(data_ok, 2; max_walking_distance = R, door_to_door_ratio = 2.0),
+            formulation, data_ok)
         @test on.Omega_s[1] == [(1, 4)]
-        @test on.Q_s[1] == [1]
         @test Set(StationSelection.get_valid_jk_pairs(on, 1, 4)) == pairs(2.0)
     end
 end

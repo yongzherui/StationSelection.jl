@@ -29,6 +29,49 @@ places is exactly the drift risk a shared body avoids.
 """
 
 """
+    _validate_joint_routing_assignment_initial_columns(data, mapping, detour_factor, columns)
+
+Error unless every `(p, j, k)` a supplied column carries is valid for this problem: `p` is
+a demand group of the column's scenario, `(j, k)` is in that OD's `get_valid_jk_pairs`,
+and the route rides from a visit of `j` to a later visit of `k` within
+`joint_routing_assignment_ride_limit` (the detour limit capped by the door-to-door
+budget). The ride check is the shortest such ride along the route, so it is necessary, not
+the pricer's full pickup-window replay.
+"""
+function _validate_joint_routing_assignment_initial_columns(
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+    detour_factor::Float64,
+    columns,
+)
+    for column in columns
+        s = Int(column.metadata["scenario"])
+        omega = mapping.Omega_s[s]
+        route = column.route
+        for (p, j, k) in column.assignments
+            1 <= p <= length(omega) || error(
+                "initial column $(column.id): demand group $p is not in scenario $s's " *
+                "$(length(omega)) groups -- was it priced on a different problem?")
+            o, d = omega[p]
+            (j, k) in get_valid_jk_pairs(mapping, o, d) || error(
+                "initial column $(column.id): pair $((j, k)) is not valid for OD $((o, d)) " *
+                "(walking limit / door_to_door_ratio = $(mapping.door_to_door_ratio))")
+            limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
+            ride = Inf
+            for a in eachindex(route), b in (a + 1):lastindex(route)
+                (route[a] == j && route[b] == k) || continue
+                ride = min(ride, sum(get_routing_cost(data, route[i], route[i + 1]) for i in a:(b - 1)))
+            end
+            ride <= limit + 1e-9 || error(
+                "initial column $(column.id): OD $((o, d)) via $((j, k)) rides $(ride) s on " *
+                "route $(route), over its limit $(limit) s (detour_factor = $detour_factor, " *
+                "door_to_door_ratio = $(mapping.door_to_door_ratio))")
+        end
+    end
+    return nothing
+end
+
+"""
     build_model(problem::StationSelectionProblem,
                 formulation::AggregateODRouteJointRoutingAssignmentFormulation,
                 solver::CGSolver) -> BuildResult
@@ -41,7 +84,11 @@ an empty pool is technically feasible via `x_walk` alone whenever direct walking
 every demand group, but two-stop routes remove the first several CG iterations' phase of
 hunting for *any* feasible column per demand group instead of improving routing cost.
 `solver.initial_columns`, when given, overrides that default entirely -- e.g. to resume
-CG from a previously discovered pool instead of the generic two-stop seed.
+CG from a previously discovered pool instead of the generic two-stop seed. Supplied columns
+are checked against THIS problem (`_validate_joint_routing_assignment_initial_columns`):
+a pool priced under another `door_to_door_ratio`, `detour_factor` or demand set would
+otherwise enter the master carrying assignments this model forbids, or `p` indices that
+point at a different OD.
 """
 function build_model(
         problem::StationSelectionProblem,
@@ -52,6 +99,8 @@ function build_model(
     mapping = create_aggregate_od_route_map(problem, formulation, data)
     aggregate_od_route_validate_feasible_coverage(data, mapping)
 
+    isnothing(solver.initial_columns) || _validate_joint_routing_assignment_initial_columns(
+        data, mapping, formulation.detour_factor, solver.initial_columns)
     initial_columns = something(
         solver.initial_columns,
         joint_routing_assignment_two_stop_seed_columns(data, mapping),

@@ -171,4 +171,34 @@
         # G2 only removes options, so it can never make the optimum cheaper.
         @test objective[(2.0, :direct)] >= objective[(Inf, :direct)] - 1e-6
     end
+
+    @testset "supplied initial columns are checked against this problem" begin
+        ods = [(1, 5), (2, 4), (5, 1), (1, 3), (4, 2)]
+        formulation = joint(detour_factor = 3.0, max_stops = 4)
+        data, off = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = Inf, k = 3)
+        _, on = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = 2.0, k = 3)
+        cols_off = StationSelection.enumerate_joint_routing_assignment_columns(off, formulation, data)
+        cols_on = StationSelection.enumerate_joint_routing_assignment_columns(on, formulation, data)
+        for c in cols_off; c.metadata["scenario"] = 1; end
+        for c in cols_on; c.metadata["scenario"] = 1; end
+
+        # A pool priced on this problem is accepted...
+        @test StationSelection.build_model(on, formulation, CGSolver(initial_columns = cols_on)) isa
+              StationSelection.BuildResult
+        # ...one priced with G2 off carries assignments G2 forbids, and is refused.
+        @test_throws ErrorException StationSelection.build_model(
+            on, formulation, CGSolver(initial_columns = cols_off))
+    end
+
+    @testset "an o == d request is an error under a finite ratio" begin
+        # Budget 2.0 * drive(3, 3) = 0: unservable under G2.
+        ods = [(1, 5), (3, 3), (4, 2)]
+        formulation = joint(detour_factor = 3.0, max_stops = 4)
+        data, problem = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = 2.0, k = 3)
+        @test_throws ArgumentError StationSelection.create_aggregate_od_route_map(problem, formulation, data)
+        @test_throws ArgumentError run_opt(problem, formulation, CGSolver())
+        # With G2 off the same instance builds.
+        _, off = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = Inf, k = 3)
+        @test (3, 3) in StationSelection.create_aggregate_od_route_map(off, formulation, data).Omega_s[1]
+    end
 end

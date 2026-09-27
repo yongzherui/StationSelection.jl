@@ -293,8 +293,8 @@ function create_aggregate_od_route_map(
         allow_walk_only=_aggregate_od_route_allow_walk_only(formulation),
         door_to_door_ratio=problem.door_to_door_ratio,
     )
-    drop_door_to_door_unservable_ods!(Omega_s, Q_s, valid_jk_pairs, data,
-                                      problem.max_walking_distance, problem.door_to_door_ratio)
+    check_door_to_door_servable(valid_jk_pairs, data,
+                                problem.max_walking_distance, problem.door_to_door_ratio)
     active_jk_s = _aggregate_od_route_active_jk_by_s(Omega_s, valid_jk_pairs)
     resolved_initial_columns = isnothing(initial_columns) ?
         _singleton_aggregate_od_route_columns(active_jk_s, data) :

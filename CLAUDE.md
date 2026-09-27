@@ -277,8 +277,9 @@ radius, shared by every formulation that restricts assignment by walk distance).
 as a `(j, k)` filter in `compute_valid_jk_pairs`, keeping a pair only if
 `walk(o,j) + drive(j,k) + walk(k,d) <= ratio * drive(o,d)` (seconds; no wait, no detour, so a
 necessary condition). The OD-pair formulations (ClusteringTwoStageOD family, AggregateODRoute
-family) apply it; single-station maps do not. ODs it leaves with no pair (e.g. `o == d`) are
-dropped from `Omega_s` with a warning, since G2 makes them unservable. Pipeline key
+family) apply it; single-station maps do not. An OD it alone leaves with no pair (e.g.
+`o == d`, budget 0) raises an `ArgumentError` naming it (`check_door_to_door_servable`):
+such riders are unservable under G2, so remove them upstream or raise the ratio. Pipeline key
 `door_to_door_ratio`; the simulator's default is 2.0.
 The Joint pricer also applies it per rider: each candidate's ride limit is
 `min(detour_factor * drive(j,k), ratio * drive(o,d) - walk(o,j) - walk(k,d))`
@@ -286,6 +287,9 @@ The Joint pricer also applies it per rider: each candidate's ride limit is
 DirectMIP enumeration, and inherited by every pricer mode and Benders). The detour limit is
 always enforced; G2 only tightens it, never below `drive(j,k)` thanks to the pair filter.
 AggregateODRouteBase's pricer does NOT apply it (its limits are per station pair, not per OD).
+Supplied `CGSolver(initial_columns=...)` for Joint are validated against the problem
+(demand group exists, pair valid, ride within the capped limit) and refused otherwise.
+Full write-up: `../docs/notes/2026-09-27_door_to_door_ratio_selection.md`.
 
 **Clustering formulations:** `l` (activate per scenario, two-stage only),
 `in_vehicle_time_weight` (OD formulations only), `flow_regularization_weight`
