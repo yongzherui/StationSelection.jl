@@ -96,12 +96,21 @@ below. So whenever a same-station pair would have been valid, `WALK_ONLY_PAIR`
 already covers the same case at equal-or-lower cost and without requiring any
 station to be open at all; same-station pairs would only ever add a
 dominated, identically-costed alternative.
+
+`door_to_door_ratio` (default `Inf`, off) additionally drops every `(j, k)` with
+`walk(o, j) + drive(j, k) + walk(k, d) > door_to_door_ratio * drive(o, d)` -- the
+simulator's G2 guarantee with zero wait and no sharing detour, so a necessary condition
+(see `StationSelectionProblem`). Walking and routing costs must both be times in one unit.
+An OD with no finite `drive(o, d)` is left unfiltered, matching the simulator, which
+switches G2 off for a request without a finite direct travel time. `WALK_ONLY_PAIR` is not
+filtered: the simulator has no walk-only service, so G2 says nothing about it.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
     max_walking_distance::Float64;
     allow_walk_only::Bool=false,
+    door_to_door_ratio::Float64=Inf,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     is_candidate = candidate_station_mask(data)
@@ -109,10 +118,14 @@ function compute_valid_jk_pairs(
 
     for (o, d) in all_od_pairs
         walk_only_available = allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
+        # G2 budget for walk + ride + walk; Inf when the filter is off or drive(o, d) is not finite.
+        d2d_budget = isfinite(door_to_door_ratio) ?
+            door_to_door_ratio * get_routing_cost(data, o, d) : Inf
         pairs = Tuple{Int, Int}[]
         for j in 1:n
             is_candidate[j] || continue
-            get_walking_cost(data, o, j) <= max_walking_distance || continue
+            walk_oj = get_walking_cost(data, o, j)
+            walk_oj <= max_walking_distance || continue
             for k in 1:n
                 is_candidate[k] || continue
                 # station pairs must be distinct: j==k would mean boarding and
@@ -121,7 +134,10 @@ function compute_valid_jk_pairs(
                 # available for this OD (see this function's docstring for why
                 # a real same-station pair is never needed).
                 j == k && continue
-                get_walking_cost(data, k, d) <= max_walking_distance || continue
+                walk_kd = get_walking_cost(data, k, d)
+                walk_kd <= max_walking_distance || continue
+                isinf(d2d_budget) ||
+                    walk_oj + get_routing_cost(data, j, k) + walk_kd <= d2d_budget || continue
                 push!(pairs, (j, k))
             end
         end
@@ -142,6 +158,47 @@ function compute_valid_jk_pairs(
     return valid_jk_pairs
 end
 
+
+"""
+    drop_door_to_door_unservable_ods!(Omega_s, Q_s, valid_jk_pairs, data, max_walking_distance,
+                                      door_to_door_ratio) -> Int
+
+Remove from every scenario the OD pairs that the door-to-door filter alone left with no
+valid `(j, k)`, and return how many (scenario, OD) entries were removed. Such a rider can
+never meet G2 -- the simulator rejects it -- so requiring its demand (`sum(x) == Q`) would
+only make the model infeasible. The usual one is `o == d`, whose budget is
+`ratio * drive(o, o) = 0`; with every station a candidate, any `o != d` keeps at least
+`(o, d)` itself. An OD already empty WITHOUT the filter (no station within walking range)
+is kept, so it still fails loudly as before.
+"""
+function drop_door_to_door_unservable_ods!(
+    Omega_s::Dict{Int, Vector{Tuple{Int, Int}}},
+    Q_s::Dict{Int, Vector{Int}},
+    valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
+    data::StationSelectionData,
+    max_walking_distance::Float64,
+    door_to_door_ratio::Float64,
+)::Int
+    isfinite(door_to_door_ratio) || return 0
+    empty_ods = Set(od for (od, pairs) in valid_jk_pairs if isempty(pairs))
+    isempty(empty_ods) && return 0
+    unfiltered = compute_valid_jk_pairs(empty_ods, data, max_walking_distance)
+    unservable = Set(od for od in empty_ods if !isempty(unfiltered[od]))
+    isempty(unservable) && return 0
+
+    n_dropped = 0
+    n_riders = 0
+    for s in keys(Omega_s)
+        keep = [od ∉ unservable for od in Omega_s[s]]
+        n_dropped += count(!, keep)
+        n_riders += sum(Q_s[s][.!keep]; init=0)
+        Omega_s[s] = Omega_s[s][keep]
+        Q_s[s] = Q_s[s][keep]
+    end
+    @warn "door_to_door_ratio = $door_to_door_ratio leaves $(length(unservable)) OD pair(s) " *
+          "with no valid station pair; dropped from the model as unservable" n_scenario_entries = n_dropped n_riders example_ods = first(collect(unservable), 5)
+    return n_dropped
+end
 
 """
     compute_scenario_od_count(scenario_data::ScenarioData) -> Dict{Tuple{Int, Int}, Int}
@@ -212,8 +269,11 @@ function create_clustering_two_stage_od_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        problem.max_walking_distance
+        problem.max_walking_distance;
+        door_to_door_ratio=problem.door_to_door_ratio,
     )
+    drop_door_to_door_unservable_ods!(Omega_s, Q_s, valid_jk_pairs, data,
+                                      problem.max_walking_distance, problem.door_to_door_ratio)
 
     return ClusteringTwoStageODMap(
         data.station_id_to_array_idx,

@@ -58,6 +58,7 @@ const MOI = JuMP.MOI
 
     @testset "Data Structures" begin
         include("data/test_struct.jl")
+        include("data/test_door_to_door_filter.jl")
     end
 
     @testset "Model Integration" begin

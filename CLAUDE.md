@@ -273,6 +273,13 @@ of this package that no longer exists.
 
 **On `StationSelectionProblem`:** `k` (stations built), `max_walking_distance` (feasibility
 radius, shared by every formulation that restricts assignment by walk distance).
+`door_to_door_ratio` (default `Inf` = off; since 2026-09-27): the simulator's G2 guarantee
+as a `(j, k)` filter in `compute_valid_jk_pairs`, keeping a pair only if
+`walk(o,j) + drive(j,k) + walk(k,d) <= ratio * drive(o,d)` (seconds; no wait, no detour, so a
+necessary condition). The OD-pair formulations (ClusteringTwoStageOD family, AggregateODRoute
+family) apply it; single-station maps do not. ODs it leaves with no pair (e.g. `o == d`) are
+dropped from `Omega_s` with a warning, since G2 makes them unservable. Pipeline key
+`door_to_door_ratio`; the simulator's default is 2.0.
 
 **Clustering formulations:** `l` (activate per scenario, two-stage only),
 `in_vehicle_time_weight` (OD formulations only), `flow_regularization_weight`
