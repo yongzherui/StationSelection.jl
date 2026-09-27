@@ -36,6 +36,7 @@ include("data/io/requests.jl")
 # Synthetic and file-backed experiment generators
 include("generators/grid.jl")
 include("generators/fielbaum_grid.jl")
+include("generators/spiderweb.jl")
 include("generators/zhuzhou.jl")
 
 # Synthetic test-case generators (middle-zone benchmark family)
@@ -157,6 +158,14 @@ export fielbaum_speed_kmh, fielbaum_validate_streets, fielbaum_node_spacings
 export fielbaum_grid_travel_cost_dict
 export create_fielbaum_grid_problem_data, create_fielbaum_grid_station_selection_data
 export print_fielbaum_grid_summary, print_fielbaum_grid_street_map
+export SpiderwebStation, SpiderwebEdge, SpiderwebNetwork, SpiderwebInstance, ContinuousRequest
+export SPIDERWEB_QUADRANTS, SPIDERWEB_DEFAULT_HALF_WIDTHS, SPIDERWEB_FLOW_PATTERNS, SPIDERWEB_CENTER
+export SPIDERWEB_ORIGIN_ID_OFFSET, SPIDERWEB_DESTINATION_ID_OFFSET
+export generate_spiderweb_network, spiderweb_candidates, spiderweb_point_quadrant, spiderweb_quadrant_box
+export sample_spiderweb_requests, perturb_spiderweb_requests, spiderweb_segments_cross
+export spiderweb_walk_matrices, spiderweb_walk_breakpoints, spiderweb_access_sets
+export spiderweb_origin_id, spiderweb_destination_id, create_spiderweb_problem_data
+export spiderweb_station_set_metrics, spiderweb_labels, print_spiderweb_summary
 export ZhuzhouStation, ZhuzhouInstance, generate_zhuzhou_instance
 export create_zhuzhou_problem_data, create_zhuzhou_station_selection_data, print_zhuzhou_summary
 
