@@ -86,6 +86,10 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
     column_ids::Set{Int}
     columns_by_pair::Dict{Tuple{Int, Int}, Vector{Int}}
     max_walking_distance::Float64
+    # `problem.door_to_door_ratio`: already applied to `valid_jk_pairs`, and read again by
+    # the joint pricer's per-candidate ride limit (`joint_routing_assignment_ride_limit`).
+    # One copy, so the two cannot disagree -- the pricer's seeding relies on it.
+    door_to_door_ratio::Float64
 end
 
 has_walking_distance_limit(mapping::AggregateODRouteMap) = true
@@ -310,6 +314,7 @@ function create_aggregate_od_route_map(
         Set{Int}(),
         Dict{Tuple{Int, Int}, Vector{Int}}(),
         problem.max_walking_distance,
+        problem.door_to_door_ratio,
     )
     for column in resolved_initial_columns
         _register_aggregate_od_route_column_metadata!(mapping, column)

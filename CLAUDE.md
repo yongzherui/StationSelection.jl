@@ -280,6 +280,12 @@ necessary condition). The OD-pair formulations (ClusteringTwoStageOD family, Agg
 family) apply it; single-station maps do not. ODs it leaves with no pair (e.g. `o == d`) are
 dropped from `Omega_s` with a warning, since G2 makes them unservable. Pipeline key
 `door_to_door_ratio`; the simulator's default is 2.0.
+The Joint pricer also applies it per rider: each candidate's ride limit is
+`min(detour_factor * drive(j,k), ratio * drive(o,d) - walk(o,j) - walk(k,d))`
+(`joint_routing_assignment_ride_limit`, `pricing_round.jl`; used by CG pricing and by the
+DirectMIP enumeration, and inherited by every pricer mode and Benders). The detour limit is
+always enforced; G2 only tightens it, never below `drive(j,k)` thanks to the pair filter.
+AggregateODRouteBase's pricer does NOT apply it (its limits are per station pair, not per OD).
 
 **Clustering formulations:** `l` (activate per scenario, two-stage only),
 `in_vehicle_time_weight` (OD formulations only), `flow_regularization_weight`

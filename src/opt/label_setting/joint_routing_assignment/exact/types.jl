@@ -20,7 +20,8 @@ station-age/wait/detour rules) -- this pricer changes only what a route gets
 - a later visit to `k` certifies `(p, j, k)` for every passenger `p` with a
   positive-reward candidate on that pair, when elapsed time since the pickup is
   at most that candidate's own `ride_limit` (passenger-specific, not a single
-  `detour_factor * travel_time` shared by all pairs);
+  `detour_factor * travel_time` shared by all pairs; tightened by the door-to-door
+  ratio, see `joint_routing_assignment_ride_limit`);
 - but a passenger is not "served" by the union of everything certified -- of all
   the assignments the finished route certifies for `p`, only the single best one
   counts. `activated_reward_layers` tracks running per-passenger maxima (via the

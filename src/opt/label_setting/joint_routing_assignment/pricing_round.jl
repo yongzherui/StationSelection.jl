@@ -23,6 +23,45 @@ layers, retroactive commit-or-skip, or onboard-bitset boarding -- see
 """
 
 """
+    joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k) -> Float64
+
+In-vehicle time allowed to demand group `(o, d)` riding pickup `j` -> dropoff `k`:
+
+    min(detour_factor * drive(j, k),                                  # ride limit (G3's role)
+        door_to_door_ratio * drive(o, d) - walk(o, j) - walk(k, d))   # door to door (G2)
+
+The ride limit is always enforced; `mapping.door_to_door_ratio` can only tighten it.
+The G2 term is the simulator's destination deadline with no waiting charged, the same
+necessary condition `compute_valid_jk_pairs` filters on, and is dropped when the ratio is
+`Inf` or `drive(o, d)` is not finite. Every candidate builder must use this, so the pricer,
+the enumeration and the pair filter share one rule.
+
+Invariant: the result is `>= drive(j, k)` for every `(j, k)` in `get_valid_jk_pairs`, since
+`detour_factor >= 1` and the pair filter kept only pairs with
+`walk + drive(j, k) + walk <= ratio * drive(o, d)`. Two-stop seeding
+(`joint_routing_assignment_two_stop_seed_columns`) and the relaxed-cluster bound rely on
+the direct hop `j -> k` always certifying its own candidate.
+"""
+function joint_routing_assignment_ride_limit(
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+    detour_factor::Float64,
+    o::Int, d::Int, j::Int, k::Int,
+)::Float64
+    ride_limit = detour_factor * get_routing_cost(data, j, k)
+    ratio = mapping.door_to_door_ratio
+    isfinite(ratio) || return ride_limit
+    direct = get_routing_cost(data, o, d)
+    isfinite(direct) || return ride_limit
+    d2d_limit = ratio * direct - od_pair_walking_cost(data, o, d, (j, k))
+    d2d_limit >= get_routing_cost(data, j, k) - 1e-6 || error(
+        "door-to-door budget $d2d_limit s for OD $((o, d)) via $((j, k)) is below the direct " *
+        "ride $(get_routing_cost(data, j, k)) s: the pair should have been filtered by " *
+        "compute_valid_jk_pairs with the same door_to_door_ratio ($ratio)")
+    return min(ride_limit, d2d_limit)
+end
+
+"""
     joint_routing_assignment_pricing_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, scenario)
         -> Vector{PassengerAssignmentCandidate}
 
@@ -61,7 +100,7 @@ function joint_routing_assignment_pricing_candidates(
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
             rho > 1e-9 || continue
-            ride_limit = detour_factor * get_routing_cost(data, j, k)
+            ride_limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
             push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))
         end
     end

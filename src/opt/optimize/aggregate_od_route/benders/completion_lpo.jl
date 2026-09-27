@@ -138,8 +138,9 @@ retained assignment deleted. Then:
   the pickup window is `label.time <= max_wait_time`, the ride limit is
   `origin_age + travel <= detour_factor * routing_cost(j,k)` -- and deleting a stop only
   decreases each left-hand side. Both right-hand sides are unchanged: `max_wait_time` is a
-  constant, and `routing_cost(j,k)` is computed from the ASSIGNMENT's pickup/dropoff stations
-  before any route exists (`pricing_round.jl`), not from route positions. Nothing measures
+  constant, and the ride limit (`joint_routing_assignment_ride_limit`, including its
+  door-to-door cap) is computed from the ASSIGNMENT's stations and OD before any route
+  exists (`pricing_round.jl`), not from route positions. Nothing measures
   wait against a fixed request clock, so a retained passenger cannot wait longer.
 - `r''` is in the ACTIVATED searched family when `A_in` is the built-only part of `A`: its
   nodes all carry built assignments, and the activated pricer's candidate generation proposes

@@ -479,9 +479,11 @@ decreases each left-hand side.
 a real step, not a formality.** `max_wait_time` is a constant. `routing_cost(j,k)` looks
 route-dependent and is not: `j` and `k` are the ASSIGNMENT's pickup/dropoff stations, and
 the limit is computed per candidate before any route exists
-(`pricing_round.jl`: `ride_limit = detour_factor * get_routing_cost(data, j, k)` over
-`get_valid_jk_pairs(mapping, o, d)`). Removing an intermediate route node therefore cannot
-move it. Spelled out because this whole argument is about route NODES, so a reader arriving
+(`pricing_round.jl`: `joint_routing_assignment_ride_limit`, i.e.
+`detour_factor * get_routing_cost(data, j, k)` capped by the door-to-door budget
+`ratio * drive(o, d) - walk(o, j) - walk(k, d)`, over `get_valid_jk_pairs(mapping, o, d)`
+-- every term fixed by the assignment and its OD). Removing an intermediate route node
+therefore cannot move it. Spelled out because this whole argument is about route NODES, so a reader arriving
 here is primed to read `(j,k)` as route positions -- and reading it that way makes the
 shortcut look unsound.
 

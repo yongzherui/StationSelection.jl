@@ -43,7 +43,8 @@ Validity of the charge itself: a real route that earns intra-cluster reward in
 `C` must visit two distinct stations of `C`, hence pays at least the minimum
 within-cell hop, hence at least `tau_intra(C)`. And the certification still
 fires, because `tau_intra(C) <= tau(j_p, k_p) <= R_pjk <= R_bar` whenever
-`detour_factor >= 1`.
+`detour_factor >= 1` -- and under a finite door-to-door ratio too, since the pair filter
+keeps `R_pjk >= tau(j_p, k_p)` (see `joint_routing_assignment_ride_limit`).
 """
 
 export create_joint_routing_assignment_relaxed_cluster_pricing_data

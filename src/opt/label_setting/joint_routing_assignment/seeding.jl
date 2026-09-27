@@ -20,7 +20,10 @@ demand group whose `get_valid_jk_pairs` contains a real (non-walk-only) pair.
 `AggregateODRouteProblem`'s constructor enforces `detour_factor >= 1.0`, and replaying
 `[j, k]` gives the pickup at `j` an age of exactly `travel(j,k)` on arrival at `k` --
 i.e. exactly at its own ride limit `detour_factor * travel(j,k)` when `detour_factor ==
-1.0`, and strictly under it otherwise. So *every* `(o,d,j,k)` this function considers is
+1.0`, and strictly under it otherwise. A finite door-to-door ratio caps that limit per
+passenger, but never below `travel(j,k)`: `compute_valid_jk_pairs` kept `(j,k)` only if the
+direct ride fits the same budget, and `joint_routing_assignment_ride_limit` asserts it.
+So *every* `(o,d,j,k)` this function considers is
 certified by its own two-stop route unconditionally; no explicit ride-limit check is
 needed (unlike the discarded `MasterData`-based version, which computed one that could
 never fail given that same constructor invariant).

@@ -7,13 +7,16 @@ universe up front (`DirectMIPSolver`) rather than iteratively priced columns (`C
 
 The physical feasibility rule this formulation's routes obey -- wait time at pickup,
 `detour_factor * routing_cost(j, k)` ride limit at dropoff -- is identical to
-`AggregateODRouteBaseFormulation`'s, and it is evaluated per `(j, k)` pair, not per
-passenger (`ride_limit = detour_factor * get_routing_cost(data, j, k)` in
-`joint_routing_assignment/pricing_round.jl`, the exact formula
-`route_covering/data.jl`'s `_direct_ride_limit` uses). So the set of physical
+`AggregateODRouteBaseFormulation`'s when `door_to_door_ratio = Inf`: then it is evaluated
+per `(j, k)` pair, not per passenger (`detour_factor * get_routing_cost(data, j, k)`, the
+exact formula `route_covering/data.jl`'s `_direct_ride_limit` uses). A finite
+`door_to_door_ratio` makes the limit per passenger and only ever smaller
+(`joint_routing_assignment_ride_limit`, `pricing_round.jl`), so Base's DFS then visits a
+SUPERSET of the routes this formulation needs, and the per-candidate replay below drops
+the certifications the tighter limit forbids. So the set of physical
 routes a from-scratch DFS against `JointRoutingAssignmentPricingLabel`'s own transitions
-would visit is provably identical to what `route_covering/exact/enumeration.jl`'s DFS
-already visits, given the same `max_stops`/`max_wait_time`/`detour_factor` and every
+would visit is contained in (with an infinite ratio, identical to) what
+`route_covering/exact/enumeration.jl`'s DFS already visits, given the same `max_stops`/`max_wait_time`/`detour_factor` and every
 `(j, k)` pair made visible (both DFSs use the "uniform positive reward, nothing pruned"
 trick to neutralize their own dual-dependent candidate-node filters). This module reuses
 that DFS verbatim via `_enumerate_aggregate_od_route_raw_columns` -- the *raw*, pre-dedup
@@ -234,7 +237,8 @@ function enumerate_joint_routing_assignment_columns(
             for pair in get_valid_jk_pairs(mapping, o, d)
                 is_walk_only_pair(pair) && continue
                 j, k = pair
-                ride_limit = formulation.detour_factor * get_routing_cost(data, j, k)
+                ride_limit = joint_routing_assignment_ride_limit(
+                    data, mapping, formulation.detour_factor, o, d, j, k)
                 push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, 1.0))
             end
         end
