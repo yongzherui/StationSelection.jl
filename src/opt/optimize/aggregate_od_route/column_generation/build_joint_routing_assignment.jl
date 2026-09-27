@@ -122,7 +122,7 @@ function _build_joint_routing_assignment_model(
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
-    m[:joint_routing_assignment_nodes] = collect(1:n)
+    m[:joint_routing_assignment_nodes] = candidate_station_indices(data)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
         i == j && continue

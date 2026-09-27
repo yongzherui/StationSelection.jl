@@ -236,7 +236,7 @@ function _stash_joint_routing_assignment_subproblem_pricing!(
     m[:joint_routing_assignment_relaxed_cluster_guide_routes] = pricing.relaxed_cluster_guide_routes
     m[:joint_routing_assignment_aligned_subset_max] = pricing.relaxed_cluster_aligned_subset_max
     m[:joint_routing_assignment_relaxed_cluster_max_count] = pricing.relaxed_cluster_max_count
-    m[:joint_routing_assignment_nodes] = collect(1:n)
+    m[:joint_routing_assignment_nodes] = candidate_station_indices(data)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
         i == j && continue

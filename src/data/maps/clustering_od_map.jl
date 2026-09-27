@@ -104,14 +104,17 @@ function compute_valid_jk_pairs(
     allow_walk_only::Bool=false,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
+    is_candidate = candidate_station_mask(data)
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
 
     for (o, d) in all_od_pairs
         walk_only_available = allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
         pairs = Tuple{Int, Int}[]
         for j in 1:n
+            is_candidate[j] || continue
             get_walking_cost(data, o, j) <= max_walking_distance || continue
             for k in 1:n
+                is_candidate[k] || continue
                 # station pairs must be distinct: j==k would mean boarding and
                 # alighting at the same station, i.e. no vehicle trip at all --
                 # handled separately below via WALK_ONLY_PAIR when it's

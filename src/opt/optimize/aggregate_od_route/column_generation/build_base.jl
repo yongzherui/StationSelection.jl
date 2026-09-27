@@ -141,7 +141,7 @@ function _build_aggregate_od_route_base_cg_model(
     m[:aggregate_od_route_base_max_stops] = formulation.max_stops
     m[:aggregate_od_route_base_detour_factor] = formulation.detour_factor
     m[:aggregate_od_route_base_compensated_dominance] = pricing.compensated_dominance
-    m[:aggregate_od_route_base_nodes] = collect(1:n)
+    m[:aggregate_od_route_base_nodes] = candidate_station_indices(data)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
         i == j && continue

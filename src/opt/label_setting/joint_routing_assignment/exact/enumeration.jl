@@ -217,7 +217,7 @@ function enumerate_joint_routing_assignment_columns(
     )
 
     n = data.n_stations
-    nodes = collect(1:n)
+    nodes = candidate_station_indices(data)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
     for i in 1:n, j in 1:n
         i == j && continue

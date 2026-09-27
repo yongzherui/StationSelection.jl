@@ -49,11 +49,12 @@ function compute_valid_j_assignments(
 )::Dict{Int, Vector{Int}}
     valid = Dict{Int, Vector{Int}}()
     n = data.n_stations
+    is_candidate = candidate_station_mask(data)
 
     for i in 1:n
         js = Int[]
         for j in 1:n
-            if get_walking_cost(data, i, j) <= max_walking_distance
+            if is_candidate[j] && get_walking_cost(data, i, j) <= max_walking_distance
                 push!(js, j)
             end
         end

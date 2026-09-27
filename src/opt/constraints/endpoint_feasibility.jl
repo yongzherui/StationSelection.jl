@@ -81,6 +81,7 @@ function add_aggregate_od_route_endpoint_feasibility_constraints!(
     )::Dict{Int, ConstraintRef}
     _assert_symmetric_walking_costs(data)
     n = data.n_stations
+    is_candidate = candidate_station_mask(data)
     required = Set{Int}()
     for s in 1:n_scenarios(data)
         for (p, (o, d)) in enumerate(mapping.Omega_s[s])
@@ -93,7 +94,8 @@ function add_aggregate_od_route_endpoint_feasibility_constraints!(
 
     endpoint_feasibility = Dict{Int, ConstraintRef}()
     for point in sort!(collect(required))
-        candidates = [j for j in 1:n if get_walking_cost(data, point, j) <= mapping.max_walking_distance]
+        candidates = [j for j in 1:n if is_candidate[j] &&
+                      get_walking_cost(data, point, j) <= mapping.max_walking_distance]
         endpoint_feasibility[point] = @constraint(m, sum(y[j] for j in candidates; init=0.0) >= 1)
     end
     return endpoint_feasibility

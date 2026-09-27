@@ -41,6 +41,12 @@ function add_station_selection_variables!(
     else
         @variable(m, y[1:n], Bin)
     end
+    # Non-candidate nodes (continuous demand points, see `candidate_station_mask`) can
+    # never be built. Fixed rather than omitted so every `y[j]` read site keeps its
+    # dense `1:n` indexing; `force` because a Bin variable needs it.
+    for j in findall(!, candidate_station_mask(data))
+        JuMP.fix(y[j], 0.0; force=true)
+    end
     return JuMP.num_variables(m) - before
 end
 

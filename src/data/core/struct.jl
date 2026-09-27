@@ -12,6 +12,7 @@ export ScenarioData, StationSelectionData
 export create_station_selection_data, create_scenario_data
 export n_scenarios, get_station_id, get_station_idx
 export get_walking_cost, get_routing_cost, get_walking_cost_by_id, get_routing_cost_by_id, has_routing_costs
+export candidate_station_mask, candidate_station_indices
 export AbstractStationSelectionMap
 export AbstractClusteringMap
 
@@ -314,6 +315,37 @@ get_routing_cost_by_id(data::StationSelectionData, from_id::Int, to_id::Int) =
 Check if routing costs are available.
 """
 has_routing_costs(data::StationSelectionData) = !isnothing(data.routing_costs)
+
+
+"""
+    candidate_station_mask(data::StationSelectionData) -> BitVector
+
+Which compact station indices may be BUILT and used as a pickup/dropoff.
+
+A node that is not a candidate exists only as a demand location: a passenger's
+continuous origin or destination, carried as a row of `data.stations` so that the
+request table can keep pointing at a station ID and the walking matrix can hold the
+exact point-to-station distance (see `generators/spiderweb.jl`). Such a node is never
+built (`add_station_selection_variables!` fixes its `y` to 0), never offered as a
+pickup/dropoff (`compute_valid_jk_pairs`, the endpoint-feasibility rows) and never
+visited by a route (the column-generation node lists).
+
+Read from an optional Bool column `:candidate` on `data.stations`; without that column
+every station is a candidate, which is what every instance built before 2026-09-26 means.
+"""
+function candidate_station_mask(data::StationSelectionData)::BitVector
+    :candidate in propertynames(data.stations) || return trues(data.n_stations)
+    return BitVector(Bool.(data.stations.candidate))
+end
+
+"""
+    candidate_station_indices(data::StationSelectionData) -> Vector{Int}
+
+Compact indices of the candidate stations, in index order. See
+[`candidate_station_mask`](@ref).
+"""
+candidate_station_indices(data::StationSelectionData)::Vector{Int} =
+    findall(candidate_station_mask(data))
 
 
 # =============================================================================

@@ -287,8 +287,9 @@ function _benders_core_point(
             push!(required, d)
         end
     end
+    is_candidate = candidate_station_mask(data)
     rows = [(pt, [j for j in 1:n
-                  if get_walking_cost(data, pt, j) <= mapping.max_walking_distance])
+                  if is_candidate[j] && get_walking_cost(data, pt, j) <= mapping.max_walking_distance])
             for pt in sort!(collect(required))]
     filter!(r -> !isempty(r[2]), rows)
 
