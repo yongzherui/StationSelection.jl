@@ -157,7 +157,11 @@ NOTE this cap has never actually bound: under the old `0.5 * remaining` inner sl
 inner rounds fit in a 300 s attempt and 6 in a 3600 s one (see the slice schedule below),
 so the budget was the real limiter and lowering this from 65 (then the cut-round cap) to 8
 changed nothing."""
-const RELAXED_CLUSTER_TWO_TIER_MAX_INNER_ROUNDS = 8
+# EXPERIMENT 2026-10-11 (branch exp/two-tier-inner-cap): 8 -> 64. On single-window sub35 k = 10 (35 candidates) an inner
+# round takes seconds, so 8 rounds bind long before the budget and every attempt ends `:inner_cap`, twice, which stops CG
+# with `pricing_inconclusive` (experiments/2026-10-08_simopt_cg_oracle, k10_cert_diag). 64 = the cut-mask width, so
+# `:mask_full_meso` is the real limit.
+const RELAXED_CLUSTER_TWO_TIER_MAX_INNER_ROUNDS = 64
 
 """Slice schedule for the inner (meso) sweeps, and why it GROWS with the round index.
 
