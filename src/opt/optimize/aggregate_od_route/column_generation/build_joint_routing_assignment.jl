@@ -334,12 +334,18 @@ function _aggregate_od_route_integer_recovery_build(
         walk_cap_penalty = m[:joint_routing_assignment_walk_cap_penalty],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
-    return _build_joint_routing_assignment_model(
+    rebuilt = _build_joint_routing_assignment_model(
         data, mapping, l, formulation;
         relax_integrality = false,
         initial_columns = initial_columns,
         pricing = _joint_routing_assignment_rebuilt_pricing_config(m),
     )
+    # Carry the LP's walking-cap duals over, so the result (which holds the rebuilt model)
+    # still reports the price the cap put on walking.
+    rebuilt.model[:joint_routing_assignment_walk_cap_dual] = m[:joint_routing_assignment_walk_cap_dual]
+    rebuilt.model[:joint_routing_assignment_walk_cap_dual_history] =
+        copy(m[:joint_routing_assignment_walk_cap_dual_history])
+    return rebuilt
 end
 
 """

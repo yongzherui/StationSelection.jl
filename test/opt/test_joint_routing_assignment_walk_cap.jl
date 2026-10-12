@@ -64,6 +64,8 @@
     # The LP master's cap dual was positive at some iteration (the cap priced walking), and
     # the integer recovery rebuilt the cap row.
     @test haskey(tight.model, :joint_routing_assignment_walk_cap_row)
+    @test maximum(tight.model[:joint_routing_assignment_walk_cap_dual_history]) > 0.0
+    @test all(==(0.0), loose.model[:joint_routing_assignment_walk_cap_dual_history][end:end])
     @test tight.model[:joint_routing_assignment_walk_cap] == cap
 
     # The cap is the epsilon-constraint: sweeping it reaches every set the DirectMIP sweep
