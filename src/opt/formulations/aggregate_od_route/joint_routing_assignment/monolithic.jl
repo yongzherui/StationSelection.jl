@@ -68,6 +68,20 @@ all), so it must always be available for the build-time feasibility guarantee
 `_aggregate_od_route_allow_walk_only` (`data/maps/aggregate_od_route_map.jl`) for how
 `create_aggregate_od_route_map` resolves this per formulation type instead of reading a
 uniform field.
+
+# Total walking cap (`walk_cap`, default `Inf` = off)
+
+`walk_cap` adds one master row over every assignment, route columns and the walk-only
+fallback alike: `sum_{s,p} Q_p * walk_p(j,k) * x - slack <= walk_cap`, in the objective's
+walking units (demand-weighted seconds, summed over every scenario). With it the model is
+the epsilon-constraint form of the route/walk trade-off: sweeping `walk_cap` reaches
+non-convex points of the front that no `walk_cost_weight` can. The pricer is unchanged
+except that it charges walking at `walk_cost_weight + mu`, where `mu >= 0` is the cap row's
+current dual (`joint_routing_assignment_pricing_walk_weight`). `slack >= 0` costs
+`walk_cap_penalty` per second, so the master stays feasible when the restricted pool (or
+the integer recovery's pool) cannot meet the cap; a positive slack in a result means the
+cap was NOT met, and `mu` is bounded by the penalty. CG and `DirectMIPSolver` only:
+the Benders decomposition refuses a finite cap.
 """
 struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     route_regularization_weight::Float64
@@ -76,6 +90,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    walk_cap::Float64
+    walk_cap_penalty::Float64
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -84,11 +100,15 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
+            walk_cap::Number=Inf,
+            walk_cap_penalty::Number=1000.0,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
         )
+        walk_cap >= 0 || throw(ArgumentError("walk_cap must be non-negative (Inf = no cap)"))
+        walk_cap_penalty > 0 || throw(ArgumentError("walk_cap_penalty must be positive"))
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
@@ -96,6 +116,8 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
+            Float64(walk_cap),
+            Float64(walk_cap_penalty),
         )
     end
 end

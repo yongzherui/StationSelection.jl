@@ -265,6 +265,10 @@ function _build_joint_routing_assignment_model(
 
     # ---- 4. Objective ----
     set_joint_routing_assignment_objective!(m, data, mapping, x_walk)
+    if isfinite(formulation.walk_cap)
+        add_joint_routing_assignment_walk_cap_constraint!(m, data, mapping, x_walk)
+        constraint_counts["walk_cap"] = 1
+    end
 
     # ---- 5. Seed initial columns ----
     # Not model construction: this populates the pool through the same
@@ -326,6 +330,8 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time = m[:joint_routing_assignment_max_wait_time],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
+        walk_cap = m[:joint_routing_assignment_walk_cap],
+        walk_cap_penalty = m[:joint_routing_assignment_walk_cap_penalty],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(

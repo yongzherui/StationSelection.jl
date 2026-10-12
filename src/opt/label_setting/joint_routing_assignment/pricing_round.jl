@@ -126,7 +126,7 @@ function _pricing_build_scenario_context(
 )
     alpha, gamma_o, gamma_d = duals
     data = m[:joint_routing_assignment_data]
-    walk_cost_weight = Float64(m[:joint_routing_assignment_walk_cost_weight])
+    walk_cost_weight = joint_routing_assignment_pricing_walk_weight(m)   # + the walking cap's dual
     detour_factor = Float64(m[:joint_routing_assignment_detour_factor])
     candidates = joint_routing_assignment_pricing_candidates(
         data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, s,

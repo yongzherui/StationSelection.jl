@@ -10,6 +10,8 @@ here would be a forward type reference Julia can't resolve yet.
 """
 
 export joint_routing_assignment_column_cost
+export joint_routing_assignment_column_walk
+export add_joint_routing_assignment_walk_cap_constraint!
 export add_joint_routing_assignment_column!
 
 """
@@ -29,18 +31,67 @@ function joint_routing_assignment_column_cost(
     mapping::AggregateODRouteMap,
     column,
 )::Float64
+    walk = joint_routing_assignment_column_walk(data, mapping, column)
+    beta = Float64(m[:joint_routing_assignment_route_regularization_weight])
+    rho = Float64(m[:joint_routing_assignment_repositioning_time])
+    w = Float64(m[:joint_routing_assignment_walk_cost_weight])
+    return beta * (column.tau + rho) + w * walk
+end
+
+"""
+    joint_routing_assignment_column_walk(data, mapping, column) -> Float64
+
+Demand-weighted walking seconds of the assignments a column carries: its coefficient in the
+walking-cap row, and (times `walk_cost_weight`) its walking cost.
+"""
+function joint_routing_assignment_column_walk(
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+    column,
+)::Float64
     s = Int(column.metadata["scenario"])
     omega = mapping.Omega_s[s]
     walk = 0.0
     for (p, j, k) in column.assignments
         o, d = omega[p]
-        demand = mapping.Q_s[s][p]
-        walk += demand * od_pair_walking_cost(data, o, d, (j, k))
+        walk += mapping.Q_s[s][p] * od_pair_walking_cost(data, o, d, (j, k))
     end
-    beta = Float64(m[:joint_routing_assignment_route_regularization_weight])
-    rho = Float64(m[:joint_routing_assignment_repositioning_time])
-    w = Float64(m[:joint_routing_assignment_walk_cost_weight])
-    return beta * (column.tau + rho) + w * walk
+    return walk
+end
+
+"""
+    add_joint_routing_assignment_walk_cap_constraint!(m, data, mapping, x_walk) -> ConstraintRef
+
+The total walking cap (`formulation.walk_cap`, stashed as
+`m[:joint_routing_assignment_walk_cap]`), one row over every scenario:
+
+    sum_{(s,p)} Q * walk(o, d) * x_walk[s,p] + sum_columns walk(column) * theta - slack <= walk_cap
+
+with `slack >= 0` charged `walk_cap_penalty` per second in the objective, so the row can
+never make a master infeasible (the restricted pool of an early iteration, or of the integer
+recovery, may not reach the cap). Route columns get their coefficient as they enter the
+pool (`add_joint_routing_assignment_column!`). The slack is continuous in the integer
+recovery as well: it is a measurement of how far the cap was missed, not a decision.
+"""
+function add_joint_routing_assignment_walk_cap_constraint!(
+    m::Model,
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+    x_walk::Dict{Tuple{Int, Int}, VariableRef},
+)
+    cap = Float64(m[:joint_routing_assignment_walk_cap])
+    penalty = Float64(m[:joint_routing_assignment_walk_cap_penalty])
+    slack = @variable(m, lower_bound = 0.0, base_name = "walk_cap_slack")
+    expr = AffExpr(0.0)
+    for ((s, p), var) in x_walk
+        o, d = mapping.Omega_s[s][p]
+        add_to_expression!(expr, mapping.Q_s[s][p] * od_pair_walking_cost(data, o, d, WALK_ONLY_PAIR), var)
+    end
+    con = @constraint(m, expr - slack <= cap)
+    set_objective_coefficient(m, slack, penalty)
+    m[:joint_routing_assignment_walk_cap_row] = con
+    m[:joint_routing_assignment_walk_cap_slack] = slack
+    return con
 end
 
 """
@@ -107,6 +158,10 @@ function add_joint_routing_assignment_column!(
         haskey(coverage, key2) && set_normalized_coefficient(coverage[key2], theta_var, 1.0)
         haskey(pickup_link, (key2, j)) && set_normalized_coefficient(pickup_link[(key2, j)], theta_var, 1.0)
         haskey(dropoff_link, (key2, k)) && set_normalized_coefficient(dropoff_link[(key2, k)], theta_var, 1.0)
+    end
+    if haskey(m, :joint_routing_assignment_walk_cap_row)
+        set_normalized_coefficient(m[:joint_routing_assignment_walk_cap_row], theta_var,
+                                   joint_routing_assignment_column_walk(data, mapping, column))
     end
     return theta_var, :added
 end

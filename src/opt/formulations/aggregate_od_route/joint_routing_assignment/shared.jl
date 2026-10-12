@@ -47,6 +47,11 @@ six as the monolith, so a subproblem can equally be derived from a master (which
 original monolith).
 """
 function _joint_routing_assignment_shared_fields(formulation)
+    # The walking cap is a coupling row across every scenario, which the per-scenario
+    # Benders subproblems cannot carry; refuse rather than silently drop it.
+    hasproperty(formulation, :walk_cap) && isfinite(formulation.walk_cap) && throw(ArgumentError(
+        "walk_cap = $(formulation.walk_cap) is not supported by the Benders decomposition; " *
+        "solve the capped joint model with CGSolver or DirectMIPSolver"))
     return (
         route_regularization_weight = formulation.route_regularization_weight,
         walk_cost_weight = formulation.walk_cost_weight,

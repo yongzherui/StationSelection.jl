@@ -11,6 +11,16 @@ matches the pricer's `beta*(tau+repo) - sum rho` sign convention directly.
 export extract_joint_routing_assignment_duals
 
 function extract_joint_routing_assignment_duals(m::JuMP.Model)
+    # The walking cap's dual is not part of the returned tuple: it enters the pricer only as
+    # a surcharge on the walk weight, so it is stashed on `m` for
+    # `joint_routing_assignment_pricing_walk_weight`. Refreshed here because this is the
+    # one call per CG iteration that reads the master's duals, so every pricing,
+    # certification and verification call of the iteration sees the same `mu`.
+    if haskey(m, :joint_routing_assignment_walk_cap_row)
+        mu = max(0.0, -dual(m[:joint_routing_assignment_walk_cap_row]))   # `<=` row in a Min
+        m[:joint_routing_assignment_walk_cap_dual] = mu
+        push!(m[:joint_routing_assignment_walk_cap_dual_history], mu)
+    end
     alpha = Dict{Tuple{Int, Int}, Float64}()
     for (key2, con) in m[:joint_routing_assignment_coverage]
         alpha[key2] = dual(con)
@@ -34,6 +44,20 @@ _aggregate_od_route_extract_duals(::AggregateODRouteJointRoutingAssignmentFormul
     extract_joint_routing_assignment_duals(m)
 
 """
+    joint_routing_assignment_pricing_walk_weight(m) -> Float64
+
+The weight the pricer charges per walking second: `walk_cost_weight + mu`, `mu >= 0` the
+walking cap's current dual (0 without a cap). With it every pricing path keeps the reduced
+cost `rho_pjk = alpha_p - gamma^O_pj - gamma^D_pk - (walk_cost_weight + mu) * walk_pjk`
+exact, and so do the relaxed-cluster bounds built from the same candidates. The column's
+objective coefficient (`joint_routing_assignment_column_cost`) still uses
+`walk_cost_weight` alone: `mu` is a dual price, not a cost.
+"""
+joint_routing_assignment_pricing_walk_weight(m::JuMP.Model) =
+    Float64(m[:joint_routing_assignment_walk_cost_weight]) +
+    Float64(get(m.obj_dict, :joint_routing_assignment_walk_cap_dual, 0.0))
+
+"""
 Cross-check that the pricer's reported reduced cost equals the one implied by the
 master's own duals and the column's true objective coefficient. Catches any drift
 between the two formulations (a wrong dual sign, a missing linking row, a walking-cost
@@ -53,6 +77,8 @@ function _verify_joint_routing_assignment_master_reduced_cost(
     pricer_rc = Float64(get(column.metadata, "reduced_cost", NaN))
     isnan(pricer_rc) && return true, pricer_rc, NaN
     master_rc = joint_routing_assignment_column_cost(m, data, mapping, column)
+    mu = Float64(get(m.obj_dict, :joint_routing_assignment_walk_cap_dual, 0.0))
+    mu > 0 && (master_rc += mu * joint_routing_assignment_column_walk(data, mapping, column))
     s = Int(column.metadata["scenario"])
     for (p, j, k) in column.assignments
         key2 = (s, p)

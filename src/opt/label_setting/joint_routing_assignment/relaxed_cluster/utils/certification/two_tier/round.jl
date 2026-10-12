@@ -35,7 +35,7 @@ function _two_tier_scenario_pass(
     data = m[:joint_routing_assignment_data]
     candidates = joint_routing_assignment_pricing_candidates(
         data, mapping, alpha, gamma_o, gamma_d,
-        Float64(m[:joint_routing_assignment_walk_cost_weight]),
+        joint_routing_assignment_pricing_walk_weight(m),   # + the walking cap's dual
         Float64(m[:joint_routing_assignment_detour_factor]), s,
     )
     isempty(candidates) && return nothing

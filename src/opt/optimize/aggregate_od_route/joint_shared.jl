@@ -41,6 +41,16 @@ function _stash_joint_routing_assignment_cost_parameters!(
     m[:joint_routing_assignment_max_wait_time] = formulation.max_wait_time
     m[:joint_routing_assignment_max_stops] = formulation.max_stops
     m[:joint_routing_assignment_detour_factor] = formulation.detour_factor
+    # Total walking cap (monolith only; the Benders members carry no such field). The cap
+    # row itself is built by `_build_joint_routing_assignment_model`; its current dual `mu`
+    # is refreshed by `extract_joint_routing_assignment_duals` and read by the pricer
+    # through `joint_routing_assignment_pricing_walk_weight`.
+    m[:joint_routing_assignment_walk_cap] =
+        hasproperty(formulation, :walk_cap) ? formulation.walk_cap : Inf
+    m[:joint_routing_assignment_walk_cap_penalty] =
+        hasproperty(formulation, :walk_cap_penalty) ? formulation.walk_cap_penalty : Inf
+    m[:joint_routing_assignment_walk_cap_dual] = 0.0
+    m[:joint_routing_assignment_walk_cap_dual_history] = Float64[]
     # Empty pool containers: real entries arrive from whichever seeding path this build
     # uses (the two-stop seed, exhaustive enumeration, or a CG iteration's `add_columns!`).
     m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()
