@@ -48,6 +48,7 @@ include("generators/test_cases/test3_north_shift.jl")
 include("generators/test_cases/test4_mirrored_zone.jl")
 include("generators/test_cases/test5_triangle.jl")
 include("generators/test_cases/test6_bidirectional.jl")
+include("generators/hub_disk.jl")             # uses the tc_ helpers above
 
 # Optimization framework - abstract types first
 include("opt/abstract.jl")
@@ -184,6 +185,8 @@ export T5Instance, generate_test5_instance, build_test5_cases, T5_CASES, T5_DEMA
 export create_test5_problem_data, create_test5_station_selection_data, print_test5_summary
 export T6Instance, generate_test6_instance, build_test6_cases, T6_DEMAND_CONFIGS
 export create_test6_problem_data, create_test6_station_selection_data, print_test6_summary
+export HUB_DISK_HUB_ID, HUB_DISK_DEMAND_ID_OFFSET, hub_disk_stations, sample_hub_disk_orders
+export generate_hub_disk_instance
 
 # Re-export data structures
 export StationSelectionData, ScenarioData
