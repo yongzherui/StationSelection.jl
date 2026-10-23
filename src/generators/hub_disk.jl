@@ -15,8 +15,10 @@ Geometry (metres, disk centre at the origin):
   bounded on long instances (the simulator re-reads segment.csv every run), at a snapping error <= g / sqrt(2).
 
 Two properties are asserted, not assumed:
-- B is walkable: the largest station-station and point-station distance inside B (at most 2R) is within
-  `max_walk_m`, so every station set that keeps A covers every rider and only k is varied.
+- B is walkable. `walkable = :all` (default): the largest point-to-station distance inside B (R + outer ring radius)
+  is within `max_walk_m`, so every rider reaches every disk station and only k varies. `walkable = :center`: only the
+  centre station must be reachable, from every disk station and every point (R <= `max_walk_m`), so the centre alone
+  covers everyone while stations across the disk are out of each other's walking range (requires a radius-0 ring).
 - A is not: the nearest B station to A is beyond `max_walk_m`, so A is built in every feasible set
   (report k_B = k - 1) and no rider walks between the hub and the disk.
 
@@ -95,7 +97,7 @@ end
 """
     generate_hub_disk_instance(outdir; radius_m=400, hub_distance_m=3000, lambda_per_hour=20, hours=3,
         seed=1, max_walk_m=840, vehicle_speed_mps=8, circuity=1, ring_radii_frac, ring_counts,
-        window_start=DateTime(2026, 1, 1, 8), demand_grid_m=nothing) -> NamedTuple
+        window_start=DateTime(2026, 1, 1, 8), demand_grid_m=nothing, walkable=:all) -> NamedTuple
 
 Write one instance to `outdir` (created if needed) and return its metadata. `max_walk_m` is the walking
 limit both stages will use (h_a x walking speed; 600 s x 1.4 m/s = 840 m), checked against the geometry.
@@ -114,16 +116,25 @@ function generate_hub_disk_instance(
     ring_counts::AbstractVector{<:Integer} = HUB_DISK_DEFAULT_RING_COUNTS,
     window_start::DateTime = DateTime(2026, 1, 1, 8),
     demand_grid_m::Union{Nothing,Real} = nothing,
+    walkable::Symbol = :all,
 )
+    walkable in (:all, :center) || throw(ArgumentError("walkable must be :all or :center, got :$walkable"))
     circuity >= 1 || throw(ArgumentError("circuity must be >= 1"))
     stations = hub_disk_stations(; radius_m, hub_distance_m, ring_radii_frac, ring_counts)
     disk = [s for s in stations if s.role == "disk"]
     d(a, b) = hypot(a.x_m - b.x_m, a.y_m - b.y_m)
 
-    # B walkable: a point anywhere in the disk to any disk station is at most R + max ring radius.
+    # :all -- a point anywhere in the disk to any disk station is at most R + max ring radius.
+    # :center -- every disk station and every point is within R of the centre station.
     far = radius_m + maximum(hypot(s.x_m, s.y_m) for s in disk)
-    far <= max_walk_m || throw(ArgumentError(
-        "disk not walkable: point-to-station distance up to $(round(far)) m > max_walk_m $(max_walk_m) m"))
+    if walkable === :all
+        far <= max_walk_m || throw(ArgumentError(
+            "disk not walkable: point-to-station distance up to $(round(far)) m > max_walk_m $(max_walk_m) m"))
+    else
+        any(s -> s.x_m == 0 && s.y_m == 0, disk) || throw(ArgumentError("walkable = :center needs a centre station"))
+        radius_m <= max_walk_m || throw(ArgumentError(
+            "centre not walkable from the disk edge: R $(radius_m) m > max_walk_m $(max_walk_m) m"))
+    end
     near_hub = minimum(d(stations[1], s) for s in disk)
     near_hub > max_walk_m || throw(ArgumentError(
         "hub walkable from B: nearest disk station $(round(near_hub)) m <= max_walk_m $(max_walk_m) m"))
@@ -182,7 +193,7 @@ function generate_hub_disk_instance(
         ring_radii_frac = collect(Float64.(ring_radii_frac)), ring_counts = collect(Int.(ring_counts)),
         n_disk_stations = length(disk), disk_station_ids = [s.id for s in disk],
         n_AB = count(r -> r.direction == :AB, draws), n_BA = count(r -> r.direction == :BA, draws),
-        max_point_to_station_m = far, nearest_disk_station_to_hub_m = near_hub,
+        walkable = string(walkable), max_point_to_station_m = far, nearest_disk_station_to_hub_m = near_hub,
         demand_grid_m = demand_grid_m === nothing ? nothing : Float64(demand_grid_m), n_demand_nodes = length(points),
     )
     open(joinpath(outdir, "metadata.json"), "w") do f
