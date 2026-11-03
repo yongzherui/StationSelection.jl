@@ -64,6 +64,7 @@ struct AggregateODRouteJointRoutingAssignmentMasterFormulation <: AbstractFormul
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    demand_weighting::Symbol
     cut_mode::AbstractBendersCutMode
 
     function AggregateODRouteJointRoutingAssignmentMasterFormulation(
@@ -82,6 +83,7 @@ struct AggregateODRouteJointRoutingAssignmentMasterFormulation <: AbstractFormul
             f.max_wait_time,
             f.detour_factor,
             resolved_max_stops,
+            f.demand_weighting,
             cut_mode,
         )
     end

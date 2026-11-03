@@ -22,7 +22,8 @@ per-member block lists.
 
 The three must agree on the route universe (`max_stops`, `max_wait_time`,
 `detour_factor`) and on the cost weights (`route_regularization_weight`,
-`walk_cost_weight`, `repositioning_time`), because a Benders cut derived from a subproblem
+`walk_cost_weight`, `repositioning_time`, and the `demand_weighting` that scales every walking
+term), because a Benders cut derived from a subproblem
 priced at one `detour_factor` is simply not a valid underestimator of a master built at
 another -- and nothing anywhere would raise: the run converges, reports `OPTIMAL`, and the
 number is wrong. So the derived types are NOT independently constructible from loose
@@ -40,9 +41,9 @@ recorded scope reduction on the optimality claim.
 """
     _joint_routing_assignment_shared_fields(formulation) -> NamedTuple
 
-The six encoding fields every member of the family carries, as a splattable
+The seven encoding fields every member of the family carries, as a splattable
 `NamedTuple`. Any member can be the source: the master and the subproblem carry the same
-six as the monolith, so a subproblem can equally be derived from a master (which is what
+seven as the monolith, so a subproblem can equally be derived from a master (which is what
 `build_model(problem, ::MasterFormulation, ::BendersSolver)` does -- it never sees the
 original monolith).
 """
@@ -54,5 +55,17 @@ function _joint_routing_assignment_shared_fields(formulation)
         max_wait_time = formulation.max_wait_time,
         detour_factor = formulation.detour_factor,
         max_stops = formulation.max_stops,
+        demand_weighting = formulation.demand_weighting,
     )
+end
+
+"""
+    _validate_demand_weighting(mode::Symbol)
+
+`:count` (Q = requests per OD group and scenario) or `:unit` (Q = 1).
+"""
+function _validate_demand_weighting(mode::Symbol)
+    mode in (:count, :unit) || throw(ArgumentError(
+        "demand_weighting must be :count or :unit, got :$mode"))
+    return mode
 end

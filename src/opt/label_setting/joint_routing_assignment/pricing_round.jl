@@ -87,18 +87,20 @@ function joint_routing_assignment_pricing_candidates(
 )::Vector{PassengerAssignmentCandidate}
     candidates = PassengerAssignmentCandidate[]
     for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
-        mapping.Q_s[scenario][p] > 0 || continue     # demand group must actually have positive demand
+        demand = mapping.Q_s[scenario][p]
+        demand > 0 || continue                        # demand group must actually have positive demand
         key2 = (scenario, p)
         a = get(alpha, key2, 0.0)                    # this demand group's coverage dual
         a > 1e-9 || continue                          # zero dual -> no candidate on this group can ever have rho > 0
         for pair in get_valid_jk_pairs(mapping, o, d)
             is_walk_only_pair(pair) && continue
             j, k = pair
-            # rho_pjk = alpha_p - gamma^O_pj - gamma^D_pk - walk_cost_weight * walking_cost:
-            # coverage dual minus both station-linking duals minus the
-            # walking-access cost of this particular (j,k) station pair.
+            # rho_pjk = alpha_p - gamma^O_pj - gamma^D_pk - walk_cost_weight * Q_p * walking_cost:
+            # coverage dual minus both station-linking duals minus the demand-weighted
+            # walking-access cost of this (j,k) pair -- the same term the master's column
+            # cost charges (`joint_routing_assignment_column_cost`).
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
-                walk_cost_weight * od_pair_walking_cost(data, o, d, pair)
+                walk_cost_weight * demand * od_pair_walking_cost(data, o, d, pair)
             rho > 1e-9 || continue
             ride_limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
             push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))

@@ -454,7 +454,7 @@ Setting `gammaO_pj := max(gammaO_pj, alpha_p)` for every unbuilt `j` (and likewi
 
        sum_{A_in} r <= f_{c''}                              (`c''` is in the searched universe)
        f_{c''} <= f_c - w * sum_{A_out} demand_p * walk_p    (`tau_{c''} <= tau_c`; walk >= 0)
-       sum_{A_out} r <= w * sum_{A_out} walk_p              (the completion, per triple; demand >= 1)
+       sum_{A_out} r <= w * sum_{A_out} demand_p * walk_p   (the completion, per triple)
        => sum_c r <= f_c.
 
 **Removing the unbuilt nodes is not optional, and this is where the triangle inequality
@@ -534,26 +534,18 @@ Then for every `k`, `net <= w * (walk_min - walk(o,d,(j,k))) <= 0`. Strictly sma
 cut at no cost. Clamping at zero is safe: if `alpha_p <= w * walk_min` the net is already
 non-positive with no completion at all.
 
-# Why NO demand factor, although `f_c` has one
+# The demand factor
 
-The walk term enters the column cost as `w * demand_p * walk(...)`
-(`joint_routing_assignment_column_cost`) but the pricer's candidate reward as
-`w * walk(...)` with no demand (`joint_routing_assignment_pricing_candidates`). Those agree
-only when `demand_p == 1`; the package guards the difference with a per-column assertion
-(`_verify_joint_routing_assignment_master_reduced_cost`), which fires rather than drifting.
-
-This function credits `w * walk_min` WITHOUT demand, which is the safe choice for both
-requirements at once, because `demand_p >= 1`:
-
-- against the DUAL CONSTRAINT (walk term `w * demand_p * walk`), crediting only
-  `w * walk_min <= w * demand_p * walk_min` under-credits, so the resulting `gamma` is at
-  least as large as required -- sound.
-- against the PRICER's reward (walk term `w * walk`), it matches exactly, so the candidate is
-  driven to `rho <= 0` and dropped by the `rho > 0` filter -- which is what makes the
-  completion double as the search restriction.
-
-Crediting `w * demand_p * walk_min` instead would still be sound for the dual but could leave
-the pricer's `rho > 0` for a group with `demand_p > 1`, losing the restriction.
+The walk term enters the column cost (`joint_routing_assignment_column_cost`) and the
+pricer's candidate reward (`joint_routing_assignment_pricing_candidates`) identically, as
+`w * demand_p * walk(...)`, so this function credits `w * demand_p * walk_min`: it is exactly
+the dual constraint's walk term (sound) and exactly the pricer's (the candidate is driven to
+`rho <= 0` and dropped by the `rho > 0` filter, which is what makes the completion double as
+the search restriction). Until 2026-11-03 the pricer had no demand factor and `demand_p` was
+always 1 (`:unit`), so this credited `w * walk_min`; under `:count` that would leave the
+pricer's `rho` at `w * (demand_p - 1) * walk_min` below what it should be -- still sound, but
+weaker. A per-column assertion (`_verify_joint_routing_assignment_master_reduced_cost`)
+guards pricer/master agreement.
 
 # Other properties
 
@@ -580,7 +572,8 @@ function _benders_activated_complete_duals!(
     )
     built(j) = incumbent[j] > 0.5
     for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
-        mapping.Q_s[scenario][p] > 0 || continue
+        demand = mapping.Q_s[scenario][p]
+        demand > 0 || continue
         key2 = (scenario, p)
         a = get(alpha, key2, 0.0)
         a > 0.0 || continue
@@ -593,7 +586,7 @@ function _benders_activated_complete_duals!(
         for pair in get_valid_jk_pairs(mapping, o, d)
             is_walk_only_pair(pair) && continue
             j, k = pair
-            cost = od_pair_walking_cost(data, o, d, pair)
+            cost = demand * od_pair_walking_cost(data, o, d, pair)
             walk_min_o[j] = min(get(walk_min_o, j, Inf), cost)
             walk_min_d[k] = min(get(walk_min_d, k, Inf), cost)
         end

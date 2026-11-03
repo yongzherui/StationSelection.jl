@@ -26,7 +26,7 @@ opt/
 ├── problems/              # AbstractProblem subtypes (StationSelectionProblem, RouteCoveringProblem)
 ├── formulations/          # AbstractFormulation subtypes (clustering.jl, aggregate_od_route/*).
 │                          #   aggregate_od_route/joint_routing_assignment/ is a FAMILY:
-│                          #   shared.jl (the six shared encoding fields + the derivation
+│                          #   shared.jl (the seven shared encoding fields + the derivation
 │                          #   helper), monolithic.jl, master.jl, benders_subproblem.jl,
 │                          #   unions.jl
 ├── solvers/                # AbstractSolver subtypes + shared solver utils.
@@ -99,23 +99,30 @@ constraint layer already handles both settings: with no fallback,
 `add_aggregate_od_route_endpoint_feasibility_constraints!` marks both endpoints of every
 group required, which is the strictly correct behaviour.
 
-### Unit demand is a modelling assumption of this family
+### Demand per OD group: `demand_weighting` (Joint default `:count` since 2026-11-03)
 
-**The `AggregateODRoute*` formulations collapse demand to `Q_s[s][p] == 1` for every OD
-group, unconditionally and with no flag.** `create_aggregate_od_route_map` still uses
-`compute_scenario_od_count` to discover *which* `(o,d)` pairs are active, then discards the
-multiplicity. `pax_num` never reaches selection in any formulation. The rationale: for
-choosing station locations what matters is the *shape* of demand — which OD pairs are
-active and how they sit on the network — not how many riders share one pair inside a
-scenario.
+`Q_s[s][p]` is the number of requests on OD pair `p` in scenario `s` (`:count`) or 1
+(`:unit`). `AggregateODRouteJointRoutingAssignmentFormulation(; demand_weighting)` chooses,
+**default `:count`**; the field is one of the family's seven shared fields, so the Benders
+master and subproblem copy it. `AggregateODRouteBaseFormulation` stays `:unit` (its CG
+pricer is not demand-aware). `pax_num` is not read: one request = one rider, as in the
+Clustering maps. Pipeline key `demand_weighting = ["count"|"unit"]` (Joint only).
 
-This is also what makes `CGSolver` sound on repeated-OD instances. The master multiplied
-walking cost by `Q_s[s][p]` in both places it appears while the pricer used it only as a
-`> 0` gate, so the two disagreed whenever any pair repeated and CG aborted with
-"the pricer and master formulations have drifted apart". Under unit demand they agree by
-construction. Do not reintroduce demand weighting on one side alone.
+`Q` scales **walking only**: the column cost, the direct-walk cost, the pricer's candidate
+reward (`pricing_round.jl`) and both Benders completions all charge `w * Q * walk`.
+Coverage stays `>= 1` and a route's travel is charged once (capacity unlimited). So at a
+fixed `walk_cost_weight`, `:count` weighs walking more than `:unit` by the mean requests per
+group (2.10 on the Zhuzhou k30 training windows); `0.0475` under `:count` matches `0.1`
+under `:unit` in total.
 
-**The Clustering formulations are unaffected** — `clustering_od_map.jl` builds its own
+History: 2026-09-15 to 2026-11-03 (`6000078`) the family was `:unit` unconditionally,
+which removed a pricer/master drift (the master multiplied walking by `Q`, the pricer used
+`Q` only as a `> 0` gate). Every Joint CG selection in that period is `:unit`. Do not put
+`Q` on one side alone: the CG master's per-column reduced-cost assertion fires.
+`test/opt/test_joint_routing_assignment_demand_weighting.jl` has an instance where `:unit`
+and `:count` pick different stations, checked under CG, DirectMIP and four Benders oracles.
+
+**The Clustering formulations are unaffected** -- `clustering_od_map.jl` builds its own
 `Q_s` and keeps true counts, where `Q` is a real weight on walking cost.
 
 ## Benders decomposition (Joint formulation)
@@ -138,7 +145,7 @@ per scenario, built once.
 
 **Both derived types are derived, never built from loose keywords.**
 `MasterFormulation(parent; cut_mode)` / `BendersSubproblemFormulation(parent; max_stops)`
-copy the family's six shared encoding fields off `parent`
+copy the family's seven shared encoding fields off `parent`
 (`joint_routing_assignment/shared.jl`). A master at one `detour_factor` against a
 subproblem at another yields invalid cuts and a confidently wrong `OPTIMAL` with nothing
 raising, so the inconsistent combination is made unrepresentable. `run_opt` still takes

@@ -161,19 +161,17 @@ which is precisely the dual row of `r`. With `alpha <= c_walk` (the `x_walk` row
 `alpha, gamma >= 0` also imposed, the point is feasible for the full dual, so the cut is
 globally valid; and the face equality makes it tight at `yhat`.
 
-**Which walking cost `rho` uses, and why the rows use the SMALLER one.** The dual row's walk
-term is `w * demand_p * walk` (it comes from `joint_routing_assignment_column_cost`), while
-the pricer's candidate reward uses `w * walk` with no demand factor
-(`joint_routing_assignment_pricing_candidates`). The completion rows here are written with the
-demand-free term, i.e.
+**Which walking cost `rho` uses.** The dual row's walk term (from
+`joint_routing_assignment_column_cost`) and the pricer's candidate reward
+(`joint_routing_assignment_pricing_candidates`) are both `w * demand_p * walk`, so the
+completion rows are
 
-    alpha_p - gammaO_pj - gammaD_pk <= w * walk(o, d, (j,k)),
+    alpha_p - gammaO_pj - gammaD_pk <= w * demand_p * walk(o, d, (j,k)),
 
-which is the STRONGER requirement whenever `demand_p > 1`. That is deliberate and serves both
-jobs at once: it implies the dual condition the validity argument needs, AND it matches the
-pricer's filter exactly, which is what keeps the search activated. Writing the weaker
-demand-weighted row instead would still be sound but would let a `demand_p > 1` triple through
-an unbuilt station survive `rho > 0` and re-open the full-universe search.
+which is exactly the dual condition the validity argument needs AND exactly the pricer's
+filter, which is what keeps the search activated. (Until 2026-11-03 the pricer had no demand
+factor and the rows were written without one; `demand_p` was always 1 then, so the two forms
+coincided.)
 
 # What is NOT claimed
 
@@ -479,6 +477,7 @@ function _benders_lpo_completion!(
     # on stations no current column uses.
     group_keys = Tuple{Int, Int}[]
     group_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
+    group_demand = Dict{Tuple{Int, Int}, Int}()
     walk_bound = Dict{Tuple{Int, Int}, Float64}()
     pickup_keys = Tuple{Tuple{Int, Int}, Int}[]
     dropoff_keys = Tuple{Tuple{Int, Int}, Int}[]
@@ -487,6 +486,7 @@ function _benders_lpo_completion!(
         demand > 0 || continue
         key2 = (scenario, p)
         push!(group_keys, key2)
+        group_demand[key2] = demand
         pairs = Tuple{Int, Int}[]
         seen_o, seen_d = Set{Int}(), Set{Int}()
         for pair in get_valid_jk_pairs(mapping, o, d)
@@ -513,7 +513,7 @@ function _benders_lpo_completion!(
         for (key, g) in gd; v -= y[key[2]] * g; end
         return v
     end
-    """The largest `alpha_p - gammaO_pj - gammaD_pk - w*walk` over triples touching `J0`."""
+    """The largest `alpha_p - gammaO_pj - gammaD_pk - w*Q_p*walk` over triples touching `J0`."""
     function worst_rho(a, go, gd)
         worst = -Inf
         for key2 in group_keys
@@ -521,7 +521,7 @@ function _benders_lpo_completion!(
             for (j, k) in group_pairs[key2]
                 (built(j) && built(k)) && continue
                 rho = get(a, key2, 0.0) - get(go, (key2, j), 0.0) - get(gd, (key2, k), 0.0) -
-                    w * od_pair_walking_cost(data, o, d, (j, k))
+                    w * group_demand[key2] * od_pair_walking_cost(data, o, d, (j, k))
                 worst = max(worst, rho)
             end
         end
@@ -622,9 +622,9 @@ function _benders_lpo_completion!(
     end
 
     # The completion rows: `rho_pjk <= 0` for every valid triple touching an unbuilt station,
-    # written with the DEMAND-FREE walking term. See the header for why that stronger form is
-    # the right one -- it implies the dual condition validity needs AND matches the pricer's
-    # `rho > 0` filter, which is what keeps every pricing round below activated.
+    # written with the pricer's own walking term `w * Q_p * walk` (see
+    # `_benders_activated_complete_duals!`): it is the dual condition validity needs AND matches
+    # the pricer's `rho > 0` filter, which is what keeps every pricing round below activated.
     n_completion_rows = 0
     for key2 in group_keys
         o, d = mapping.Omega_s[scenario][key2[2]]
@@ -634,7 +634,7 @@ function _benders_lpo_completion!(
             _lpo_term!(row, 1.0, A[key2])
             _lpo_term!(row, -1.0, GO[(key2, j)])
             _lpo_term!(row, -1.0, GD[(key2, k)])
-            @constraint(lp, row <= w * od_pair_walking_cost(data, o, d, (j, k)))
+            @constraint(lp, row <= w * group_demand[key2] * od_pair_walking_cost(data, o, d, (j, k)))
             n_completion_rows += 1
         end
     end

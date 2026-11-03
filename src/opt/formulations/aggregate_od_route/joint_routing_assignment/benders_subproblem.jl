@@ -65,6 +65,7 @@ struct AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation <: Abs
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    demand_weighting::Symbol
 
     function AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation(
             parent;
@@ -89,6 +90,7 @@ struct AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation <: Abs
             f.max_wait_time,
             f.detour_factor,
             resolved_max_stops,
+            f.demand_weighting,
         )
     end
 end

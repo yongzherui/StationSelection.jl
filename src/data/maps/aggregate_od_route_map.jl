@@ -51,26 +51,24 @@ of the raw `(s,o,d)` triple. `Q_s[s]::Vector{Int}` is dense and parallel to
 `Omega_s[s]`. `valid_jk_pairs` stays keyed by the raw
 `(o,d)` tuple -- station-pair feasibility depends on geography, not on `s`/`p`.
 
-# MODELLING ASSUMPTION: unit demand (`Q_s[s][p] == 1` always)
+# Demand per OD group: `Q_s[s][p]` (`_aggregate_od_route_demand_weighting`)
 
-**The AggregateODRoute family collapses demand to 1 per OD group, by default and
-unconditionally.** `Q_s[s][p]` is 1 for every `(s,p)` regardless of how many requests
-share that OD pair in scenario `s`, and `pax_num` never reaches selection at all. This is a
-deliberate simplification of this formulation family, not a data defect: what matters for
-choosing station locations is the *shape* of the demand -- which OD pairs are active and how
-they sit relative to the network -- not how many riders sit on any one pair within a
-scenario. A group of three co-located requests is one OD pair and is counted once.
+`Q_s[s][p]` is the number of requests on OD pair `p` in scenario `s` (`:count`) or 1
+(`:unit`). The Joint formulation chooses through its `demand_weighting` field, **default
+`:count` since 2026-11-03**; `AggregateODRouteBaseFormulation` and the feasibility
+formulation stay `:unit` (Base's own CG pricer was never made demand-aware). `pax_num` is
+not read: one request is one rider, as in the Clustering maps.
 
-Two consequences worth knowing:
+History: from 2026-09-15 (`6000078`) to 2026-11-03 the whole family was `:unit`
+unconditionally. That retired a pricer/master drift (the master multiplied walking by `Q`,
+the pricer used `Q` only as a `> 0` gate) by removing `Q`. `:count` is sound only because
+the pricer (`joint_routing_assignment_pricing_candidates`) and the Benders completions now
+multiply walking by `Q` too. Do not reintroduce `Q` on one side alone; the per-column
+reduced-cost assertion in the CG master fires if the two disagree.
 
-  - It removes the demand weighting from every walking term (objective, column cost,
-    pricer reward). The master and the label-setting pricer therefore agree by
-    construction, which is what retires the pricer/master drift error that used to make
-    `CGSolver` unusable on any instance where an OD pair repeated (the pricer used
-    `Q_s[s][p]` only as a `> 0` gate while the master multiplied by it).
-  - It does NOT apply to the Clustering formulations. They build their own `Q_s`
-    (`clustering_od_map.jl`) and keep true counts, where `Q` is a genuine weight on
-    walking cost and still carries information the clustering objective uses.
+`Q` scales walking only. Coverage stays `>= 1` and a route's travel is charged once, so at a
+fixed `walk_cost_weight` `:count` weights walking more than `:unit` by the mean requests per
+group (about 2.1 on the Zhuzhou k30 training windows).
 """
 mutable struct AggregateODRouteMap <: AbstractClusteringMap
     station_id_to_array_idx::Dict{Int, Int}
@@ -198,6 +196,17 @@ _aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = false
 _aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = false
 
 """
+    _aggregate_od_route_demand_weighting(formulation) -> Symbol
+
+`:count` or `:unit`, the `Q_s` rule (see "Demand per OD group" on `AggregateODRouteMap`).
+Joint reads its field; Base and the feasibility formulation are `:unit`. No generic fallback,
+for the same reason as `_aggregate_od_route_allow_walk_only`.
+"""
+_aggregate_od_route_demand_weighting(f::AnyJointRoutingAssignmentFormulation) = f.demand_weighting
+_aggregate_od_route_demand_weighting(::AggregateODRouteBaseFormulation) = :unit
+_aggregate_od_route_demand_weighting(::AggregateODRouteFeasibilityFormulation) = :unit
+
+"""
     aggregate_od_route_validate_feasible_coverage(data, mapping)
 
 Throw `ArgumentError` unless every positive-demand group `(s,p)` has at least one
@@ -273,16 +282,16 @@ function create_aggregate_od_route_map(
 
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
     Q_s = Dict{Int, Vector{Int}}()
+    demand_weighting = _aggregate_od_route_demand_weighting(formulation)
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (s, scenario_data) in enumerate(data.scenarios)
         od_count = compute_scenario_od_count(scenario_data)
         Omega_s[s] = sort!(collect(keys(od_count)))
-        # Unit demand, by design -- see the MODELLING ASSUMPTION section on
-        # `AggregateODRouteMap`. `od_count` is still what discovers WHICH pairs are active;
-        # only its multiplicity is dropped. Keeping the vector (rather than removing Q_s)
-        # preserves every `Q_s[s][p]` read site and the shared map interface.
-        Q_s[s] = ones(Int, length(Omega_s[s]))
+        # See "Demand per OD group" on `AggregateODRouteMap`.
+        Q_s[s] = demand_weighting === :count ?
+            [od_count[od] for od in Omega_s[s]] :
+            ones(Int, length(Omega_s[s]))
         union!(all_od_pairs, Omega_s[s])
     end
 

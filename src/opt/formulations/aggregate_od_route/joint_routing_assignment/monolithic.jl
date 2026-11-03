@@ -31,6 +31,13 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
 `max_wait_time`, `detour_factor`, and `max_stops`.
 
+`demand_weighting` (`:count`, the default since 2026-11-03, or `:unit`) sets the demand `Q`
+of each OD group `(s,p)`: `:count` is the number of requests on that OD pair in scenario `s`,
+`:unit` collapses every group to 1 (the family's only behaviour from 2026-09-15 to
+2026-11-03). `Q` multiplies every walking term -- column cost, direct-walk cost, the
+pricer's candidate reward and the Benders completions -- and nothing else: a route's travel
+is charged once whatever it carries (capacity is unlimited), and coverage stays `>= 1`.
+
 # Pricers live on the solver, not here
 
 Every pricer this formulation can be solved with -- `:exact`, `:station_simple`,
@@ -76,6 +83,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     max_wait_time::Float64
     detour_factor::Float64
     max_stops::Int
+    demand_weighting::Symbol
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -84,7 +92,9 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             max_wait_time::Number=Inf,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
+            demand_weighting::Symbol=:count,
         )
+        _validate_demand_weighting(demand_weighting)
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
@@ -96,6 +106,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             Float64(max_wait_time),
             Float64(detour_factor),
             resolved_max_stops,
+            demand_weighting,
         )
     end
 end
