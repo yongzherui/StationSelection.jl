@@ -106,6 +106,12 @@ function optimize_model(build_result::BuildResult, solver::CGSolver)::OptResult
     if solver.recover_integer_solution && JuMP.termination_status(m) == MOI.OPTIMAL
         metadata["cg_lp_objective_value"] = JuMP.objective_value(m)
         t0 = time()
+        # A loop stopped by its budget (or max_iterations) during the warm-start phase leaves
+        # the model in the warm-start mode, which is not a valid final mode: the recovery
+        # rebuild re-validates the pricing config and threw on it, losing the whole run
+        # (a 4.4 h :cluster_guide warm start, 2026-11-05). Recovery prices nothing, so hand
+        # the model back to its final pricer first, exactly as a converged warm start does.
+        st.warm_start_active && set_cg_pricing_mode!(build_result, mapping, m, st.final_pricing_mode)
         build_result = integer_recovery_build(build_result, mapping, m)
         m = build_result.model
         _apply_solver_config!(m, solver.config)

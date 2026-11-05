@@ -70,6 +70,24 @@
         @test warm.model[:joint_routing_assignment_pricing_mode] === :exact
     end
 
+    @testset "a loop stopped DURING the warm start still recovers an integer plan" begin
+        # Regression (2026-11-05): a budget stop inside a :cluster_guide warm start left the
+        # model in the warm-start mode, and integer recovery's rebuilt CGPricingConfig threw
+        # `mode must be one of ... got :cluster_guide`. max_iterations = 1 stops the loop
+        # inside phase 1 deterministically, for both warm-start modes.
+        for (ws, extra) in ((:station_simple, (;)), (:cluster_guide, (; relaxed_cluster_count = 3)))
+            res = run_opt(problem, formulation(), CGSolver(
+                recover_integer_solution = true, max_iterations = 1,
+                pricing = CGPricingConfig(; warm_start_mode = ws, extra...),
+            ))
+            @test res.metadata["cg_stop_reason"] == "max_iterations"
+            @test res.metadata["cg_warm_start_iterations"] == 0   # never handed off
+            @test res.termination_status == SOLVE_FEASIBLE
+            @test res.objective_value !== nothing
+            @test res.metadata["cg_integer_recovery_sec"] > 0
+        end
+    end
+
     @testset "the two OPTIMALs are distinguishable by scope, not by status" begin
         # Both statuses read OPTIMAL; `cg_optimality_scope` is the only thing separating a
         # full-universe optimum from an elementary-only one. This is the check that would
