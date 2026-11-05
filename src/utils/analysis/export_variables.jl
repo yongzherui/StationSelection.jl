@@ -898,6 +898,25 @@ function _joint_export_self_checks!(
         end
     end
 
+    # `unserved_penalty` variant: the slack completes a row it leaves unserved, and is paid
+    # for in the objective.
+    n_unserved = 0
+    unserved_demand = 0.0
+    if haskey(m.obj_dict, :joint_routing_assignment_unserved)
+        penalty = Float64(m[:joint_routing_assignment_unserved_penalty])
+        for ((s, p), var) in m[:joint_routing_assignment_unserved]
+            val = JuMP.value(var)
+            val > JOINT_ROUTING_ASSIGNMENT_EXPORT_TOL || continue
+            n_unserved += 1
+            unserved_demand += val * mapping.Q_s[s][p]
+            haskey(coverage, (s, p)) && (coverage[(s, p)] += val)
+            objective += val * penalty * mapping.Q_s[s][p]
+        end
+        metadata["unserved_penalty"] = penalty
+    end
+    metadata["n_unserved_groups"] = n_unserved
+    metadata["unserved_demand"] = unserved_demand
+
     metadata["coverage_shortfall_max"] =
         isempty(coverage) ? 0.0 : maximum(max(0.0, 1.0 - v) for v in values(coverage))
     metadata["coverage_max"] =

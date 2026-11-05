@@ -48,6 +48,10 @@ seven as the monolith, so a subproblem can equally be derived from a master (whi
 original monolith).
 """
 function _joint_routing_assignment_shared_fields(formulation)
+    # The Benders master/subproblem have no unserved slack; deriving them from a monolith
+    # that allows unserved demand would silently solve the stricter model.
+    isfinite(something(get_unserved_penalty(formulation), Inf)) && throw(ArgumentError(
+        "unserved_penalty is supported by CGSolver and DirectMIPSolver only, not BendersSolver"))
     return (
         route_regularization_weight = formulation.route_regularization_weight,
         walk_cost_weight = formulation.walk_cost_weight,
@@ -58,6 +62,14 @@ function _joint_routing_assignment_shared_fields(formulation)
         demand_weighting = formulation.demand_weighting,
     )
 end
+
+"""
+    get_unserved_penalty(formulation) -> Union{Float64, Nothing}
+
+The formulation's `unserved_penalty`, or `nothing` for a family member without the field
+(the Benders master and subproblem).
+"""
+get_unserved_penalty(f) = hasproperty(f, :unserved_penalty) ? f.unserved_penalty : nothing
 
 """
     _validate_demand_weighting(mode::Symbol)

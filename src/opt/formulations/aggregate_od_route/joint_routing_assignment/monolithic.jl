@@ -38,6 +38,15 @@ of each OD group `(s,p)`: `:count` is the number of requests on that OD pair in 
 pricer's candidate reward and the Benders completions -- and nothing else: a route's travel
 is charged once whatever it carries (capacity is unlimited), and coverage stays `>= 1`.
 
+`unserved_penalty` (default `Inf`): with `Inf` every demand group must be covered, by a route
+column or a direct walk, and a station budget too small to give every group's origin and
+destination a station within walking range is infeasible (the endpoint-feasibility rows).
+A finite value lets a group go unserved: its coverage row gets a slack `u[(s,p)] >= 0`
+costing `unserved_penalty * Q` in the objective, and the endpoint-feasibility rows are not
+built (they would force the coverage back). A value far above any route or walking cost
+makes the model minimise unserved demand first. Supported by `CGSolver` and
+`DirectMIPSolver`; `BendersSolver` rejects a finite value.
+
 # Pricers live on the solver, not here
 
 Every pricer this formulation can be solved with -- `:exact`, `:station_simple`,
@@ -84,6 +93,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     detour_factor::Float64
     max_stops::Int
     demand_weighting::Symbol
+    unserved_penalty::Float64
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -93,8 +103,11 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
             demand_weighting::Symbol=:count,
+            unserved_penalty::Number=Inf,
         )
         _validate_demand_weighting(demand_weighting)
+        (!isnan(unserved_penalty) && unserved_penalty > 0) || throw(ArgumentError(
+            "unserved_penalty must be positive (Inf = every group must be served), got $unserved_penalty"))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
@@ -107,6 +120,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             Float64(detour_factor),
             resolved_max_stops,
             demand_weighting,
+            Float64(unserved_penalty),
         )
     end
 end

@@ -6,7 +6,8 @@ whose own coefficients directly carry OD assignment. No separate assignment vari
 exists here -- routing and assignment are decided by the same variable, which is what
 makes this "joint" (see the formulation's own docstring for why the earlier `y`/`x`/`θ`
 two-layer model this session briefly built under this same name was not that). No
-unserved-demand slack either: `aggregate_od_route_validate_feasible_coverage`
+unserved-demand slack unless the formulation sets a finite `unserved_penalty`
+(`add_joint_routing_assignment_unserved_slack!`): `aggregate_od_route_validate_feasible_coverage`
 (`data/maps/aggregate_od_route_map.jl`, shared with `AggregateODRouteBaseFormulation`'s
 own `build_model`) proves every demand group has a real coverage option before any
 variable is built.
@@ -260,11 +261,25 @@ function _build_joint_routing_assignment_model(
     constraint_counts["pickup_link"] = length(pickup_link)
     constraint_counts["dropoff_link"] = length(dropoff_link)
     constraint_counts["station_limit"] = add_station_limit_constraint!(m, data, l; equality = true)
-    endpoint_feasibility = add_aggregate_od_route_endpoint_feasibility_constraints!(m, data, mapping, y)
-    constraint_counts["endpoint_feasibility"] = length(endpoint_feasibility)
+    # With a finite `unserved_penalty` a group may go unserved, so the endpoint rows (a
+    # station within walking range of every required origin/destination) would force
+    # coverage back and are not built.
+    unserved_penalty = formulation.unserved_penalty
+    m[:joint_routing_assignment_unserved_penalty] = unserved_penalty
+    if isfinite(unserved_penalty)
+        constraint_counts["endpoint_feasibility"] = 0
+    else
+        endpoint_feasibility = add_aggregate_od_route_endpoint_feasibility_constraints!(m, data, mapping, y)
+        constraint_counts["endpoint_feasibility"] = length(endpoint_feasibility)
+    end
 
     # ---- 4. Objective ----
     set_joint_routing_assignment_objective!(m, data, mapping, x_walk)
+    if isfinite(unserved_penalty)
+        unserved = add_joint_routing_assignment_unserved_slack!(m, mapping, coverage, unserved_penalty)
+        m[:joint_routing_assignment_unserved] = unserved
+        variable_counts["unserved"] = length(unserved)
+    end
 
     # ---- 5. Seed initial columns ----
     # Not model construction: this populates the pool through the same
@@ -326,6 +341,8 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time = m[:joint_routing_assignment_max_wait_time],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
+        demand_weighting = m[:aggregate_od_route_formulation].demand_weighting,
+        unserved_penalty = m[:joint_routing_assignment_unserved_penalty],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(

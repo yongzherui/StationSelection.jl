@@ -58,6 +58,9 @@ function check_feasibility(
         },
         solver::AbstractSolver,
     )::Union{Nothing, String}
+    # A Joint formulation with a finite `unserved_penalty` may leave groups unserved, so a
+    # budget that cannot reach every group refutes nothing.
+    isfinite(something(get_unserved_penalty(formulation), Inf)) && return nothing
     result = run_opt(
         problem, AggregateODRouteFeasibilityFormulation(),
         DirectMIPSolver(config=SolverOptions(silent=true)),

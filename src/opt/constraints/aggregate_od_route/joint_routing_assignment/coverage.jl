@@ -50,3 +50,36 @@ function add_joint_routing_assignment_coverage_constraints!(
     end
     return coverage
 end
+
+export add_joint_routing_assignment_unserved_slack!
+
+"""
+    add_joint_routing_assignment_unserved_slack!(m, mapping, coverage, penalty)
+        -> Dict{Tuple{Int,Int}, VariableRef}
+
+The `unserved_penalty` variant (see `AggregateODRouteJointRoutingAssignmentFormulation`):
+one continuous `u[(s,p)] >= 0` per coverage row, entered into that row with coefficient 1
+and into the objective at `penalty * Q_s[s][p]`. Continuous even in the integer-recovery
+MIP: with `theta`/`x_walk` binary, `u` settles at 0 or 1 at any optimum, since a partial
+slack only pays for coverage the row does not need. Call after the objective is set.
+
+The coverage dual of a row is then capped at `penalty * Q`, so the pricer never values a
+group above what leaving it unserved costs.
+"""
+function add_joint_routing_assignment_unserved_slack!(
+    m::Model,
+    mapping::AggregateODRouteMap,
+    coverage::Dict{Tuple{Int, Int}, ConstraintRef},
+    penalty::Float64,
+)::Dict{Tuple{Int, Int}, VariableRef}
+    isfinite(penalty) && penalty > 0 || throw(ArgumentError("unserved slack needs a finite positive penalty, got $penalty"))
+    unserved = Dict{Tuple{Int, Int}, VariableRef}()
+    for (key2, con) in coverage
+        s, p = key2
+        u = @variable(m, lower_bound = 0.0, base_name = "u_unserved[$s,$p]")
+        set_normalized_coefficient(con, u, 1.0)
+        set_objective_coefficient(m, u, penalty * mapping.Q_s[s][p])
+        unserved[key2] = u
+    end
+    return unserved
+end
