@@ -360,6 +360,22 @@ function _cg_finish_certified!(st::CGLoopState, it::CGIterationState, solver::CG
 end
 
 """
+    _cg_stamp_iteration!(columns, iteration)
+
+Record in each priced column's `metadata["cg_iteration"]` the CG iteration whose master duals
+priced it, before it is offered to the master. The master stores the column object itself, so
+the stamp survives in its column dict; columns rejected as duplicates are never stored, and
+initial (seed) columns carry no stamp.
+"""
+function _cg_stamp_iteration!(columns, iteration::Integer)
+    for c in columns
+        md = hasproperty(c, :metadata) ? c.metadata : nothing
+        md isa AbstractDict && (md["cg_iteration"] = Int(iteration))
+    end
+    return columns
+end
+
+"""
     _cg_harvest_phase!(st, it, build_result, mapping, m, duals, solver) -> Symbol
 
 Take a non-certifying certification attempt's columns as this iteration's pricing result.
@@ -390,6 +406,7 @@ function _cg_harvest_phase!(
     isempty(harvested) && return :proceed
 
     t0 = time()
+    _cg_stamp_iteration!(harvested, it.iteration)
     accepted = add_columns!(build_result, mapping, m, harvested)
     add_sec = time() - t0
     st.cumulative_columns_added += accepted
@@ -461,6 +478,7 @@ function _cg_pricing_phase!(
     end
 
     t0 = time()
+    _cg_stamp_iteration!(new_columns, it.iteration)
     columns_accepted = add_columns!(build_result, mapping, m, new_columns)
     add_columns_sec = time() - t0
     st.cumulative_columns_added += columns_accepted
