@@ -168,6 +168,12 @@ include("label_setting/joint_routing_assignment/darp/prune.jl")
 include("label_setting/joint_routing_assignment/darp/context.jl")
 include("label_setting/joint_routing_assignment/darp/hooks.jl")
 include("label_setting/joint_routing_assignment/darp/driver.jl")
+# exact_capacitated/: exact/'s retroactive crediting plus a vehicle load (per-clock look-back
+# loads, credit-subset branching at each stop) -- see its types.jl. Reuses exact/'s
+# remaining-reward bound and search index, and duals.jl's master verification.
+include("label_setting/joint_routing_assignment/exact_capacitated/types.jl")
+include("label_setting/joint_routing_assignment/exact_capacitated/search.jl")
+include("label_setting/joint_routing_assignment/exact_capacitated/hooks.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
 # relaxed_cluster/: NOT a fourth column-producing pricer -- a relaxation of the pricing

@@ -104,6 +104,10 @@ struct JointRoutingAssignmentDarpPricingData
     candidates_by_origin::Dict{Int, Vector{Int}}
     candidates_by_destination::Dict{Int, Vector{Int}}
     candidates_by_passenger::Vector{Vector{Int}}
+    # optional vehicle capacity (`typemax(Int)` = unlimited, the original behaviour) and each
+    # passenger's load (requests in the group; 1 when not given)
+    capacity::Int
+    load::Vector{Int}
 end
 
 """

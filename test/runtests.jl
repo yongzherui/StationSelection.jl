@@ -66,6 +66,7 @@ const MOI = JuMP.MOI
         include("opt/test_aggregate_od_route_pricing.jl")
         include("opt/test_joint_routing_assignment_pricing.jl")
         include("opt/test_joint_routing_assignment_darp_pricing.jl")
+        include("opt/test_joint_routing_assignment_capacity.jl")
         include("opt/test_joint_routing_assignment_door_to_door.jl")
         include("opt/test_joint_routing_assignment_demand_weighting.jl")
         include("opt/test_joint_routing_assignment_singleton_seeds.jl")

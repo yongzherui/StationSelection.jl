@@ -84,6 +84,12 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     detour_factor::Float64
     max_stops::Int
     demand_weighting::Symbol
+    # Seats per vehicle, counted in requests (a group of Q requests takes Q seats). `nothing`
+    # = unlimited, the model as it always was (pricer `:exact`). With a capacity, groups of
+    # more than `vehicle_capacity` requests are dropped from the instance (no route could
+    # carry them), every route must keep at most `vehicle_capacity` on board on every arc,
+    # and CG prices with `:exact_capacitated`. CGSolver only.
+    vehicle_capacity::Union{Nothing, Int}
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -93,8 +99,11 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
             demand_weighting::Symbol=:count,
+            vehicle_capacity::Union{Nothing, Integer}=nothing,
         )
         _validate_demand_weighting(demand_weighting)
+        isnothing(vehicle_capacity) || vehicle_capacity >= 1 || throw(ArgumentError(
+            "vehicle_capacity must be nothing (unlimited) or >= 1, got $vehicle_capacity"))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
             max_wait_time, detour_factor, max_stops,
@@ -107,6 +116,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             Float64(detour_factor),
             resolved_max_stops,
             demand_weighting,
+            isnothing(vehicle_capacity) ? nothing : Int(vehicle_capacity),
         )
     end
 end

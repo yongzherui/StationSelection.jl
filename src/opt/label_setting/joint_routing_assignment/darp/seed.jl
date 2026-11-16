@@ -23,7 +23,7 @@ function initial_joint_routing_assignment_darp_pricing_labels(
     for node in pricing_data.nodes
         node in endpoints || continue
         options = _joint_routing_assignment_darp_board_options(node, 0.0, Set{Int}(), pricing_data)
-        for board_subset in _joint_routing_assignment_darp_board_subsets(node, options)
+        for board_subset in _joint_routing_assignment_darp_board_subsets(node, options, pricing_data.capacity, pricing_data.load)
             onboard = Dict{Int, Tuple{Int, Int, Float64}}(
                 p => (j, k, 0.0) for (p, j, k, _reward) in board_subset
             )

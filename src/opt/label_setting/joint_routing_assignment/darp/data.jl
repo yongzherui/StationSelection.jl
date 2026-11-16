@@ -39,6 +39,8 @@ function create_joint_routing_assignment_darp_pricing_data(
     repositioning_time::Float64=0.0,
     max_stops::Int=typemax(Int),
     tol::Float64=1e-9,
+    capacity::Int=typemax(Int),
+    load::Dict{Int, Int}=Dict{Int, Int}(),
 )::JointRoutingAssignmentDarpPricingData
     positive = PassengerAssignmentCandidate[c for c in candidates if c.reward > tol]
 
@@ -69,6 +71,7 @@ function create_joint_routing_assignment_darp_pricing_data(
         max_wait_time, resolved_max_stops, bounded_max_stops,
         n_passengers, passenger_weight, positive, candidate_index,
         candidates_by_origin, candidates_by_destination, candidates_by_passenger,
+        capacity, Int[get(load, p, 1) for p in 1:n_passengers],
     )
 end
 
@@ -109,6 +112,35 @@ list of `(p, node, destination, reward)` triples actually boarded; the empty
 decide degenerates to one action, same as every other pricer's "boring node"
 case.
 """
+function _joint_routing_assignment_darp_board_subsets(
+    node::Int,
+    options::Dict{Int, Vector{Tuple{Int, Float64}}},
+    room::Int,
+    load::Vector{Int},
+)::Vector{Vector{Tuple{Int, Int, Int, Float64}}}
+    room == typemax(Int) && return _joint_routing_assignment_darp_board_subsets(node, options)
+    passengers = sort!(collect(keys(options)))
+    selections = Vector{Tuple{Int, Int, Int, Float64}}[]
+    selection = Tuple{Int, Int, Int, Float64}[]
+    function rec(i::Int, left::Int)
+        if i > length(passengers)
+            push!(selections, copy(selection))
+            return
+        end
+        rec(i + 1, left)
+        p = passengers[i]
+        load[p] <= left || return
+        for (k, r) in options[p]
+            push!(selection, (p, node, k, r))
+            rec(i + 1, left - load[p])
+            pop!(selection)
+        end
+    end
+    rec(1, room)
+    return selections
+end
+
+"""The same with unlimited capacity (every combination)."""
 function _joint_routing_assignment_darp_board_subsets(
     node::Int,
     options::Dict{Int, Vector{Tuple{Int, Float64}}},

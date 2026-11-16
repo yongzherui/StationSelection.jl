@@ -40,6 +40,8 @@ function build_model(
         formulation::AggregateODRouteJointRoutingAssignmentFormulation,
         solver::BendersSolver,
     )::BuildResult
+    isnothing(formulation.vehicle_capacity) || throw(ArgumentError(
+        "vehicle_capacity is supported by CGSolver only (pricing mode :exact_capacitated)"))
     return build_model(
         problem,
         AggregateODRouteJointRoutingAssignmentMasterFormulation(formulation),

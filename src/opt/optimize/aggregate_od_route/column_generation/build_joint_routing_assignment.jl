@@ -72,6 +72,40 @@ function _validate_joint_routing_assignment_initial_columns(
 end
 
 """
+    _joint_routing_assignment_group_requests(data, mapping) -> Dict{Int, Vector{Int}}
+
+Requests per demand group, parallel to `mapping.Omega_s[s]`, whatever `demand_weighting`
+says (`Q_s` is 1 under `:unit`): the seats a group takes in a capacitated vehicle.
+"""
+function _joint_routing_assignment_group_requests(data::StationSelectionData, mapping::AggregateODRouteMap)
+    out = Dict{Int, Vector{Int}}()
+    for s in 1:n_scenarios(data)
+        od_count = compute_scenario_od_count(data.scenarios[s])
+        out[s] = [od_count[od] for od in mapping.Omega_s[s]]
+    end
+    return out
+end
+
+"""
+    _joint_routing_assignment_column_max_load(column, requests) -> Int
+
+Most requests on board on any arc of `column`, from its `assignment_positions` metadata
+(every pricer and the two-stop seeds record it). A column without positions is an error
+under a capacity: its load cannot be checked.
+"""
+function _joint_routing_assignment_column_max_load(column, requests::Dict{Int, Vector{Int}})::Int
+    pos = get(column.metadata, "assignment_positions", nothing)
+    pos === nothing && error("column $(column.id) has no assignment_positions; its load under a vehicle capacity cannot be checked")
+    s = Int(column.metadata["scenario"])
+    arc = zeros(Int, max(length(column.route) - 1, 0))
+    for (p, _j, _k) in column.assignments
+        a, b = pos[p]
+        for e in a:(b - 1); arc[e] += requests[s][p]; end
+    end
+    return maximum(arc; init = 0)
+end
+
+"""
     build_model(problem::StationSelectionProblem,
                 formulation::AggregateODRouteJointRoutingAssignmentFormulation,
                 solver::CGSolver) -> BuildResult
@@ -105,6 +139,19 @@ function build_model(
         solver.initial_columns,
         joint_routing_assignment_two_stop_seed_columns(data, mapping),
     )
+    cap = formulation.vehicle_capacity
+    if !isnothing(cap)
+        requests = _joint_routing_assignment_group_requests(data, mapping)
+        if isnothing(solver.initial_columns)
+            # Two-stop bundles over capacity are dropped; their groups keep their singleton seeds.
+            initial_columns = [c for c in initial_columns if _joint_routing_assignment_column_max_load(c, requests) <= cap]
+        else
+            for c in initial_columns
+                _joint_routing_assignment_column_max_load(c, requests) <= cap || error(
+                    "initial column $(c.id) carries more than vehicle_capacity = $cap requests on some arc")
+            end
+        end
+    end
     return _build_joint_routing_assignment_model(
         data, mapping, problem.k, formulation;
         relax_integrality = true,
@@ -167,7 +214,23 @@ function _build_joint_routing_assignment_model(
     # re-resolving a `nothing` default. `DirectMIPSolver`'s own build of this same master
     # passes no config and lands on `:exact`, which is inert there: it enumerates its pool
     # up front and never prices.
-    m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
+    cap = formulation.vehicle_capacity
+    if isnothing(cap)
+        pricing.mode === :exact_capacitated && throw(ArgumentError(
+            "pricing mode :exact_capacitated needs a formulation with vehicle_capacity set"))
+        m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
+    else
+        # A capacity changes the model, so only the capacitated pricer prices it; every other
+        # pricer would generate routes the model forbids.
+        something(pricing.mode, :exact_capacitated) === :exact_capacitated || throw(ArgumentError(
+            "vehicle_capacity = $cap requires pricing mode :exact_capacitated (or nothing), got $(repr(pricing.mode))"))
+        isnothing(pricing.warm_start_mode) || throw(ArgumentError(
+            "vehicle_capacity is not supported with a pricing warm_start_mode"))
+        m[:joint_routing_assignment_pricing_mode] = :exact_capacitated
+    end
+    m[:joint_routing_assignment_vehicle_capacity] = cap
+    m[:joint_routing_assignment_group_requests] = isnothing(cap) ? nothing :
+        _joint_routing_assignment_group_requests(data, mapping)
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -326,6 +389,7 @@ function _aggregate_od_route_integer_recovery_build(
         max_wait_time = m[:joint_routing_assignment_max_wait_time],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
+        vehicle_capacity = m[:joint_routing_assignment_vehicle_capacity],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     return _build_joint_routing_assignment_model(

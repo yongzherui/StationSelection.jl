@@ -234,7 +234,7 @@ that formulation's `build_model` (`AggregateODRouteBaseFormulation` offers none 
 """
 const CG_PRICING_MODES = (
     :exact, :station_simple, :darp_modified, :darp, :relaxed_cluster,
-    :relaxed_cluster_two_tier,
+    :relaxed_cluster_two_tier, :exact_capacitated,
 )
 const CG_WARM_START_PRICING_MODES = (CG_PRICING_MODES..., :cluster_guide)
 

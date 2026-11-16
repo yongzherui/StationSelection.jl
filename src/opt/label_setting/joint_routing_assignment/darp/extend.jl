@@ -85,7 +85,17 @@ function _joint_routing_assignment_darp_candidate_next_nodes(
 
         arrival_time = label.time + travel_time
         options = _joint_routing_assignment_darp_board_options(next_node, arrival_time, resolved, pricing_data)
-        for board_subset in _joint_routing_assignment_darp_board_subsets(next_node, options)
+        # with a capacity: the passengers still onboard after next_node's drop-offs ride the
+        # arc out of it together with whoever boards there
+        room = typemax(Int)
+        if pricing_data.capacity != typemax(Int)
+            aboard = 0
+            for (p, (_, k, _)) in label.onboard
+                k == next_node || (aboard += pricing_data.load[p])
+            end
+            room = pricing_data.capacity - aboard
+        end
+        for board_subset in _joint_routing_assignment_darp_board_subsets(next_node, options, room, pricing_data.load)
             push!(actions, (next_node, board_subset))
         end
     end

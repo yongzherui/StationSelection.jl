@@ -39,6 +39,8 @@ function build_model(
         max_routes::Int=10_000,
         time_limit_sec::Float64=30.0,
     )::BuildResult
+    isnothing(formulation.vehicle_capacity) || throw(ArgumentError(
+        "vehicle_capacity is supported by CGSolver only (pricing mode :exact_capacitated)"))
     data = problem.data
     mapping = create_aggregate_od_route_map(problem, formulation, data)
     aggregate_od_route_validate_feasible_coverage(data, mapping)

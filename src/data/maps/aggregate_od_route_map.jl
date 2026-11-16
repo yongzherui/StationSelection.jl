@@ -204,6 +204,11 @@ for the same reason as `_aggregate_od_route_allow_walk_only`.
 """
 _aggregate_od_route_demand_weighting(f::AnyJointRoutingAssignmentFormulation) = f.demand_weighting
 _aggregate_od_route_demand_weighting(::AggregateODRouteBaseFormulation) = :unit
+
+"""Seats per vehicle in requests, or `nothing` (unlimited). Only the joint monolith carries
+one (`vehicle_capacity`); every other formulation is uncapacitated."""
+_aggregate_od_route_vehicle_capacity(formulation) = nothing
+_aggregate_od_route_vehicle_capacity(f::AggregateODRouteJointRoutingAssignmentFormulation) = f.vehicle_capacity
 _aggregate_od_route_demand_weighting(::AggregateODRouteFeasibilityFormulation) = :unit
 
 """
@@ -283,11 +288,14 @@ function create_aggregate_od_route_map(
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
     Q_s = Dict{Int, Vector{Int}}()
     demand_weighting = _aggregate_od_route_demand_weighting(formulation)
+    capacity = _aggregate_od_route_vehicle_capacity(formulation)
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (s, scenario_data) in enumerate(data.scenarios)
         od_count = compute_scenario_od_count(scenario_data)
-        Omega_s[s] = sort!(collect(keys(od_count)))
+        # With a vehicle capacity, a group of more requests than seats can ride no route: it
+        # is dropped from the instance (owner's choice, 2026-11-14), not left uncoverable.
+        Omega_s[s] = sort!([od for od in keys(od_count) if isnothing(capacity) || od_count[od] <= capacity])
         # See "Demand per OD group" on `AggregateODRouteMap`.
         Q_s[s] = demand_weighting === :count ?
             [od_count[od] for od in Omega_s[s]] :

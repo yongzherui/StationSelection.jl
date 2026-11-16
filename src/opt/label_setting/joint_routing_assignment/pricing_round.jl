@@ -115,6 +115,18 @@ _pricing_parallel_scenarios(::AggregateODRouteJointRoutingAssignmentFormulation)
 _pricing_next_column_id(::AggregateODRouteJointRoutingAssignmentFormulation, mapping::AggregateODRouteMap, m::JuMP.Model) =
     maximum(keys(m[:joint_routing_assignment_columns]); init=0) + 1
 
+const _CAPACITATED_CRITICAL_LOCK = ReentrantLock()
+
+"""The scenario's critical-rider set for `:exact_capacitated` (see its `types.jl`), kept on
+the model so each CG iteration starts from the set the previous one grew. Scenarios are
+priced on separate threads, hence the lock around the shared Dict."""
+function _capacitated_critical_set!(m::JuMP.Model, s::Int)::Vector{Bool}
+    lock(_CAPACITATED_CRITICAL_LOCK) do
+        d = get!(() -> Dict{Int, Vector{Bool}}(), JuMP.object_dictionary(m), :joint_routing_assignment_capacitated_critical)
+        return get!(() -> Bool[], d, s)
+    end
+end
+
 """
 Build one scenario's pricing context: duals -> candidates -> pricing data ->
 search context (`exact/`, `darp_modified/`, or `darp/`, per
@@ -148,6 +160,23 @@ function _pricing_build_scenario_context(
         isnothing(built) && return nothing
         ctx, guide_elapsed = built
         return ctx, existing, max(0.0, time_limit - guide_elapsed)
+    end
+
+    if pricing_mode === :exact_capacitated
+        requests = m[:joint_routing_assignment_group_requests][s]
+        cap_data = create_joint_routing_assignment_capacitated_pricing_data(
+            s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
+            capacity=Int(m[:joint_routing_assignment_vehicle_capacity]),
+            load=Dict(p => requests[p] for p in eachindex(requests)),
+            critical=_capacitated_critical_set!(m, s),
+            route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
+            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
+            max_stops=Int(m[:joint_routing_assignment_max_stops]),
+            compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
+        )
+        isempty(cap_data.base.opportunities) && return nothing
+        return JointRoutingAssignmentCapacitatedSearchContext(cap_data), existing
     end
 
     if pricing_mode === :darp_modified
