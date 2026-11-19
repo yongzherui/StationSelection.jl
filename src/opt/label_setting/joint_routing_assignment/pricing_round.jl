@@ -281,11 +281,12 @@ function _pricing_build_scenario_context(
     # layers, searched under the simulator's walking/boarding timing rules.
     if pricing_mode === :exact_no_anticipation
         first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol
-        triggers = first_boarding === :start_now ? nothing : joint_routing_assignment_trigger_candidates(
+        triggers = first_boarding in (:start_now, :start_now_walk_limit) ? nothing : joint_routing_assignment_trigger_candidates(
             data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, ride_time_limit_ratio, s,
         )
         na_data = create_no_anticipation_pricing_data(
             pricing_data, data, mapping, s, ride_time_limit_ratio, first_boarding; trigger_candidates=triggers,
+            first_stop_walk_limit = m[:joint_routing_assignment_first_stop_walk_limit]::Float64,
         )
         return NoAnticipationSearchContext(na_data), existing
     end

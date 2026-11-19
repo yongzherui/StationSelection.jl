@@ -52,6 +52,7 @@ function joint_routing_assignment_two_stop_seed_columns(
     data::StationSelectionData,
     mapping::AggregateODRouteMap;
     next_column_id::Int=1,
+    singletons_only::Bool=false,
 )::Vector{JointRoutingAssignmentRouteColumn}
     by_route = Dict{Tuple{Int, Int, Int}, Vector{Tuple{Int, Int, Int}}}()
     for s in 1:n_scenarios(data)
@@ -69,15 +70,18 @@ function joint_routing_assignment_two_stop_seed_columns(
 
     columns = JointRoutingAssignmentRouteColumn[]
     id = next_column_id
-    for (s, j, k) in sort!(collect(keys(by_route)))
-        assignments = sort!(by_route[(s, j, k)])
-        push!(columns, _two_stop_seed_column(id, s, j, k, assignments, data, "two_stop"))
-        id += 1
+    # `singletons_only` (M4, `first_boarding = :start_now_walk_limit`): no bundles, one group per column.
+    if !singletons_only
+        for (s, j, k) in sort!(collect(keys(by_route)))
+            assignments = sort!(by_route[(s, j, k)])
+            push!(columns, _two_stop_seed_column(id, s, j, k, assignments, data, "two_stop"))
+            id += 1
+        end
     end
     # Singletons, in addition to the bundles (see the docstring): one group per column.
     for (s, j, k) in sort!(collect(keys(by_route)))
         assignments = by_route[(s, j, k)]
-        length(assignments) > 1 || continue      # a one-group bundle already is the singleton
+        (singletons_only || length(assignments) > 1) || continue      # a one-group bundle already is the singleton
         for a in sort(assignments)
             push!(columns, _two_stop_seed_column(id, s, j, k, [a], data, "two_stop_singleton"))
             id += 1

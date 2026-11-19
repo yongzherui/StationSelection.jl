@@ -22,6 +22,12 @@ Clock. Every rider of a scenario requests at t = 0 (the scenario's shared start,
     at the first stop have gathered: every first-stop rider needs walk(o, j1) <= t0 (the
     simulator lets an idle vehicle defer its departure until after a walker arrives). Riders
     who arrive earlier stand at the stop; the door-to-door limit runs from the request, so that counts.
+  - `:start_now_walk_limit` (M4, owner 2026-11-19) -- M1 with a cap: the vehicle leaves at
+    t0 = 0 and takes only first-stop riders with walk(o, j1) <= `first_stop_walk_limit`
+    (60/120/300 s), so it runs ahead of a first-stop rider by at most that much. Their door-to-door
+    limit is M1's. Master seeds are two-stop singletons only (`seeding.jl`, `singletons_only`):
+    a lone rider's `[j, k]` stays valid at any walk (the vehicle could wait for them), but a
+    seed bundle could pool first-stop riders the pricer forbids.
 
 Under M2/M3 every route starts on a TRIGGER: a rider pair (p, j1, k) whose walk sets t0 (the
 first walker under M2, the last under M3). The trigger must be carried -- dropped off at k with
@@ -92,6 +98,7 @@ struct NoAnticipationPricingData
     base::JointRoutingAssignmentPricingData
     first_walker::Bool          # M2 or M3: the vehicle waits (empty) at its first stop and leaves at t0 > 0
     gather::Bool                # M3: every first-stop rider with walk <= t0 boards (else only walk in (t0 - 5 s, t0])
+    first_walk_limit::Float64   # M4: first-stop riders need walk <= this (Inf for M1/M2/M3)
     opps::Vector{NoAnticipationOpportunity}
     by_origin::Dict{Int, Vector{Int}}
     by_destination::Dict{Int, Vector{Int}}

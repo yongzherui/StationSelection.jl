@@ -121,6 +121,7 @@ struct CGPricingConfig
     relaxed_cluster_macro_count::Union{Nothing, Int}
     relaxed_cluster_aligned_subset_max::Int
     first_boarding::Symbol
+    first_stop_walk_limit::Float64
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -132,6 +133,7 @@ struct CGPricingConfig
             relaxed_cluster_macro_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_aligned_subset_max::Int=15,
             first_boarding::Symbol=:start_now,
+            first_stop_walk_limit::Real=Inf,
         )
         _cg_validate_pricing_mode(mode, "mode")
         # `first_boarding` is read only by `mode = :exact_no_anticipation`
@@ -140,9 +142,23 @@ struct CGPricingConfig
         # riders' walk is not waited for; `:after_first_walker` waits (empty) for the first
         # rider to arrive and leaves the moment that rider boards; `:after_last_walker` lets
         # the riders it takes there gather and leaves when the last of them arrives.
-        first_boarding in (:start_now, :after_first_walker, :after_last_walker) || throw(ArgumentError(
-            "first_boarding must be :start_now, :after_first_walker or :after_last_walker, got $(repr(first_boarding))",
-        ))
+        # `:start_now_walk_limit` (M4, 2026-11-19) leaves at t = 0 like `:start_now` but takes
+        # only first-stop riders whose walk is <= `first_stop_walk_limit` (seconds), so the
+        # vehicle never runs ahead of a first-stop rider by more than that limit.
+        first_boarding in (:start_now, :after_first_walker, :after_last_walker, :start_now_walk_limit) ||
+            throw(ArgumentError(
+                "first_boarding must be :start_now, :after_first_walker, :after_last_walker or " *
+                ":start_now_walk_limit, got $(repr(first_boarding))",
+            ))
+        if first_boarding === :start_now_walk_limit
+            (isfinite(first_stop_walk_limit) && first_stop_walk_limit >= 0) || throw(ArgumentError(
+                "first_boarding=:start_now_walk_limit needs a finite first_stop_walk_limit >= 0 (seconds), " *
+                "got $(first_stop_walk_limit)"))
+        else
+            isinf(first_stop_walk_limit) || throw(ArgumentError(
+                "first_stop_walk_limit is read only by first_boarding=:start_now_walk_limit, got " *
+                "$(first_stop_walk_limit) with first_boarding=$(repr(first_boarding))"))
+        end
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
         # `:relaxed_cluster` never reports its own exhaustion -- the only thing it can
         # exhaust is the relaxation, and that is a full-universe certificate that ends the
@@ -232,7 +248,7 @@ struct CGPricingConfig
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
             relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
-            relaxed_cluster_aligned_subset_max, first_boarding,
+            relaxed_cluster_aligned_subset_max, first_boarding, Float64(first_stop_walk_limit),
         )
     end
 end

@@ -45,6 +45,7 @@ function create_no_anticipation_pricing_data(
     ride_time_limit_ratio::Float64,
     first_boarding::Symbol;
     trigger_candidates::Union{Nothing, AbstractVector}=nothing,
+    first_stop_walk_limit::Float64=Inf,
 )::NoAnticipationPricingData
     omega = mapping.Omega_s[scenario]
     ratio = mapping.door_to_door_limit_ratio
@@ -111,7 +112,8 @@ function create_no_anticipation_pricing_data(
     end
     pmax = max(maximum((o.p for o in opps); init = 0), maximum((t.p for t in triggers); init = 0))
     return NoAnticipationPricingData(base, first_walker,
-                                     first_boarding === :after_last_walker, opps, by_origin, by_destination,
+                                     first_boarding === :after_last_walker,
+                                     first_boarding === :start_now_walk_limit ? first_stop_walk_limit : Inf, opps, by_origin, by_destination,
                                      sort!(collect(keys(by_origin))), triggers, p_layers, starts, start_triggers,
                                      travel, Tuple{Float64, Int, Float64}[], zeros(pmax), Int[])
 end
@@ -132,7 +134,8 @@ end
                (pd.gather || o.walk_in > t0 - NO_ANTICIPATION_FIRST_WALKER_TOL - NO_ANTICIPATION_EPS) &&
                T <= o.deadline + 1e-9
     end
-    return T <= o.deadline - o.walk_in + 1e-9          # M1: the `exact` door-to-door limit (walk counted, no wait)
+    o.walk_in <= pd.first_walk_limit + NO_ANTICIPATION_EPS || return false   # M4 (Inf under M1)
+    return T <= o.deadline - o.walk_in + 1e-9          # M1/M4: the `exact` door-to-door limit (walk counted, no wait)
 end
 
 "Could a later-visit clock at `j` (visit time `v`, age `age`, now `T`, vehicle at `cur`) still credit anyone?"
@@ -476,9 +479,9 @@ function _na_make_bitsets(label::NoAnticipationLabel, pd::NoAnticipationPricingD
     return NoAnticipationBitsets(stations, ages, gaps, fw, rw)        # rw is sorted: by_origin is sorted by walk
 end
 
-"First-stop riders admitted with departure `t0`: M3 walk <= t0, M2 walk in (t0 - 5 s, t0], M1 everyone."
+"First-stop riders admitted with departure `t0`: M3 walk <= t0, M2 walk in (t0 - 5 s, t0], M1 everyone, M4 walk <= limit."
 @inline _na_root_admits(pd::NoAnticipationPricingData, t0::Float64, w::Float64) =
-    !pd.first_walker || (w <= t0 + NO_ANTICIPATION_EPS &&
+    !pd.first_walker ? w <= pd.first_walk_limit + NO_ANTICIPATION_EPS : (w <= t0 + NO_ANTICIPATION_EPS &&
                          (pd.gather || w > t0 - NO_ANTICIPATION_FIRST_WALKER_TOL - NO_ANTICIPATION_EPS))
 
 "Does every unpaid, deliverable first-stop rider that departure `tb` admits also get admitted by `ta`?"

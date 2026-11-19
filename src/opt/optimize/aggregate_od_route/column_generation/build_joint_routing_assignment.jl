@@ -146,7 +146,12 @@ function build_model(
             joint_routing_assignment_two_stop_seed_columns_first_walker(
                 data, mapping; pickup_deadline_s = formulation.pickup_deadline_s,
                 gather = solver.pricing.first_boarding === :after_last_walker) :
-            joint_routing_assignment_two_stop_seed_columns(data, mapping),
+            joint_routing_assignment_two_stop_seed_columns(
+                data, mapping;
+                # M4: a first-stop bundle may carry only riders within first_stop_walk_limit;
+                # seed singletons only (a lone rider's [j, k] is fine: the vehicle can wait for them).
+                singletons_only = solver.pricing.mode === :exact_no_anticipation &&
+                                  solver.pricing.first_boarding === :start_now_walk_limit),
     )
     cap = formulation.vehicle_capacity
     if !isnothing(cap)
@@ -241,6 +246,7 @@ function _build_joint_routing_assignment_model(
     m[:joint_routing_assignment_group_requests] = isnothing(cap) ? nothing :
         _joint_routing_assignment_group_requests(data, mapping)
     m[:joint_routing_assignment_first_boarding] = pricing.first_boarding
+    m[:joint_routing_assignment_first_stop_walk_limit] = pricing.first_stop_walk_limit
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -437,5 +443,6 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_macro_count = macro_count,
         relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
         first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol,
+        first_stop_walk_limit = m[:joint_routing_assignment_first_stop_walk_limit]::Float64,
     )
 end
