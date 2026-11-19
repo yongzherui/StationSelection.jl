@@ -10,11 +10,11 @@
 
     @test_throws ArgumentError CGSolver(pricing_time_limit_sec=0.0)
 
-    function darp_data(candidates; n=3, max_wait_time=10.0, max_stops=5)
+    function darp_data(candidates; n=3, pickup_deadline_s=10.0, max_stops=5)
         return create_joint_routing_assignment_darp_pricing_data(
             1, collect(1:n), complete_line_cost(n), candidates;
             route_regularization_weight=1.0,
-            max_wait_time=max_wait_time,
+            pickup_deadline_s=pickup_deadline_s,
             max_stops=max_stops,
         )
     end
@@ -42,7 +42,7 @@
             PassengerAssignmentCandidate(1, 1, 2, 5.0, 4.0),
             PassengerAssignmentCandidate(2, 2, 3, 5.0, 7.0),
         ]
-        data = darp_data(candidates; n=3, max_wait_time=0.5)
+        data = darp_data(candidates; n=3, pickup_deadline_s=0.5)
         label = JointRoutingAssignmentDarpPricingLabel(
             1, [1], 0.0, Dict(1 => (1, 2, 0.0)),
             Set{Tuple{Int, Int, Int}}(), 0.0, -4.0, 1,
@@ -185,12 +185,12 @@
 
             exact_data = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, candidates;
-                route_regularization_weight=1.0, max_wait_time=3.0,
+                route_regularization_weight=1.0, pickup_deadline_s=3.0,
                 max_stops=4, compensated_dominance=false,
             )
             darp = create_joint_routing_assignment_darp_pricing_data(
                 1, nodes, travel, candidates;
-                route_regularization_weight=1.0, max_wait_time=3.0, max_stops=4,
+                route_regularization_weight=1.0, pickup_deadline_s=3.0, max_stops=4,
             )
             exact_ctx = StationSelection.JointRoutingAssignmentSearchContext(exact_data)
             darp_ctx = StationSelection.JointRoutingAssignmentDarpSearchContext(darp)
@@ -247,7 +247,7 @@
                 route_regularization_weight=1.0,
                 walk_cost_weight=1.0,
                 repositioning_time=0.0,
-                max_wait_time=10.0,
+                pickup_deadline_s=10.0,
                 max_stops=5,
         )
         exact_solver = CGSolver(max_iterations=100, reduced_cost_tol=1e-7,

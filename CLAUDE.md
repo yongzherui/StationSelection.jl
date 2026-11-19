@@ -46,7 +46,9 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
 - **Clustering models** keep the y (build) / z (activate per scenario) split, `l <= k`. In practice z == y.
 - **LAR and Joint LAR** have no z: every built station is usable in every scenario.
 - **Route fields:** `route_regularization_weight` (multiplies each route's cost), `walk_cost_weight`,
-  `repositioning_time` (added to every route; project standard 20 s), `max_wait_time`, `detour_factor` (min 1.0;
+  `repositioning_time` (added to every route; project standard 20 s), `pickup_deadline_s` (the pickup deadline: a route
+  picks riders up only while its clock, which starts at 0 with every request, is <= it; required, no default),
+  `detour_factor` (min 1.0;
   ride-time limit counterpart, project standard 2.0, package default 1.5), `max_stops` (min 2, default unbounded).
 - **Direct walking (`x_walk`) is OFF** for every live formulation: the simulator has no walk-only mode, so
   selection must not serve groups on foot.

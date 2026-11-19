@@ -35,14 +35,14 @@
     relaxed_data(clustering, travel_cost, candidates; kwargs...) =
         SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
             1, clustering, travel_cost, candidates;
-            route_regularization_weight = 1.0, max_wait_time = 100.0,
+            route_regularization_weight = 1.0, pickup_deadline_s = 100.0,
             repositioning_time = 0.0, max_stops = typemax(Int), kwargs...,
         )
 
     exact_data(nodes, travel_cost, candidates) =
         create_joint_routing_assignment_pricing_data(
             1, nodes, travel_cost, candidates;
-            route_regularization_weight = 1.0, max_wait_time = 100.0,
+            route_regularization_weight = 1.0, pickup_deadline_s = 100.0,
             repositioning_time = 0.0, max_stops = typemax(Int),
         )
 
@@ -243,7 +243,7 @@
         ]
         exact = exact_data(nodes, costs, candidates)
         relaxed = relaxed_data(clustering, costs, candidates).inner
-        for field in (:route_regularization_weight, :repositioning_time, :max_wait_time,
+        for field in (:route_regularization_weight, :repositioning_time, :pickup_deadline_s,
                       :max_stops, :bounded_max_stops, :compensated_dominance, :scenario)
             @test getfield(relaxed, field) == getfield(exact, field)
         end
@@ -279,7 +279,7 @@
         # the pickup clock there never opens and the reward is unreachable.
         tight = SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
             1, clustering, costs, candidates;
-            route_regularization_weight = 1.0, max_wait_time = 1.0,
+            route_regularization_weight = 1.0, pickup_deadline_s = 1.0,
             repositioning_time = 0.0, max_stops = typemax(Int),
         )
         assignments, _tau, _rc, _pos =
@@ -485,7 +485,7 @@
         #     each cell into a small blob far from the others, leaving almost no travel
         #     slack, so the per-passenger reward maximum becomes load-bearing and that
         #     mutation now fails. `n_reward_discriminating` asserts the shape occurred.
-        #   * **a binding pickup window.** `max_wait_time` is set below the longest arc,
+        #   * **a binding pickup window.** `pickup_deadline_s` is set below the longest arc,
         #     so clocks genuinely expire -- the regime where the relaxation's "relaxed
         #     times are smaller, so clocks open more easily" argument has to hold.
         #   * **a binding stop cap.** `max_stops` of 3-4 makes `bounded_max_stops` true,
@@ -613,10 +613,10 @@
             isempty(candidates) && continue
 
             max_stops = rand(3:4)
-            max_wait = longest_arc * (0.3 + 0.4 * rand())
-            @test max_wait < longest_arc          # the pickup window really does bind
+            pickup_deadline = longest_arc * (0.3 + 0.4 * rand())
+            @test pickup_deadline < longest_arc          # the pickup window really does bind
             compensated = isodd(trial)
-            shared = (route_regularization_weight = 1.0, max_wait_time = max_wait,
+            shared = (route_regularization_weight = 1.0, pickup_deadline_s = pickup_deadline,
                       repositioning_time = 5.0, max_stops = max_stops,
                       compensated_dominance = compensated)
 
@@ -741,7 +741,7 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         base = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(),
         )
         @test base.termination_status == SOLVE_OPTIMAL
@@ -753,7 +753,7 @@
         @test all(r -> r.certification_outcome == "none", base.metadata["cg_iteration_log"])
 
         for n_clusters in (2, 4, data.n_stations)
-            formulation = AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4)
+            formulation = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4)
             result = run_opt(problem, formulation, rc_solver(n_clusters))
             # Whether the relaxation certifies or not, the answer must not move: a failed
             # certification only wastes a round, it never changes which columns are priced.
@@ -796,7 +796,7 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             rc_solver(data.n_stations),
         )
         @test result.termination_status == SOLVE_OPTIMAL
@@ -815,7 +815,7 @@
         solver = rc_solver(3)
         build = StationSelection.build_model(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             solver,
         )
         delete!(build.model.obj_dict, :joint_routing_assignment_station_clustering)
@@ -835,7 +835,7 @@
         solver = rc_solver(3)
         build = StationSelection.build_model(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             solver,
         )
         m = build.model
@@ -1073,7 +1073,7 @@
             relaxed = SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
                 1, clustering, costs, candidates;
                 route_regularization_weight = 1.0,
-                max_wait_time = maximum(values(costs)) * 0.6,
+                pickup_deadline_s = maximum(values(costs)) * 0.6,
                 repositioning_time = 5.0, max_stops = max_stops,
                 compensated_dominance = isodd(trial),
             )
@@ -1134,7 +1134,7 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             rc_solver(3),
         )
         stats = result.metadata["cg_relaxed_cluster_guide_stats"]
@@ -1168,7 +1168,7 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         base = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(recover_integer_solution = true),
         )
         @test base.termination_status == SOLVE_OPTIMAL
@@ -1176,7 +1176,7 @@
         for n_clusters in (2, 4, data.n_stations)
             result = run_opt(
                 problem,
-                AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+                AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
                 rc_solver(n_clusters; recover_integer_solution = true),
             )
             @test result.termination_status == SOLVE_OPTIMAL
@@ -1199,14 +1199,14 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         base = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(recover_integer_solution = true),
         )
         # K = 2 is coarse enough that the relaxation is loose, so attempts keep coming back
         # `:column_found` -- which is exactly the path that harvests.
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             rc_solver(2; recover_integer_solution = true),
         )
         harvested = result.metadata["cg_certification_harvested_columns"]
@@ -1402,7 +1402,7 @@
 
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             rc_solver(2; recover_integer_solution = true),
         )
         @test result.metadata["cg_certifying_rounds"] == 0
@@ -1412,7 +1412,7 @@
         # control, so a future change that disabled it everywhere would be caught.
         plain = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(recover_integer_solution = true),
         )
         @test plain.metadata["cg_certifying_rounds"] >= 0
@@ -1434,14 +1434,14 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         base = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(recover_integer_solution = true),
         )
 
         # Refinement OFF: no per-scenario state, and the report is empty.
         off = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             rc_solver(2; recover_integer_solution = true),
         )
         @test isempty(off.metadata["cg_relaxed_cluster_final_counts"])
@@ -1451,7 +1451,7 @@
         # and never past the ceiling.
         on = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(
                 recover_integer_solution = true,
                 pricing = CGPricingConfig(

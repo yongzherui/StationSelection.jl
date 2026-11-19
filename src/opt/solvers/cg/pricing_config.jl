@@ -17,7 +17,7 @@ sweep now varies one solver and reuses one formulation object, instead of rebuil
 "different" formulation per arm and having to argue that the arms are comparable.
 
 `AbstractFormulation` still owns everything that changes the model: the cost weights,
-`max_stops`, `detour_factor`, `max_wait_time`. `compensated_dominance` lives here because
+`max_stops`, `detour_factor`, `pickup_deadline_s`. `compensated_dominance` lives here because
 it changes only label-setting search, never the encoded model or route universe.
 
 ## Fields

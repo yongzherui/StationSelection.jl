@@ -37,7 +37,7 @@ function _station_cluster_pricing_case(n::Int, seed::Int, scenario::Int)
     candidates = diag_scenario_candidates(data, n, scenario)
     println("CASE n=$n seed=$seed scenario=$scenario candidates=$(length(candidates)) passengers=$(length(unique(c.passenger for c in candidates)))")
     pd = create_passenger_free_assignment_pricing_data(scenario, collect(1:n), travel, candidates;
-        route_regularization_weight=10.0, max_wait_time=900.0, repositioning_time=20.0,
+        route_regularization_weight=10.0, pickup_deadline_s=900.0, repositioning_time=20.0,
         max_stops=4, max_visits_per_node=3)
 
     exact = price_exact_on_stations(pd, BitSet(pd.nodes); time_limit=300.0, use_reduced_cost_pruning=false)

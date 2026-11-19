@@ -105,7 +105,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(StationSelection._initial_joint_routing_assignment_station_simple_labels(pd), 1)
         @test label0.visited == Set([1])
@@ -128,7 +128,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(StationSelection._initial_joint_routing_assignment_station_simple_labels(pd), 1)
         label1 = StationSelection._extend_joint_routing_assignment_station_simple_label(label0, 2, pd)
@@ -148,7 +148,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=4,
         )
         cols, _exhausted, _stats = joint_routing_assignment_pricing_by_station_simple_label_setting(
             pd, JointRoutingAssignmentRouteColumn[];
@@ -170,7 +170,7 @@
         reward_lookup = Dict((c.p, c.origin, c.destination) => c.reward for c in candidates)
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=4,
         )
         # The driver's route replay asserts label rc == recomputed rc internally; here
         # we also check it against an independent per-assignment recomputation.
@@ -197,7 +197,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=4,
         )
         brute_best = brute_force_best_elementary_rc(nodes, travel, pd)
         cols, exhausted, _stats = joint_routing_assignment_pricing_by_station_simple_label_setting(
@@ -219,7 +219,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=3,
         )
         rev_cols, _e1, _s1 = joint_routing_assignment_pricing_by_label_setting(
             pd, JointRoutingAssignmentRouteColumn[];
@@ -246,7 +246,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=3,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=3,
         )
 
         rev_cols, _e1, _s1 = joint_routing_assignment_pricing_by_label_setting(
@@ -284,7 +284,7 @@
         ]
         pd = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         node_index = Dict(n => i for (i, n) in enumerate(pd.nodes))
         n_nodes = length(pd.nodes)
@@ -349,7 +349,7 @@
             pd = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, cands;
                 route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
-                max_wait_time=Float64(rand(rng, 1:4)),
+                pickup_deadline_s=Float64(rand(rng, 1:4)),
                 max_stops=typemax(Int),
             )
             isempty(pd.opportunities) && continue
@@ -411,7 +411,7 @@
             pd = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, cands;
                 route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
-                max_wait_time=Float64(rand(rng, 1:4)),
+                pickup_deadline_s=Float64(rand(rng, 1:4)),
                 max_stops=typemax(Int),
             )
             isempty(pd.opportunities) && continue

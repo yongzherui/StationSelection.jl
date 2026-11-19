@@ -10,7 +10,7 @@ specifically to get several independent, reasoned fixtures to check whether "gro
 (`DirectSolver`/`enumerate_aggregate_od_route_columns`) or the CG pricer is at fault.
 
 Built a driver (`AggregateODRouteModel(5; assignment_policy=NearestOpenAggregateODAssignmentPolicy(:gamma_chain),
-max_walking_distance=1000.0, route_regularization_weight=0.1, max_stops=3, max_wait_time=10000.0,
+max_walking_distance=1000.0, route_regularization_weight=0.1, max_stops=3, pickup_deadline_s=10000.0,
 detour_factor=2.0)`, full un-subsetted station/request set per case) and ran all four solve paths on
 five independent fixtures. **The same disagreement reproduces on every single one**, and in the three
 where DirectSolver and CG/BendersXY agree on `y`, they disagree only on which routes cover that
@@ -45,7 +45,7 @@ cover those assignments:
   against every constraint: `max_stops=3` (route has exactly 3 stops) ✓; detour for passenger
   (1,4) riding the whole route = 768.824 vs direct 750.0 → ratio 1.025, well under
   `detour_factor=2.0` ✓; passenger (7,4) boards after the vehicle already visited 1, so their ride
-  segment is just 7→4 = direct, zero detour ✓; `max_wait_time=10000.0` non-binding either way;
+  segment is just 7→4 = direct, zero detour ✓; `pickup_deadline_s=10000.0` non-binding either way;
   `max_visits_per_node=2` non-binding (each station visited once). **This route is unambiguously
   feasible and CG is right to use it.** DirectSolver's enumerator is missing it — "ground truth"
   is a misnomer here.
@@ -100,7 +100,7 @@ pricer (no duals, no dominance buckets, no reduced-cost bookkeeping at all). It 
 bounded DFS over station sequences, restricted to stations that are an OD-pair endpoint (lossless,
 since routing costs are direct point-to-point — no road graph to transit through), and for each
 sequence prefix of length >= 2 checks, directly and existentially, whether each active pair
-`(j,k)` has *some* valid boarding position `p` (`route[p]==j`, within `max_wait_time` of route
+`(j,k)` has *some* valid boarding position `p` (`route[p]==j`, within `pickup_deadline_s` of route
 start) and later alighting position `q>p` (`route[q]==k`, ride time within `detour_factor` of
 direct) — a strictly more complete check than the pricer's "most recent boarding only" dominance
 shortcut. The old implementation was deleted outright from
@@ -204,7 +204,7 @@ enumeration, no pricing/duals at all) is the only path giving 82.54.
 (ground truth) missing a real, cheaper, feasible route that CG's reduced-cost-driven
 label-setting search finds — or is CG's pricer (`aggregate_od_route_pricing_by_label_setting`
 via `_enumerate_aggregate_od_route_pricing_labels`) accepting an actually-infeasible column
-(violating `max_stops=3` / `detour_factor=2.0` / `max_wait_time=10000.0` /
+(violating `max_stops=3` / `detour_factor=2.0` / `pickup_deadline_s=10000.0` /
 `max_visits_per_node=2`) due to a dominance/pruning bug? I was mid-way through pulling the exact
 selected column(s)/route(s) responsible for 56.39 (via
 `cg_direct.generated_columns`/`selected_column_ids`, station sequence, stop count, computed
@@ -231,7 +231,7 @@ data = create_station_selection_data(stations2, requests2, walking_costs; routin
 model = AggregateODRouteModel(4;
     assignment_policy=NearestOpenAggregateODAssignmentPolicy(:gamma_chain),
     max_walking_distance=200.0, route_regularization_weight=0.1, repositioning_time=0.0,
-    max_stops=3, max_wait_time=10000.0, detour_factor=2.0,
+    max_stops=3, pickup_deadline_s=10000.0, detour_factor=2.0,
 )
 
 gt = run_opt(data, model, DirectSolver(optimizer_env=Gurobi.Env(), silent=true, mip_gap=0.0,

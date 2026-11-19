@@ -23,7 +23,7 @@
     problem = StationSelectionProblem(data, 3; max_walking_distance = 2.5, door_to_door_ratio = 2.0)
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
         route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
-        max_wait_time = 10.0, detour_factor = 1.5, max_stops = 4)
+        pickup_deadline_s = 10.0, detour_factor = 1.5, max_stops = 4)
 
     mapping = StationSelection.create_aggregate_od_route_map(problem, formulation, data)
     seeds = joint_routing_assignment_two_stop_seed_columns(data, mapping)

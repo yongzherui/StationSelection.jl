@@ -13,7 +13,7 @@
     function line_pricing_data(;
             scenario::Int=1,
             active_pairs=[(1, 3), (2, 4)],
-            max_wait_time=10.0,
+            pickup_deadline_s=10.0,
             detour_factor=1.5,
             max_stops=5,
             bounded_max_stops=true,
@@ -26,7 +26,7 @@
             Tuple{Int, Int}.(active_pairs),
             1.0,
             0.0,
-            max_wait_time,
+            pickup_deadline_s,
             detour_factor,
             max_stops,
             bounded_max_stops,
@@ -123,12 +123,12 @@
         @test initial_1.reduced_cost == 0.0
     end
 
-    @testset "pickup eligibility ends at max_wait_time" begin
+    @testset "pickup eligibility ends at pickup_deadline_s" begin
         duals = RouteCoveringPricingDuals(Dict((2, 4) => 10.0))
 
         at_cutoff = line_pricing_data(
             active_pairs=[(2, 4)],
-            max_wait_time=1.0,
+            pickup_deadline_s=1.0,
             detour_factor=2.0,
             max_stops=3,
         )
@@ -143,7 +143,7 @@
 
         after_cutoff = line_pricing_data(
             active_pairs=[(2, 4)],
-            max_wait_time=0.5,
+            pickup_deadline_s=0.5,
             detour_factor=2.0,
             max_stops=3,
         )
@@ -305,7 +305,7 @@
     @testset "candidate generation can open fresh origins before pickup cutoff" begin
         pricing_data = line_pricing_data(
             active_pairs=[(3, 4)],
-            max_wait_time=10.0,
+            pickup_deadline_s=10.0,
             detour_factor=3.0,
             max_stops=4,
         )
@@ -474,7 +474,7 @@
         end
 
         @testset "candidate generation never offers a visited station" begin
-            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], detour_factor=3.0, max_wait_time=10.0)
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], detour_factor=3.0, pickup_deadline_s=10.0)
             duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (3, 4) => 10.0))
             label = RouteCoveringStationSimpleLabel(
                 1, [1], Set([1]), 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0,

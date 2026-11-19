@@ -73,7 +73,7 @@ function _replay_joint_routing_assignment_route(
             end
         end
 
-        if elapsed_time <= pricing_data.max_wait_time + 1e-9
+        if elapsed_time <= pricing_data.pickup_deadline_s + 1e-9
             pickup_time[next_node] = elapsed_time  # a fresh clock, i.e. age 0 from here
             pickup_position[next_node] = idx
         end

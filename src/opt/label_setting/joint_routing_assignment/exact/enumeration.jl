@@ -5,7 +5,7 @@ universe up front (`DirectMIPSolver`) rather than iteratively priced columns (`C
 
 # Reusing Base's physical-route DFS
 
-The physical feasibility rule this formulation's routes obey -- wait time at pickup,
+The physical feasibility rule this formulation's routes obey -- pickup deadline,
 `detour_factor * routing_cost(j, k)` ride limit at dropoff -- is identical to
 `AggregateODRouteBaseFormulation`'s when `door_to_door_ratio = Inf`: then it is evaluated
 per `(j, k)` pair, not per passenger (`detour_factor * get_routing_cost(data, j, k)`, the
@@ -16,7 +16,7 @@ SUPERSET of the routes this formulation needs, and the per-candidate replay belo
 the certifications the tighter limit forbids. So the set of physical
 routes a from-scratch DFS against `JointRoutingAssignmentPricingLabel`'s own transitions
 would visit is contained in (with an infinite ratio, identical to) what
-`route_covering/exact/enumeration.jl`'s DFS already visits, given the same `max_stops`/`max_wait_time`/`detour_factor` and every
+`route_covering/exact/enumeration.jl`'s DFS already visits, given the same `max_stops`/`pickup_deadline_s`/`detour_factor` and every
 `(j, k)` pair made visible (both DFSs use the "uniform positive reward, nothing pruned"
 trick to neutralize their own dual-dependent candidate-node filters). This module reuses
 that DFS verbatim via `_enumerate_aggregate_od_route_raw_columns` -- the *raw*, pre-dedup
@@ -98,7 +98,7 @@ function _replay_joint_routing_assignment_route_all_certifications(
             pair in options || push!(options, pair)
         end
 
-        if elapsed_time <= pricing_data.max_wait_time + 1e-9
+        if elapsed_time <= pricing_data.pickup_deadline_s + 1e-9
             pickup_time[next_node] = elapsed_time
         end
         current = next_node
@@ -205,7 +205,7 @@ function enumerate_joint_routing_assignment_columns(
     raw_routes = _enumerate_aggregate_od_route_raw_columns(
         mapping, data,
         formulation.route_regularization_weight, formulation.repositioning_time,
-        formulation.max_wait_time, formulation.detour_factor, formulation.max_stops,
+        formulation.pickup_deadline_s, formulation.detour_factor, formulation.max_stops,
         max_routes, time_limit_sec,
     )
     # `_enumerate_aggregate_od_route_raw_columns` also appends `mapping.columns`, its
@@ -247,7 +247,7 @@ function enumerate_joint_routing_assignment_columns(
         pricing_data = create_joint_routing_assignment_pricing_data(
             s, nodes, travel_cost, candidates;
             route_regularization_weight=formulation.route_regularization_weight,
-            max_wait_time=formulation.max_wait_time,
+            pickup_deadline_s=formulation.pickup_deadline_s,
             repositioning_time=formulation.repositioning_time,
             max_stops=formulation.max_stops,
             # This exhaustive replay does not run label dominance.

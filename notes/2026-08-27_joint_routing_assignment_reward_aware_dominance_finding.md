@@ -62,14 +62,14 @@ test (seed 2026, trial 21) without needing a new test written for it.
 
 Minimal counterexample: 5 nodes, one candidate (`origin=3, destination=5,
 ride_limit=4.0, reward=1.0`), `route_regularization_weight=1.0,
-max_wait_time=1.0, max_stops=3`. Seed label `a` starts directly at node 5
+pickup_deadline_s=1.0, max_stops=3`. Seed label `a` starts directly at node 5
 (`rc=0`, no useful clocks at all -- pricer seeds every opportunity endpoint).
 Label `b` starts at 3, travels to 5, certifying the opportunity (`rc=1.0`,
 live clock `{3: age 2.0}`). Both land at `current=5`. Station 3 is reward-dead
 *for `b`* (`b` already banked the only layer reachable from it), so the
 version-2 rule drops it from the D3 check entirely -- leaving nothing to stop
 `a` from "dominating" `b`. `b` gets discarded. Since `a` can never open a
-clock at 3 in time (`travel(5,3)=2 > max_wait_time=1.0`) and there is no other
+clock at 3 in time (`travel(5,3)=2 > pickup_deadline_s=1.0`) and there is no other
 origin in the instance, `a` can never certify anything, ever. The search
 reports `best_rc = Inf`; brute force gives `1.0` (via `[3,5]`, tied with
 `[3,4,5]`).

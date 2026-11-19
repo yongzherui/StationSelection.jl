@@ -51,7 +51,7 @@ scripts/compare_benders_decompositions.jl and scripts/run_single_instance.jl):
                                       not an arbitrary route-count ceiling
     CS_DIRECT_TIME_LIMIT   = 300     max enumeration wall time for Direct solve (seconds)
     CS_DETOUR_FACTOR       = 2.0     allowed detour ratio over direct route time
-    CS_MAX_WAIT_TIME       = 900     vehicle wait budget from depot (seconds)
+    CS_PICKUP_DEADLINE_S       = 900     pickup deadline (seconds)
     CS_ROUTE_REG_WEIGHT    = 10.0    route_regularization_weight: route travel-time penalty
                                       weight ("route weight")
     CS_WALK_COST_WEIGHT    = 0.1     walk_cost_weight: multiplies the walking-cost term in the
@@ -101,7 +101,7 @@ if _RUN_AS_MAIN
         direct_max_routes   = parse(Int,     get(ENV, "CS_DIRECT_MAX_ROUTES",   string(typemax(Int)))),
         direct_time_limit   = parse(Float64, get(ENV, "CS_DIRECT_TIME_LIMIT",   "300")),
         detour_factor       = parse(Float64, get(ENV, "CS_DETOUR_FACTOR",       "2.0")),
-        max_wait_time       = parse(Float64, get(ENV, "CS_MAX_WAIT_TIME",       "900")),
+        pickup_deadline_s       = parse(Float64, get(ENV, "CS_PICKUP_DEADLINE_S",       "900")),
         route_reg_weight    = parse(Float64, get(ENV, "CS_ROUTE_REG_WEIGHT",    "10.0")),
         walk_cost_weight    = parse(Float64, get(ENV, "CS_WALK_COST_WEIGHT",    "0.1")),
         repositioning_time  = parse(Float64, get(ENV, "CS_REPOSITIONING_TIME",  "20.0")),
@@ -184,7 +184,7 @@ function build_model(l::Int, max_stops::Int, max_walk::Float64, cfg::NamedTuple;
         walk_cost_weight=cfg.walk_cost_weight,
         repositioning_time=cfg.repositioning_time,
         max_walking_distance=max_walk,
-        max_wait_time=cfg.max_wait_time,
+        pickup_deadline_s=cfg.pickup_deadline_s,
         detour_factor=cfg.detour_factor,
         max_stops=max_stops,
         use_station_simple=use_station_simple,

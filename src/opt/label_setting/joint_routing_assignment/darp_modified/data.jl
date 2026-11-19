@@ -32,7 +32,7 @@ function create_joint_routing_assignment_darp_modified_pricing_data(
     travel_cost::Dict{Tuple{Int, Int}, Float64},
     candidates::AbstractVector{PassengerAssignmentCandidate};
     route_regularization_weight::Float64,
-    max_wait_time::Float64,
+    pickup_deadline_s::Float64,
     repositioning_time::Float64=0.0,
     max_stops::Int=typemax(Int),
     compensated_dominance::Bool=true,
@@ -58,7 +58,7 @@ function create_joint_routing_assignment_darp_modified_pricing_data(
 
     return JointRoutingAssignmentDarpModifiedPricingData(
         scenario, nodes, travel_cost, route_regularization_weight, repositioning_time,
-        max_wait_time, resolved_max_stops, bounded_max_stops, compensated_dominance,
+        pickup_deadline_s, resolved_max_stops, bounded_max_stops, compensated_dominance,
         n_passengers, passenger_weight, positive,
         candidates_by_origin, candidates_by_destination, candidates_by_passenger,
     )

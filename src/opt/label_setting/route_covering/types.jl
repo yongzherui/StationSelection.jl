@@ -17,7 +17,7 @@ struct RouteCoveringPricingData
     active_pairs::Vector{Tuple{Int, Int}}
     route_regularization_weight::Float64
     repositioning_time::Float64
-    max_wait_time::Float64
+    pickup_deadline_s::Float64
     detour_factor::Float64
     max_stops::Int
     bounded_max_stops::Bool

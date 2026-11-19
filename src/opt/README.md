@@ -40,7 +40,7 @@ constraint/objective reference. This file only covers the build/run API shape.
 Construct a formulation with its own keyword arguments (e.g.
 `ClusteringTwoStageODFormulation(l; in_vehicle_time_weight=1.0)`,
 `AggregateODRouteBaseFormulation(; route_regularization_weight=1.0, walk_cost_weight=1.0,
-repositioning_time=20.0, max_wait_time=Inf, detour_factor=1.5, max_stops=nothing)`) — see
+repositioning_time=20.0, pickup_deadline_s (required), detour_factor=1.5, max_stops=nothing)`) — see
 each formulation's own docstring in `formulations/` for the authoritative field list and
 defaults.
 

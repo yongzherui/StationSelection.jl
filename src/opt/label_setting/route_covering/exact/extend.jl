@@ -46,7 +46,7 @@ function _route_covering_candidate_next_nodes(
     duals::RouteCoveringPricingDuals,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > pricing_data.pickup_deadline_s + 1e-9
     # Once no fresh pickup is possible (past cutoff), the route is only worth
     # continuing if some already-open pickup clock can still reach a
     # dropoff -- otherwise every future extension is dead weight.
@@ -62,7 +62,7 @@ function _route_covering_candidate_next_nodes(
         # the origin, and reachable before this pair's wait cutoff.
         if !remembered && origin != label.current
             arrival_time = label.time + _route_covering_travel(pricing_data, label.current, origin)
-            arrival_time <= pricing_data.max_wait_time + 1e-9 && push!(candidate_nodes, origin)
+            arrival_time <= pricing_data.pickup_deadline_s + 1e-9 && push!(candidate_nodes, origin)
         end
 
         # Dropoff candidate: skip if already certified or already standing at
@@ -123,7 +123,7 @@ function _extend_route_covering_pricing_label(
     # This visit also opens a fresh pickup clock at `next_node` itself, but
     # only if we're still within its own wait cutoff -- arriving late means
     # `next_node` can pick up nothing, so no clock is worth starting.
-    if arrival_time <= pricing_data.max_wait_time + 1e-9
+    if arrival_time <= pricing_data.pickup_deadline_s + 1e-9
         aged_station[next_node] = 0.0
     end
     # Drop any clock (including the one possibly just opened above) that can

@@ -42,7 +42,7 @@ Both modes use the production `CGSolver`, normal two-stop seed columns, and
 the same formulation parameters: `k=ceil(n/2)` (5, 8, and 10), 600-second
 walking cap, route/walk weights 10.0/0.1, 20-second repositioning, 900-second
 pickup horizon, and detour factor 2.0. Note the 900 s pickup horizon
-(`max_wait_time`) is a *model* parameter and is unrelated to the 1800 s pricing
+(`pickup_deadline_s`) is a *model* parameter and is unrelated to the 1800 s pricing
 budget above.
 
 ## Runtime definition

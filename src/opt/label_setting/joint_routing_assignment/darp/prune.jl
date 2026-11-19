@@ -23,7 +23,7 @@ function _joint_routing_assignment_darp_remaining_reward_bound(
     pricing_data::JointRoutingAssignmentDarpPricingData,
 )::Float64
     ub = 0.0
-    if label.time <= pricing_data.max_wait_time + 1e-9
+    if label.time <= pricing_data.pickup_deadline_s + 1e-9
         resolved = _joint_routing_assignment_darp_resolved_passengers(label)
         for p in 1:pricing_data.n_passengers
             p in resolved && continue

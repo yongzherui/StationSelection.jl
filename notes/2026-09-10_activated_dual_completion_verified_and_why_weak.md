@@ -58,9 +58,9 @@ universe, and
     sum_{A_out} net <= w * sum_{A_out} walk_p            (the completion, per triple)
     => rc(c) >= 0                                         (demand_p >= 1)
 
-**The `max_wait_time` worry recorded in that same docstring is answerable, not open.** Both
+**The `pickup_deadline_s` worry recorded in that same docstring is answerable, not open.** Both
 route-feasibility conditions the pricer enforces are upper bounds on *elapsed* durations —
-the pickup window is `label.time <= max_wait_time` and the ride limit is
+the pickup window is `label.time <= pickup_deadline_s` and the ride limit is
 `origin_age + travel <= detour_factor * routing_cost(j,k)` — and both only decrease when a
 stop is removed. Nothing in this model measures wait against a fixed request clock, so
 shortcutting cannot make a retained passenger wait longer. (The `A → U → A → B` case, where

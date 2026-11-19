@@ -216,7 +216,7 @@ function _stash_joint_routing_assignment_subproblem_pricing!(
         route_regularization_weight = formulation.route_regularization_weight,
         walk_cost_weight = formulation.walk_cost_weight,
         repositioning_time = formulation.repositioning_time,
-        max_wait_time = formulation.max_wait_time,
+        pickup_deadline_s = formulation.pickup_deadline_s,
         detour_factor = formulation.detour_factor,
         max_stops = formulation.max_stops,
     )

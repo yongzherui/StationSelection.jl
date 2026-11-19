@@ -56,7 +56,7 @@ using Random
 # price of walking against riding belongs in the formulation weights
 # (`in_vehicle_time_weight`; `walk_cost_weight` / `route_regularization_weight`),
 # not here. Unit-free costs mean any time-valued formulation field
-# (`repositioning_time`, `max_wait_time`) must be given in the same units --
+# (`repositioning_time`, `pickup_deadline_s`) must be given in the same units --
 # the owner's Zhuzhou values (20 s, 300 s) are meaningless on this instance.
 
 const SPIDERWEB_QUADRANTS = (:SW, :SE, :NE, :NW)

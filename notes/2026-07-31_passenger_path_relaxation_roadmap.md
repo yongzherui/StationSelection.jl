@@ -83,7 +83,7 @@ limits.
    full active set. Keep the implementation as a correctness/reference oracle;
    do not wire it into CG.
 4. **Post-pickup-cutoff completion.** Build a destination-only suffix bound after
-   `max_wait_time`, first as a memoized exact micro-oracle on small instances,
+   `pickup_deadline_s`, first as a memoized exact micro-oracle on small instances,
    then test time buckets and critical-passenger state.
 
    Initial oracle: `passenger_free_assignment_post_w_completion`. It enumerates

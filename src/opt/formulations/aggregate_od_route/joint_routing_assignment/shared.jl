@@ -20,7 +20,7 @@ per-member block lists.
 
 # Why the derivation helper exists
 
-The three must agree on the route universe (`max_stops`, `max_wait_time`,
+The three must agree on the route universe (`max_stops`, `pickup_deadline_s`,
 `detour_factor`) and on the cost weights (`route_regularization_weight`,
 `walk_cost_weight`, `repositioning_time`, and the `demand_weighting` that scales every walking
 term), because a Benders cut derived from a subproblem
@@ -52,7 +52,7 @@ function _joint_routing_assignment_shared_fields(formulation)
         route_regularization_weight = formulation.route_regularization_weight,
         walk_cost_weight = formulation.walk_cost_weight,
         repositioning_time = formulation.repositioning_time,
-        max_wait_time = formulation.max_wait_time,
+        pickup_deadline_s = formulation.pickup_deadline_s,
         detour_factor = formulation.detour_factor,
         max_stops = formulation.max_stops,
         demand_weighting = formulation.demand_weighting,

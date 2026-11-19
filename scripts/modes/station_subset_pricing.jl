@@ -41,7 +41,7 @@ function run_station_subset_pricing(args::Vector{String})
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, 1)
     pd = create_passenger_free_assignment_pricing_data(1, md.nodes, md.travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
-        max_wait_time=md.max_wait_time, repositioning_time=md.repositioning_time,
+        pickup_deadline_s=md.pickup_deadline_s, repositioning_time=md.repositioning_time,
         max_stops=md.max_stops, max_visits_per_node=md.max_visits_per_node)
 
     row(mode, c) = (; n, L=l, mode, optimal_value=c.optimal_value,

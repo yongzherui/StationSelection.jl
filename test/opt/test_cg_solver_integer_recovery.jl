@@ -2,7 +2,7 @@
     instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
     data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
     problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-    formulation = AggregateODRouteJointRoutingAssignmentFormulation()
+    formulation = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf)
 
     @testset "build_model honors solver.initial_columns as the seed pool" begin
         default_build = StationSelection.build_model(problem, formulation, CGSolver())

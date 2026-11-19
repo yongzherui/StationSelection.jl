@@ -386,7 +386,7 @@ function _aggregate_od_route_integer_recovery_build(
         route_regularization_weight = m[:joint_routing_assignment_route_regularization_weight],
         walk_cost_weight = m[:joint_routing_assignment_walk_cost_weight],
         repositioning_time = m[:joint_routing_assignment_repositioning_time],
-        max_wait_time = m[:joint_routing_assignment_max_wait_time],
+        pickup_deadline_s = m[:joint_routing_assignment_pickup_deadline_s],
         detour_factor = m[:joint_routing_assignment_detour_factor],
         max_stops = m[:joint_routing_assignment_max_stops],
         vehicle_capacity = m[:joint_routing_assignment_vehicle_capacity],

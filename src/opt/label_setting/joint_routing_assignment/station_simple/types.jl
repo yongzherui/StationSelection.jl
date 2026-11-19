@@ -17,7 +17,7 @@ which a physical route may never revisit a station.
 
 Only the *route universe* changes -- the reward contract is identical to the
 revisit-tolerant pricer (see `../exact/types.jl`'s module docstring): a visit to origin
-`j` within `max_wait_time` opens a live pickup clock; a later visit to `k`
+`j` within `pickup_deadline_s` opens a live pickup clock; a later visit to `k`
 certifies `(p, j, k)` for passengers whose clock survives the ride limit; and a
 passenger banks only its single best certified reward, tracked incrementally via
 `activated_reward_layers`.

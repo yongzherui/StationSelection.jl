@@ -79,7 +79,7 @@ uses a synchronized service model:
 
 - every route starts at time `t=0`;
 - every passenger is available at `t=0` and must be picked up by the common maximum-wait deadline
-  `W = max_wait_time`; and
+  `W = pickup_deadline_s`; and
 - after pickup, a passenger assigned to station pair `(j,k)` need only reach `k` within
   `detour_factor * routing_cost(j,k)` of their pickup time.
 

@@ -469,14 +469,14 @@ never searched -- only the shortcut `c''` is. **`tau_{c''} <= tau_c` holds becau
 matrix is required to be metric package-wide** (the pricer's age pruning already asserts on
 violation), so this is a cross-cutting precondition, not a local assumption.
 
-**`max_wait_time` is not a hazard for that shortcut**, though an earlier version of this
+**`pickup_deadline_s` is not a hazard for that shortcut**, though an earlier version of this
 proof recorded it as one. Both route-feasibility conditions bound ELAPSED durations from
-above -- the pickup window is `label.time <= max_wait_time`, the ride limit is
+above -- the pickup window is `label.time <= pickup_deadline_s`, the ride limit is
 `origin_age + travel <= detour_factor * routing_cost(j,k)` -- and removing a stop only
 decreases each left-hand side.
 
 **Both right-hand sides are also unchanged by the shortcut, and for the ride limit that is
-a real step, not a formality.** `max_wait_time` is a constant. `routing_cost(j,k)` looks
+a real step, not a formality.** `pickup_deadline_s` is a constant. `routing_cost(j,k)` looks
 route-dependent and is not: `j` and `k` are the ASSIGNMENT's pickup/dropoff stations, and
 the limit is computed per candidate before any route exists
 (`pricing_round.jl`: `joint_routing_assignment_ride_limit`, i.e.

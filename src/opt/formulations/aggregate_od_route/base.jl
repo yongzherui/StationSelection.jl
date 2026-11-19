@@ -17,7 +17,7 @@ export AggregateODRouteBaseFormulation
 """
     _validate_aggregate_od_route_formulation_fields(
         route_regularization_weight, walk_cost_weight, repositioning_time,
-        max_wait_time, detour_factor, max_stops,
+        pickup_deadline_s, detour_factor, max_stops,
     ) -> resolved_max_stops::Int
 
 Shared cross-field validation for `AggregateODRouteBaseFormulation`'s and
@@ -30,7 +30,7 @@ function _validate_aggregate_od_route_formulation_fields(
         route_regularization_weight::Number,
         walk_cost_weight::Number,
         repositioning_time::Number,
-        max_wait_time::Number,
+        pickup_deadline_s::Number,
         detour_factor::Number,
         max_stops::Union{Nothing, Int},
     )::Int
@@ -40,8 +40,8 @@ function _validate_aggregate_od_route_formulation_fields(
         throw(ArgumentError("walk_cost_weight must be non-negative"))
     repositioning_time >= 0 ||
         throw(ArgumentError("repositioning_time must be non-negative"))
-    max_wait_time >= 0 ||
-        throw(ArgumentError("max_wait_time must be non-negative"))
+    pickup_deadline_s >= 0 ||
+        throw(ArgumentError("pickup_deadline_s must be non-negative"))
     detour_factor >= 1.0 ||
         throw(ArgumentError("detour_factor must be at least 1.0"))
     resolved_max_stops = isnothing(max_stops) ? typemax(Int) : max_stops
@@ -64,7 +64,12 @@ paths) belongs here instead, since it's an encoding choice, not a business decis
 - `route_regularization_weight`: μ, multiplying each aggregate OD route column cost
 - `walk_cost_weight`: multiplies the walking-cost term everywhere it enters the objective
 - `repositioning_time`: ρ, added to every aggregate OD route column travel/service cost
-- `max_wait_time`: maximum passenger wait time
+- `pickup_deadline_s`: the pickup deadline, in seconds (CLAUDE.md service guarantees,
+  simulator `pickup_deadline_s`). A route may pick a rider up only while its clock is
+  `<= pickup_deadline_s`. Every rider of a scenario requests at the scenario start and every
+  route's clock starts at 0 at its first stop, so this is board <= request +
+  `pickup_deadline_s`. These pricers do not time the rider's walk, so it bounds the vehicle's
+  arrival at the pickup stop. Required, no default (set every limit explicitly).
 - `detour_factor`: maximum allowed in-vehicle detour ratio
 - `max_stops`: maximum stops per route
 
@@ -81,7 +86,7 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
     route_regularization_weight::Float64
     walk_cost_weight::Float64
     repositioning_time::Float64
-    max_wait_time::Float64
+    pickup_deadline_s::Float64
     detour_factor::Float64
     max_stops::Int
 
@@ -89,19 +94,19 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             route_regularization_weight::Number=1.0,
             walk_cost_weight::Number=1.0,
             repositioning_time::Number=20.0,
-            max_wait_time::Number=Inf,
+            pickup_deadline_s::Number,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
         )
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
-            max_wait_time, detour_factor, max_stops,
+            pickup_deadline_s, detour_factor, max_stops,
         )
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
             Float64(repositioning_time),
-            Float64(max_wait_time),
+            Float64(pickup_deadline_s),
             Float64(detour_factor),
             resolved_max_stops,
         )

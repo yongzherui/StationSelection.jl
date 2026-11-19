@@ -86,7 +86,7 @@
     for trial in 1:20
         n = rand(rng, 3:5); P = rand(rng, 2:6); maxstops = rand(rng, 3:5)
         nodes, travel, cands, load, W, rho = instance(rng; n, P, maxopts = 3)
-        kw = (route_regularization_weight = 1.0, max_wait_time = W, repositioning_time = rho, max_stops = maxstops)
+        kw = (route_regularization_weight = 1.0, pickup_deadline_s = W, repositioning_time = rho, max_stops = maxstops)
         for cap in (1, 2, 4)
             kept = [c for c in cands if load[c.p] <= cap]
             want, _ = brute(nodes, travel, kept, load, W, rho, cap, maxstops)
@@ -120,7 +120,7 @@
         data = create_station_selection_data(stations, requests, cost; routing_costs = cost,
                                              scenarios = [("2026-01-01 08:00:00", "2026-01-01 09:00:00")])
         problem = StationSelectionProblem(data, 4; max_walking_distance = 1.5)
-        f(cap) = AggregateODRouteJointRoutingAssignmentFormulation(route_regularization_weight = 1.0, walk_cost_weight = 0.1,
+        f(cap) = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, route_regularization_weight = 1.0, walk_cost_weight = 0.1,
             repositioning_time = 0.0, detour_factor = 2.0, max_stops = 5, vehicle_capacity = cap)
         solve(cap) = run_opt(problem, f(cap), CGSolver(config = SolverOptions(silent = true), max_iterations = 200,
                                                        reduced_cost_tol = 1e-7, recover_integer_solution = true))
@@ -138,6 +138,6 @@
             end
         end
         @test_throws ArgumentError run_opt(problem, f(2), DirectMIPSolver(config = SolverOptions(silent = true)))
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(vehicle_capacity = 0)
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, vehicle_capacity = 0)
     end
 end

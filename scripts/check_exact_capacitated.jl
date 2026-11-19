@@ -97,7 +97,7 @@ function main()
     for trial in 1:ntrials
         n = rand(rng, 3:parse(Int, get(ENV, "CHK_NMAX", "5"))); P = rand(rng, 2:parse(Int, get(ENV, "CHK_PMAX", "6"))); maxstops = rand(rng, 3:6)
         nodes, travel, cands, load, W, rho = instance(rng; n, P, maxopts = 3)
-        kw = (route_regularization_weight = 1.0, max_wait_time = W, repositioning_time = rho, max_stops = maxstops)
+        kw = (route_regularization_weight = 1.0, pickup_deadline_s = W, repositioning_time = rho, max_stops = maxstops)
         only = parse(Int, get(ENV, "CHK_ONLY", "0"))
         if only > 0 && trial == only
             kept = cands

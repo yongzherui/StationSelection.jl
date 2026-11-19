@@ -47,7 +47,7 @@ function run_ncandidates_sensitivity(args::Vector{String})
         isempty(candidates) && continue
         pricing_data = create_passenger_free_assignment_pricing_data(
             s, collect(1:n_stations), travel_cost, candidates;
-            route_regularization_weight=10.0, max_wait_time=900.0,
+            route_regularization_weight=10.0, pickup_deadline_s=900.0,
             repositioning_time=20.0, max_stops=_NCAND_MAX_STOPS, max_visits_per_node=3,
         )
 

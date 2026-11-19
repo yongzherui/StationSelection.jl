@@ -4,7 +4,7 @@
     problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
     # One formulation for every arm below: the pricer is a solver setting, so a mode sweep
     # varies `CGSolver.pricing` and reuses the identical model.
-    formulation() = AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4)
+    formulation() = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4)
     ss_solver(; kwargs...) = CGSolver(
         pricing = CGPricingConfig(mode = :station_simple); kwargs...,
     )
@@ -154,12 +154,12 @@
         # Base has no selectable pricer, so there is nothing to hand off to. Rejected
         # rather than ignored, so a warm start can never quietly not happen.
         @test_throws ArgumentError run_opt(
-            problem, AggregateODRouteBaseFormulation(max_stops = 4),
+            problem, AggregateODRouteBaseFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(pricing = CGPricingConfig(warm_start_mode = :station_simple)),
         )
         # And a mode Base cannot select is refused rather than quietly ignored.
         @test_throws ArgumentError run_opt(
-            problem, AggregateODRouteBaseFormulation(max_stops = 4),
+            problem, AggregateODRouteBaseFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(pricing = CGPricingConfig(mode = :exact)),
         )
     end

@@ -3,7 +3,7 @@
 Every Benders cell measured so far used `BENCHMARK_BASELINE` (benchmarks/lib/cg_benchmark.jl)
 with `max_stops` overridden to 4:
 
-    route_regularization_weight = 10.0     max_wait_time   = 900.0
+    route_regularization_weight = 10.0     pickup_deadline_s   = 900.0
     walk_cost_weight            =  0.1     detour_factor   =   2.0
     repositioning_time          = 20.0     max_stops       =   4   (baseline is 10)
 
@@ -88,7 +88,7 @@ flush(stdout)
 
 _formulation(a) = AggregateODRouteJointRoutingAssignmentFormulation(
     route_regularization_weight=a.route_reg, walk_cost_weight=a.walk,
-    repositioning_time=a.repo, max_wait_time=900.0, detour_factor=2.0,
+    repositioning_time=a.repo, pickup_deadline_s=900.0, detour_factor=2.0,
     max_stops=MAX_STOPS)
 
 """Master-feasible station sets -- the domain on which Q is defined (see the brute-force

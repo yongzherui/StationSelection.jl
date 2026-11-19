@@ -33,7 +33,7 @@ model = AggregateODRouteModel(
     5;   # l
     assignment_policy=NearestOpenAggregateODAssignmentPolicy(:big_m_nearest),
     route_regularization_weight=10.0, walk_cost_weight=0.1, repositioning_time=20.0,
-    max_walking_distance=max_walk, max_wait_time=900.0, detour_factor=2.0, max_stops=4,
+    max_walking_distance=max_walk, pickup_deadline_s=900.0, detour_factor=2.0, max_stops=4,
 )
 ```
 

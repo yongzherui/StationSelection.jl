@@ -29,7 +29,7 @@ this type so the three can never disagree about the route universe or the cost w
 # Fields
 See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
-`max_wait_time`, `detour_factor`, and `max_stops`.
+`pickup_deadline_s`, `detour_factor`, and `max_stops`.
 
 `demand_weighting` (`:count`, the default since 2026-11-03, or `:unit`) sets the demand `Q`
 of each OD group `(s,p)`: `:count` is the number of requests on that OD pair in scenario `s`,
@@ -80,7 +80,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     route_regularization_weight::Float64
     walk_cost_weight::Float64
     repositioning_time::Float64
-    max_wait_time::Float64
+    pickup_deadline_s::Float64
     detour_factor::Float64
     max_stops::Int
     demand_weighting::Symbol
@@ -95,7 +95,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             route_regularization_weight::Number=1.0,
             walk_cost_weight::Number=1.0,
             repositioning_time::Number=20.0,
-            max_wait_time::Number=Inf,
+            pickup_deadline_s::Number,
             detour_factor::Number=1.5,
             max_stops::Union{Nothing, Int}=nothing,
             demand_weighting::Symbol=:count,
@@ -106,13 +106,13 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             "vehicle_capacity must be nothing (unlimited) or >= 1, got $vehicle_capacity"))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
-            max_wait_time, detour_factor, max_stops,
+            pickup_deadline_s, detour_factor, max_stops,
         )
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
             Float64(repositioning_time),
-            Float64(max_wait_time),
+            Float64(pickup_deadline_s),
             Float64(detour_factor),
             resolved_max_stops,
             demand_weighting,

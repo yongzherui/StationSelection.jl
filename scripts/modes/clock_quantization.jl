@@ -126,7 +126,7 @@ function run_clock_quantization(args::Vector{String})
     make_pricing_data(md, s, candidates, travel_cost) = StationSelection.create_passenger_free_assignment_pricing_data(
         s, md.nodes, travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
-        max_wait_time=md.max_wait_time, repositioning_time=md.repositioning_time,
+        pickup_deadline_s=md.pickup_deadline_s, repositioning_time=md.repositioning_time,
         max_stops=md.max_stops, max_visits_per_node=md.max_visits_per_node,
     )
 

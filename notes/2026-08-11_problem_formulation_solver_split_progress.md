@@ -36,7 +36,7 @@ two_stage,two_stage_od}.jl`.
   no up-front enumeration.
 
 Both share the encoding-detail field set (`route_regularization_weight`,
-`walk_cost_weight`, `repositioning_time`, `max_wait_time`, `detour_factor`, `max_stops`,
+`walk_cost_weight`, `repositioning_time`, `pickup_deadline_s`, `detour_factor`, `max_stops`,
 `allow_walk_only`); kept as separate marker types since they pair with different solvers.
 
 The label-setting pricing engine both formulations sit on (`label_setting/engine/*.jl` +

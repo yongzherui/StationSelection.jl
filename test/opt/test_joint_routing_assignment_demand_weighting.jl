@@ -21,7 +21,7 @@
     end
 
     joint(dw) = AggregateODRouteJointRoutingAssignmentFormulation(
-        route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
+        pickup_deadline_s = Inf, route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
         detour_factor = 1.5, max_stops = 4, demand_weighting = dw)
 
     # Three riders 1 -> 7, one rider 2 -> 6, k = 2, stations reachable within 1 unit.
@@ -34,7 +34,7 @@
     data, problem = line_instance(ods; n = 7, R = 1.5, k = 2)
 
     @testset "map: Q_s counts requests per OD group" begin
-        @test AggregateODRouteJointRoutingAssignmentFormulation().demand_weighting === :count
+        @test AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf).demand_weighting === :count
         m_count = StationSelection.create_aggregate_od_route_map(problem, joint(:count), data)
         m_unit = StationSelection.create_aggregate_od_route_map(problem, joint(:unit), data)
         @test m_count.Omega_s[1] == m_unit.Omega_s[1]
@@ -44,7 +44,7 @@
         @test q[o17] == 3 && q[o26] == 1
         @test sum(m_count.Q_s[1]) == length(ods)
         @test all(==(1), m_unit.Q_s[1])
-        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(demand_weighting = :riders)
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, demand_weighting = :riders)
     end
 
     @testset "derived Benders formulations carry it" begin

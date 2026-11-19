@@ -106,7 +106,7 @@ for seed in SEEDS
     for n_clusters in (round(Int, 0.6 * N_STATIONS), round(Int, 0.8 * N_STATIONS))
         result = run_opt(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops=MAX_STOPS),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops=MAX_STOPS),
             # Every budget is bounded. An unbounded probe that prints only at the end can
             # burn its whole walltime and yield NOTHING, which is exactly what the first
             # attempt did -- a diagnostic must degrade to partial data, not to silence.

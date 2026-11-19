@@ -48,7 +48,7 @@ open a config struct. The false premise and the true one support the same conclu
 nothing downstream ever failed.
 
 **2. Moving that proof next to its function immediately exposed a second gap.** The
-`max_wait_time` argument showed both left-hand sides decreasing under shortcutting and never
+`pickup_deadline_s` argument showed both left-hand sides decreasing under shortcutting and never
 said the right-hand sides were unchanged -- a real step for the ride limit, since
 `routing_cost(j,k)` reads as route-dependent and is not (`j,k` are the *assignment's*
 endpoints, computed per candidate in `pricing_round.jl` before any route exists). The gap

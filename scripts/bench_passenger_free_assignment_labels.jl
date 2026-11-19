@@ -36,7 +36,7 @@ const SEED = 42
 const N_SCENARIOS = 3
 const MAX_WALK = 600.0
 const ROUTE_REG_WEIGHT = 10.0
-const MAX_WAIT_TIME = 900.0
+const PICKUP_DEADLINE_S = 900.0
 const REPOSITIONING_TIME = 20.0
 const DETOUR_FACTOR = 2.0
 const WALK_COST_WEIGHT = 0.1
@@ -93,7 +93,7 @@ function run_case(n_stations::Int, raw_max_stops::Int)
         pricing_data = create_passenger_free_assignment_pricing_data(
             s, nodes, travel_cost, candidates;
             route_regularization_weight=ROUTE_REG_WEIGHT,
-            max_wait_time=MAX_WAIT_TIME,
+            pickup_deadline_s=PICKUP_DEADLINE_S,
             repositioning_time=REPOSITIONING_TIME,
             max_stops=max_stops,
             compensated_dominance=COMPENSATED,
@@ -168,7 +168,7 @@ function warmup()
     ]
     pd = create_passenger_free_assignment_pricing_data(
         1, nodes, travel_cost, candidates;
-        route_regularization_weight=1.0, max_wait_time=200.0,
+        route_regularization_weight=1.0, pickup_deadline_s=200.0,
         repositioning_time=0.0, max_stops=3,
     )
     passenger_free_assignment_pricing_by_label_setting(

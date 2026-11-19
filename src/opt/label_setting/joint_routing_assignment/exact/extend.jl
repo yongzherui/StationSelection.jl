@@ -47,7 +47,7 @@ function _joint_routing_assignment_candidate_next_nodes(
     pricing_data::JointRoutingAssignmentPricingData,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > pricing_data.pickup_deadline_s + 1e-9
     if past_pickup_cutoff && !_has_useful_live_joint_routing_assignment_origin(label, pricing_data)
         return Int[]
     end
@@ -57,7 +57,7 @@ function _joint_routing_assignment_candidate_next_nodes(
             origin == label.current && continue
             _has_inactive_layer(mask, label.activated_reward_layers) || continue
             arrival_time = label.time + _joint_routing_assignment_travel(pricing_data, label.current, origin)
-            arrival_time <= pricing_data.max_wait_time + 1e-9 && push!(candidate_nodes, origin)
+            arrival_time <= pricing_data.pickup_deadline_s + 1e-9 && push!(candidate_nodes, origin)
         end
     end
 
@@ -128,7 +128,7 @@ function _extend_joint_routing_assignment_pricing_label(
         _joint_routing_assignment_age_is_useful(station, aged, pricing_data, next_node) &&
             (aged_station[station] = aged)
     end
-    if arrival_time <= pricing_data.max_wait_time + 1e-9
+    if arrival_time <= pricing_data.pickup_deadline_s + 1e-9
         # A fresh clock at the arrival station: age 0 is the most useful an age can
         # be, but it still only earns a slot if it can reach some opportunity in time.
         _joint_routing_assignment_age_is_useful(next_node, 0.0, pricing_data, next_node) &&

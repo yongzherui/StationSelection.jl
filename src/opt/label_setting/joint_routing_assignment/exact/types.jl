@@ -15,7 +15,7 @@ Same unlimited-capacity, synchronized-start physical route as
 station-age/wait/detour rules) -- this pricer changes only what a route gets
 *credit* for:
 
-- a visit to origin `j` within `max_wait_time` opens a live pickup clock for `j`,
+- a visit to origin `j` within `pickup_deadline_s` opens a live pickup clock for `j`,
   exactly as before;
 - a later visit to `k` certifies `(p, j, k)` for every passenger `p` with a
   positive-reward candidate on that pair, when elapsed time since the pickup is

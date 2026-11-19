@@ -2,7 +2,7 @@
 # Study 1 -- four LP/IP-gap comparisons, one independent job per instance/variant cell.
 #
 # Usage: sbatch --array=1-<n_jobs> submit_benchmark.sh <substudy>
-#   substudy = formulation, max_stops, max_wait_time, or detour_factor.
+#   substudy = formulation, max_stops, pickup_deadline_s, or detour_factor.
 #   -o/-e need slurm_logs/ to exist before first submit:
 #   mkdir -p slurm_logs
 #
@@ -25,9 +25,9 @@ TASK="${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID not set -- submit via sbatch --
 source "$PROJECT_ROOT/scripts/lib/slurm_modules.sh"
 source "$PROJECT_ROOT/scripts/lib/slurm_array_task_env.sh"
 
-SUBSTUDY="${1:?usage: submit_benchmark.sh <formulation|max_stops|max_wait_time|detour_factor>}"
+SUBSTUDY="${1:?usage: submit_benchmark.sh <formulation|max_stops|pickup_deadline_s|detour_factor>}"
 case "$SUBSTUDY" in
-    formulation|max_stops|max_wait_time|detour_factor) ;;
+    formulation|max_stops|pickup_deadline_s|detour_factor) ;;
     *) echo "invalid Study 1 sub-study: $SUBSTUDY" >&2; exit 2 ;;
 esac
 JOBS_FILE="$STUDY_DIR/config/${SUBSTUDY}_jobs.tsv"

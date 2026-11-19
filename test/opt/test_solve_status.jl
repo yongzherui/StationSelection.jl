@@ -42,8 +42,8 @@
 
         # Both live aggregate-OD-route formulations share the gate, on either solver.
         cases = (
-            (AggregateODRouteJointRoutingAssignmentFormulation(), CGSolver()),
-            (AggregateODRouteBaseFormulation(max_stops = 4), DirectMIPSolver()),
+            (AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf), CGSolver()),
+            (AggregateODRouteBaseFormulation(pickup_deadline_s = Inf, max_stops = 4), DirectMIPSolver()),
         )
         for (formulation, solver) in cases
             result = run_opt(problem, formulation, solver)
@@ -60,7 +60,7 @@
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         result = run_opt(
-            problem, AggregateODRouteJointRoutingAssignmentFormulation(), CGSolver(),
+            problem, AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf), CGSolver(),
         )
         @test result.termination_status == SOLVE_OPTIMAL
         @test result.metadata["cg_converged"]           # what makes OPTIMAL earned here

@@ -35,10 +35,10 @@ The DFS starts once at every node in that set. It carries the shared pricing-lab
 
 Pickup and service state is maintained by the same label transition as column-generation pricing.
 A station visit creates or refreshes pickup eligibility only when its cumulative arrival time is at
-most `max_wait_time` (with the shared `1e-9` numerical tolerance). A later visit to destination `k`
+most `pickup_deadline_s` (with the shared `1e-9` numerical tolerance). A later visit to destination `k`
 certifies `(j,k)` only when the remembered pickup at `j` is still within the detour limit:
 
-- arrival at `p` is within `max_wait_time`; and
+- arrival at `p` is within `pickup_deadline_s`; and
 - `cum_time[q] - cum_time[p]` is at most `detour_factor * routing_cost(j,k)`.
 
 Every resulting label serving at least one pair becomes a provisional column. Its covered-pair set
@@ -46,7 +46,7 @@ is the column incidence signature and its `tau` is the total time from the first
 last.
 
 The DFS asks the shared pricing candidate-extension function for useful next endpoints. That
-function permits a fresh pickup only if arrival at its origin will be within `max_wait_time`; after
+function permits a fresh pickup only if arrival at its origin will be within `pickup_deadline_s`; after
 the pickup cutoff, it permits only destinations reachable from a previously eligible pickup. An
 extension is also rejected when the next station has reached `max_visits_per_node`. Recursion stops
 when the route reaches the resolved stop bound. There is no dominance or reduced-cost pruning in

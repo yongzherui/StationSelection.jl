@@ -29,7 +29,7 @@ revisits is expected to be faster on two levers, both aimed at that scan:
 ## What elementarity does and does not simplify
 
 Only the *route universe* changes. The reward contract is unchanged: a visit to
-origin `j` within `max_wait_time` opens a live clock; a later visit to `k`
+origin `j` within `pickup_deadline_s` opens a live clock; a later visit to `k`
 certifies `(p, j, k)` when the clock survives the passenger-specific `ride_limit`;
 and each passenger banks only its single best certified reward, tracked
 incrementally via `activated_reward_layers`.

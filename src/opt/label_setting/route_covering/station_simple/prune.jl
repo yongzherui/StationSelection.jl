@@ -30,7 +30,7 @@ function _route_covering_station_simple_future_reward_bound(
                 _direct_ride_limit(pricing_data, pair) + 1e-9 || continue
         else
             label.time + _route_covering_travel(pricing_data, label.current, pair[1]) <=
-                pricing_data.max_wait_time + 1e-9 || continue
+                pricing_data.pickup_deadline_s + 1e-9 || continue
         end
         ub += dual
     end

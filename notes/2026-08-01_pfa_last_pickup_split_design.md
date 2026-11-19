@@ -22,7 +22,7 @@ actually is).
 
 `post_w_completion.jl` already establishes the useful lemma:
 
-> Once `label.time >= max_wait_time`, no station visit can open or reset a pickup
+> Once `label.time >= pickup_deadline_s`, no station visit can open or reset a pickup
 > clock. With metric travel times [...] an optimal suffix does not revisit a
 > suffix station. The residual problem can therefore be enumerated as an
 > elementary destination path.

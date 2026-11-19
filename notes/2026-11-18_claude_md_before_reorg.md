@@ -65,7 +65,7 @@ blocks; they don't live inside `formulations/` or `problems/` themselves.
 | `ClusteringTwoStageFormulation` | `DirectMIPSolver` | Two-stage station-to-station assignment | `l` (activate/scenario) | y, z, x |
 | `ClusteringTwoStageODFormulation` | `DirectMIPSolver` | Two-stage OD pickup/dropoff assignment | `l`, `in_vehicle_time_weight` | y, z, x |
 | `ClusteringTwoStageODFlowRegularizerFormulation` | `DirectMIPSolver` | `ClusteringTwoStageODFormulation` + route-activation flow penalty | `l`, `in_vehicle_time_weight`, `flow_regularization_weight` | y, z, x, f_flow |
-| `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | Station build + decoupled OD assignment + route activation, against an exhaustively enumerated column pool built up front | `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`, `max_wait_time`, `detour_factor`, `max_stops`, `compensated_dominance` | y, x, x_walk, θ |
+| `AggregateODRouteBaseFormulation` | `DirectMIPSolver` | Station build + decoupled OD assignment + route activation, against an exhaustively enumerated column pool built up front | `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`, `pickup_deadline_s`, `detour_factor`, `max_stops`, `compensated_dominance` | y, x, x_walk, θ |
 | `AggregateODRouteJointRoutingAssignmentFormulation` | `CGSolver` | Same encoding-detail fields as Base, but θ columns carry OD assignment directly — no separate `x`; grown via column generation, no up-front enumeration | Base's field set exactly (the pricer lives on `CGSolver.pricing`) | y, x_walk, θ |
 
 **Important departure from the old two-stage convention:** the two `AggregateODRoute*`
@@ -305,7 +305,7 @@ Full write-up: `../docs/notes/2026-09-27_door_to_door_ratio_selection.md`.
 **AggregateODRoute formulations (both):** `route_regularization_weight` (μ, multiplies
 each route column's cost), `walk_cost_weight` (multiplies every walking-cost term),
 `repositioning_time` (ρ, added to every route column's travel/service cost),
-`max_wait_time`, `detour_factor` (min 1.0), and `max_stops` (min 2, default unbounded).
+`pickup_deadline_s`, `detour_factor` (min 1.0), and `max_stops` (min 2, default unbounded).
 `CGPricingConfig.compensated_dominance` (default `true`) affects only `CGSolver`'s
 label-setting pricer; `DirectMIPSolver`'s enumeration never runs dominance.
 
