@@ -13,7 +13,7 @@
     @test all(inst.orders == instances[1].orders for inst in instances)
 
     inst = generate_test1_instance(T1_FLEET_CONFIGS[1], 1)
-    data = create_test1_problem_data(inst; max_walking_distance = 1000.0 / 1.4)
+    data = create_test1_problem_data(inst; walking_limit_s = 1000.0 / 1.4)
     @test data.n_stations == nrow(inst.stations)
 end
 

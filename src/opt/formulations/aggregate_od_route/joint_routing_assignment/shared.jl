@@ -21,10 +21,10 @@ per-member block lists.
 # Why the derivation helper exists
 
 The three must agree on the route universe (`max_stops`, `pickup_deadline_s`,
-`detour_factor`) and on the cost weights (`route_regularization_weight`,
+`ride_time_limit_ratio`) and on the cost weights (`route_regularization_weight`,
 `walk_cost_weight`, `repositioning_time`, and the `demand_weighting` that scales every walking
 term), because a Benders cut derived from a subproblem
-priced at one `detour_factor` is simply not a valid underestimator of a master built at
+priced at one `ride_time_limit_ratio` is simply not a valid underestimator of a master built at
 another -- and nothing anywhere would raise: the run converges, reports `OPTIMAL`, and the
 number is wrong. So the derived types are NOT independently constructible from loose
 keywords in the normal path: each takes a parent formulation and copies this field set off
@@ -53,7 +53,7 @@ function _joint_routing_assignment_shared_fields(formulation)
         walk_cost_weight = formulation.walk_cost_weight,
         repositioning_time = formulation.repositioning_time,
         pickup_deadline_s = formulation.pickup_deadline_s,
-        detour_factor = formulation.detour_factor,
+        ride_time_limit_ratio = formulation.ride_time_limit_ratio,
         max_stops = formulation.max_stops,
         demand_weighting = formulation.demand_weighting,
     )

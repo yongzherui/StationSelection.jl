@@ -12,15 +12,17 @@ run_opt(problem::AbstractProblem, formulation::AbstractFormulation, solver::Abst
     optimize_model(build_model(problem, formulation, solver), solver)
 ```
 
-- **Problem** = instance + business decision: `StationSelectionProblem(data, k; max_walking_distance, door_to_door_ratio)`.
-  `k` = stations built. `max_walking_distance` is a TIME in seconds despite its name (haversine m / 1.4 m/s); its
-  default 300 is not the project standard (720) — always pass it. `door_to_door_ratio` defaults to `Inf` (off);
-  the project standard is 3.0 — always pass it.
+- **Problem** = instance + business decision: `StationSelectionProblem(data, k; walking_limit_s, door_to_door_limit_ratio)`.
+  `k` = stations built. `walking_limit_s` is a TIME in seconds despite its name (haversine m / 1.4 m/s); its
+  default 300 is not the project standard (720) — always pass it. `door_to_door_limit_ratio` defaults to `Inf` (off);
+  the project standard is 3.0 — always pass it. Renamed 2026-11-18 (old names `max_walking_distance`,
+  `door_to_door_ratio`, and the formulations' `detour_factor` -> `ride_time_limit_ratio`); the old keyword and field
+  names still work with a warning (`src/utils/core/renamed_limits.jl`) and will be removed.
 - **Formulation** = the mathematical encoding (the model).
 - **Solver** = the algorithm: `DirectMIPSolver`, `CGSolver` (column generation), `BendersSolver`.
 
 ```julia
-problem = StationSelectionProblem(data, 20; max_walking_distance = 720.0, door_to_door_ratio = 3.0)
+problem = StationSelectionProblem(data, 20; walking_limit_s = 720.0, door_to_door_limit_ratio = 3.0)
 formulation = AggregateODRouteJointRoutingAssignmentFormulation(route_regularization_weight = 10.0,
                                                                 walk_cost_weight = 0.1)
 result = run_opt(problem, formulation, CGSolver(config = SolverOptions(silent = false)))
@@ -48,7 +50,7 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
 - **Route fields:** `route_regularization_weight` (multiplies each route's cost), `walk_cost_weight`,
   `repositioning_time` (added to every route; project standard 20 s), `pickup_deadline_s` (the pickup deadline: a route
   picks riders up only while its clock, which starts at 0 with every request, is <= it; required, no default),
-  `detour_factor` (min 1.0;
+  `ride_time_limit_ratio` (min 1.0;
   ride-time limit counterpart, project standard 2.0, package default 1.5), `max_stops` (min 2, default unbounded).
 - **Direct walking (`x_walk`) is OFF** for every live formulation: the simulator has no walk-only mode, so
   selection must not serve groups on foot.
@@ -61,11 +63,11 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
 
 ### Service limits on the selection side
 
-`door_to_door_ratio` (the door-to-door limit) filters station pairs in `compute_valid_jk_pairs`:
+`door_to_door_limit_ratio` (the door-to-door limit) filters station pairs in `compute_valid_jk_pairs`:
 `walk(o,j) + drive(j,k) + walk(k,d) <= ratio * drive(o,d)` (seconds; a necessary condition). The OD formulations
 (Direct-distance clustering family, LAR, Joint LAR) apply it. An OD left with no pair (e.g. `o == d`) raises an
 `ArgumentError` (`check_door_to_door_servable`). The Joint LAR pricer also caps each rider's ride at
-`min(detour_factor * drive(j,k), ratio * drive(o,d) - walk(o,j) - walk(k,d))`
+`min(ride_time_limit_ratio * drive(j,k), ratio * drive(o,d) - walk(o,j) - walk(k,d))`
 (`joint_routing_assignment_ride_limit`, used by CG pricing, DirectMIP enumeration and Benders). LAR's pricer does
 not apply it. Supplied `CGSolver(initial_columns = ...)` are validated against these limits and refused otherwise.
 Write-up: `../docs/notes/2026-09-27_door_to_door_ratio_selection.md`.

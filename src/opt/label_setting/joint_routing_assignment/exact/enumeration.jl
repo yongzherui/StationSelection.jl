@@ -6,17 +6,17 @@ universe up front (`DirectMIPSolver`) rather than iteratively priced columns (`C
 # Reusing Base's physical-route DFS
 
 The physical feasibility rule this formulation's routes obey -- pickup deadline,
-`detour_factor * routing_cost(j, k)` ride limit at dropoff -- is identical to
-`AggregateODRouteBaseFormulation`'s when `door_to_door_ratio = Inf`: then it is evaluated
-per `(j, k)` pair, not per passenger (`detour_factor * get_routing_cost(data, j, k)`, the
+`ride_time_limit_ratio * routing_cost(j, k)` ride limit at dropoff -- is identical to
+`AggregateODRouteBaseFormulation`'s when `door_to_door_limit_ratio = Inf`: then it is evaluated
+per `(j, k)` pair, not per passenger (`ride_time_limit_ratio * get_routing_cost(data, j, k)`, the
 exact formula `route_covering/data.jl`'s `_direct_ride_limit` uses). A finite
-`door_to_door_ratio` makes the limit per passenger and only ever smaller
+`door_to_door_limit_ratio` makes the limit per passenger and only ever smaller
 (`joint_routing_assignment_ride_limit`, `pricing_round.jl`), so Base's DFS then visits a
 SUPERSET of the routes this formulation needs, and the per-candidate replay below drops
 the certifications the tighter limit forbids. So the set of physical
 routes a from-scratch DFS against `JointRoutingAssignmentPricingLabel`'s own transitions
 would visit is contained in (with an infinite ratio, identical to) what
-`route_covering/exact/enumeration.jl`'s DFS already visits, given the same `max_stops`/`pickup_deadline_s`/`detour_factor` and every
+`route_covering/exact/enumeration.jl`'s DFS already visits, given the same `max_stops`/`pickup_deadline_s`/`ride_time_limit_ratio` and every
 `(j, k)` pair made visible (both DFSs use the "uniform positive reward, nothing pruned"
 trick to neutralize their own dual-dependent candidate-node filters). This module reuses
 that DFS verbatim via `_enumerate_aggregate_od_route_raw_columns` -- the *raw*, pre-dedup
@@ -205,14 +205,14 @@ function enumerate_joint_routing_assignment_columns(
     raw_routes = _enumerate_aggregate_od_route_raw_columns(
         mapping, data,
         formulation.route_regularization_weight, formulation.repositioning_time,
-        formulation.pickup_deadline_s, formulation.detour_factor, formulation.max_stops,
+        formulation.pickup_deadline_s, formulation.ride_time_limit_ratio, formulation.max_stops,
         max_routes, time_limit_sec,
     )
     # `_enumerate_aggregate_od_route_raw_columns` also appends `mapping.columns`, its
     # walking-feasibility-guaranteeing singleton defaults (`_singleton_aggregate_od_route_columns`,
     # `data/maps/aggregate_od_route_map.jl`) -- those carry no `"route"` metadata and are
     # redundant here: any direct `(j, k)` route they represent is always within the same
-    # DFS's own depth-2 reach (`detour_factor >= 1` means the direct hop is always inside
+    # DFS's own depth-2 reach (`ride_time_limit_ratio >= 1` means the direct hop is always inside
     # its own ride limit), so only the genuinely DFS-visited entries are kept.
     physical_routes = unique(
         c -> c.metadata["route"],
@@ -238,7 +238,7 @@ function enumerate_joint_routing_assignment_columns(
                 is_walk_only_pair(pair) && continue
                 j, k = pair
                 ride_limit = joint_routing_assignment_ride_limit(
-                    data, mapping, formulation.detour_factor, o, d, j, k)
+                    data, mapping, formulation.ride_time_limit_ratio, o, d, j, k)
                 push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, 1.0))
             end
         end

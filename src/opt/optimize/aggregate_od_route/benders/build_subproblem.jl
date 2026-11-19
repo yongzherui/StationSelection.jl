@@ -217,7 +217,7 @@ function _stash_joint_routing_assignment_subproblem_pricing!(
         walk_cost_weight = formulation.walk_cost_weight,
         repositioning_time = formulation.repositioning_time,
         pickup_deadline_s = formulation.pickup_deadline_s,
-        detour_factor = formulation.detour_factor,
+        ride_time_limit_ratio = formulation.ride_time_limit_ratio,
         max_stops = formulation.max_stops,
     )
     m[:joint_routing_assignment_pricing_formulation] = monolith

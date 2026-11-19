@@ -83,11 +83,11 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
     columns::Vector{AggregateODRouteColumn}
     column_ids::Set{Int}
     columns_by_pair::Dict{Tuple{Int, Int}, Vector{Int}}
-    max_walking_distance::Float64
-    # `problem.door_to_door_ratio`: already applied to `valid_jk_pairs`, and read again by
+    walking_limit_s::Float64
+    # `problem.door_to_door_limit_ratio`: already applied to `valid_jk_pairs`, and read again by
     # the joint pricer's per-candidate ride limit (`joint_routing_assignment_ride_limit`).
     # One copy, so the two cannot disagree -- the pricer's seeding relies on it.
-    door_to_door_ratio::Float64
+    door_to_door_limit_ratio::Float64
 end
 
 has_walking_distance_limit(mapping::AggregateODRouteMap) = true
@@ -174,7 +174,7 @@ thing crossing the selection/simulation boundary is the station set --
 `walk_only_assignments.csv` is never read. So with this on, selection credited itself for
 serving ~25% of demand groups on foot while the simulator put every one of them in a
 vehicle, and "which formulation picks a better station set" was partly measuring which
-one had an escape hatch. Measured on a 4x4 grid at `max_walking_distance=110`: the routing
+one had an escape hatch. Measured on a 4x4 grid at `walking_limit_s=110`: the routing
 arm walked 20-21 of 81 groups; the simulator's incidental path fired for 0-5 of 30
 requests, for an unrelated reason.
 
@@ -226,7 +226,7 @@ out of range), not something a slack variable should paper over. Note this is a
 *necessary* condition, not sufficient on its own for `AggregateODRouteBaseFormulation`:
 a finite `get_routing_cost` only proves the pair is walkable-to, not that
 `enumerate_aggregate_od_route_columns` actually emitted a route covering it -- the same
-`detour_factor >= 1.0` two-stop certification argument
+`ride_time_limit_ratio >= 1.0` two-stop certification argument
 `joint_routing_assignment_two_stop_seed_columns` documents applies to that enumeration
 too, so in practice it does, but this function only checks the necessary part. Called
 once by each `build_model`, right after the map is built and before any JuMP variables
@@ -265,7 +265,7 @@ end
 
 Build the `AggregateODRouteMap` for `AggregateODRouteBaseFormulation`/
 `AggregateODRouteJointRoutingAssignmentFormulation`/`AggregateODRouteFeasibilityFormulation`,
-reading `problem.max_walking_distance` and `_aggregate_od_route_allow_walk_only(formulation)`
+reading `problem.walking_limit_s` and `_aggregate_od_route_allow_walk_only(formulation)`
 -- the only two things this function actually needs from `formulation`, which is why its
 parameter type is the broad `AbstractFormulation` rather than the narrower
 `AnyAggregateODRouteFormulation` Union: that Union is reserved for formulations sharing the
@@ -306,12 +306,12 @@ function create_aggregate_od_route_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        problem.max_walking_distance;
+        problem.walking_limit_s;
         allow_walk_only=_aggregate_od_route_allow_walk_only(formulation),
-        door_to_door_ratio=problem.door_to_door_ratio,
+        door_to_door_limit_ratio=problem.door_to_door_limit_ratio,
     )
     check_door_to_door_servable(valid_jk_pairs, data,
-                                problem.max_walking_distance, problem.door_to_door_ratio)
+                                problem.walking_limit_s, problem.door_to_door_limit_ratio)
     active_jk_s = _aggregate_od_route_active_jk_by_s(Omega_s, valid_jk_pairs)
     resolved_initial_columns = isnothing(initial_columns) ?
         _singleton_aggregate_od_route_columns(active_jk_s, data) :
@@ -330,8 +330,8 @@ function create_aggregate_od_route_map(
         AggregateODRouteColumn[],
         Set{Int}(),
         Dict{Tuple{Int, Int}, Vector{Int}}(),
-        problem.max_walking_distance,
-        problem.door_to_door_ratio,
+        problem.walking_limit_s,
+        problem.door_to_door_limit_ratio,
     )
     for column in resolved_initial_columns
         _register_aggregate_od_route_column_metadata!(mapping, column)

@@ -8,7 +8,7 @@ column_generation/build_joint_routing_assignment.jl`'s `_build_joint_routing_ass
 `aggregate_od_route_validate_feasible_coverage` (`data/maps/aggregate_od_route_map.jl`) is
 a *build-time* check on the demand-group/candidate-pair data alone -- it says nothing
 about whether the `k`-station budget forced on `y` (`Σy == k`, `add_station_limit_constraint!`)
-can actually be met. `Σ_{j reachable within max_walking_distance} y[j] >= 1` is a genuine
+can actually be met. `Σ_{j reachable within walking_limit_s} y[j] >= 1` is a genuine
 necessary condition on `y` itself, so writing it as a real `@constraint` lets a solve that
 can't possibly satisfy it fail immediately (LP infeasible on the very first `optimize!`)
 instead of only surfacing after CG has spent several pricing rounds discovering it has no
@@ -46,7 +46,7 @@ end
     add_aggregate_od_route_endpoint_feasibility_constraints!(m, data, mapping, y)
         -> Dict{Int, ConstraintRef}
 
-One row per *required* location: `Σ_{j : walking_cost(point, j) <= max_walking_distance}
+One row per *required* location: `Σ_{j : walking_cost(point, j) <= walking_limit_s}
 y[j] >= 1`.
 
 A demand group `(s,p)` with origin `o` and destination `d` marks both `o` and `d` required
@@ -58,7 +58,7 @@ formulations -- so forcing a station near `o`/`d` there would be unsound: it wou
 solutions the model is supposed to allow.
 
 Consolidated per location, not per demand group, and not split by pickup/dropoff side:
-reachability depends only on `(point, max_walking_distance)` under symmetric walking costs
+reachability depends only on `(point, walking_limit_s)` under symmetric walking costs
 (enforced by `_assert_symmetric_walking_costs`), so every demand group touching a location
 -- as origin or destination -- contributes to the same one row. This also means a location
 is required (gets a row) the moment *any* demand group needs it there, even if some other
@@ -70,7 +70,7 @@ Every candidate list this builds is guaranteed non-empty by the time it's called
 required location belongs to a demand group `aggregate_od_route_validate_feasible_coverage`
 already proved has a real `(j,k)` pair with finite routing cost, and that pair only exists
 in `mapping.valid_jk_pairs` because both its stations already passed this same
-`max_walking_distance` reachability check (`compute_valid_jk_pairs`) -- so there is always
+`walking_limit_s` reachability check (`compute_valid_jk_pairs`) -- so there is always
 at least one term to sum. Both `build_model` entry points call the validator before this.
 """
 function add_aggregate_od_route_endpoint_feasibility_constraints!(
@@ -95,7 +95,7 @@ function add_aggregate_od_route_endpoint_feasibility_constraints!(
     endpoint_feasibility = Dict{Int, ConstraintRef}()
     for point in sort!(collect(required))
         candidates = [j for j in 1:n if is_candidate[j] &&
-                      get_walking_cost(data, point, j) <= mapping.max_walking_distance]
+                      get_walking_cost(data, point, j) <= mapping.walking_limit_s]
         endpoint_feasibility[point] = @constraint(m, sum(y[j] for j in candidates; init=0.0) >= 1)
     end
     return endpoint_feasibility

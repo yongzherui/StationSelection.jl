@@ -24,7 +24,7 @@ Dispatch marker, no fields -- unlike `AggregateODRouteBaseFormulation`/
 encoding-detail knobs to carry: it never touches routing cost, walk cost weighting,
 repositioning time, pickup deadline, detour factor, stop count, or dominance mode, since it
 builds no route columns and no walk variables at all. Pairs with `StationSelectionProblem`
-(`data`, `k`, `max_walking_distance`) and `DirectMIPSolver` only -- there is no pricing
+(`data`, `k`, `walking_limit_s`) and `DirectMIPSolver` only -- there is no pricing
 loop to speak of, so `CGSolver` has nothing to do here.
 
 Not a member of `AnyAggregateODRouteFormulation` (`formulations/aggregate_od_route/

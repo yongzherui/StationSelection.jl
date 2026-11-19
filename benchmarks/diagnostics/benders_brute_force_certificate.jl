@@ -103,7 +103,7 @@ cut_signatures = collect(master[:benders_cut_signatures])
 #
 # Reproduces `add_aggregate_od_route_endpoint_feasibility_constraints!`'s own rule: a
 # location is required iff some positive-demand group at it lacks WALK_ONLY_PAIR, and it is
-# satisfied iff some station within `max_walking_distance` of it is built.
+# satisfied iff some station within `walking_limit_s` of it is built.
 data = problem.data
 mapping = create_aggregate_od_route_map(problem, formulation, data)
 required = Set{Int}()
@@ -116,7 +116,7 @@ for s in 1:n_scenarios(data)
     end
 end
 candidates = Dict(pt => Set(j for j in 1:N
-                            if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                            if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
                   for pt in required)
 master_feasible(combo) = all(!isempty(intersect(candidates[pt], combo)) for pt in required)
 @printf("required locations: %d | endpoint-feasible station sets: ", length(required))

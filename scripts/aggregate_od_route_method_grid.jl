@@ -158,9 +158,9 @@ function resolve_max_stops(mode::Symbol, n_stations::Int)::Int
 end
 
 """
-    build_instance(family, n_stations, n_pairs, seed, data_dir) -> (data, max_walking_distance)
+    build_instance(family, n_stations, n_pairs, seed, data_dir) -> (data, walking_limit_s)
 
-`max_walking_distance` is returned alongside `data` because the two families
+`walking_limit_s` is returned alongside `data` because the two families
 resolve it differently: the synthetic grid measures distance in grid units
 (so the cap is set to the grid diagonal -- effectively unrestricted), while
 Zhuzhou measures walking time in seconds (matches the 600s convention used in
@@ -180,7 +180,7 @@ function build_instance(
         nx, ny = _grid_dims_for(n_stations)
         instance = generate_grid_instance(nx, ny, n_pairs; endpoint_overlap=ENDPOINT_OVERLAP, seed=seed)
         max_walk = Float64(nx + ny)
-        data = create_grid_problem_data(instance; max_walking_distance=max_walk)
+        data = create_grid_problem_data(instance; walking_limit_s=max_walk)
         return data, max_walk
     elseif family == "zhuzhou"
         data, meta = generate_zhuzhou_data(

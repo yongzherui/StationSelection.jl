@@ -9,7 +9,7 @@
     end
 
     @testset "a refuted feasibility gate returns INFEASIBLE instead of throwing" begin
-        # Four stations pairwise 1000 m apart -- further than `max_walking_distance`, so no
+        # Four stations pairwise 1000 m apart -- further than `walking_limit_s`, so no
         # station can stand in for another and neither demand group gets a direct-walk
         # fallback. Two disjoint requests (1 -> 2 and 3 -> 4) therefore require all four
         # stations, which k = 2 cannot supply: infeasible on `y` alone, decided by
@@ -38,7 +38,7 @@
             routing_costs = routing_costs,
             scenarios = [("2024-01-01 07:00:00", "2024-01-01 09:00:00")],
         )
-        problem = StationSelectionProblem(data, 2; max_walking_distance = 300.0)
+        problem = StationSelectionProblem(data, 2; walking_limit_s = 300.0)
 
         # Both live aggregate-OD-route formulations share the gate, on either solver.
         cases = (
@@ -57,8 +57,8 @@
 
     @testset "a certified solve still reports OPTIMAL, and keeps the raw MOI code" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         result = run_opt(
             problem, AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf), CGSolver(),
         )

@@ -30,7 +30,7 @@
     )
     @test StationSelection.n_scenarios(data) == 2
 
-    problem = StationSelectionProblem(data, 1; max_walking_distance = 500.0)
+    problem = StationSelectionProblem(data, 1; walking_limit_s = 500.0)
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf)
     mapping = StationSelection.create_aggregate_od_route_map(problem, formulation, data)
     @test mapping.Omega_s[1] == [(1, 2)]
@@ -93,9 +93,9 @@ end
     )
     @test StationSelection.n_scenarios(data) == 2
 
-    problem = StationSelectionProblem(data, 2; max_walking_distance = 500.0)
+    problem = StationSelectionProblem(data, 2; walking_limit_s = 500.0)
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
-        pickup_deadline_s = 900.0, detour_factor = 2.0, max_stops = 4,
+        pickup_deadline_s = 900.0, ride_time_limit_ratio = 2.0, max_stops = 4,
     )
 
     # Every scenario must get a slice, so nothing is starved: with an equal split each of

@@ -23,21 +23,21 @@ layers, retroactive commit-or-skip, or onboard-bitset boarding -- see
 """
 
 """
-    joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k) -> Float64
+    joint_routing_assignment_ride_limit(data, mapping, ride_time_limit_ratio, o, d, j, k) -> Float64
 
 In-vehicle time allowed to demand group `(o, d)` riding pickup `j` -> dropoff `k`:
 
-    min(detour_factor * drive(j, k),                                  # ride limit (G3's role)
-        door_to_door_ratio * drive(o, d) - walk(o, j) - walk(k, d))   # door to door (G2)
+    min(ride_time_limit_ratio * drive(j, k),                                  # ride limit (the ride-time limit's role)
+        door_to_door_limit_ratio * drive(o, d) - walk(o, j) - walk(k, d))   # door-to-door limit
 
-The ride limit is always enforced; `mapping.door_to_door_ratio` can only tighten it.
-The G2 term is the simulator's destination deadline with no waiting charged, the same
+The ride limit is always enforced; `mapping.door_to_door_limit_ratio` can only tighten it.
+The door-to-door term is the simulator's destination deadline with no waiting charged, the same
 necessary condition `compute_valid_jk_pairs` filters on, and is dropped when the ratio is
 `Inf` or `drive(o, d)` is not finite. Every candidate builder must use this, so the pricer,
 the enumeration and the pair filter share one rule.
 
 Invariant: the result is `>= drive(j, k)` for every `(j, k)` in `get_valid_jk_pairs`, since
-`detour_factor >= 1` and the pair filter kept only pairs with
+`ride_time_limit_ratio >= 1` and the pair filter kept only pairs with
 `walk + drive(j, k) + walk <= ratio * drive(o, d)`. Two-stop seeding
 (`joint_routing_assignment_two_stop_seed_columns`) and the relaxed-cluster bound rely on
 the direct hop `j -> k` always certifying its own candidate.
@@ -45,11 +45,11 @@ the direct hop `j -> k` always certifying its own candidate.
 function joint_routing_assignment_ride_limit(
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    detour_factor::Float64,
+    ride_time_limit_ratio::Float64,
     o::Int, d::Int, j::Int, k::Int,
 )::Float64
-    ride_limit = detour_factor * get_routing_cost(data, j, k)
-    ratio = mapping.door_to_door_ratio
+    ride_limit = ride_time_limit_ratio * get_routing_cost(data, j, k)
+    ratio = mapping.door_to_door_limit_ratio
     isfinite(ratio) || return ride_limit
     direct = get_routing_cost(data, o, d)
     isfinite(direct) || return ride_limit
@@ -57,12 +57,12 @@ function joint_routing_assignment_ride_limit(
     d2d_limit >= get_routing_cost(data, j, k) - 1e-6 || error(
         "door-to-door budget $d2d_limit s for OD $((o, d)) via $((j, k)) is below the direct " *
         "ride $(get_routing_cost(data, j, k)) s: the pair should have been filtered by " *
-        "compute_valid_jk_pairs with the same door_to_door_ratio ($ratio)")
+        "compute_valid_jk_pairs with the same door_to_door_limit_ratio ($ratio)")
     return min(ride_limit, d2d_limit)
 end
 
 """
-    joint_routing_assignment_pricing_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, scenario)
+    joint_routing_assignment_pricing_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, ride_time_limit_ratio, scenario)
         -> Vector{PassengerAssignmentCandidate}
 
 Turn the current RMP duals into `PassengerAssignmentCandidate`s for one scenario,
@@ -82,7 +82,7 @@ function joint_routing_assignment_pricing_candidates(
     gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     walk_cost_weight::Float64,
-    detour_factor::Float64,
+    ride_time_limit_ratio::Float64,
     scenario::Int,
 )::Vector{PassengerAssignmentCandidate}
     candidates = PassengerAssignmentCandidate[]
@@ -102,7 +102,7 @@ function joint_routing_assignment_pricing_candidates(
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * demand * od_pair_walking_cost(data, o, d, pair)
             rho > 1e-9 || continue
-            ride_limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
+            ride_limit = joint_routing_assignment_ride_limit(data, mapping, ride_time_limit_ratio, o, d, j, k)
             push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))
         end
     end
@@ -110,7 +110,7 @@ function joint_routing_assignment_pricing_candidates(
 end
 
 """
-    joint_routing_assignment_trigger_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, scenario)
+    joint_routing_assignment_trigger_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, ride_time_limit_ratio, scenario)
 
 Every valid (group, j, k) pair with demand and its rho, WHATEVER ITS SIGN: the riders who may set an M2/M3 route's
 departure in `:exact_no_anticipation` (the trigger is carried and charged its rho even when it is not positive).
@@ -123,7 +123,7 @@ function joint_routing_assignment_trigger_candidates(
     gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
     walk_cost_weight::Float64,
-    detour_factor::Float64,
+    ride_time_limit_ratio::Float64,
     scenario::Int,
 )::Vector{PassengerAssignmentCandidate}
     candidates = PassengerAssignmentCandidate[]
@@ -137,7 +137,7 @@ function joint_routing_assignment_trigger_candidates(
             j, k = pair
             rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
                 walk_cost_weight * demand * od_pair_walking_cost(data, o, d, pair)
-            ride_limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
+            ride_limit = joint_routing_assignment_ride_limit(data, mapping, ride_time_limit_ratio, o, d, j, k)
             push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))
         end
     end
@@ -176,9 +176,9 @@ function _pricing_build_scenario_context(
     alpha, gamma_o, gamma_d = duals
     data = m[:joint_routing_assignment_data]
     walk_cost_weight = Float64(m[:joint_routing_assignment_walk_cost_weight])
-    detour_factor = Float64(m[:joint_routing_assignment_detour_factor])
+    ride_time_limit_ratio = Float64(m[:joint_routing_assignment_ride_time_limit_ratio])
     candidates = joint_routing_assignment_pricing_candidates(
-        data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, s,
+        data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, ride_time_limit_ratio, s,
     )
     isempty(candidates) && return nothing
 
@@ -282,10 +282,10 @@ function _pricing_build_scenario_context(
     if pricing_mode === :exact_no_anticipation
         first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol
         triggers = first_boarding === :start_now ? nothing : joint_routing_assignment_trigger_candidates(
-            data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, s,
+            data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, ride_time_limit_ratio, s,
         )
         na_data = create_no_anticipation_pricing_data(
-            pricing_data, data, mapping, s, detour_factor, first_boarding; trigger_candidates=triggers,
+            pricing_data, data, mapping, s, ride_time_limit_ratio, first_boarding; trigger_candidates=triggers,
         )
         return NoAnticipationSearchContext(na_data), existing
     end

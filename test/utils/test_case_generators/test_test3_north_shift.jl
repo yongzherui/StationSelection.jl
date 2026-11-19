@@ -15,7 +15,7 @@
     inst2 = generate_test3_instance("north_shift_2h", T3_VARIANTS[2].zone_h_km, 2)
     @test inst1.orders == inst2.orders
 
-    data = create_test3_problem_data(inst1; max_walking_distance = inst1.recommended_walk_threshold_km * 1000 / 1.4)
+    data = create_test3_problem_data(inst1; walking_limit_s = inst1.recommended_walk_threshold_km * 1000 / 1.4)
     @test data.n_stations == nrow(inst1.stations)
 
     all_instances = build_test3_cases(; n_seeds = 1)
@@ -34,8 +34,8 @@ end
     for v in T3_VARIANTS
         inst = generate_test3_instance(v.case_name, v.zone_h_km, 1)
         mwd_sec = inst.recommended_walk_threshold_km * 1000 / 1.4
-        data = create_test3_problem_data(inst; max_walking_distance = mwd_sec)
-        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        data = create_test3_problem_data(inst; walking_limit_s = mwd_sec)
+        problem = StationSelectionProblem(data, inst.suggested_k; walking_limit_s = mwd_sec)
         formulation = ClusteringTwoStageODFormulation(
             inst.suggested_l; in_vehicle_time_weight = 0.0,
         )

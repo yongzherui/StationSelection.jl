@@ -63,7 +63,7 @@ struct AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation <: Abs
     walk_cost_weight::Float64
     repositioning_time::Float64
     pickup_deadline_s::Float64
-    detour_factor::Float64
+    ride_time_limit_ratio::Float64
     max_stops::Int
     demand_weighting::Symbol
 
@@ -81,14 +81,14 @@ struct AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation <: Abs
         ))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             f.route_regularization_weight, f.walk_cost_weight, f.repositioning_time,
-            f.pickup_deadline_s, f.detour_factor, effective_max_stops,
+            f.pickup_deadline_s, f.ride_time_limit_ratio, effective_max_stops,
         )
         new(
             f.route_regularization_weight,
             f.walk_cost_weight,
             f.repositioning_time,
             f.pickup_deadline_s,
-            f.detour_factor,
+            f.ride_time_limit_ratio,
             resolved_max_stops,
             f.demand_weighting,
         )

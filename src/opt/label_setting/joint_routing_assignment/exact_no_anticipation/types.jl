@@ -5,8 +5,8 @@ simulator's timing rules for riders who walk to their pickup stop (owner, 2026-1
 Why: the `exact` pricer lets a vehicle collect a rider at a stop as soon as it gets there,
 whatever the rider's walk, and charges the walk only inside the door-to-door budget. In the
 simulator a rider boards only after walking to the stop, a vehicle with riders on board
-never waits, and the door-to-door guarantee (G2) runs from the request. On the model's own
-G2 3.0 routes 48-67% of later boardings happen before the rider could have arrived
+never waits, and the door-to-door limit runs from the request. On the model's own
+door-to-door limit 3.0 routes 48-67% of later boardings happen before the rider could have arrived
 (experiments/2026-11-17_g2_time_blind, finding 7).
 
 Clock. Every rider of a scenario requests at t = 0 (the scenario's shared start, as in the
@@ -14,14 +14,14 @@ Clock. Every rider of a scenario requests at t = 0 (the scenario's shared start,
 `CGPricingConfig`) says when the vehicle leaves it:
 
   - `:start_now` (M1) -- at t0 = 0. The first stop's riders board at once; their walk is
-    not waited for and their G2 is the `exact` rule, walk + ride + egress walk <= budget.
+    not waited for and their door-to-door limit is the `exact` rule, walk + ride + egress walk <= budget.
   - `:after_first_walker` (M2) -- the empty vehicle waits for the first rider to arrive and
     leaves the moment that rider boards: t0 = walk(o, j1) of that rider. Only riders who
     are already there board with them: walk in (t0 - 5 s, t0].
   - `:after_last_walker` (M3) -- the empty vehicle times its departure t0 so the riders it takes
     at the first stop have gathered: every first-stop rider needs walk(o, j1) <= t0 (the
     simulator lets an idle vehicle defer its departure until after a walker arrives). Riders
-    who arrive earlier stand at the stop; G2 runs from the request, so that counts.
+    who arrive earlier stand at the stop; the door-to-door limit runs from the request, so that counts.
 
 Under M2/M3 every route starts on a TRIGGER: a rider pair (p, j1, k) whose walk sets t0 (the
 first walker under M2, the last under M3). The trigger must be carried -- dropped off at k with
@@ -37,8 +37,8 @@ a column at rc -152 was never generated). Other first-stop riders stay optional.
 
 After the first stop the vehicle never waits. A rider boards a later visit of `j` at time v
 only if they have walked there: walk(o, j) <= v. Every rider (first stop under M2, every
-later stop) meets G2 counted from the request: drop-off time T + walk(k, d) <=
-door_to_door_ratio * drive(o, d). The in-vehicle limit is `detour_factor * drive(j, k)`.
+later stop) meets the door-to-door limit counted from the request: drop-off time T + walk(k, d) <=
+door_to_door_limit_ratio * drive(o, d). The in-vehicle limit is `ride_time_limit_ratio * drive(j, k)`.
 Every rider requests at t = 0, so all share one pickup deadline, the formulation's
 `pickup_deadline_s` (900 s): pickup clocks open only while time <= pickup_deadline_s, and an
 M2/M3 start t0 <= pickup_deadline_s (owner, 2026-11-18: the pickup deadline is the only pickup limit).
@@ -58,8 +58,8 @@ struct NoAnticipationOpportunity
     p::Int
     origin::Int
     destination::Int
-    ride_cap::Float64       # detour_factor * drive(j, k): the in-vehicle limit on its own
-    deadline::Float64       # door_to_door_ratio * drive(o, d) - walk(k, d), from the request (Inf without G2)
+    ride_cap::Float64       # ride_time_limit_ratio * drive(j, k): the in-vehicle limit on its own
+    deadline::Float64       # door_to_door_limit_ratio * drive(o, d) - walk(k, d), from the request (Inf without the door-to-door limit)
     walk_in::Float64        # walk(o, j)
     reward::Float64
     layer_mask::RewardLayerBitset

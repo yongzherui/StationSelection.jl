@@ -17,9 +17,9 @@ demand group whose `get_valid_jk_pairs` contains a real (non-walk-only) pair.
 
 # Coverage claim
 
-`AggregateODRouteProblem`'s constructor enforces `detour_factor >= 1.0`, and replaying
+`AggregateODRouteProblem`'s constructor enforces `ride_time_limit_ratio >= 1.0`, and replaying
 `[j, k]` gives the pickup at `j` an age of exactly `travel(j,k)` on arrival at `k` --
-i.e. exactly at its own ride limit `detour_factor * travel(j,k)` when `detour_factor ==
+i.e. exactly at its own ride limit `ride_time_limit_ratio * travel(j,k)` when `ride_time_limit_ratio ==
 1.0`, and strictly under it otherwise. A finite door-to-door ratio caps that limit per
 passenger, but never below `travel(j,k)`: `compute_valid_jk_pairs` kept `(j,k)` only if the
 direct ride fits the same budget, and `joint_routing_assignment_ride_limit` asserts it.
@@ -36,7 +36,7 @@ certifies, PLUS one singleton column per `(s, p, j, k)` carrying that group alon
 The master's coverage is set partitioning: each group must be covered by exactly one
 selected column, and a column serves its whole assignment set at once. Bundled seeds alone
 therefore need two forced groups never to share a bundle with a third group. That held
-while every group had many valid pairs, and broke under `door_to_door_ratio`: at k = 20 on
+while every group had many valid pairs, and broke under `door_to_door_limit_ratio`: at k = 20 on
 sub35 (ratio 2.0), groups with a single valid pair forced two bundles that both also
 carried another group, the RMP was infeasible before any pricing (IIS: two coverage rows,
 one dropoff_link row, one `y <= 1` bound), and CG stopped. `ClusteringTwoStageOD`, which

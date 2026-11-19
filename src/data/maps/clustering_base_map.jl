@@ -26,7 +26,7 @@ at each station location, aggregated across all scenarios.
 - `scenario_label_to_array_idx::Dict{String, Int}`: Scenario label → array index mapping
 - `array_idx_to_scenario_label::Vector{String}`: Array index → scenario label mapping
 - `request_counts::Dict{Int, Int}`: Station index → total request count (pickups + dropoffs)
-- `max_walking_distance::Float64`: Assignment-radius limit
+- `walking_limit_s::Float64`: Assignment-radius limit
 - `valid_j_assignments::Dict{Int, Vector{Int}}`: Admissible cluster centers for each i
 - `n_stations::Int`: Number of candidate stations
 """
@@ -37,7 +37,7 @@ struct ClusteringBaseModelMap <: AbstractClusteringMap
     scenario_label_to_array_idx::Dict{String, Int}
     array_idx_to_scenario_label::Vector{String}
     request_counts::Dict{Int, Int}
-    max_walking_distance::Float64
+    walking_limit_s::Float64
     valid_j_assignments::Dict{Int, Vector{Int}}
 
     n_stations::Int
@@ -85,7 +85,7 @@ end
 
 function compute_base_valid_j_assignments(
     data::StationSelectionData,
-    max_walking_distance::Float64
+    walking_limit_s::Float64
 )::Dict{Int, Vector{Int}}
     valid = Dict{Int, Vector{Int}}()
     n = data.n_stations
@@ -94,7 +94,7 @@ function compute_base_valid_j_assignments(
     for i in 1:n
         js = Int[]
         for j in 1:n
-            if is_candidate[j] && get_walking_cost(data, i, j) <= max_walking_distance
+            if is_candidate[j] && get_walking_cost(data, i, j) <= walking_limit_s
                 push!(js, j)
             end
         end
@@ -115,7 +115,7 @@ end
 Create a clustering base map with aggregated request counts.
 
 # Arguments
-- `problem::StationSelectionProblem`: `max_walking_distance` lives here
+- `problem::StationSelectionProblem`: `walking_limit_s` lives here
 - `formulation::ClusteringBaseFormulation`: The clustering formulation (no fields)
 - `data::StationSelectionData`: Problem data with stations and scenarios
 
@@ -129,7 +129,7 @@ function create_clustering_base_model_map(
 )::ClusteringBaseModelMap
 
     request_counts = compute_request_counts(data)
-    valid_j_assignments = compute_base_valid_j_assignments(data, problem.max_walking_distance)
+    valid_j_assignments = compute_base_valid_j_assignments(data, problem.walking_limit_s)
     scenario_label_to_array_idx, array_idx_to_scenario_label = create_scenario_label_mappings(data.scenarios)
 
     return ClusteringBaseModelMap(
@@ -139,7 +139,7 @@ function create_clustering_base_model_map(
         scenario_label_to_array_idx,
         array_idx_to_scenario_label,
         request_counts,
-        problem.max_walking_distance,
+        problem.walking_limit_s,
         valid_j_assignments,
         data.n_stations
     )

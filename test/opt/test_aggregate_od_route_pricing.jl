@@ -14,7 +14,7 @@
             scenario::Int=1,
             active_pairs=[(1, 3), (2, 4)],
             pickup_deadline_s=10.0,
-            detour_factor=1.5,
+            ride_time_limit_ratio=1.5,
             max_stops=5,
             bounded_max_stops=true,
             compensated_dominance=true,
@@ -27,7 +27,7 @@
             1.0,
             0.0,
             pickup_deadline_s,
-            detour_factor,
+            ride_time_limit_ratio,
             max_stops,
             bounded_max_stops,
             compensated_dominance,
@@ -129,7 +129,7 @@
         at_cutoff = line_pricing_data(
             active_pairs=[(2, 4)],
             pickup_deadline_s=1.0,
-            detour_factor=2.0,
+            ride_time_limit_ratio=2.0,
             max_stops=3,
         )
         initial_1 = RouteCoveringPricingLabel(
@@ -144,7 +144,7 @@
         after_cutoff = line_pricing_data(
             active_pairs=[(2, 4)],
             pickup_deadline_s=0.5,
-            detour_factor=2.0,
+            ride_time_limit_ratio=2.0,
             max_stops=3,
         )
         initial_1_late = RouteCoveringPricingLabel(
@@ -172,7 +172,7 @@
     end
 
     @testset "expired opportunities are pruned before certification" begin
-        pricing_data = line_pricing_data(detour_factor=1.0)
+        pricing_data = line_pricing_data(ride_time_limit_ratio=1.0)
         duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
         initial_1 = label_at_current(initial_route_covering_pricing_labels(pricing_data, duals), 1)
         expired_child = only(extend_route_covering_pricing_label(initial_1, 4, pricing_data, duals))
@@ -306,7 +306,7 @@
         pricing_data = line_pricing_data(
             active_pairs=[(3, 4)],
             pickup_deadline_s=10.0,
-            detour_factor=3.0,
+            ride_time_limit_ratio=3.0,
             max_stops=4,
         )
         duals = RouteCoveringPricingDuals(Dict((3, 4) => 10.0))
@@ -425,7 +425,7 @@
         end
 
         @testset "expired opportunities are pruned before certification" begin
-            pricing_data = line_pricing_data(active_pairs=[(1, 3)], detour_factor=1.0)
+            pricing_data = line_pricing_data(active_pairs=[(1, 3)], ride_time_limit_ratio=1.0)
             duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0))
             initial_1 = only(
                 filter(
@@ -474,7 +474,7 @@
         end
 
         @testset "candidate generation never offers a visited station" begin
-            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], detour_factor=3.0, pickup_deadline_s=10.0)
+            pricing_data = line_pricing_data(active_pairs=[(1, 3), (3, 4)], ride_time_limit_ratio=3.0, pickup_deadline_s=10.0)
             duals = RouteCoveringPricingDuals(Dict((1, 3) => 10.0, (3, 4) => 10.0))
             label = RouteCoveringStationSimpleLabel(
                 1, [1], Set([1]), 0.0, Dict(1 => 0.0), Set{Tuple{Int, Int}}(), 0.0, 0.0,

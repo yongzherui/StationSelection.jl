@@ -49,7 +49,7 @@ data = create_station_selection_data(
 )
 
 # Choose a problem + formulation + solver
-problem = StationSelectionProblem(data, 10; max_walking_distance=800.0)  # k=10 stations, seconds
+problem = StationSelectionProblem(data, 10; walking_limit_s=800.0)  # k=10 stations, seconds
 formulation = ClusteringTwoStageODFormulation(5; in_vehicle_time_weight=1.0)  # l=5 active/scenario
 solver = DirectMIPSolver(config=SolverOptions(silent=true))
 

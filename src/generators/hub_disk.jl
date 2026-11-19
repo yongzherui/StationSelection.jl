@@ -26,7 +26,7 @@ Demand: Poisson arrivals at `lambda_per_hour` in EACH direction, uniform over th
 two flows give the fleet a natural repositioning trip in each direction.
 
 Driving: straight line x `circuity` at `vehicle_speed_mps`, a complete graph over every node (hub, stations,
-demand points); demand-point rows are needed for direct drive distances and G2. Coordinates go to
+demand points); demand-point rows are needed for direct drive distances and the door-to-door limit. Coordinates go to
 lon/lat through the test-case reference point (`tc_to_lon` / `tc_to_lat`).
 
 Writes `station.csv` (extra columns `candidate`, `role`, `x_m`, `y_m`), `segment.csv`, `order.csv` and

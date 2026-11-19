@@ -643,7 +643,7 @@
                 # A service arc must always be traversable inside the ride limits of the
                 # passengers it serves, or the intra reward is unreachable and the bound
                 # silently loses it. Holds because tau_intra(C) <= tau(j_p,k_p) <= R_pjk
-                # <= R_bar whenever detour_factor >= 1 -- checked, not assumed.
+                # <= R_bar whenever ride_time_limit_ratio >= 1 -- checked, not assumed.
                 for opp in relaxed.inner.opportunities
                     haskey(relaxed.service_node, opp.origin) || continue
                     opp.destination == relaxed.service_node[opp.origin] || continue
@@ -737,8 +737,8 @@
 
     @testset "end to end: certify-first reaches the same certified optimum" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         base = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
@@ -792,8 +792,8 @@
         # it must certify exactly when exhaustive pricing would -- the sanity end of a
         # cluster-count sweep.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         result = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
@@ -810,8 +810,8 @@
         # configuring it legally and stripping the clustering off the built model.
         @test_throws ArgumentError CGPricingConfig(mode = :relaxed_cluster)
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         solver = rc_solver(3)
         build = StationSelection.build_model(
             problem,
@@ -830,8 +830,8 @@
         # where scenario 1 replayed the same inconclusive 262 s search 24 times because
         # scenario 2 kept harvesting columns and the round therefore never looked stuck.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         solver = rc_solver(3)
         build = StationSelection.build_model(
             problem,
@@ -1130,8 +1130,8 @@
         # should already have excluded -- i.e. the cut machinery is broken -- so this is a
         # property test, not a smoke test.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         result = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
@@ -1164,8 +1164,8 @@
         # improving route's image is ever cut off. If that reasoning were wrong, CG would
         # stop early here and the objective would move.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         base = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
@@ -1195,8 +1195,8 @@
         # the regular pricing round is skipped for that iteration -- which is the whole
         # speedup, and it must not cost anything in correctness.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         base = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
@@ -1397,8 +1397,8 @@
         # certificate when it lands. So `cg_certifying_rounds` must be 0 for any
         # :relaxed_cluster run, and its escalated attempts show up as certification rounds.
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
 
         result = run_opt(
             problem,
@@ -1430,8 +1430,8 @@
             relaxed_cluster_count = 8, relaxed_cluster_max_count = 8,
         )                                                           # equal = no refinement
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         base = run_opt(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),

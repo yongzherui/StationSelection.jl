@@ -57,7 +57,7 @@ Maps scenarios to origin-destination pairs for clustering optimization.
   demand; position `p` within `Omega_s[s]` is the demand group's index.
 - `Q_s::Dict{Int, Vector{Int}}`: Demand count `Q_s[s][p]` for demand group `p`, dense and
   parallel to `Omega_s[s]` (every `p` has positive demand by construction).
-- `max_walking_distance::Float64`: Maximum walking distance constraint
+- `walking_limit_s::Float64`: Maximum walking distance constraint
 - `valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}`: Maps OD pair (o,d) → valid (j,k) station pairs
 """
 struct ClusteringTwoStageODMap <: AbstractClusteringMap
@@ -75,14 +75,14 @@ struct ClusteringTwoStageODMap <: AbstractClusteringMap
     Q_s::Dict{Int, Vector{Int}}
 
     # Walking distance constraint
-    max_walking_distance::Float64
+    walking_limit_s::Float64
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
 end
 
 
 """
     compute_valid_jk_pairs(
-        all_od_pairs, data, max_walking_distance
+        all_od_pairs, data, walking_limit_s
     ) -> Dict{Tuple{Int,Int}, Vector{Tuple{Int,Int}}}
 
 For each OD index pair (origin_idx,dest_idx), compute which station index pairs
@@ -90,42 +90,42 @@ For each OD index pair (origin_idx,dest_idx), compute which station index pairs
 
 `j == k` (same-station) pairs are never produced: boarding and alighting at the
 same station needs no vehicle trip, and by the triangle inequality any `j` within
-`max_walking_distance` of *both* `o` and `d` implies `dist(o,d) <= 2 *
-max_walking_distance` -- exactly `WALK_ONLY_PAIR`'s own availability condition
+`walking_limit_s` of *both* `o` and `d` implies `dist(o,d) <= 2 *
+walking_limit_s` -- exactly `WALK_ONLY_PAIR`'s own availability condition
 below. So whenever a same-station pair would have been valid, `WALK_ONLY_PAIR`
 already covers the same case at equal-or-lower cost and without requiring any
 station to be open at all; same-station pairs would only ever add a
 dominated, identically-costed alternative.
 
-`door_to_door_ratio` (default `Inf`, off) additionally drops every `(j, k)` with
-`walk(o, j) + drive(j, k) + walk(k, d) > door_to_door_ratio * drive(o, d)` -- the
-simulator's G2 guarantee with zero wait and no sharing detour, so a necessary condition
+`door_to_door_limit_ratio` (default `Inf`, off) additionally drops every `(j, k)` with
+`walk(o, j) + drive(j, k) + walk(k, d) > door_to_door_limit_ratio * drive(o, d)` -- the
+simulator's door-to-door limit with zero wait and no sharing detour, so a necessary condition
 (see `StationSelectionProblem`). Walking and routing costs must both be times in one unit.
 An OD with no finite `drive(o, d)` is left unfiltered, matching the simulator, which
-switches G2 off for a request without a finite direct travel time. `WALK_ONLY_PAIR` is not
-filtered: the simulator has no walk-only service, so G2 says nothing about it.
+switches the door-to-door limit off for a request without a finite direct travel time. `WALK_ONLY_PAIR` is not
+filtered: the simulator has no walk-only service, so the door-to-door limit says nothing about it.
 """
 function compute_valid_jk_pairs(
     all_od_pairs::Set{Tuple{Int, Int}},
     data::StationSelectionData,
-    max_walking_distance::Float64;
+    walking_limit_s::Float64;
     allow_walk_only::Bool=false,
-    door_to_door_ratio::Float64=Inf,
+    door_to_door_limit_ratio::Float64=Inf,
 )::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     n = data.n_stations
     is_candidate = candidate_station_mask(data)
     valid_jk_pairs = Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}()
 
     for (o, d) in all_od_pairs
-        walk_only_available = allow_walk_only && get_walking_cost(data, o, d) <= 2 * max_walking_distance
-        # G2 budget for walk + ride + walk; Inf when the filter is off or drive(o, d) is not finite.
-        d2d_budget = isfinite(door_to_door_ratio) ?
-            door_to_door_ratio * get_routing_cost(data, o, d) : Inf
+        walk_only_available = allow_walk_only && get_walking_cost(data, o, d) <= 2 * walking_limit_s
+        # Door-to-door budget for walk + ride + walk; Inf when the filter is off or drive(o, d) is not finite.
+        d2d_budget = isfinite(door_to_door_limit_ratio) ?
+            door_to_door_limit_ratio * get_routing_cost(data, o, d) : Inf
         pairs = Tuple{Int, Int}[]
         for j in 1:n
             is_candidate[j] || continue
             walk_oj = get_walking_cost(data, o, j)
-            walk_oj <= max_walking_distance || continue
+            walk_oj <= walking_limit_s || continue
             for k in 1:n
                 is_candidate[k] || continue
                 # station pairs must be distinct: j==k would mean boarding and
@@ -135,15 +135,15 @@ function compute_valid_jk_pairs(
                 # a real same-station pair is never needed).
                 j == k && continue
                 walk_kd = get_walking_cost(data, k, d)
-                walk_kd <= max_walking_distance || continue
+                walk_kd <= walking_limit_s || continue
                 isinf(d2d_budget) ||
                     walk_oj + get_routing_cost(data, j, k) + walk_kd <= d2d_budget || continue
                 push!(pairs, (j, k))
             end
         end
         # Walk-only option (opt-in): skip stations entirely if the direct walk
-        # is within 2 * max_walking_distance (the same budget a
-        # station-mediated trip would use: up to max_walking_distance on each
+        # is within 2 * walking_limit_s (the same budget a
+        # station-mediated trip would use: up to walking_limit_s on each
         # leg). Off by default — real walking costs obey the triangle
         # inequality, so this condition is satisfied almost any time a real
         # 2-hop station pair exists, and callers that don't expect a
@@ -160,10 +160,10 @@ end
 
 
 """
-    check_door_to_door_servable(valid_jk_pairs, data, max_walking_distance, door_to_door_ratio)
+    check_door_to_door_servable(valid_jk_pairs, data, walking_limit_s, door_to_door_limit_ratio)
 
 Throw an `ArgumentError` if the door-to-door filter alone left some OD with no valid
-`(j, k)`. Such a rider can never meet G2 (the simulator rejects it), and requiring its
+`(j, k)`. Such a rider can never meet the door-to-door limit (the simulator rejects it), and requiring its
 demand (`sum(x) == Q`) would make the model infeasible with no pointer to the cause, so
 the build stops here and names the ODs instead. Dropping them silently was rejected: it
 changes the demand the selection is scored on. Remove those requests upstream or raise
@@ -177,19 +177,19 @@ fails as it did before.
 function check_door_to_door_servable(
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}},
     data::StationSelectionData,
-    max_walking_distance::Float64,
-    door_to_door_ratio::Float64,
+    walking_limit_s::Float64,
+    door_to_door_limit_ratio::Float64,
 )
-    isfinite(door_to_door_ratio) || return nothing
+    isfinite(door_to_door_limit_ratio) || return nothing
     empty_ods = Set(od for (od, pairs) in valid_jk_pairs if isempty(pairs))
     isempty(empty_ods) && return nothing
-    unfiltered = compute_valid_jk_pairs(empty_ods, data, max_walking_distance)
+    unfiltered = compute_valid_jk_pairs(empty_ods, data, walking_limit_s)
     unservable = sort!([od for od in empty_ods if !isempty(unfiltered[od])])
     isempty(unservable) && return nothing
     ids = [(data.array_idx_to_station_id[o], data.array_idx_to_station_id[d]) for (o, d) in unservable]
     throw(ArgumentError(
-        "door_to_door_ratio = $door_to_door_ratio leaves $(length(unservable)) OD pair(s) with " *
-        "no valid station pair, so their riders cannot be served under G2 " *
+        "door_to_door_limit_ratio = $door_to_door_limit_ratio leaves $(length(unservable)) OD pair(s) with " *
+        "no valid station pair, so their riders cannot be served under the door-to-door limit " *
         "(origin, destination station IDs, first 10: $(first(ids, 10))). " *
         "An o == d request has a zero budget. Remove these requests or raise the ratio."))
 end
@@ -263,11 +263,11 @@ function create_clustering_two_stage_od_map(
     valid_jk_pairs = compute_valid_jk_pairs(
         all_od_pairs,
         data,
-        problem.max_walking_distance;
-        door_to_door_ratio=problem.door_to_door_ratio,
+        problem.walking_limit_s;
+        door_to_door_limit_ratio=problem.door_to_door_limit_ratio,
     )
     check_door_to_door_servable(valid_jk_pairs, data,
-                                problem.max_walking_distance, problem.door_to_door_ratio)
+                                problem.walking_limit_s, problem.door_to_door_limit_ratio)
 
     return ClusteringTwoStageODMap(
         data.station_id_to_array_idx,
@@ -277,7 +277,7 @@ function create_clustering_two_stage_od_map(
         array_idx_to_scenario_label,
         Omega_s,
         Q_s,
-        problem.max_walking_distance,
+        problem.walking_limit_s,
         valid_jk_pairs
     )
 end

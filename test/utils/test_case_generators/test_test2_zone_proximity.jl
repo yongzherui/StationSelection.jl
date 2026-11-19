@@ -18,7 +18,7 @@
     inst2 = generate_test2_instance("far_from_B", -1.0, 3)
     @test inst1.orders == inst2.orders
 
-    data = create_test2_problem_data(inst1; max_walking_distance = 1000.0 / 1.4)
+    data = create_test2_problem_data(inst1; walking_limit_s = 1000.0 / 1.4)
     @test data.n_stations == 8
 
     all_instances = build_test2_cases(; n_seeds = 1)
@@ -43,8 +43,8 @@ end
     objective_by_case = Dict{String,Float64}()
     for v in T2_VARIANTS
         inst = generate_test2_instance(v.case_name, v.zone_cx_km, 1)
-        data = create_test2_problem_data(inst; max_walking_distance = mwd_sec)
-        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        data = create_test2_problem_data(inst; walking_limit_s = mwd_sec)
+        problem = StationSelectionProblem(data, inst.suggested_k; walking_limit_s = mwd_sec)
         formulation = ClusteringTwoStageODFormulation(
             inst.suggested_l; in_vehicle_time_weight = 0.0,
         )

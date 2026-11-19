@@ -95,7 +95,7 @@ end
 
 """
     _enumerate_aggregate_od_route_raw_columns(mapping, data, route_regularization_weight,
-        repositioning_time, pickup_deadline_s, detour_factor, max_stops_cap, max_routes,
+        repositioning_time, pickup_deadline_s, ride_time_limit_ratio, max_stops_cap, max_routes,
         time_limit_sec) -> Vector{AggregateODRouteColumn}
 
 The DFS itself, *before* `_deduplicate_aggregate_od_route_columns` collapses it to one
@@ -111,7 +111,7 @@ per-passenger assignment choices, not one column per served-pairs signature) -- 
 by signature here first would silently discard physically distinct routes (different node
 order, different `tau`, potentially different passenger certifications) that happen to
 share a served-pairs signature. The two formulations' physical feasibility rule is
-identical (`detour_factor * routing_cost(j, k)` per `(j, k)` pair, independent of which
+identical (`ride_time_limit_ratio * routing_cost(j, k)` per `(j, k)` pair, independent of which
 formulation or which passenger uses it -- see `joint_routing_assignment/pricing_round.jl`'s
 own `ride_limit` computation), so reusing this DFS verbatim, rather than re-deriving an
 equivalent one against `JointRoutingAssignmentPricingLabel`'s transitions, is exact, not an
@@ -123,7 +123,7 @@ function _enumerate_aggregate_od_route_raw_columns(
         route_regularization_weight::Float64,
         repositioning_time::Float64,
         pickup_deadline_s::Float64,
-        detour_factor::Float64,
+        ride_time_limit_ratio::Float64,
         max_stops_cap::Int,
         max_routes::Int,
         time_limit_sec::Float64,
@@ -142,7 +142,7 @@ function _enumerate_aggregate_od_route_raw_columns(
         route_regularization_weight,
         repositioning_time,
         pickup_deadline_s,
-        detour_factor,
+        ride_time_limit_ratio,
         max_stops,
         max_stops_cap != typemax(Int),
         false,  # compensated_dominance: irrelevant -- this DFS never calls dominance at all
@@ -214,7 +214,7 @@ end
 
 """
     _enumerate_aggregate_od_route_columns_core(mapping, data, route_regularization_weight,
-        repositioning_time, pickup_deadline_s, detour_factor, max_stops_cap, max_routes,
+        repositioning_time, pickup_deadline_s, ride_time_limit_ratio, max_stops_cap, max_routes,
         time_limit_sec) -> Vector{AggregateODRouteColumn}
 
 Shared body behind both `enumerate_aggregate_od_route_columns` methods below -- the
@@ -230,14 +230,14 @@ function _enumerate_aggregate_od_route_columns_core(
         route_regularization_weight::Float64,
         repositioning_time::Float64,
         pickup_deadline_s::Float64,
-        detour_factor::Float64,
+        ride_time_limit_ratio::Float64,
         max_stops_cap::Int,
         max_routes::Int,
         time_limit_sec::Float64,
     )::Vector{AggregateODRouteColumn}
     columns = _enumerate_aggregate_od_route_raw_columns(
         mapping, data, route_regularization_weight, repositioning_time, pickup_deadline_s,
-        detour_factor, max_stops_cap, max_routes, time_limit_sec,
+        ride_time_limit_ratio, max_stops_cap, max_routes, time_limit_sec,
     )
     return _deduplicate_aggregate_od_route_columns(columns)
 end
@@ -266,7 +266,7 @@ function enumerate_aggregate_od_route_columns(
         formulation.route_regularization_weight,
         formulation.repositioning_time,
         formulation.pickup_deadline_s,
-        formulation.detour_factor,
+        formulation.ride_time_limit_ratio,
         formulation.max_stops,
         max_routes, time_limit_sec,
     )

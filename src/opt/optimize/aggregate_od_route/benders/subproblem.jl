@@ -94,7 +94,7 @@ Two further facts pin down what the cut actually is:
 # Two things that make this simpler than textbook Benders
 
 **No feasibility cuts** -- but NOT because of `x_walk`, and the distinction matters.
-`x_walk` exists only for groups whose `walking_cost(o, d) <= 2 * max_walking_distance`
+`x_walk` exists only for groups whose `walking_cost(o, d) <= 2 * walking_limit_s`
 (`compute_valid_jk_pairs`); a group beyond that has a coverage row `sum(theta) >= 1` with
 no walk term at all, so it needs a route column whose two stations are BUILT. "Walk
 everybody" is therefore not universally available and cannot be the guarantee.
@@ -103,7 +103,7 @@ What actually guarantees feasibility at every incumbent is the MASTER's
 `add_aggregate_od_route_endpoint_feasibility_constraints!` rows
 (`constraints/endpoint_feasibility.jl`, the same rows the CG master carries): for every
 location required by a group with no walk fallback, some station within
-`max_walking_distance` of it must be built. A `y` that fails this cannot be an incumbent,
+`walking_limit_s` of it must be built. A `y` that fails this cannot be an incumbent,
 because the master will not produce it.
 
 **That condition is necessary, not sufficient**, so this is an empirical guarantee rather
@@ -472,7 +472,7 @@ violation), so this is a cross-cutting precondition, not a local assumption.
 **`pickup_deadline_s` is not a hazard for that shortcut**, though an earlier version of this
 proof recorded it as one. Both route-feasibility conditions bound ELAPSED durations from
 above -- the pickup window is `label.time <= pickup_deadline_s`, the ride limit is
-`origin_age + travel <= detour_factor * routing_cost(j,k)` -- and removing a stop only
+`origin_age + travel <= ride_time_limit_ratio * routing_cost(j,k)` -- and removing a stop only
 decreases each left-hand side.
 
 **Both right-hand sides are also unchanged by the shortcut, and for the ride limit that is
@@ -480,7 +480,7 @@ a real step, not a formality.** `pickup_deadline_s` is a constant. `routing_cost
 route-dependent and is not: `j` and `k` are the ASSIGNMENT's pickup/dropoff stations, and
 the limit is computed per candidate before any route exists
 (`pricing_round.jl`: `joint_routing_assignment_ride_limit`, i.e.
-`detour_factor * get_routing_cost(data, j, k)` capped by the door-to-door budget
+`ride_time_limit_ratio * get_routing_cost(data, j, k)` capped by the door-to-door budget
 `ratio * drive(o, d) - walk(o, j) - walk(k, d)`, over `get_valid_jk_pairs(mapping, o, d)`
 -- every term fixed by the assignment and its OD). Removing an intermediate route node
 therefore cannot move it. Spelled out because this whole argument is about route NODES, so a reader arriving

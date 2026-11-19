@@ -119,9 +119,9 @@
         cost = Dict((i, j) => Float64(abs(i - j)) for i in 1:n for j in 1:n)
         data = create_station_selection_data(stations, requests, cost; routing_costs = cost,
                                              scenarios = [("2026-01-01 08:00:00", "2026-01-01 09:00:00")])
-        problem = StationSelectionProblem(data, 4; max_walking_distance = 1.5)
+        problem = StationSelectionProblem(data, 4; walking_limit_s = 1.5)
         f(cap) = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, route_regularization_weight = 1.0, walk_cost_weight = 0.1,
-            repositioning_time = 0.0, detour_factor = 2.0, max_stops = 5, vehicle_capacity = cap)
+            repositioning_time = 0.0, ride_time_limit_ratio = 2.0, max_stops = 5, vehicle_capacity = cap)
         solve(cap) = run_opt(problem, f(cap), CGSolver(config = SolverOptions(silent = true), max_iterations = 200,
                                                        reduced_cost_tol = 1e-7, recover_integer_solution = true))
         base = solve(nothing)

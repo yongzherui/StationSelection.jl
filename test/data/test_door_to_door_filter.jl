@@ -20,7 +20,7 @@
     od = (1, 4)                           # compact indices equal the ids here
 
     pairs(ratio) = Set(StationSelection.compute_valid_jk_pairs(
-        Set([od]), data, R; door_to_door_ratio = ratio)[od])
+        Set([od]), data, R; door_to_door_limit_ratio = ratio)[od])
 
     # drive(1, 4) = 150. walk + ride + walk: (1,3) 200, (1,4) 150, (2,3) 250, (2,4) 200.
     @test pairs(Inf) == Set([(1, 3), (1, 4), (2, 3), (2, 4)])
@@ -29,29 +29,44 @@
     @test pairs(1.0) == Set([(1, 4)])     # only the direct pair has zero walking
     @test pairs(Inf) == Set(StationSelection.compute_valid_jk_pairs(Set([od]), data, R)[od])
 
+    @testset "old limit names still accepted (renamed 2026-11-18)" begin
+        old = StationSelectionProblem(data, 2; max_walking_distance = R, door_to_door_ratio = 2.0)
+        new = StationSelectionProblem(data, 2; walking_limit_s = R, door_to_door_limit_ratio = 2.0)
+        @test old.walking_limit_s == new.walking_limit_s == R
+        @test old.door_to_door_limit_ratio == new.door_to_door_limit_ratio == 2.0
+        @test old.max_walking_distance == R && old.door_to_door_ratio == 2.0     # old field names read
+        @test_throws ArgumentError StationSelectionProblem(data, 2; walking_limit_s = R, max_walking_distance = R)
+        f_old = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = 300.0, detour_factor = 2.0)
+        f_new = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = 300.0, ride_time_limit_ratio = 2.0)
+        @test f_old.ride_time_limit_ratio == f_new.ride_time_limit_ratio == f_old.detour_factor == 2.0
+        @test AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = 300.0).ride_time_limit_ratio == 1.5
+        b = AggregateODRouteBaseFormulation(pickup_deadline_s = 300.0, detour_factor = 1.8)
+        @test b.ride_time_limit_ratio == b.detour_factor == 1.8
+    end
+
     @testset "problem validation" begin
-        @test StationSelectionProblem(data, 2; max_walking_distance = R).door_to_door_ratio == Inf
-        @test_throws ArgumentError StationSelectionProblem(data, 2; max_walking_distance = R,
-                                                           door_to_door_ratio = 0.9)
+        @test StationSelectionProblem(data, 2; walking_limit_s = R).door_to_door_limit_ratio == Inf
+        @test_throws ArgumentError StationSelectionProblem(data, 2; walking_limit_s = R,
+                                                           door_to_door_limit_ratio = 0.9)
         data_no_routing = StationSelection.create_station_selection_data(
             stations, requests, walking_costs)
         @test_throws ArgumentError StationSelectionProblem(data_no_routing, 2;
-                                                           max_walking_distance = R,
-                                                           door_to_door_ratio = 2.0)
-        @test StationSelectionProblem(data_no_routing, 2; max_walking_distance = R) isa
+                                                           walking_limit_s = R,
+                                                           door_to_door_limit_ratio = 2.0)
+        @test StationSelectionProblem(data_no_routing, 2; walking_limit_s = R) isa
               StationSelectionProblem
     end
 
     @testset "an OD the filter leaves unservable is an error, not a silent drop" begin
         formulation = ClusteringTwoStageODFormulation(2)
         off = StationSelection.create_map(
-            StationSelectionProblem(data, 2; max_walking_distance = R), formulation, data)
+            StationSelectionProblem(data, 2; walking_limit_s = R), formulation, data)
         @test Set(off.Omega_s[1]) == Set([(1, 4), (2, 2)])
 
         # o == d has budget 2.0 * drive(2, 2) = 0: no pair survives.
         err = try
             StationSelection.create_map(
-                StationSelectionProblem(data, 2; max_walking_distance = R, door_to_door_ratio = 2.0),
+                StationSelectionProblem(data, 2; walking_limit_s = R, door_to_door_limit_ratio = 2.0),
                 formulation, data)
             nothing
         catch e
@@ -64,7 +79,7 @@
         data_ok = StationSelection.create_station_selection_data(
             stations, requests[1:1, :], walking_costs; routing_costs = routing_costs)
         on = StationSelection.create_map(
-            StationSelectionProblem(data_ok, 2; max_walking_distance = R, door_to_door_ratio = 2.0),
+            StationSelectionProblem(data_ok, 2; walking_limit_s = R, door_to_door_limit_ratio = 2.0),
             formulation, data_ok)
         @test on.Omega_s[1] == [(1, 4)]
         @test Set(StationSelection.get_valid_jk_pairs(on, 1, 4)) == pairs(2.0)

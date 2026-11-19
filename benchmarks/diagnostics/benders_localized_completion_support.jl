@@ -25,7 +25,7 @@ fiction lives on
 and the strongest form of the idea is `T = F \\ S`, which makes the cut EXACTLY as strong as
 full-station pricing while pricing only `|S| + |F \\ S|` stations. Whether that is a saving
 is entirely a question of how big `F` is, and `F` is bounded by geometry rather than by `n`:
-a group only has valid station pairs within `max_walking_distance` of its endpoints.
+a group only has valid station pairs within `walking_limit_s` of its endpoints.
 
 # Why this needs no solve
 

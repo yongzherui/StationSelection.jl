@@ -77,7 +77,7 @@ function measure_margins(m, mapping, clustering)
         candidates = joint_routing_assignment_pricing_candidates(
             data, mapping, alpha, gamma_o, gamma_d,
             Float64(m[:joint_routing_assignment_walk_cost_weight]),
-            Float64(m[:joint_routing_assignment_detour_factor]), s,
+            Float64(m[:joint_routing_assignment_ride_time_limit_ratio]), s,
         )
         isempty(candidates) && continue
         shared = (

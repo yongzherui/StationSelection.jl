@@ -47,10 +47,10 @@ for both (see below).
 ## Four comparisons
 
 1. Base versus Joint at `max_stops=4` (not the Study 2 baseline of 10 -- see above),
-   `pickup_deadline_s=900`, and `detour_factor=2.0`.
+   `pickup_deadline_s=900`, and `ride_time_limit_ratio=2.0`.
 2. Joint with `max_stops` equal to 3, 5, and 7.
 3. Joint with `pickup_deadline_s` equal to 600, 900, and 1200 seconds.
-4. Joint with `detour_factor` equal to 1.5, 2.0, and 2.5.
+4. Joint with `ride_time_limit_ratio` equal to 1.5, 2.0, and 2.5.
 
 Parameters not varied in a comparison retain the Study 2 baseline, except comparison 1's
 `max_stops` (see above). These are four independent sub-studies—not one 120-task array.
@@ -100,9 +100,9 @@ sbatch --job-name=study1_max_stops --array=1-30 \
 sbatch --job-name=study1_pickup_deadline --array=1-30 \
     benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh pickup_deadline_s
 
-# Sub-study 4: detour_factor (30 jobs)
+# Sub-study 4: ride_time_limit_ratio (30 jobs)
 sbatch --job-name=study1_detour --array=1-30 \
-    benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh detour_factor
+    benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh ride_time_limit_ratio
 ```
 
 `STUDY1_DATA_DIR` and `STUDY1_OUTPUT_DIR` override the defaults. Aggregate with:

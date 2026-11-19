@@ -146,7 +146,7 @@ for s in 1:n_scenarios(data), (p, (o, d)) in enumerate(mapping.Omega_s[s])
     push!(required, o); push!(required, d)
 end
 cands = Dict(pt => Set(j for j in 1:N
-                       if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                       if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
              for pt in required)
 combos = filter(c -> all(!isempty(intersect(cands[pt], c)) for pt in required),
                 collect(combinations(1:N, k)))

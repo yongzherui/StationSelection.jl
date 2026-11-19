@@ -54,7 +54,7 @@ The remaining six fields are the family's shared encoding set, copied from the p
 
 `parent` is any member of the family -- normally the monolith the user actually asked to
 solve. There is deliberately no loose-keyword constructor: a master built at one
-`detour_factor` against a subproblem built at another produces invalid cuts and a
+`ride_time_limit_ratio` against a subproblem built at another produces invalid cuts and a
 confidently wrong `OPTIMAL`, so the only way to make one is to derive it.
 """
 struct AggregateODRouteJointRoutingAssignmentMasterFormulation <: AbstractFormulation
@@ -62,7 +62,7 @@ struct AggregateODRouteJointRoutingAssignmentMasterFormulation <: AbstractFormul
     walk_cost_weight::Float64
     repositioning_time::Float64
     pickup_deadline_s::Float64
-    detour_factor::Float64
+    ride_time_limit_ratio::Float64
     max_stops::Int
     demand_weighting::Symbol
     cut_mode::AbstractBendersCutMode
@@ -74,14 +74,14 @@ struct AggregateODRouteJointRoutingAssignmentMasterFormulation <: AbstractFormul
         f = _joint_routing_assignment_shared_fields(parent)
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             f.route_regularization_weight, f.walk_cost_weight, f.repositioning_time,
-            f.pickup_deadline_s, f.detour_factor, f.max_stops,
+            f.pickup_deadline_s, f.ride_time_limit_ratio, f.max_stops,
         )
         new(
             f.route_regularization_weight,
             f.walk_cost_weight,
             f.repositioning_time,
             f.pickup_deadline_s,
-            f.detour_factor,
+            f.ride_time_limit_ratio,
             resolved_max_stops,
             f.demand_weighting,
             cut_mode,

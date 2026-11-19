@@ -9,7 +9,7 @@ run_opt(problem::AbstractProblem, formulation::AbstractFormulation, solver::Abst
 ```
 
 - `problems/` — `AbstractProblem` subtypes: instance data + the business decision on top
-  of it. `StationSelectionProblem(data, k; max_walking_distance=300)` is the one live
+  of it. `StationSelectionProblem(data, k; walking_limit_s=300)` is the one live
   type today.
 - `formulations/` — `AbstractFormulation` subtypes: the mathematical encoding. See
   "Formulations" below.
@@ -40,7 +40,7 @@ constraint/objective reference. This file only covers the build/run API shape.
 Construct a formulation with its own keyword arguments (e.g.
 `ClusteringTwoStageODFormulation(l; in_vehicle_time_weight=1.0)`,
 `AggregateODRouteBaseFormulation(; route_regularization_weight=1.0, walk_cost_weight=1.0,
-repositioning_time=20.0, pickup_deadline_s (required), detour_factor=1.5, max_stops=nothing)`) — see
+repositioning_time=20.0, pickup_deadline_s (required), ride_time_limit_ratio=1.5, max_stops=nothing)`) — see
 each formulation's own docstring in `formulations/` for the authoritative field list and
 defaults.
 

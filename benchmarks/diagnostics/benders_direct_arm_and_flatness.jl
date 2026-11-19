@@ -138,7 +138,7 @@ for n in NS
                 end
             end
             cand = Dict(pt => Set(j for j in 1:n
-                                  if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                                  if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
                         for pt in required)
             feas = filter(c -> all(!isempty(intersect(cand[pt], c)) for pt in required),
                           collect(combinations(1:n, k)))

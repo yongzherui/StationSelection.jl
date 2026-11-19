@@ -128,7 +128,7 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
 
     if model_type == "TwoStageSingleDetourModel"
         use_walking_distance_limit = get(mc, "use_walking_distance_limit", false)
-        max_walking_distance = get(mc, "max_walking_distance", nothing)
+        walking_limit_s = get(mc, "walking_limit_s", nothing)
         detour_use_flow_bounds = get(mc, "detour_use_flow_bounds", false)
         in_vehicle_time_weight = get(mc, "in_vehicle_time_weight", mc["vehicle_routing_weight"])
         model = TwoStageSingleDetourModel(
@@ -136,23 +136,23 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
             mc["time_window"], mc["routing_delay"];
             in_vehicle_time_weight=in_vehicle_time_weight,
             use_walking_distance_limit=use_walking_distance_limit,
-            max_walking_distance=max_walking_distance,
+            walking_limit_s=walking_limit_s,
             detour_use_flow_bounds=detour_use_flow_bounds
         )
         println("  - k=$(model.k), l=$(model.l), γ=$(model.vehicle_routing_weight), w_ivt=$(model.in_vehicle_time_weight)")
         println("  - time_window=$(model.time_window)s, routing_delay=$(model.routing_delay)s")
-        println("  - walking_limit=$(model.use_walking_distance_limit), max_walking_distance=$(model.max_walking_distance)s")
+        println("  - walking_limit=$(model.use_walking_distance_limit), walking_limit_s=$(model.walking_limit_s)s")
         println("  - detour_use_flow_bounds=$(model.detour_use_flow_bounds)")
     elseif model_type == "TwoStageOD"
-        max_walking_distance = get(mc, "max_walking_distance", 300.0)
+        walking_limit_s = get(mc, "walking_limit_s", 300.0)
         in_vehicle_time_weight = get(mc, "in_vehicle_time_weight", 1.0)
         model = ClusteringModel(TwoStageODPolicy(
             mc["k"], mc["l"];
             in_vehicle_time_weight=in_vehicle_time_weight,
-            max_walking_distance=max_walking_distance
+            walking_limit_s=walking_limit_s
         ))
         println("  - k=$(model.k), l=$(model.l), w_ivt=$(model.in_vehicle_time_weight)")
-        println("  - max_walking_distance=$(model.max_walking_distance)s")
+        println("  - walking_limit_s=$(model.walking_limit_s)s")
     elseif model_type == "SingleStage"
         model = ClusteringModel(SingleStagePolicy(mc["k"]))
         println("  - k=$(model.k) (stations to select)")
@@ -213,11 +213,11 @@ function main(config_path::String, station_limit::Int, no_optimize::Bool)
         model_metadata["time_window"] = model.time_window
         model_metadata["routing_delay"] = model.routing_delay
         model_metadata["use_walking_distance_limit"] = model.use_walking_distance_limit
-        model_metadata["max_walking_distance"] = model.max_walking_distance
+        model_metadata["walking_limit_s"] = model.walking_limit_s
     elseif model_type == "TwoStageOD"
         model_metadata["l"] = model.l
         model_metadata["in_vehicle_time_weight"] = model.in_vehicle_time_weight
-        model_metadata["max_walking_distance"] = model.max_walking_distance
+        model_metadata["walking_limit_s"] = model.walking_limit_s
     end
     # SingleStage only has k, which is already added
 

@@ -1,7 +1,7 @@
 @testset "AggregateODRouteBaseFormulation + CGSolver" begin
     instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-    data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-    problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+    data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+    problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
     # DirectMIPSolver's exhaustive enumeration requires a finite max_stops (it has no other
     # way to terminate a plain DFS); CG's label-setting pricer has no such requirement, but
     # a shared, finite formulation keeps the two solvers' results directly comparable below.

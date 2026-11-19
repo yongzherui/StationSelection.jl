@@ -14,7 +14,7 @@ raw_dir = abspath(ARGS[1])
 project_root = normpath(joinpath(@__DIR__, "..", ".."))
 results_dir = length(ARGS) == 2 ? abspath(ARGS[2]) :
     joinpath(project_root, "benchmarks", "results", "$(Dates.today())_study1_formulation_lp_ip_gap")
-comparison_names = ("formulation", "max_stops", "pickup_deadline_s", "detour_factor")
+comparison_names = ("formulation", "max_stops", "pickup_deadline_s", "ride_time_limit_ratio")
 jobs_files = [joinpath(@__DIR__, "config", "$(name)_jobs.tsv") for name in comparison_names]
 
 files = sort(filter(path -> endswith(path, ".csv"), readdir(raw_dir; join=true)))
@@ -58,7 +58,7 @@ for comparison in comparison_names
 end
 
 summary = combine(groupby(case_results, [:comparison, :variant, :formulation,
-        :max_stops, :pickup_deadline_s, :detour_factor]),
+        :max_stops, :pickup_deadline_s, :ride_time_limit_ratio]),
     nrow => :n_cases,
     :gap => mean => :mean_gap,
     :gap => median => :median_gap,

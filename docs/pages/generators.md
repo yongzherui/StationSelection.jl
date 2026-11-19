@@ -36,7 +36,7 @@ Two consequences to keep in mind when using it:
 * **Costs are in minutes, not metres.** Every arc is the same length, so distance carries
   no information here; only time distinguishes a fast street from a slow one. The walking
   limit is therefore a walking *time* limit -- pass `FIELBAUM_MAX_WALKING_TIME_MIN` (the
-  paper's `Ω_a = 12` min) as `StationSelectionProblem.max_walking_distance`.
+  paper's `Ω_a = 12` min) as `StationSelectionProblem.walking_limit_s`.
 * **Routing costs are asymmetric.** The mid-speed streets are one-way, so the return leg
   between two stations can be strictly longer than the outbound one.
   `StationSelectionData` indexes routing costs as `[from, to]`, so this survives, but any

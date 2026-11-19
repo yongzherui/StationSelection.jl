@@ -20,7 +20,7 @@
     inst2 = generate_test4_instance("mirrored_zones", true, 4)
     @test inst1.orders == inst2.orders
 
-    data = create_test4_problem_data(inst_mirror; max_walking_distance = 1000.0 / 1.4)
+    data = create_test4_problem_data(inst_mirror; walking_limit_s = 1000.0 / 1.4)
     @test data.n_stations == 13
 
     all_instances = build_test4_cases(; n_seeds = 1)
@@ -33,8 +33,8 @@ end
     mwd_sec = 1000.0 / 1.4
 
     function active_roles(inst)
-        data = create_test4_problem_data(inst; max_walking_distance = mwd_sec)
-        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        data = create_test4_problem_data(inst; walking_limit_s = mwd_sec)
+        problem = StationSelectionProblem(data, inst.suggested_k; walking_limit_s = mwd_sec)
         formulation = ClusteringTwoStageODFormulation(
             inst.suggested_l; in_vehicle_time_weight = 0.0,
         )

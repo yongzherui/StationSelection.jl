@@ -14,7 +14,7 @@
     inst2 = generate_middle_zone_benchmark_instance("ab30_m10", 1, 30, 10)
     @test inst.orders == inst2.orders
 
-    data = create_middle_zone_problem_data(inst; max_walking_distance = 1000.0 / 1.4)
+    data = create_middle_zone_problem_data(inst; walking_limit_s = 1000.0 / 1.4)
     @test data.n_stations == nrow(inst.stations)
     @test nrow(data.scenarios[1].requests) == nrow(inst.orders)
 

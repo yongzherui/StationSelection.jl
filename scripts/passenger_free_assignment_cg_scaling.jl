@@ -90,9 +90,9 @@ function build_model_for(n_stations::Int)
         route_regularization_weight = ROUTE_WEIGHT,
         walk_cost_weight            = WALK_WEIGHT,
         repositioning_time          = 20.0,
-        max_walking_distance        = MAX_WALK,
+        walking_limit_s        = MAX_WALK,
         pickup_deadline_s               = 900.0,
-        detour_factor               = 2.0,
+        ride_time_limit_ratio               = 2.0,
         max_stops                   = MAX_STOPS,
     )
 end

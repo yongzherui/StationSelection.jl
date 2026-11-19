@@ -240,7 +240,7 @@
             routing_costs=routing,
             scenarios=[("2026-01-01 08:00:00", "2026-01-01 09:00:00")],
         )
-        problem = StationSelectionProblem(data, 2; max_walking_distance=250.0)
+        problem = StationSelectionProblem(data, 2; walking_limit_s=250.0)
         # ONE formulation, two solvers: the pricer is a search algorithm, so the
         # exhaustive-equivalence claim below is about two searches of the *same* model.
         formulation = AggregateODRouteJointRoutingAssignmentFormulation(

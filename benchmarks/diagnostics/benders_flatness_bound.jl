@@ -77,7 +77,7 @@ for s in 1:n_scenarios(data)
     end
 end
 cands = Dict(pt => Set(j for j in 1:N
-                       if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                       if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
              for pt in required)
 combos = filter(collect(combinations(1:N, k))) do c
     all(!isempty(intersect(cands[pt], c)) for pt in required)

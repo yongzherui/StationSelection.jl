@@ -87,7 +87,7 @@ const FIELBAUM_NON_UNIFORM_EDGE_SPACING_M = 300.0
 Maximum walking time per leg, minutes (the paper's `Ω_a`).
 
 The one paper bound this package can act on: pass it as
-`StationSelectionProblem.max_walking_distance` *and* as
+`StationSelectionProblem.walking_limit_s` *and* as
 `create_fielbaum_grid_problem_data`'s `max_walking_time` so the two agree on
 which pairs are walkable. It is a time, not a distance -- see that function's
 docstring for why this instance measures everything in minutes.
@@ -623,7 +623,7 @@ Turn a [`FielbaumGridInstance`](@ref) into `StationSelectionData`.
 **Both cost matrices are in minutes**, which is the whole point of this grid:
 every arc is the same length, so only travel *time* distinguishes a fast street
 from a slow one. That makes the walking limit a walking *time* limit, so
-`StationSelectionProblem`'s `max_walking_distance` must be given in minutes too
+`StationSelectionProblem`'s `walking_limit_s` must be given in minutes too
 -- pass `FIELBAUM_MAX_WALKING_TIME_MIN` (the paper's `Ω_a = 12` min) to match the
 paper, and keep `max_walking_time` here in step with it so the two agree on which
 pairs are walkable.

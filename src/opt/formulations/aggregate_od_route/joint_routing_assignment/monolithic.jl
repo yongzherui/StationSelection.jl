@@ -29,7 +29,7 @@ this type so the three can never disagree about the route universe or the cost w
 # Fields
 See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
-`pickup_deadline_s`, `detour_factor`, and `max_stops`.
+`pickup_deadline_s`, `ride_time_limit_ratio`, and `max_stops`.
 
 `demand_weighting` (`:count`, the default since 2026-11-03, or `:unit`) sets the demand `Q`
 of each OD group `(s,p)`: `:count` is the number of requests on that OD pair in scenario `s`,
@@ -81,7 +81,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     walk_cost_weight::Float64
     repositioning_time::Float64
     pickup_deadline_s::Float64
-    detour_factor::Float64
+    ride_time_limit_ratio::Float64
     max_stops::Int
     demand_weighting::Symbol
     # Seats per vehicle, counted in requests (a group of Q requests takes Q seats). `nothing`
@@ -96,24 +96,27 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             walk_cost_weight::Number=1.0,
             repositioning_time::Number=20.0,
             pickup_deadline_s::Number,
-            detour_factor::Number=1.5,
+            ride_time_limit_ratio::Union{Number, Nothing}=nothing,
             max_stops::Union{Nothing, Int}=nothing,
             demand_weighting::Symbol=:count,
             vehicle_capacity::Union{Nothing, Integer}=nothing,
+            detour_factor::Union{Number, Nothing}=nothing,   # old name of ride_time_limit_ratio
         )
+        ride_time_limit_ratio = something(_renamed_kwarg(ride_time_limit_ratio, detour_factor,
+                                                         :ride_time_limit_ratio, :detour_factor), 1.5)
         _validate_demand_weighting(demand_weighting)
         isnothing(vehicle_capacity) || vehicle_capacity >= 1 || throw(ArgumentError(
             "vehicle_capacity must be nothing (unlimited) or >= 1, got $vehicle_capacity"))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
-            pickup_deadline_s, detour_factor, max_stops,
+            pickup_deadline_s, ride_time_limit_ratio, max_stops,
         )
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
             Float64(repositioning_time),
             Float64(pickup_deadline_s),
-            Float64(detour_factor),
+            Float64(ride_time_limit_ratio),
             resolved_max_stops,
             demand_weighting,
             isnothing(vehicle_capacity) ? nothing : Int(vehicle_capacity),

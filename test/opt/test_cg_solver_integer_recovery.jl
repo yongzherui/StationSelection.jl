@@ -1,7 +1,7 @@
 @testset "CGSolver integer recovery" begin
     instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-    data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-    problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+    data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+    problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf)
 
     @testset "build_model honors solver.initial_columns as the seed pool" begin

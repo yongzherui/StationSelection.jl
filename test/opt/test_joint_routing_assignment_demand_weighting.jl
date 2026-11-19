@@ -17,12 +17,12 @@
             routing_costs = cost,
             scenarios = [("2026-01-01 08:00:00", "2026-01-01 09:00:00")],
         )
-        return data, StationSelectionProblem(data, k; max_walking_distance = R)
+        return data, StationSelectionProblem(data, k; walking_limit_s = R)
     end
 
     joint(dw) = AggregateODRouteJointRoutingAssignmentFormulation(
         pickup_deadline_s = Inf, route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
-        detour_factor = 1.5, max_stops = 4, demand_weighting = dw)
+        ride_time_limit_ratio = 1.5, max_stops = 4, demand_weighting = dw)
 
     # Three riders 1 -> 7, one rider 2 -> 6, k = 2, stations reachable within 1 unit.
     # Candidate sets and their objective (route + walking):

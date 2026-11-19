@@ -23,7 +23,7 @@ using CSV
                 ("2024-01-01 08:03:00", "2024-01-01 08:10:00"),
             ],
         )
-        problem = StationSelectionProblem(data, 2; max_walking_distance=1.0)
+        problem = StationSelectionProblem(data, 2; walking_limit_s=1.0)
         formulation = AggregateODRouteBaseFormulation(
             route_regularization_weight=1.0,
             repositioning_time=0.0,

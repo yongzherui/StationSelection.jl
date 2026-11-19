@@ -25,6 +25,7 @@ include("utils/core/results.jl")
 include("utils/core/costs.jl")
 include("utils/core/export.jl")
 include("utils/core/logging.jl")
+include("utils/core/renamed_limits.jl")
 
 # Data preparation utilities
 include("utils/data/scenarios.jl")
@@ -277,5 +278,13 @@ export generate_scenarios_by_datetimes
 export generate_scenarios_by_profile
 export export_results
 export export_variables
+
+# Old (pre-2026-11-18) field names still read; see utils/core/renamed_limits.jl.
+for T in (StationSelectionProblem, AggregateODRouteBaseFormulation, AggregateODRouteJointRoutingAssignmentFormulation,
+          AggregateODRouteJointRoutingAssignmentMasterFormulation,
+          AggregateODRouteJointRoutingAssignmentBendersSubproblemFormulation,
+          AggregateODRouteMap, ClusteringBaseModelMap, ClusteringTwoStageODMap, ClusteringTwoStageStationMap)
+    @eval Base.getproperty(x::$T, f::Symbol) = getfield(x, _current_limit_field(f))
+end
 
 end # module

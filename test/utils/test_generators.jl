@@ -7,7 +7,7 @@
     @test length(grid.active_pairs) == 4
     @test all(origin != destination for (origin, destination) in grid.active_pairs)
 
-    grid_data = create_grid_problem_data(grid; max_walking_distance = 1.0)
+    grid_data = create_grid_problem_data(grid; walking_limit_s = 1.0)
     @test grid_data.n_stations == 6
     @test nrow(grid_data.scenarios[1].requests) == 4
     @test !isnothing(grid_data.routing_costs)
@@ -62,7 +62,7 @@
         @test length(zhuzhou.stations) == 3
         @test zhuzhou.active_pairs == [(1, 2), (2, 3), (3, 1)]
 
-        zhuzhou_data = create_zhuzhou_problem_data(zhuzhou; max_walking_distance = 0.0)
+        zhuzhou_data = create_zhuzhou_problem_data(zhuzhou; walking_limit_s = 0.0)
         @test zhuzhou_data.n_stations == 3
         @test nrow(zhuzhou_data.scenarios[1].requests) == 3
         @test !isnothing(zhuzhou_data.routing_costs)

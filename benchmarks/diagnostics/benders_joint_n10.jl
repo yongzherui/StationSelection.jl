@@ -33,7 +33,7 @@ could disagree for its own reasons.
 - `restricted_scope` -- formulation `max_stops=6`, subproblem capped at 4. The master
                         carries no `max_stops` dependence at all (its rows are the station
                         budget and endpoint feasibility, and the map keys off
-                        `max_walking_distance`), so this MUST return exactly
+                        `walking_limit_s`), so this MUST return exactly
                         `multicut_s1`'s objective while reporting
                         `benders_optimality_scope == "max_stops_restricted"`. That identity
                         is what makes the narrowing path testable without enumerating
@@ -45,7 +45,7 @@ could disagree for its own reasons.
                         iterations than `multicut_s3`, since one aggregated row carries
                         what three separate rows carried.
 - `infeasible_gate`  -- `k=1`, through `run_opt`. Most Zhuzhou OD pairs are further apart
-                        than `2 * max_walking_distance`, so they carry no direct-walk
+                        than `2 * walking_limit_s`, so they carry no direct-walk
                         fallback and DO get endpoint-feasibility rows; one station cannot
                         be near every required location. Expects `SOLVE_INFEASIBLE` with
                         `metadata["infeasibility_reason"]` set -- i.e. the refutation comes
@@ -199,7 +199,7 @@ to compare)."""
 function run_infeasible_arm(arm::AbstractString)
     problem, _k, _meta = benchmark_problem(@__DIR__, "BJ", N, P, 1, SEED)
     small = StationSelectionProblem(problem.data, INFEASIBLE_K;
-                                    max_walking_distance=problem.max_walking_distance)
+                                    walking_limit_s=problem.walking_limit_s)
     formulation = _formulation(MAX_STOPS)
     solver = BendersSolver(
         config=SolverOptions(silent=true, time_limit_sec=300.0),

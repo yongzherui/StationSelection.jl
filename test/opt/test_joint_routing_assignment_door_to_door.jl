@@ -20,14 +20,14 @@
             routing_costs = routing,
             scenarios = [("2026-01-01 08:00:00", "2026-01-01 09:00:00")],
         )
-        problem = StationSelectionProblem(data, k; max_walking_distance = R,
-                                          door_to_door_ratio = ratio)
+        problem = StationSelectionProblem(data, k; walking_limit_s = R,
+                                          door_to_door_limit_ratio = ratio)
         return data, problem
     end
 
-    joint(; detour_factor = 1.5, max_stops = 4) = AggregateODRouteJointRoutingAssignmentFormulation(
+    joint(; ride_time_limit_ratio = 1.5, max_stops = 4) = AggregateODRouteJointRoutingAssignmentFormulation(
         route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
-        pickup_deadline_s = 10.0, detour_factor = detour_factor, max_stops = max_stops)
+        pickup_deadline_s = 10.0, ride_time_limit_ratio = ride_time_limit_ratio, max_stops = max_stops)
 
     # Shortest ride from a visit of `j` to a LATER visit of `k` along `route`.
     function best_ride(route, j, k, data)
@@ -41,11 +41,11 @@
     end
 
     # Every assignment a column carries must fit the capped ride limit.
-    function columns_respect_limits(columns, mapping, data, detour_factor; s = 1)
+    function columns_respect_limits(columns, mapping, data, ride_time_limit_ratio; s = 1)
         for column in columns, (p, j, k) in column.assignments
             o, d = mapping.Omega_s[s][p]
             limit = StationSelection.joint_routing_assignment_ride_limit(
-                data, mapping, detour_factor, o, d, j, k)
+                data, mapping, ride_time_limit_ratio, o, d, j, k)
             best_ride(column.route, j, k, data) <= limit + 1e-9 || return false
         end
         return true
@@ -55,7 +55,7 @@
         # Five stations, walking twice as slow as driving, one-station walking radius.
         data, problem = line_instance([(1, 5)]; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = 2.0)
         mapping = StationSelection.create_aggregate_od_route_map(problem, joint(), data)
-        @test mapping.door_to_door_ratio == 2.0
+        @test mapping.door_to_door_limit_ratio == 2.0
         limit(df, j, k) = StationSelection.joint_routing_assignment_ride_limit(
             data, mapping, df, 1, 5, j, k)
 
@@ -77,7 +77,7 @@
             data, mapping_off, 3.0, 1, 5, 2, 4) ≈ 6.0
 
         # A ratio that disagrees with the pair filter is an error, not a silent bad seed.
-        mapping_off.door_to_door_ratio = 1.0
+        mapping_off.door_to_door_limit_ratio = 1.0
         @test_throws ErrorException StationSelection.joint_routing_assignment_ride_limit(
             data, mapping_off, 3.0, 1, 5, 2, 4)
     end
@@ -124,7 +124,7 @@
 
     @testset "CG pricers and direct MIP agree under a finite ratio" begin
         ods = [(1, 5), (2, 4), (5, 1), (1, 3), (4, 2)]
-        formulation = joint(detour_factor = 3.0, max_stops = 4)
+        formulation = joint(ride_time_limit_ratio = 3.0, max_stops = 4)
         objective = Dict{Tuple{Float64, Symbol}, Float64}()
         for ratio in (Inf, 2.0)
             data, problem = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = ratio, k = 3)
@@ -174,7 +174,7 @@
 
     @testset "supplied initial columns are checked against this problem" begin
         ods = [(1, 5), (2, 4), (5, 1), (1, 3), (4, 2)]
-        formulation = joint(detour_factor = 3.0, max_stops = 4)
+        formulation = joint(ride_time_limit_ratio = 3.0, max_stops = 4)
         data, off = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = Inf, k = 3)
         _, on = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = 2.0, k = 3)
         cols_off = StationSelection.enumerate_joint_routing_assignment_columns(off, formulation, data)
@@ -193,7 +193,7 @@
     @testset "an o == d request is an error under a finite ratio" begin
         # Budget 2.0 * drive(3, 3) = 0: unservable under G2.
         ods = [(1, 5), (3, 3), (4, 2)]
-        formulation = joint(detour_factor = 3.0, max_stops = 4)
+        formulation = joint(ride_time_limit_ratio = 3.0, max_stops = 4)
         data, problem = line_instance(ods; n = 5, walk_per_unit = 2.0, R = 2.5, ratio = 2.0, k = 3)
         @test_throws ArgumentError StationSelection.create_aggregate_od_route_map(problem, formulation, data)
         @test_throws ArgumentError run_opt(problem, formulation, CGSolver())

@@ -15,7 +15,7 @@
     inst2 = generate_test6_instance(T6_DEMAND_CONFIGS[2], 2)
     @test inst1.orders == inst2.orders
 
-    data = create_test6_problem_data(inst1; max_walking_distance = 1000.0 / 1.4)
+    data = create_test6_problem_data(inst1; walking_limit_s = 1000.0 / 1.4)
     @test data.n_stations == 8
 
     all_instances = build_test6_cases(; n_seeds = 1)
@@ -39,8 +39,8 @@ end
 
     for dcfg in T6_DEMAND_CONFIGS
         inst = generate_test6_instance(dcfg, 1)
-        data = create_test6_problem_data(inst; max_walking_distance = mwd_sec)
-        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        data = create_test6_problem_data(inst; walking_limit_s = mwd_sec)
+        problem = StationSelectionProblem(data, inst.suggested_k; walking_limit_s = mwd_sec)
         formulation = ClusteringTwoStageODFormulation(
             inst.suggested_l; in_vehicle_time_weight = 1.0,
         )

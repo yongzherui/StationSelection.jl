@@ -1,7 +1,7 @@
 """
 Clustering formulations for station selection, paired with `StationSelectionProblem`:
-`k` (stations built) and `max_walking_distance` come from `problem`, not from these
-structs -- the redundant per-formulation `k`/`max_walking_distance` fields from the
+`k` (stations built) and `walking_limit_s` come from `problem`, not from these
+structs -- the redundant per-formulation `k`/`walking_limit_s` fields from the
 initial split have been dropped so there is exactly one source of truth for each.
 
 - `ClusteringBaseFormulation`: single-scenario k-medoids, station-to-station assignment.
@@ -42,7 +42,7 @@ abstract type AbstractClusteringFormulation <: AbstractFormulation end
 Basic k-medoids clustering formulation for station selection: selects `problem.k`
 stations to minimize total walking distance from request origins and destinations to
 their nearest selected station. No fields -- single-stage has no build/activate split,
-so there is no formulation-specific knob left once `k`/`max_walking_distance` moved to
+so there is no formulation-specific knob left once `k`/`walking_limit_s` moved to
 `StationSelectionProblem`.
 
 # Decision Variables

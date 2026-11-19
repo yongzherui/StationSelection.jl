@@ -122,14 +122,14 @@ end
 
 function _grid_walking_costs(
     instance::GridInstance;
-    max_walking_distance::Float64,
+    walking_limit_s::Float64,
     walking_cost_scale::Float64,
 )::Dict{Tuple{Int,Int},Float64}
     costs = Dict{Tuple{Int,Int},Float64}()
     nodes = [station.id for station in instance.stations]
     for u in nodes, v in nodes
         dist = instance.dist[u, v]
-        if dist <= max_walking_distance + 1e-9
+        if dist <= walking_limit_s + 1e-9
             costs[(u, v)] = walking_cost_scale * dist
         end
     end
@@ -137,19 +137,19 @@ function _grid_walking_costs(
 end
 
 """
-    create_grid_problem_data(instance; max_walking_distance, ...)
+    create_grid_problem_data(instance; walking_limit_s, ...)
 
 Convert a grid instance into `StationSelectionData`. Walking feasibility uses
 Manhattan distance on the grid; routing costs are the full grid Manhattan costs.
 """
 function create_grid_problem_data(
     instance::GridInstance;
-    max_walking_distance::Float64,
+    walking_limit_s::Float64,
     walking_cost_scale::Float64 = 1.0,
     routing_cost_scale::Float64 = 1.0,
     request_time::DateTime = DateTime(2026, 1, 1),
 )::StationSelectionData
-    max_walking_distance >= 0.0 || throw(ArgumentError("max_walking_distance must be nonnegative"))
+    walking_limit_s >= 0.0 || throw(ArgumentError("walking_limit_s must be nonnegative"))
     walking_cost_scale >= 0.0 || throw(ArgumentError("walking_cost_scale must be nonnegative"))
     routing_cost_scale >= 0.0 || throw(ArgumentError("routing_cost_scale must be nonnegative"))
 
@@ -157,7 +157,7 @@ function create_grid_problem_data(
     routing_costs = Dict(key => routing_cost_scale * value for (key, value) in travel_cost)
     walking_costs = _grid_walking_costs(
         instance;
-        max_walking_distance = max_walking_distance,
+        walking_limit_s = walking_limit_s,
         walking_cost_scale = walking_cost_scale,
     )
 

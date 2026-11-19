@@ -17,7 +17,7 @@ export AggregateODRouteBaseFormulation
 """
     _validate_aggregate_od_route_formulation_fields(
         route_regularization_weight, walk_cost_weight, repositioning_time,
-        pickup_deadline_s, detour_factor, max_stops,
+        pickup_deadline_s, ride_time_limit_ratio, max_stops,
     ) -> resolved_max_stops::Int
 
 Shared cross-field validation for `AggregateODRouteBaseFormulation`'s and
@@ -31,7 +31,7 @@ function _validate_aggregate_od_route_formulation_fields(
         walk_cost_weight::Number,
         repositioning_time::Number,
         pickup_deadline_s::Number,
-        detour_factor::Number,
+        ride_time_limit_ratio::Number,
         max_stops::Union{Nothing, Int},
     )::Int
     route_regularization_weight >= 0 ||
@@ -42,8 +42,8 @@ function _validate_aggregate_od_route_formulation_fields(
         throw(ArgumentError("repositioning_time must be non-negative"))
     pickup_deadline_s >= 0 ||
         throw(ArgumentError("pickup_deadline_s must be non-negative"))
-    detour_factor >= 1.0 ||
-        throw(ArgumentError("detour_factor must be at least 1.0"))
+    ride_time_limit_ratio >= 1.0 ||
+        throw(ArgumentError("ride_time_limit_ratio must be at least 1.0"))
     resolved_max_stops = isnothing(max_stops) ? typemax(Int) : max_stops
     resolved_max_stops >= 2 || throw(ArgumentError("max_stops must be at least 2"))
     return resolved_max_stops
@@ -56,7 +56,7 @@ Encoding-detail knobs for the compact `y`/`x`/`θ` MILP's variable structure -- 
 `StationSelectionProblem` is served, weighted, and staged when solved directly
 (`DirectMIPSolver`) against an exhaustively enumerated column pool. Pairs with
 `StationSelectionProblem`, which carries only `data`,
-`l`, and `max_walking_distance` -- everything else that used to live on
+`l`, and `walking_limit_s` -- everything else that used to live on
 `AggregateODRouteProblem` (still used by the not-yet-migrated Benders/`RouteCoveringProblem`
 paths) belongs here instead, since it's an encoding choice, not a business decision.
 
@@ -70,7 +70,7 @@ paths) belongs here instead, since it's an encoding choice, not a business decis
   route's clock starts at 0 at its first stop, so this is board <= request +
   `pickup_deadline_s`. These pricers do not time the rider's walk, so it bounds the vehicle's
   arrival at the pickup stop. Required, no default (set every limit explicitly).
-- `detour_factor`: maximum allowed in-vehicle detour ratio
+- `ride_time_limit_ratio`: maximum allowed in-vehicle detour ratio
 - `max_stops`: maximum stops per route
 
 No `assignment_policy` field: this formulation's `build_model` only ever supported free
@@ -87,7 +87,7 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
     walk_cost_weight::Float64
     repositioning_time::Float64
     pickup_deadline_s::Float64
-    detour_factor::Float64
+    ride_time_limit_ratio::Float64
     max_stops::Int
 
     function AggregateODRouteBaseFormulation(;
@@ -95,19 +95,22 @@ struct AggregateODRouteBaseFormulation <: AbstractFormulation
             walk_cost_weight::Number=1.0,
             repositioning_time::Number=20.0,
             pickup_deadline_s::Number,
-            detour_factor::Number=1.5,
+            ride_time_limit_ratio::Union{Number, Nothing}=nothing,
             max_stops::Union{Nothing, Int}=nothing,
+            detour_factor::Union{Number, Nothing}=nothing,   # old name of ride_time_limit_ratio
         )
+        ride_time_limit_ratio = something(_renamed_kwarg(ride_time_limit_ratio, detour_factor,
+                                                         :ride_time_limit_ratio, :detour_factor), 1.5)
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
             route_regularization_weight, walk_cost_weight, repositioning_time,
-            pickup_deadline_s, detour_factor, max_stops,
+            pickup_deadline_s, ride_time_limit_ratio, max_stops,
         )
         new(
             Float64(route_regularization_weight),
             Float64(walk_cost_weight),
             Float64(repositioning_time),
             Float64(pickup_deadline_s),
-            Float64(detour_factor),
+            Float64(ride_time_limit_ratio),
             resolved_max_stops,
         )
     end

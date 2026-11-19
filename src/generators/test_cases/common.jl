@@ -195,25 +195,25 @@ function tc_routing_costs(segments::DataFrame)::Dict{Tuple{Int,Int},Float64}
 end
 
 """
-    tc_problem_data(stations, orders, segments; max_walking_distance,
+    tc_problem_data(stations, orders, segments; walking_limit_s,
                     walking_speed=1.4, walking_cost_scale=1.0, routing_cost_scale=1.0)
         -> StationSelectionData
 
 Shared conversion recipe used by every `create_test{N}_problem_data`: renames
 columns to the `StationSelectionData` contract, computes Haversine walking
 costs via `compute_station_pairwise_costs`, and routing costs directly from
-the segment DataFrame. `max_walking_distance` is accepted for interface
+the segment DataFrame. `walking_limit_s` is accepted for interface
 consistency with `create_grid_problem_data`/`create_zhuzhou_problem_data` but
 is not used to prune costs here (unlike those two converters) — walking-pair
 pruning happens on the model-build side (e.g. `TwoStageODPolicy`'s
-`max_walking_distance`), so returning the full cost dict is simpler and
+`walking_limit_s`), so returning the full cost dict is simpler and
 correct.
 """
 function tc_problem_data(
     stations::DataFrame,
     orders::DataFrame,
     segments::DataFrame;
-    max_walking_distance::Float64,
+    walking_limit_s::Float64,
     walking_speed::Float64 = 1.4,
     walking_cost_scale::Float64 = 1.0,
     routing_cost_scale::Float64 = 1.0,

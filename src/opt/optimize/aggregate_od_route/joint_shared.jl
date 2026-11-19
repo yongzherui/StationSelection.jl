@@ -40,7 +40,7 @@ function _stash_joint_routing_assignment_cost_parameters!(
     m[:joint_routing_assignment_walk_cost_weight] = formulation.walk_cost_weight
     m[:joint_routing_assignment_pickup_deadline_s] = formulation.pickup_deadline_s
     m[:joint_routing_assignment_max_stops] = formulation.max_stops
-    m[:joint_routing_assignment_detour_factor] = formulation.detour_factor
+    m[:joint_routing_assignment_ride_time_limit_ratio] = formulation.ride_time_limit_ratio
     # Empty pool containers: real entries arrive from whichever seeding path this build
     # uses (the two-stop seed, exhaustive enumeration, or a CG iteration's `add_columns!`).
     m[:joint_routing_assignment_theta] = Dict{Int, VariableRef}()

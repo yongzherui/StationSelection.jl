@@ -22,7 +22,7 @@ struct ClusteringTwoStageStationMap <: AbstractClusteringMap
     I_s::Dict{Int, Vector{Int}}
     q_s::Dict{Int, Dict{Int, Int}}
 
-    max_walking_distance::Float64
+    walking_limit_s::Float64
     valid_j_assignments::Dict{Int, Vector{Int}}
 
     n_stations::Int
@@ -45,7 +45,7 @@ end
 
 function compute_valid_j_assignments(
     data::StationSelectionData,
-    max_walking_distance::Float64
+    walking_limit_s::Float64
 )::Dict{Int, Vector{Int}}
     valid = Dict{Int, Vector{Int}}()
     n = data.n_stations
@@ -54,7 +54,7 @@ function compute_valid_j_assignments(
     for i in 1:n
         js = Int[]
         for j in 1:n
-            if is_candidate[j] && get_walking_cost(data, i, j) <= max_walking_distance
+            if is_candidate[j] && get_walking_cost(data, i, j) <= walking_limit_s
                 push!(js, j)
             end
         end
@@ -79,7 +79,7 @@ function create_clustering_two_stage_station_map(
         I_s[scenario_id] = sort([i for (i, q) in counts if q > 0])
     end
 
-    valid_j_assignments = compute_valid_j_assignments(data, problem.max_walking_distance)
+    valid_j_assignments = compute_valid_j_assignments(data, problem.walking_limit_s)
 
     return ClusteringTwoStageStationMap(
         data.station_id_to_array_idx,
@@ -89,7 +89,7 @@ function create_clustering_two_stage_station_map(
         array_idx_to_scenario_label,
         I_s,
         q_s,
-        problem.max_walking_distance,
+        problem.walking_limit_s,
         valid_j_assignments,
         data.n_stations
     )

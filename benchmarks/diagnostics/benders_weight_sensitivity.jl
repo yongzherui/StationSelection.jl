@@ -4,10 +4,10 @@ Every Benders cell measured so far used `BENCHMARK_BASELINE` (benchmarks/lib/cg_
 with `max_stops` overridden to 4:
 
     route_regularization_weight = 10.0     pickup_deadline_s   = 900.0
-    walk_cost_weight            =  0.1     detour_factor   =   2.0
+    walk_cost_weight            =  0.1     ride_time_limit_ratio   =   2.0
     repositioning_time          = 20.0     max_stops       =   4   (baseline is 10)
 
-plus, from `benchmark_problem`: `k = max(2, ceil(n/2))` and `max_walking_distance = 600.0`,
+plus, from `benchmark_problem`: `k = max(2, ceil(n/2))` and `walking_limit_s = 600.0`,
 on Zhuzhou with p=8 OD pairs per scenario.
 
 # The hypothesis
@@ -83,12 +83,12 @@ const ARMS = [
 
 problem, k, _meta = benchmark_problem(@__DIR__, "WS", N, P, S, SEED)
 @printf("instance: zhuzhou n=%d p=%d s=%d seed=%d k=%d max_stops=%d max_walk=%.0f\n",
-        N, P, S, SEED, k, MAX_STOPS, problem.max_walking_distance)
+        N, P, S, SEED, k, MAX_STOPS, problem.walking_limit_s)
 flush(stdout)
 
 _formulation(a) = AggregateODRouteJointRoutingAssignmentFormulation(
     route_regularization_weight=a.route_reg, walk_cost_weight=a.walk,
-    repositioning_time=a.repo, pickup_deadline_s=900.0, detour_factor=2.0,
+    repositioning_time=a.repo, pickup_deadline_s=900.0, ride_time_limit_ratio=2.0,
     max_stops=MAX_STOPS)
 
 """Master-feasible station sets -- the domain on which Q is defined (see the brute-force
@@ -105,7 +105,7 @@ function master_feasible_sets(formulation)
         end
     end
     cand = Dict(pt => Set(j for j in 1:N
-                          if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                          if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
                 for pt in required)
     return filter(c -> all(!isempty(intersect(cand[pt], c)) for pt in required),
                   collect(combinations(1:N, k)))

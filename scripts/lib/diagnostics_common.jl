@@ -68,9 +68,9 @@ function diag_zz_model(n_stations::Int;
     route_regularization_weight  :: Float64 = 10.0,
     walk_cost_weight             :: Float64 = 0.1,
     repositioning_time           :: Float64 = 20.0,
-    max_walking_distance         :: Float64 = 600.0,
+    walking_limit_s         :: Float64 = 600.0,
     pickup_deadline_s                :: Float64 = 900.0,
-    detour_factor                :: Float64 = 2.0,
+    ride_time_limit_ratio                :: Float64 = 2.0,
     max_stops                    :: Int      = 4,
     kwargs...,
 )
@@ -79,9 +79,9 @@ function diag_zz_model(n_stations::Int;
         route_regularization_weight=route_regularization_weight,
         walk_cost_weight=walk_cost_weight,
         repositioning_time=repositioning_time,
-        max_walking_distance=max_walking_distance,
+        walking_limit_s=walking_limit_s,
         pickup_deadline_s=pickup_deadline_s,
-        detour_factor=detour_factor,
+        ride_time_limit_ratio=ride_time_limit_ratio,
         max_stops=max_stops,
         kwargs...,
     )
@@ -91,16 +91,16 @@ end
 
 """
     diag_scenario_candidates(data, n_stations, scenario; max_walk=600.0, base_value=5000.0,
-                              walk_cost_weight=0.1, detour_factor=2.0)
+                              walk_cost_weight=0.1, ride_time_limit_ratio=2.0)
 
 Every (request, pickup station, dropoff station) triple within `max_walk` of
 both endpoints, with `reward = base_value - walk_cost_weight*(walk_o+walk_d)`
-and `ride_limit = detour_factor * direct_routing_time(j,k)`.
+and `ride_limit = ride_time_limit_ratio * direct_routing_time(j,k)`.
 """
 function diag_scenario_candidates(
     data::StationSelectionData, n_stations::Int, scenario::Int;
     max_walk::Float64=600.0, base_value::Float64=5000.0,
-    walk_cost_weight::Float64=0.1, detour_factor::Float64=2.0,
+    walk_cost_weight::Float64=0.1, ride_time_limit_ratio::Float64=2.0,
 )
     candidates = PassengerAssignmentCandidate[]
     for row in eachrow(data.scenarios[scenario].requests)
@@ -114,7 +114,7 @@ function diag_scenario_candidates(
                 walk_d <= max_walk || continue
                 reward = base_value - walk_cost_weight * (walk_o + walk_d)
                 reward > 0 || continue
-                ride_limit = detour_factor * get_routing_cost(data, j, k)
+                ride_limit = ride_time_limit_ratio * get_routing_cost(data, j, k)
                 push!(candidates, PassengerAssignmentCandidate(row.id, j, k, ride_limit, reward))
             end
         end

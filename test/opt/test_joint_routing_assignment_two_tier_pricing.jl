@@ -201,8 +201,8 @@
 
     @testset "end to end: same certified optimum as the one-tier mode" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         formulation() = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4)
 
         # `recover_integer_solution` is what makes the LP/IP split exist at all
@@ -243,8 +243,8 @@
 
     @testset "a two-tier mode without a macro layer is not silently supported" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         # Built for the ONE-tier mode, so no macro layer exists on the model.
         br = build_model(
             problem,
@@ -264,8 +264,8 @@
 
     @testset "the build stashes a macro layer only when asked" begin
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-        data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-        problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+        data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+        problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
         br = build_model(
             problem,
             AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),

@@ -139,7 +139,7 @@ function _build_aggregate_od_route_base_cg_model(
     m[:aggregate_od_route_base_walk_cost_weight] = formulation.walk_cost_weight
     m[:aggregate_od_route_base_pickup_deadline_s] = formulation.pickup_deadline_s
     m[:aggregate_od_route_base_max_stops] = formulation.max_stops
-    m[:aggregate_od_route_base_detour_factor] = formulation.detour_factor
+    m[:aggregate_od_route_base_ride_time_limit_ratio] = formulation.ride_time_limit_ratio
     m[:aggregate_od_route_base_compensated_dominance] = pricing.compensated_dominance
     m[:aggregate_od_route_base_nodes] = candidate_station_indices(data)
     travel_cost = Dict{Tuple{Int, Int}, Float64}()
@@ -221,7 +221,7 @@ function _aggregate_od_route_integer_recovery_build(
         walk_cost_weight=m[:aggregate_od_route_base_walk_cost_weight],
         repositioning_time=m[:aggregate_od_route_base_repositioning_time],
         pickup_deadline_s=m[:aggregate_od_route_base_pickup_deadline_s],
-        detour_factor=m[:aggregate_od_route_base_detour_factor],
+        ride_time_limit_ratio=m[:aggregate_od_route_base_ride_time_limit_ratio],
         max_stops=m[:aggregate_od_route_base_max_stops],
     )
     columns_by_id = m[:aggregate_od_route_base_columns_by_id]

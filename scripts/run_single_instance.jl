@@ -147,10 +147,10 @@ function main()
     println()
 
     stations, requests, data, walking_costs, demand_station_ids = _build_data(NX, NY, N_REQUESTS, SEED)
-    max_walking_distance = isempty(MAX_WALKING_DISTANCE_ENV) ?
+    walking_limit_s = isempty(MAX_WALKING_DISTANCE_ENV) ?
         _max_walking_distance(walking_costs, demand_station_ids) :
         parse(Float64, MAX_WALKING_DISTANCE_ENV)
-    @printf("  Max walk dist: %.1f\n", max_walking_distance)
+    @printf("  Max walk dist: %.1f\n", walking_limit_s)
     @printf("  Demand set   : %s\n", string(demand_station_ids))
     println()
 
@@ -158,7 +158,7 @@ function main()
         max(1, min(8, data.n_stations));
         route_regularization_weight=ROUTE_REGULARIZATION_WEIGHT,
         repositioning_time=REPOSITIONING_TIME,
-        max_walking_distance=max_walking_distance,
+        walking_limit_s=walking_limit_s,
         max_stops=2,
         max_new_columns=MAX_NEW_COLS,
         n_candidates=max(MAX_NEW_COLS, 20),
@@ -172,7 +172,7 @@ function main()
         ip_time_limit=IP_TIME_LIMIT, mip_gap=MIP_GAP,
         extra_summary_fields=(
             nx=NX, ny=NY, n_stations=nrow(stations), n_requests=nrow(requests), seed=SEED,
-            max_walking_distance=max_walking_distance,
+            walking_limit_s=walking_limit_s,
             route_regularization_weight=ROUTE_REGULARIZATION_WEIGHT,
             repositioning_time=REPOSITIONING_TIME,
         ),

@@ -21,7 +21,7 @@
     inst2 = generate_test5_instance(:equilateral, 3, dcfg)
     @test inst1.orders == inst2.orders
 
-    data = create_test5_problem_data(inst1; max_walking_distance = 1800.0 / 1.4)
+    data = create_test5_problem_data(inst1; walking_limit_s = 1800.0 / 1.4)
     @test data.n_stations == 8
 
     all_instances = build_test5_cases(; n_seeds = 1)
@@ -42,8 +42,8 @@ end
     # (all built stations active) here instead; this deviation from the
     # source's own suggested sweep is intentional and documented.
     inst = generate_test5_instance(:corridor_base, 1, dcfg)
-    data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-    problem = StationSelectionProblem(data, 3; max_walking_distance = mwd_sec)
+    data = create_test5_problem_data(inst; walking_limit_s = mwd_sec)
+    problem = StationSelectionProblem(data, 3; walking_limit_s = mwd_sec)
     formulation = ClusteringTwoStageODFormulation(3; in_vehicle_time_weight = 0.0)
     result = run_opt(problem, formulation, DirectMIPSolver())
     @test result.termination_status == SOLVE_OPTIMAL
@@ -53,8 +53,8 @@ end
     # only feasibility/optimality is asserted for these.
     for case in (:equilateral, :equilateral_with_m1)
         inst = generate_test5_instance(case, 1, dcfg)
-        data = create_test5_problem_data(inst; max_walking_distance = mwd_sec)
-        problem = StationSelectionProblem(data, inst.suggested_k; max_walking_distance = mwd_sec)
+        data = create_test5_problem_data(inst; walking_limit_s = mwd_sec)
+        problem = StationSelectionProblem(data, inst.suggested_k; walking_limit_s = mwd_sec)
         formulation = ClusteringTwoStageODFormulation(
             inst.suggested_l; in_vehicle_time_weight = 0.0,
         )

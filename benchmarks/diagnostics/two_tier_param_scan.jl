@@ -127,7 +127,7 @@ for k2 in k2_list
             cands = joint_routing_assignment_pricing_candidates(
                 data, mapping, alpha, gamma_o, gamma_d,
                 Float64(m[:joint_routing_assignment_walk_cost_weight]),
-                Float64(m[:joint_routing_assignment_detour_factor]), s)
+                Float64(m[:joint_routing_assignment_ride_time_limit_ratio]), s)
             isempty(cands) && continue
             mac = SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
                 s, macro_cl, travel_cost, cands; shared...)

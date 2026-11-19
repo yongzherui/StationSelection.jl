@@ -40,10 +40,10 @@
     )
 
     # k = stations built (first stage), l = stations activated per scenario (second stage)
-    # max_walking_distance is generous (walking costs top out at 400) so every
+    # walking_limit_s is generous (walking costs top out at 400) so every
     # station pair stays admissible -- these tests exercise variable/constraint
     # counting, not walking-distance pruning.
-    problem = StationSelectionProblem(data, 3; max_walking_distance = 500)
+    problem = StationSelectionProblem(data, 3; walking_limit_s = 500)
 
     @testset "ClusteringTwoStageODFormulation build" begin
         formulation = ClusteringTwoStageODFormulation(2)

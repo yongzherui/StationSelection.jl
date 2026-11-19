@@ -11,7 +11,7 @@ const BENCHMARK_BASELINE = (
     walk_cost_weight=0.1,
     repositioning_time=20.0,
     pickup_deadline_s=900.0,
-    detour_factor=2.0,
+    ride_time_limit_ratio=2.0,
     max_stops=10,
 )
 
@@ -33,7 +33,7 @@ function benchmark_problem(study_dir::AbstractString, env_prefix::AbstractString
         "$(fill(n_pairs, n_scenarios))"
     )
     k = max(2, ceil(Int, n_stations / 2))
-    return StationSelectionProblem(data, k; max_walking_distance=600.0), k, meta
+    return StationSelectionProblem(data, k; walking_limit_s=600.0), k, meta
 end
 
 function benchmark_output_dir(study_dir::AbstractString, env_prefix::AbstractString,

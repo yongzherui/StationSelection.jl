@@ -1,7 +1,7 @@
 @testset "Joint CG: :station_simple pricing mode and warm-start phasing" begin
     instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
-    data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
-    problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
+    data = create_middle_zone_station_selection_data(instance; walking_limit_s = 800.0)
+    problem = StationSelectionProblem(data, 5; walking_limit_s = 800.0)
     # One formulation for every arm below: the pricer is a solver setting, so a mode sweep
     # varies `CGSolver.pricing` and reuses the identical model.
     formulation() = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4)

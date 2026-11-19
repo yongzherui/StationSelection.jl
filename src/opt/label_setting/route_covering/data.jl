@@ -14,7 +14,7 @@ function _direct_ride_limit(
     pricing_data::RouteCoveringPricingData,
     pair::Tuple{Int, Int},
 )::Float64
-    return pricing_data.detour_factor * _route_covering_travel(pricing_data, pair[1], pair[2])
+    return pricing_data.ride_time_limit_ratio * _route_covering_travel(pricing_data, pair[1], pair[2])
 end
 
 function _route_covering_label_reduced_cost(

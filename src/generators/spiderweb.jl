@@ -41,7 +41,7 @@ using Random
 #   * `candidate = false` keeps it from being built, offered as a pickup/dropoff,
 #     or visited by a route (`candidate_station_mask`, data/core/struct.jl).
 #
-# The walking limit is then just `StationSelectionProblem.max_walking_distance`,
+# The walking limit is then just `StationSelectionProblem.walking_limit_s`,
 # compared against those exact point-to-station distances, so the feasible
 # pickup set of passenger p is O_p(R) = {j : ||o_p - s_j|| <= R} with no
 # rounding anywhere.
@@ -52,7 +52,7 @@ using Random
 # Coordinates live in [0,1]^2. Walking cost = `walk_cost_per_unit` x Euclidean
 # distance; routing cost = `routing_cost_scale` x road travel time, where an
 # edge takes length / speed. With the defaults (all 1) both are in unit-square
-# lengths, so `max_walking_distance` is R_walk in the same units. The relative
+# lengths, so `walking_limit_s` is R_walk in the same units. The relative
 # price of walking against riding belongs in the formulation weights
 # (`in_vehicle_time_weight`; `walk_cost_weight` / `route_regularization_weight`),
 # not here. Unit-free costs mean any time-valued formulation field

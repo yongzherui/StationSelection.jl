@@ -12,7 +12,7 @@ export create_map
                data::StationSelectionData)
 
 Create the appropriate clustering map for `formulation`, dispatched on its concrete type.
-`max_walking_distance` comes from `problem`, not `formulation`.
+`walking_limit_s` comes from `problem`, not `formulation`.
 """
 create_map(
     problem::StationSelectionProblem, formulation::ClusteringBaseFormulation, data::StationSelectionData,

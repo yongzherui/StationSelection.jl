@@ -29,7 +29,7 @@ places is exactly the drift risk a shared body avoids.
 """
 
 """
-    _validate_joint_routing_assignment_initial_columns(data, mapping, detour_factor, columns)
+    _validate_joint_routing_assignment_initial_columns(data, mapping, ride_time_limit_ratio, columns)
 
 Error unless every `(p, j, k)` a supplied column carries is valid for this problem: `p` is
 a demand group of the column's scenario, `(j, k)` is in that OD's `get_valid_jk_pairs`,
@@ -41,7 +41,7 @@ the pricer's full pickup-window replay.
 function _validate_joint_routing_assignment_initial_columns(
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
-    detour_factor::Float64,
+    ride_time_limit_ratio::Float64,
     columns,
 )
     for column in columns
@@ -55,8 +55,8 @@ function _validate_joint_routing_assignment_initial_columns(
             o, d = omega[p]
             (j, k) in get_valid_jk_pairs(mapping, o, d) || error(
                 "initial column $(column.id): pair $((j, k)) is not valid for OD $((o, d)) " *
-                "(walking limit / door_to_door_ratio = $(mapping.door_to_door_ratio))")
-            limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
+                "(walking limit / door_to_door_limit_ratio = $(mapping.door_to_door_limit_ratio))")
+            limit = joint_routing_assignment_ride_limit(data, mapping, ride_time_limit_ratio, o, d, j, k)
             ride = Inf
             for a in eachindex(route), b in (a + 1):lastindex(route)
                 (route[a] == j && route[b] == k) || continue
@@ -64,8 +64,8 @@ function _validate_joint_routing_assignment_initial_columns(
             end
             ride <= limit + 1e-9 || error(
                 "initial column $(column.id): OD $((o, d)) via $((j, k)) rides $(ride) s on " *
-                "route $(route), over its limit $(limit) s (detour_factor = $detour_factor, " *
-                "door_to_door_ratio = $(mapping.door_to_door_ratio))")
+                "route $(route), over its limit $(limit) s (ride_time_limit_ratio = $ride_time_limit_ratio, " *
+                "door_to_door_limit_ratio = $(mapping.door_to_door_limit_ratio))")
         end
     end
     return nothing
@@ -120,7 +120,7 @@ hunting for *any* feasible column per demand group instead of improving routing 
 `solver.initial_columns`, when given, overrides that default entirely -- e.g. to resume
 CG from a previously discovered pool instead of the generic two-stop seed. Supplied columns
 are checked against THIS problem (`_validate_joint_routing_assignment_initial_columns`):
-a pool priced under another `door_to_door_ratio`, `detour_factor` or demand set would
+a pool priced under another `door_to_door_limit_ratio`, `ride_time_limit_ratio` or demand set would
 otherwise enter the master carrying assignments this model forbids, or `p` indices that
 point at a different OD.
 """
@@ -134,7 +134,7 @@ function build_model(
     aggregate_od_route_validate_feasible_coverage(data, mapping)
 
     isnothing(solver.initial_columns) || _validate_joint_routing_assignment_initial_columns(
-        data, mapping, formulation.detour_factor, solver.initial_columns)
+        data, mapping, formulation.ride_time_limit_ratio, solver.initial_columns)
     # Under `:exact_no_anticipation` with `first_boarding = :after_first_walker` the vehicle
     # leaves its first stop when the first rider boards, so a two-stop bundle may only carry
     # riders who reach `j` together (`exact_no_anticipation/seeding.jl`).
@@ -397,7 +397,7 @@ function _aggregate_od_route_integer_recovery_build(
         walk_cost_weight = m[:joint_routing_assignment_walk_cost_weight],
         repositioning_time = m[:joint_routing_assignment_repositioning_time],
         pickup_deadline_s = m[:joint_routing_assignment_pickup_deadline_s],
-        detour_factor = m[:joint_routing_assignment_detour_factor],
+        ride_time_limit_ratio = m[:joint_routing_assignment_ride_time_limit_ratio],
         max_stops = m[:joint_routing_assignment_max_stops],
         vehicle_capacity = m[:joint_routing_assignment_vehicle_capacity],
     )

@@ -30,7 +30,7 @@ grown by column generation instead of enumerated up front.
 
 The two **derived** types below are the Benders decomposition of the monolith. They are
 derived from the parent and never built from loose keywords: a master at one
-`detour_factor` against a subproblem at another yields invalid cuts and a confidently
+`ride_time_limit_ratio` against a subproblem at another yields invalid cuts and a confidently
 wrong `OPTIMAL`, so the inconsistent combination is made unrepresentable.
 
 {{autodocs opt/formulations/aggregate_od_route/joint_routing_assignment}}

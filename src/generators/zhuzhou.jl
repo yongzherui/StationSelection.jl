@@ -350,7 +350,7 @@ end
 
 function _zhuzhou_walking_costs(
     instance::ZhuzhouInstance;
-    max_walking_distance::Float64,
+    walking_limit_s::Float64,
     walking_speed::Float64,
     walking_cost_scale::Float64,
 )::Dict{Tuple{Int,Int},Float64}
@@ -366,7 +366,7 @@ function _zhuzhou_walking_costs(
             to_station.lat,
             to_station.lon,
         ) / walking_speed
-        if walk_seconds <= max_walking_distance + 1e-9
+        if walk_seconds <= walking_limit_s + 1e-9
             costs[(u, v)] = walking_cost_scale * walk_seconds
         end
     end
@@ -374,20 +374,20 @@ function _zhuzhou_walking_costs(
 end
 
 """
-    create_zhuzhou_problem_data(instance; max_walking_distance, ...)
+    create_zhuzhou_problem_data(instance; walking_limit_s, ...)
 
 Convert a Zhuzhou instance into `StationSelectionData`. Walking feasibility is
 measured in seconds, using haversine distance divided by `walking_speed`.
 """
 function create_zhuzhou_problem_data(
     instance::ZhuzhouInstance;
-    max_walking_distance::Float64,
+    walking_limit_s::Float64,
     walking_speed::Float64 = 1.4,
     walking_cost_scale::Float64 = 1.0,
     routing_cost_scale::Float64 = 1.0,
     request_time::DateTime = DateTime(2026, 1, 1),
 )::StationSelectionData
-    max_walking_distance >= 0.0 || throw(ArgumentError("max_walking_distance must be nonnegative"))
+    walking_limit_s >= 0.0 || throw(ArgumentError("walking_limit_s must be nonnegative"))
     walking_speed > 0.0 || throw(ArgumentError("walking_speed must be positive"))
     walking_cost_scale >= 0.0 || throw(ArgumentError("walking_cost_scale must be nonnegative"))
     routing_cost_scale >= 0.0 || throw(ArgumentError("routing_cost_scale must be nonnegative"))
@@ -395,7 +395,7 @@ function create_zhuzhou_problem_data(
     routing_costs = Dict(key => routing_cost_scale * value for (key, value) in instance.travel_time)
     walking_costs = _zhuzhou_walking_costs(
         instance;
-        max_walking_distance = max_walking_distance,
+        walking_limit_s = walking_limit_s,
         walking_speed = walking_speed,
         walking_cost_scale = walking_cost_scale,
     )

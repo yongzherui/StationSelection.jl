@@ -25,7 +25,7 @@ the identical model, which is what makes a mode sweep a comparison rather than a
 confound.
 
 ```julia
-problem     = StationSelectionProblem(data, 10; max_walking_distance=300)
+problem     = StationSelectionProblem(data, 10; walking_limit_s=300)
 formulation = ClusteringTwoStageODFormulation(5; in_vehicle_time_weight=1.0)
 solver      = DirectMIPSolver(config=SolverOptions(silent=true))
 result      = run_opt(problem, formulation, solver)

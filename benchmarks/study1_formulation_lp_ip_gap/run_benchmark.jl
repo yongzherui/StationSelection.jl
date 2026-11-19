@@ -19,7 +19,7 @@ n_scenarios = parse(Int, fields[8])
 seed = parse(Int, fields[9])
 max_stops = parse(Int, fields[10])
 pickup_deadline_s = parse(Float64, fields[11])
-detour_factor = parse(Float64, fields[12])
+ride_time_limit_ratio = parse(Float64, fields[12])
 pricing_time_limit_sec = parse(Float64, fields[13])
 
 problem, k, instance_meta = benchmark_problem(@__DIR__, "STUDY1", n_stations, n_pairs, n_scenarios, seed)
@@ -27,7 +27,7 @@ output_dir = benchmark_output_dir(@__DIR__, "STUDY1", "study1_formulation_lp_ip_
 common = (
     route_regularization_weight=10.0, walk_cost_weight=0.1,
     repositioning_time=20.0, pickup_deadline_s=pickup_deadline_s,
-    detour_factor=detour_factor, max_stops=max_stops,
+    ride_time_limit_ratio=ride_time_limit_ratio, max_stops=max_stops,
 )
 
 base_fields = (
@@ -36,7 +36,7 @@ base_fields = (
     n_pairs_actual=[sum(instance_meta.pairs_per_scenario)],
     pairs_per_scenario=[join(instance_meta.pairs_per_scenario, ";")],
     n_scenarios=[n_scenarios], seed=[seed], k=[k], max_stops=[max_stops],
-    pickup_deadline_s=[pickup_deadline_s], detour_factor=[detour_factor],
+    pickup_deadline_s=[pickup_deadline_s], ride_time_limit_ratio=[ride_time_limit_ratio],
     pricing_time_limit_sec=[pricing_time_limit_sec],
 )
 

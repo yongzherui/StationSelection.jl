@@ -136,7 +136,7 @@ retained assignment deleted. Then:
   `c_route = beta * (tau + repositioning_time)` is increasing in `tau`, so the cost drops.
 - `r''` is FEASIBLE. Both route-feasibility conditions bound ELAPSED durations from above --
   the pickup window is `label.time <= pickup_deadline_s`, the ride limit is
-  `origin_age + travel <= detour_factor * routing_cost(j,k)` -- and deleting a stop only
+  `origin_age + travel <= ride_time_limit_ratio * routing_cost(j,k)` -- and deleting a stop only
   decreases each left-hand side. Both right-hand sides are unchanged: `pickup_deadline_s` is a
   constant, and the ride limit (`joint_routing_assignment_ride_limit`, including its
   door-to-door cap) is computed from the ASSIGNMENT's stations and OD before any route
@@ -288,7 +288,7 @@ function _benders_core_point(
     end
     is_candidate = candidate_station_mask(data)
     rows = [(pt, [j for j in 1:n
-                  if is_candidate[j] && get_walking_cost(data, pt, j) <= mapping.max_walking_distance])
+                  if is_candidate[j] && get_walking_cost(data, pt, j) <= mapping.walking_limit_s])
             for pt in sort!(collect(required))]
     filter!(r -> !isempty(r[2]), rows)
 

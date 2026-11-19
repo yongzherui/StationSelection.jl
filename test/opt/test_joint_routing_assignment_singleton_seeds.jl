@@ -20,10 +20,10 @@
                          request_time = fill(DateTime(2026, 1, 1, 8, 0), 3))
     data = create_station_selection_data(stations, requests, walking; routing_costs = routing,
         scenarios = [("2026-01-01 08:00:00", "2026-01-01 09:00:00")])
-    problem = StationSelectionProblem(data, 3; max_walking_distance = 2.5, door_to_door_ratio = 2.0)
+    problem = StationSelectionProblem(data, 3; walking_limit_s = 2.5, door_to_door_limit_ratio = 2.0)
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
         route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
-        pickup_deadline_s = 10.0, detour_factor = 1.5, max_stops = 4)
+        pickup_deadline_s = 10.0, ride_time_limit_ratio = 1.5, max_stops = 4)
 
     mapping = StationSelection.create_aggregate_od_route_map(problem, formulation, data)
     seeds = joint_routing_assignment_two_stop_seed_columns(data, mapping)

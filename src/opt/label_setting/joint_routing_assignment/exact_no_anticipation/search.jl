@@ -24,10 +24,10 @@ const NO_ANTICIPATION_TRI_TOL = 0.01
 
 # ── data ──────────────────────────────────────────────────────────────────────
 """
-    create_no_anticipation_pricing_data(base, data, mapping, scenario, detour_factor, first_boarding;
+    create_no_anticipation_pricing_data(base, data, mapping, scenario, ride_time_limit_ratio, first_boarding;
                                         trigger_candidates = nothing)
 
-Attach each opportunity's walk to its pickup stop, its G2 deadline from the request and its
+Attach each opportunity's walk to its pickup stop, its door-to-door deadline from the request and its
 in-vehicle limit. `base` is the `exact` pricer's pricing data for the same candidates.
 
 M2/M3: `trigger_candidates` are the rider pairs that may set a route's departure -- EVERY valid
@@ -42,12 +42,12 @@ function create_no_anticipation_pricing_data(
     data::StationSelectionData,
     mapping::AggregateODRouteMap,
     scenario::Int,
-    detour_factor::Float64,
+    ride_time_limit_ratio::Float64,
     first_boarding::Symbol;
     trigger_candidates::Union{Nothing, AbstractVector}=nothing,
 )::NoAnticipationPricingData
     omega = mapping.Omega_s[scenario]
-    ratio = mapping.door_to_door_ratio
+    ratio = mapping.door_to_door_limit_ratio
     opps = NoAnticipationOpportunity[]
     for o in base.opportunities
         od_o, od_d = omega[o.p]
@@ -55,7 +55,7 @@ function create_no_anticipation_pricing_data(
         egress = get_walking_cost(data, o.destination, od_d)
         direct = get_routing_cost(data, od_o, od_d)
         deadline = (isfinite(ratio) && isfinite(direct)) ? ratio * direct - egress : Inf
-        cap = detour_factor * get_routing_cost(data, o.origin, o.destination)
+        cap = ride_time_limit_ratio * get_routing_cost(data, o.origin, o.destination)
         push!(opps, NoAnticipationOpportunity(o.p, o.origin, o.destination, cap, deadline, walk_in, o.reward, o.layer_mask))
     end
     by_origin = Dict{Int, Vector{Int}}()
@@ -89,7 +89,7 @@ function create_no_anticipation_pricing_data(
             egress = get_walking_cost(data, k, od_d)
             direct = get_routing_cost(data, od_o, od_d)
             deadline = (isfinite(ratio) && isfinite(direct)) ? ratio * direct - egress : Inf
-            cap = detour_factor * get_routing_cost(data, j, k)
+            cap = ride_time_limit_ratio * get_routing_cost(data, j, k)
             d = _na_travel(base, j, k)
             (d <= cap + 1e-9 && walk_in + d <= deadline + 1e-9) || continue  # cannot be delivered even directly
             push!(triggers, NoAnticipationTrigger(p, j, k, cap, deadline, walk_in, r))
@@ -132,7 +132,7 @@ end
                (pd.gather || o.walk_in > t0 - NO_ANTICIPATION_FIRST_WALKER_TOL - NO_ANTICIPATION_EPS) &&
                T <= o.deadline + 1e-9
     end
-    return T <= o.deadline - o.walk_in + 1e-9          # M1: the `exact` G2 (walk counted, no wait)
+    return T <= o.deadline - o.walk_in + 1e-9          # M1: the `exact` door-to-door limit (walk counted, no wait)
 end
 
 "Could a later-visit clock at `j` (visit time `v`, age `age`, now `T`, vehicle at `cur`) still credit anyone?"
@@ -719,7 +719,7 @@ t0 carries every rider with walk <= t0 who still makes their deadline). M2:
 a bundle on `[j, k]` carries only riders who reach `j` within 5 s of the bundle's last walker
 (t0 = that walk) and still make their door-to-door deadline from t0; plus one singleton per
 rider, so every per-group assignment stays representable (see `seeding.jl`). A singleton
-boards at t0 = its own walk and meets G2 because the pair filter kept walk + drive + walk
+boards at t0 = its own walk and meets the door-to-door limit because the pair filter kept walk + drive + walk
 within budget.
 """
 function joint_routing_assignment_two_stop_seed_columns_first_walker(
@@ -729,7 +729,7 @@ function joint_routing_assignment_two_stop_seed_columns_first_walker(
     pickup_deadline_s::Float64,
     gather::Bool=false,
 )::Vector{JointRoutingAssignmentRouteColumn}
-    ratio = mapping.door_to_door_ratio
+    ratio = mapping.door_to_door_limit_ratio
     by_route = Dict{Tuple{Int, Int, Int}, Vector{Tuple{Float64, Float64, Int}}}()   # (walk, deadline, p)
     for s in 1:n_scenarios(data)
         for (p, (o, d)) in enumerate(mapping.Omega_s[s])

@@ -84,7 +84,7 @@ function feasibility_data(problem, formulation)
         end
     end
     cand = Dict(pt => Set(j for j in 1:N
-                          if get_walking_cost(data, pt, j) <= mapping.max_walking_distance)
+                          if get_walking_cost(data, pt, j) <= mapping.walking_limit_s)
                 for pt in required)
     return required, cand
 end

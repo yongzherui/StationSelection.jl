@@ -121,9 +121,9 @@ function main()
     print_zhuzhou_data_summary(data, meta)
 
     L <= data.n_stations || error("l=$L exceeds n_stations=$(data.n_stations)")
-    max_walking_distance = _zz_resolve_max_walking_distance(data, MAX_WALK_ENV)
+    walking_limit_s = _zz_resolve_max_walking_distance(data, MAX_WALK_ENV)
     max_stops = isempty(MAX_STOPS_ENV) ? data.n_stations : parse(Int, MAX_STOPS_ENV)
-    @printf("  Max walk dist    : %.1fs\n", max_walking_distance)
+    @printf("  Max walk dist    : %.1fs\n", walking_limit_s)
     @printf("  Max stops        : %d\n", max_stops)
     println()
 
@@ -131,9 +131,9 @@ function main()
         L;
         route_regularization_weight = ROUTE_REG_WEIGHT,
         repositioning_time          = REPOSITIONING_TIME,
-        max_walking_distance        = max_walking_distance,
+        walking_limit_s        = walking_limit_s,
         pickup_deadline_s               = PICKUP_DEADLINE_S,
-        detour_factor                 = DETOUR_FACTOR,
+        ride_time_limit_ratio                 = DETOUR_FACTOR,
         max_stops                   = max_stops,
         max_new_columns             = MAX_NEW_COLS,
         n_candidates                = max(MAX_NEW_COLS, 20),
@@ -150,8 +150,8 @@ function main()
             n_stations=meta.n_stations_actual, l=L, n_scenarios=meta.n_scenarios_actual,
             n_pairs_requested=N_PAIRS, n_pairs_actual=sum(meta.pairs_per_scenario),
             endpoint_overlap=ENDPOINT_OVERLAP, seed=SEED,
-            max_walking_distance=max_walking_distance, pickup_deadline_s=PICKUP_DEADLINE_S,
-            detour_factor=DETOUR_FACTOR, max_stops=max_stops,
+            walking_limit_s=walking_limit_s, pickup_deadline_s=PICKUP_DEADLINE_S,
+            ride_time_limit_ratio=DETOUR_FACTOR, max_stops=max_stops,
             route_reg_weight=ROUTE_REG_WEIGHT, repositioning_time=REPOSITIONING_TIME,
         ),
     )
