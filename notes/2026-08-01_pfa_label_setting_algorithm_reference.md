@@ -51,7 +51,7 @@ One pricing call handles **one scenario**. Input from the master:
 A **column** is a physical station route `r = (n_1, ..., n_m)` starting at
 `t = 0`, unlimited capacity, synchronized start. Its rules:
 
-- visiting `j` at elapsed time `<= W` (`max_wait_time`) **opens a pickup clock**
+- visiting `j` at elapsed time `<= W` (`pickup_deadline_s`) **opens a pickup clock**
   at `j` (age 0); visiting past `W` opens nothing;
 - arriving at `k` **certifies** `(p, j, k)` if `j`'s clock age on arrival is
   `<= R_pjk`;

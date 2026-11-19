@@ -98,7 +98,7 @@ struct JointRoutingAssignmentDarpModifiedPricingData
     travel_cost::Dict{Tuple{Int, Int}, Float64}
     route_regularization_weight::Float64
     repositioning_time::Float64
-    max_wait_time::Float64
+    pickup_deadline_s::Float64
     max_stops::Int
     bounded_max_stops::Bool
     compensated_dominance::Bool

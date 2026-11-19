@@ -33,7 +33,7 @@ function _pricing_build_scenario_context(
         active_pairs,
         Float64(m[:aggregate_od_route_base_route_regularization_weight]),
         Float64(m[:aggregate_od_route_base_repositioning_time]),
-        Float64(m[:aggregate_od_route_base_max_wait_time]),
+        Float64(m[:aggregate_od_route_base_pickup_deadline_s]),
         Float64(m[:aggregate_od_route_base_detour_factor]),
         max_stops,
         max_stops != typemax(Int),

@@ -28,7 +28,7 @@ Env overrides:
     PFASP_N_PAIRS      default 16
     PFASP_MAX_STOPS    default 7   (0 => unbounded)
     PFASP_SEARCH_TIME  default 300
-    PFASP_MAX_WAIT     default 900
+    PFASP_PICKUP_DEADLINE_S     default 900
 """
 
 using Statistics
@@ -55,7 +55,7 @@ opens after W, so the last *contributing* pickup cannot lie past it.
 """
 function _split_indices(route::Vector{Int}, pd)
     m = length(route)
-    W = pd.max_wait_time
+    W = pd.pickup_deadline_s
     elapsed = zeros(Float64, m)
     for i in 2:m
         elapsed[i] = elapsed[i - 1] +
@@ -100,18 +100,18 @@ function run_split_census(args::Vector{String})
     n_pairs = env_int("PFASP_N_PAIRS", 16)
     max_stops = diag_unbounded(env_int("PFASP_MAX_STOPS", 7))
     search_time = env_float("PFASP_SEARCH_TIME", 300.0)
-    max_wait = env_float("PFASP_MAX_WAIT", 900.0)
+    pickup_deadline = env_float("PFASP_PICKUP_DEADLINE_S", 900.0)
 
     data, _ = diag_zz_data(n; n_pairs=n_pairs, n_scenarios=1, seed=42)
-    model = diag_zz_model(n; max_stops=max_stops, max_wait_time=max_wait)
+    model = diag_zz_model(n; max_stops=max_stops, pickup_deadline_s=pickup_deadline)
     _master, _mapping, md, alpha, gamma_o, gamma_d = diag_dual_snapshot(model, data)
     candidates = passenger_free_assignment_pricing_candidates(md, alpha, gamma_o, gamma_d, 1)
     pd = create_passenger_free_assignment_pricing_data(1, md.nodes, md.travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
-        max_wait_time=md.max_wait_time, repositioning_time=md.repositioning_time,
+        pickup_deadline_s=md.pickup_deadline_s, repositioning_time=md.repositioning_time,
         max_stops=md.max_stops, max_visits_per_node=md.max_visits_per_node)
 
-    W = pd.max_wait_time
+    W = pd.pickup_deadline_s
     @printf("CONFIG n=%d n_pairs=%d max_stops=%s W=%.1f opportunities=%d layers=%d\n",
         n, n_pairs, max_stops == typemax(Int) ? "inf" : string(max_stops),
         W, length(pd.opportunities), pd.n_layers)
@@ -175,7 +175,7 @@ function run_split_census(args::Vector{String})
 
     summary = (; n_stations=n, n_pairs=n_pairs,
         max_stops=(max_stops == typemax(Int) ? -1 : max_stops),
-        max_wait_time=W, n_opportunities=length(pd.opportunities), n_layers=pd.n_layers,
+        pickup_deadline_s=W, n_opportunities=length(pd.opportunities), n_layers=pd.n_layers,
         search_exhausted=exhausted, search_seconds=search_seconds,
         labels_generated=stats.labels_generated, labels_inserted=n_labels,
         max_live_labels=stats.max_live_labels,

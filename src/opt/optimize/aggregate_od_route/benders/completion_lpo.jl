@@ -135,9 +135,9 @@ retained assignment deleted. Then:
   pricer's age pruning asserts on violation), so deleting a stop cannot lengthen the route.
   `c_route = beta * (tau + repositioning_time)` is increasing in `tau`, so the cost drops.
 - `r''` is FEASIBLE. Both route-feasibility conditions bound ELAPSED durations from above --
-  the pickup window is `label.time <= max_wait_time`, the ride limit is
+  the pickup window is `label.time <= pickup_deadline_s`, the ride limit is
   `origin_age + travel <= detour_factor * routing_cost(j,k)` -- and deleting a stop only
-  decreases each left-hand side. Both right-hand sides are unchanged: `max_wait_time` is a
+  decreases each left-hand side. Both right-hand sides are unchanged: `pickup_deadline_s` is a
   constant, and the ride limit (`joint_routing_assignment_ride_limit`, including its
   door-to-door cap) is computed from the ASSIGNMENT's stations and OD before any route
   exists (`pricing_round.jl`), not from route positions. Nothing measures

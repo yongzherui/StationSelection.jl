@@ -29,7 +29,7 @@ skip the label search entirely.
 ## The formulation
 
 Time grid `delta`, arc time advance `dbar(i,j) = delta*floor(d(i,j)/delta)`,
-horizon `H = max_wait + max ride_limit`. States `(i, t)` restricted to those
+horizon `H = pickup_deadline_s + max ride_limit`. States `(i, t)` restricted to those
 forward-reachable from a start node; travel arcs at the **true** cost
 `beta*d(i,j)`; a source arc into every `(i, 0)` at `beta*repositioning_time` and
 a sink arc out of every state.

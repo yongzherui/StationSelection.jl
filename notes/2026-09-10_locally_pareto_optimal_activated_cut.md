@@ -80,9 +80,9 @@ deleted.
   the pricer's age pruning already assumes it and asserts on violation. `c_route` is
   increasing in `τ`.
 - **Feasibility.** Both route-feasibility conditions bound ELAPSED durations from above: the
-  pickup window is `label.time ≤ max_wait_time`, the ride limit is
+  pickup window is `label.time ≤ pickup_deadline_s`, the ride limit is
   `origin_age + travel ≤ detour_factor · routing_cost(j,k)`. Deleting a stop only decreases
-  each left-hand side. Both right-hand sides are unchanged — `max_wait_time` is a constant,
+  each left-hand side. Both right-hand sides are unchanged — `pickup_deadline_s` is a constant,
   and `routing_cost(j,k)` is computed from the ASSIGNMENT's stations before any route exists
   (`pricing_round.jl`), not from route positions. Nothing measures wait against a fixed
   request clock, so no retained passenger waits longer. `A → U → A → B` with the pickup at the

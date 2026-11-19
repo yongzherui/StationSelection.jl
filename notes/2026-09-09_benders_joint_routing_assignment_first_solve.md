@@ -561,7 +561,7 @@ to exist. So same-station pairs and walk-only cover the identical set of groups,
   required -- and endpoint coverage forces a station near `o` and one near `d` to be built,
   with the 2-stop route `j -> k` serving the pair whenever `routing_cost(j,k)` is finite
   (its ride limit is `detour_factor * routing_cost(j,k) >= routing_cost(j,k)` for
-  `detour_factor >= 1`, so the direct hop always fits) and `max_wait_time` is met.
+  `detour_factor >= 1`, so the direct hop always fits) and `pickup_deadline_s` is met.
 
 That reduces the residual risk to two concrete conditions -- an infinite routing cost between
 the specific built pair, or a wait-time violation -- rather than leaving it as "necessary but

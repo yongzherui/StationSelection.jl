@@ -5,7 +5,7 @@
     # DirectMIPSolver's exhaustive enumeration requires a finite max_stops (it has no other
     # way to terminate a plain DFS); CG's label-setting pricer has no such requirement, but
     # a shared, finite formulation keeps the two solvers' results directly comparable below.
-    formulation = AggregateODRouteBaseFormulation(max_stops = 4)
+    formulation = AggregateODRouteBaseFormulation(pickup_deadline_s = Inf, max_stops = 4)
 
     @testset "build_model honors solver.initial_columns as the seed pool" begin
         default_build = StationSelection.build_model(problem, formulation, CGSolver())
@@ -89,7 +89,7 @@
         @test base_result.termination_status == SOLVE_OPTIMAL
 
         joint_result = run_opt(
-            problem, AggregateODRouteJointRoutingAssignmentFormulation(), CGSolver(),
+            problem, AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf), CGSolver(),
         )
         @test joint_result.termination_status == SOLVE_OPTIMAL
         @test haskey(joint_result.model.obj_dict, :joint_routing_assignment_theta)

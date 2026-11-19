@@ -42,7 +42,7 @@ model = AggregateODRouteModel(
     walk_cost_weight=0.1,
     repositioning_time=20.0,
     max_walking_distance=max_walk,
-    max_wait_time=900.0,
+    pickup_deadline_s=900.0,
     detour_factor=2.0,
     max_stops=4,
 )

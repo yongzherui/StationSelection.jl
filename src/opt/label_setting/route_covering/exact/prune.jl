@@ -26,7 +26,7 @@ handful of individual fields -- so this file loads after it.
 function _route_covering_remaining_reward_bound(
     label::RouteCoveringPricingLabel, label_bs::RouteCoveringLabelBitsets, ctx::RouteCoveringSearchContext,
 )::Float64
-    past_pickup_cutoff = label.time > ctx.pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > ctx.pricing_data.pickup_deadline_s + 1e-9
     current_idx = ctx.node_index[label.current]
     ub = 0.0
     @inbounds for i in 1:ctx.n_pairs
@@ -46,7 +46,7 @@ function _route_covering_remaining_reward_bound(
         can_claim_current = isfinite(origin_age) &&
             origin_age + ctx.travel_matrix[current_idx, ctx.pair_dest_idx[i]] <= ctx.pair_ride_limit[i] + 1e-9
         can_refresh = !past_pickup_cutoff &&
-            label.time + ctx.travel_matrix[current_idx, ctx.pair_origin_idx[i]] <= ctx.pricing_data.max_wait_time + 1e-9
+            label.time + ctx.travel_matrix[current_idx, ctx.pair_origin_idx[i]] <= ctx.pricing_data.pickup_deadline_s + 1e-9
         can_claim_current || can_refresh || continue
         ub += ctx.positive_pair_rewards[i]
     end

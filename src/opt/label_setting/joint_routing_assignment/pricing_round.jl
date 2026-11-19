@@ -170,7 +170,7 @@ function _pricing_build_scenario_context(
             load=Dict(p => requests[p] for p in eachindex(requests)),
             critical=_capacitated_critical_set!(m, s),
             route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
-            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            pickup_deadline_s=Float64(m[:joint_routing_assignment_pickup_deadline_s]),
             repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
             max_stops=Int(m[:joint_routing_assignment_max_stops]),
             compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
@@ -183,7 +183,7 @@ function _pricing_build_scenario_context(
         darp_modified_pricing_data = create_joint_routing_assignment_darp_modified_pricing_data(
             s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
             route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
-            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            pickup_deadline_s=Float64(m[:joint_routing_assignment_pickup_deadline_s]),
             repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
             max_stops=Int(m[:joint_routing_assignment_max_stops]),
             compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
@@ -200,7 +200,7 @@ function _pricing_build_scenario_context(
         darp_pricing_data = create_joint_routing_assignment_darp_pricing_data(
             s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
             route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
-            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            pickup_deadline_s=Float64(m[:joint_routing_assignment_pickup_deadline_s]),
             repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
             max_stops=Int(m[:joint_routing_assignment_max_stops]),
         )
@@ -217,7 +217,7 @@ function _pricing_build_scenario_context(
         "relaxed-cluster round, driven by CGSolver via cg_certification_round, not by " *
         "_run_pricing_round",
     ))
-    pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
+    pricing_mode in (:exact, :station_simple, :exact_no_anticipation) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
         "expected :exact, :station_simple, :darp_modified, :darp, :cluster_guide, " *
         ":relaxed_cluster, or :relaxed_cluster_two_tier",
@@ -225,7 +225,7 @@ function _pricing_build_scenario_context(
     pricing_data = create_joint_routing_assignment_pricing_data(
         s, m[:joint_routing_assignment_nodes], m[:joint_routing_assignment_travel_cost], candidates;
         route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
-        max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+        pickup_deadline_s=Float64(m[:joint_routing_assignment_pickup_deadline_s]),
         repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
         max_stops=Int(m[:joint_routing_assignment_max_stops]),
         compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),
@@ -241,6 +241,15 @@ function _pricing_build_scenario_context(
     # `_cg_optimality_scope`).
     if pricing_mode === :station_simple
         return JointRoutingAssignmentStationSimpleSearchContext(pricing_data), existing
+    end
+    # `:exact_no_anticipation` (`exact_no_anticipation/`): the same candidates and reward
+    # layers, searched under the simulator's walking/boarding timing rules.
+    if pricing_mode === :exact_no_anticipation
+        na_data = create_no_anticipation_pricing_data(
+            pricing_data, data, mapping, s, detour_factor,
+            m[:joint_routing_assignment_first_boarding]::Symbol,
+        )
+        return NoAnticipationSearchContext(na_data), existing
     end
     return JointRoutingAssignmentSearchContext(pricing_data), existing
 end

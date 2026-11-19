@@ -88,7 +88,15 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
     # the joint pricer's per-candidate ride limit (`joint_routing_assignment_ride_limit`).
     # One copy, so the two cannot disagree -- the pricer's seeding relies on it.
     door_to_door_ratio::Float64
+    # `demand_weighting = :request` only (2026-11-18): `request_time_s[s][p]` is group p's request time in seconds
+    # from scenario s's start (one group per request row). Empty for :count / :unit, whose groups have no single
+    # request time; the `:exact_no_anticipation` pricer then puts every request at t = 0.
+    request_time_s::Dict{Int, Vector{Float64}}
 end
+
+"Group `p`'s request time in scenario `s`, seconds from the scenario start (0 unless `demand_weighting = :request`)."
+aggregate_od_route_request_time(mapping::AggregateODRouteMap, s::Int, p::Int)::Float64 =
+    haskey(mapping.request_time_s, s) ? mapping.request_time_s[s][p] : 0.0
 
 has_walking_distance_limit(mapping::AggregateODRouteMap) = true
 
@@ -198,7 +206,7 @@ _aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = 
 """
     _aggregate_od_route_demand_weighting(formulation) -> Symbol
 
-`:count` or `:unit`, the `Q_s` rule (see "Demand per OD group" on `AggregateODRouteMap`).
+`:count`, `:unit` or `:request` (one group per request, Q = 1, with its request time), the `Q_s` rule (see "Demand per OD group" on `AggregateODRouteMap`).
 Joint reads its field; Base and the feasibility formulation are `:unit`. No generic fallback,
 for the same reason as `_aggregate_od_route_allow_walk_only`.
 """
@@ -291,7 +299,27 @@ function create_aggregate_od_route_map(
     capacity = _aggregate_od_route_vehicle_capacity(formulation)
     all_od_pairs = Set{Tuple{Int, Int}}()
 
+    request_time_s = Dict{Int, Vector{Float64}}()
     for (s, scenario_data) in enumerate(data.scenarios)
+        if demand_weighting === :request
+            # One group per request row, ordered by request time (then OD, then row), Q = 1. Two requests on the
+            # same OD are two groups: they may board different vehicles at different times.
+            _require_indexed_request_columns(scenario_data.requests)
+            req = scenario_data.requests
+            hasproperty(req, :request_time) || throw(ArgumentError(
+                "demand_weighting = :request needs a request_time column in scenario $(scenario_data.label)"))
+            t_start = something(scenario_data.start_time, minimum(req.request_time))
+            rows = [(Dates.value(req.request_time[i] - t_start) / 1000, req.origin_idx[i], req.dest_idx[i], i)
+                    for i in 1:nrow(req)]
+            sort!(rows)
+            all(r -> r[1] >= 0, rows) || throw(ArgumentError(
+                "scenario $(scenario_data.label) has a request before its start_time"))
+            Omega_s[s] = [(r[2], r[3]) for r in rows]
+            Q_s[s] = ones(Int, length(rows))
+            request_time_s[s] = [r[1] for r in rows]
+            union!(all_od_pairs, Omega_s[s])
+            continue
+        end
         od_count = compute_scenario_od_count(scenario_data)
         # With a vehicle capacity, a group of more requests than seats can ride no route: it
         # is dropped from the instance (owner's choice, 2026-11-14), not left uncoverable.
@@ -332,6 +360,7 @@ function create_aggregate_od_route_map(
         Dict{Tuple{Int, Int}, Vector{Int}}(),
         problem.max_walking_distance,
         problem.door_to_door_ratio,
+        request_time_s,
     )
     for column in resolved_initial_columns
         _register_aggregate_od_route_column_metadata!(mapping, column)

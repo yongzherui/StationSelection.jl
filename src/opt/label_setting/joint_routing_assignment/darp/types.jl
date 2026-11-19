@@ -8,7 +8,7 @@ reward model and dominance argument.
 
 This is a DARP-style label-setting algorithm adapted to this pricing problem,
 not a general classical DARP solver: starts are synchronized, capacity is
-unlimited, the only pickup time window is the shared `max_wait_time`, and the
+unlimited, the only pickup time window is the shared `pickup_deadline_s`, and the
 pricing graph uses station-to-station metric-closure arcs rather than separate
 depot/pickup/delivery vertices with service times.
 
@@ -90,7 +90,7 @@ struct JointRoutingAssignmentDarpPricingData
     travel_cost::Dict{Tuple{Int, Int}, Float64}
     route_regularization_weight::Float64
     repositioning_time::Float64
-    max_wait_time::Float64
+    pickup_deadline_s::Float64
     max_stops::Int
     bounded_max_stops::Bool
     n_passengers::Int

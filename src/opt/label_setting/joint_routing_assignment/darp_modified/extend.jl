@@ -57,7 +57,7 @@ function _joint_routing_assignment_darp_modified_reachable_next_nodes(
     pricing_data::JointRoutingAssignmentDarpModifiedPricingData,
 )::Vector{Int}
     candidate_nodes = Set{Int}()
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > pricing_data.pickup_deadline_s + 1e-9
     if past_pickup_cutoff && !_has_useful_live_joint_routing_assignment_darp_modified_origin(label, pricing_data)
         return Int[]
     end
@@ -67,7 +67,7 @@ function _joint_routing_assignment_darp_modified_reachable_next_nodes(
             origin == label.current && continue
             any(!haskey(label.served, pricing_data.candidates[idx].p) for idx in idxs) || continue
             arrival_time = label.time + _joint_routing_assignment_darp_modified_travel(pricing_data, label.current, origin)
-            arrival_time <= pricing_data.max_wait_time + 1e-9 && push!(candidate_nodes, origin)
+            arrival_time <= pricing_data.pickup_deadline_s + 1e-9 && push!(candidate_nodes, origin)
         end
     end
 
@@ -166,7 +166,7 @@ function _extend_joint_routing_assignment_darp_modified_pricing_label(
         _joint_routing_assignment_darp_modified_age_is_useful(station, aged, certified, pricing_data, next_node) &&
             (aged_station[station] = aged)
     end
-    if arrival_time <= pricing_data.max_wait_time + 1e-9
+    if arrival_time <= pricing_data.pickup_deadline_s + 1e-9
         _joint_routing_assignment_darp_modified_age_is_useful(next_node, 0.0, certified, pricing_data, next_node) &&
             (aged_station[next_node] = 0.0)
     elseif haskey(label.station_age, next_node)

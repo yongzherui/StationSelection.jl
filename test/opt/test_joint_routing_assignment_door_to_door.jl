@@ -27,7 +27,7 @@
 
     joint(; detour_factor = 1.5, max_stops = 4) = AggregateODRouteJointRoutingAssignmentFormulation(
         route_regularization_weight = 1.0, walk_cost_weight = 1.0, repositioning_time = 0.0,
-        max_wait_time = 10.0, detour_factor = detour_factor, max_stops = max_stops)
+        pickup_deadline_s = 10.0, detour_factor = detour_factor, max_stops = max_stops)
 
     # Shortest ride from a visit of `j` to a LATER visit of `k` along `route`.
     function best_ride(route, j, k, data)
@@ -113,7 +113,7 @@
                           for i in 1:3 for j in 1:3 if i != j)
             pd = create_joint_routing_assignment_pricing_data(
                 1, collect(1:3), travel, candidates;
-                route_regularization_weight = 1.0, max_wait_time = 10.0)
+                route_regularization_weight = 1.0, pickup_deadline_s = 10.0)
             certified = StationSelection._replay_joint_routing_assignment_route_all_certifications(route, pd)
             return (1, 2) in get(certified, 1, Tuple{Int, Int}[])
         end

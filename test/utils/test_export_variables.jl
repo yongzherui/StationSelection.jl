@@ -28,7 +28,7 @@ using CSV
             route_regularization_weight=1.0,
             repositioning_time=0.0,
             max_stops=3,
-            max_wait_time=100.0,
+            pickup_deadline_s=100.0,
         )
 
         result = run_opt(problem, formulation, DirectMIPSolver())

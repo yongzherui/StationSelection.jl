@@ -27,7 +27,7 @@ function _joint_routing_assignment_darp_modified_remaining_reward_bound(
     ctx,
 )::Float64
     pricing_data = ctx.pricing_data
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > pricing_data.pickup_deadline_s + 1e-9
     current_idx = ctx.node_index[label.current]
     ub = 0.0
     @inbounds for p in 1:pricing_data.n_passengers
@@ -44,7 +44,7 @@ function _joint_routing_assignment_darp_modified_remaining_reward_bound(
             can_claim_current = isfinite(origin_age) &&
                 origin_age + ctx.travel_matrix[current_idx, dest_idx] <= c.ride_limit + 1e-9
             can_refresh = !past_pickup_cutoff &&
-                label.time + ctx.travel_matrix[current_idx, origin_idx] <= pricing_data.max_wait_time + 1e-9
+                label.time + ctx.travel_matrix[current_idx, origin_idx] <= pricing_data.pickup_deadline_s + 1e-9
             if can_claim_current || can_refresh
                 reachable = true
                 break

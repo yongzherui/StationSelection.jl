@@ -82,7 +82,7 @@ function measure_margins(m, mapping, clustering)
         isempty(candidates) && continue
         shared = (
             route_regularization_weight=Float64(m[:joint_routing_assignment_route_regularization_weight]),
-            max_wait_time=Float64(m[:joint_routing_assignment_max_wait_time]),
+            pickup_deadline_s=Float64(m[:joint_routing_assignment_pickup_deadline_s]),
             repositioning_time=Float64(m[:joint_routing_assignment_repositioning_time]),
             max_stops=Int(m[:joint_routing_assignment_max_stops]),
             compensated_dominance=Bool(m[:joint_routing_assignment_compensated_dominance]),

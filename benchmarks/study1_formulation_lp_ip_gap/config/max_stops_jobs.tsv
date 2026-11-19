@@ -1,4 +1,4 @@
-job_id	instance_id	comparison	variant	formulation	n_stations	n_pairs	n_scenarios	seed	max_stops	max_wait_time	detour_factor	pricing_time_limit_sec
+job_id	instance_id	comparison	variant	formulation	n_stations	n_pairs	n_scenarios	seed	max_stops	pickup_deadline_s	detour_factor	pricing_time_limit_sec
 21	zhuzhou_n10_p8_sc1_seed42	max_stops	max_stops_3	joint	10	8	1	42	3	900.0	2.0	900.0
 22	zhuzhou_n10_p8_sc1_seed42	max_stops	max_stops_5	joint	10	8	1	42	5	900.0	2.0	900.0
 23	zhuzhou_n10_p8_sc1_seed42	max_stops	max_stops_7	joint	10	8	1	42	7	900.0	2.0	900.0

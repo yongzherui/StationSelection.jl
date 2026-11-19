@@ -69,7 +69,7 @@ for trial in 1:10
     clustering = cluster_stations_by_travel_cost(nodes, costs, rand(2:4))
     relaxed = SS.create_joint_routing_assignment_relaxed_cluster_pricing_data(
         1, clustering, costs, candidates;
-        route_regularization_weight=1.0, max_wait_time=maximum(values(costs)) * 0.6,
+        route_regularization_weight=1.0, pickup_deadline_s=maximum(values(costs)) * 0.6,
         repositioning_time=5.0, max_stops=max_stops, compensated_dominance=isodd(trial))
     isempty(relaxed.inner.opportunities) && continue
     node_clusters = SS._relaxed_cluster_node_clusters(relaxed)

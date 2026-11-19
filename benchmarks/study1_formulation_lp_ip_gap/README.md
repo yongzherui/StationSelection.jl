@@ -47,9 +47,9 @@ for both (see below).
 ## Four comparisons
 
 1. Base versus Joint at `max_stops=4` (not the Study 2 baseline of 10 -- see above),
-   `max_wait_time=900`, and `detour_factor=2.0`.
+   `pickup_deadline_s=900`, and `detour_factor=2.0`.
 2. Joint with `max_stops` equal to 3, 5, and 7.
-3. Joint with `max_wait_time` equal to 600, 900, and 1200 seconds.
+3. Joint with `pickup_deadline_s` equal to 600, 900, and 1200 seconds.
 4. Joint with `detour_factor` equal to 1.5, 2.0, and 2.5.
 
 Parameters not varied in a comparison retain the Study 2 baseline, except comparison 1's
@@ -96,9 +96,9 @@ sbatch --job-name=study1_formulation --array=1-20 \
 sbatch --job-name=study1_max_stops --array=1-30 \
     benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh max_stops
 
-# Sub-study 3: max_wait_time (30 jobs)
-sbatch --job-name=study1_max_wait --array=1-30 \
-    benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh max_wait_time
+# Sub-study 3: pickup_deadline_s (30 jobs)
+sbatch --job-name=study1_pickup_deadline --array=1-30 \
+    benchmarks/study1_formulation_lp_ip_gap/submit_benchmark.sh pickup_deadline_s
 
 # Sub-study 4: detour_factor (30 jobs)
 sbatch --job-name=study1_detour --array=1-30 \

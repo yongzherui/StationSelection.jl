@@ -42,7 +42,7 @@ function run_lagrangian_gap(args::Vector{String})
     pricing_data(s, candidates) = create_passenger_free_assignment_pricing_data(
         s, md.nodes, md.travel_cost, candidates;
         route_regularization_weight=md.route_regularization_weight,
-        max_wait_time=md.max_wait_time, repositioning_time=md.repositioning_time,
+        pickup_deadline_s=md.pickup_deadline_s, repositioning_time=md.repositioning_time,
         max_stops=md.max_stops, max_visits_per_node=md.max_visits_per_node,
     )
 
@@ -89,7 +89,7 @@ function run_lagrangian_gap(args::Vector{String})
                 max_visits_per_node=exact_data.max_visits_per_node, use_reduced_cost_pruning=false,
             )
         post_w = filter(
-            label -> label.time + 1e-9 >= exact_data.max_wait_time &&
+            label -> label.time + 1e-9 >= exact_data.pickup_deadline_s &&
                 label.route_length < exact_data.max_stops,
             measured_labels,
         )

@@ -33,6 +33,8 @@ price_columns(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.M
     _run_pricing_round(
         m[:aggregate_od_route_formulation], mapping, m, duals, solver;
         time_limit=time_limit_sec,
+        n_candidates=solver.pricing.max_columns_per_scenario > 0 ? solver.pricing.max_columns_per_scenario :
+                     typemax(Int) ÷ 2,
     )
 
 function add_columns!(build_result::BuildResult, mapping::AggregateODRouteMap, m::JuMP.Model, columns)::Int

@@ -129,13 +129,13 @@ _capacitated_candidate_next_nodes(label::JointRoutingAssignmentCapacitatedPricin
 
 function _joint_routing_assignment_candidate_next_nodes_generic(label, base::JointRoutingAssignmentPricingData)
     candidate_nodes = Set{Int}()
-    past_cutoff = label.time > base.max_wait_time + 1e-9
+    past_cutoff = label.time > base.pickup_deadline_s + 1e-9
     past_cutoff && !_has_useful_live_joint_routing_assignment_origin(label, base) && return Int[]
     if !past_cutoff
         for (origin, mask) in base.origin_layer_mask
             origin == label.current && continue
             _has_inactive_layer(mask, label.activated_reward_layers) || continue
-            label.time + _joint_routing_assignment_travel(base, label.current, origin) <= base.max_wait_time + 1e-9 &&
+            label.time + _joint_routing_assignment_travel(base, label.current, origin) <= base.pickup_deadline_s + 1e-9 &&
                 push!(candidate_nodes, origin)
         end
     end
@@ -165,7 +165,7 @@ function _capacitated_candidate_actions(label::JointRoutingAssignmentCapacitated
         # After the pickup window a stop only matters for what it credits; with metric travel
         # times, driving straight on is never worse than a stop that credits nobody (same
         # clocks, no later, one stop fewer). Non-critical credits count too.
-        skip_empty = pd.metric && label.time + t > base.max_wait_time + 1e-9 &&
+        skip_empty = pd.metric && label.time + t > base.pickup_deadline_s + 1e-9 &&
                      !_capacitated_noncritical_gain(label, n, t, pd)
         options = nothing
         for opp in get(base.assignments_by_destination, n, PassengerAssignmentOpportunity[])
@@ -255,7 +255,7 @@ function _capacitated_subsets!(actions, label, pd::JointRoutingAssignmentCapacit
         probe = _extend_joint_routing_assignment_capacitated_label(label, JointRoutingAssignmentCapacitatedAction(n, credits), pd)
         p_idx, p_val, _ = _make_sparse_station_ages(probe.station_age, ctx.search_index.node_index)
         noncrit0 = _capacitated_scan!(ctx.cap_scan, ctx, probe, p_idx, p_val)
-        fresh = label.time + t <= base.max_wait_time + 1e-9
+        fresh = label.time + t <= base.pickup_deadline_s + 1e-9
         for i in p_idx
             c = base.nodes[i]
             push!(slot_parent, (c == n && fresh) ? 0 : findfirst(==(c), clk)::Int)
@@ -398,7 +398,7 @@ function _extend_joint_routing_assignment_capacitated_label(
         _joint_routing_assignment_age_is_useful(c, aged, base, n) || continue
         new_age[c] = aged; new_load[c] = loads[c]; new_pos[c] = label.station_pos[c]
     end
-    if arrival <= base.max_wait_time + 1e-9
+    if arrival <= base.pickup_deadline_s + 1e-9
         if _joint_routing_assignment_age_is_useful(n, 0.0, base, n)
             new_age[n] = 0.0; new_load[n] = 0; new_pos[n] = pos
         end
@@ -557,7 +557,7 @@ function _capacitated_route_options(route::Vector{Int}, pd::JointRoutingAssignme
                 push!(get!(() -> Tuple{Int, Int, Int, Int, Float64}[], opts, opp.p), (a, b, opp.origin, opp.destination, opp.reward))
             end
         end
-        times[b] <= base.max_wait_time + 1e-9 && (last_visit[route[b]] = b)
+        times[b] <= base.pickup_deadline_s + 1e-9 && (last_visit[route[b]] = b)
     end
     for (p, v) in opts
         keep = Tuple{Int, Int, Int, Int, Float64}[]
@@ -720,7 +720,7 @@ That sum is bounded by the smallest of these relaxations, each valid alone:
      (fractional knapsack, weight `Q * d`);
   3. stops: a stop drops only riders aboard on the arc into it, at most `C`, so `sum Q <=
      C * (stops left)`;
-  4. by class, with `tstar = max(now, max_wait_time)` (no pickup after `max_wait_time`):
+  4. by class, with `tstar = max(now, pickup_deadline_s)` (no pickup after `pickup_deadline_s`):
      riders credited through a live clock are all aboard on the next arc (`sum Q <= C`);
      riders boarding at a later clock either finish by `tstar`, riding at least `d` inside
      `[now, tstar]` (`sum Q d <= C (tstar - now)`), or are aboard at `tstar` (`sum Q <= C`).
@@ -731,7 +731,7 @@ function _capacitated_remaining_bound(ctx, label::JointRoutingAssignmentCapacita
                                       reach::Vector{Float64})::Float64
     pd = ctx.pricing_data; base = pd.base; index = ctx.search_index; bi = ctx.cap_bound
     now = label.time
-    past_cutoff = now > base.max_wait_time + 1e-9
+    past_cutoff = now > base.pickup_deadline_s + 1e-9
     cur = index.node_index[label.current]
     activated = label.activated_reward_layers
     layer_weight = base.layer_weight
@@ -746,7 +746,7 @@ function _capacitated_remaining_bound(ctx, label::JointRoutingAssignmentCapacita
     cred = label.credited_set
     lam = base.route_regularization_weight / pd.capacity
     horizon_end = now
-    tstar = max(now, base.max_wait_time)
+    tstar = max(now, base.pickup_deadline_s)
     total = 0.0
     empty!(bi.lrec_p); empty!(bi.lrec_age); empty!(bi.lrec_v); empty!(bi.slot_age); empty!(bi.slot_load)
     @inbounds for t in eachindex(age_idx)
@@ -792,7 +792,7 @@ function _capacitated_remaining_bound(ctx, label::JointRoutingAssignmentCapacita
     end
     if !past_cutoff
         @inbounds for o in eachindex(bi.noncrit_origin_union_mask)
-            if now + index.travel_matrix[cur, o] <= base.max_wait_time + 1e-9
+            if now + index.travel_matrix[cur, o] <= base.pickup_deadline_s + 1e-9
                 for layer in bi.noncrit_origin_union_mask[o]
                     (layer in activated || layer in scratch) && continue
                     push!(scratch, layer)
@@ -800,7 +800,7 @@ function _capacitated_remaining_bound(ctx, label::JointRoutingAssignmentCapacita
                 end
             end
             reach_o = now + bi.sp[cur, o]
-            reach_o <= base.max_wait_time + 1e-9 || continue
+            reach_o <= base.pickup_deadline_s + 1e-9 || continue
             for i in bi.crit_opps_by_origin_idx[o]
                 p = bi.opp_p[i]
                 p in cred && continue
@@ -812,7 +812,7 @@ function _capacitated_remaining_bound(ctx, label::JointRoutingAssignmentCapacita
                 q = bi.opp_q[i]
                 d = bi.sp[o, index.opp_dest_idx[i]]
                 v = r - lam * q * d
-                horizon_end = max(horizon_end, base.max_wait_time + index.opp_ride_limit[i])
+                horizon_end = max(horizon_end, base.pickup_deadline_s + index.opp_ride_limit[i])
                 v > 0 || continue
                 v > vb[p] && (vb[p] = v)
                 q * d < vw[p] && (vw[p] = q * d)
@@ -908,7 +908,7 @@ function _capacitated_scan!(sc::CapacitatedScan, ctx, probe::JointRoutingAssignm
     pd = ctx.pricing_data; base = pd.base; index = ctx.search_index; bi = ctx.cap_bound
     empty!(sc.p); empty!(sc.slot); empty!(sc.q); empty!(sc.v); empty!(sc.w); empty!(sc.cls)
     now = probe.time
-    past_cutoff = now > base.max_wait_time + 1e-9
+    past_cutoff = now > base.pickup_deadline_s + 1e-9
     cur = index.node_index[probe.current]
     activated = probe.activated_reward_layers
     layer_weight = base.layer_weight
@@ -917,7 +917,7 @@ function _capacitated_scan!(sc::CapacitatedScan, ctx, probe::JointRoutingAssignm
     cred = probe.credited_set
     lam = base.route_regularization_weight / pd.capacity
     horizon_end = now
-    tstar = max(now, base.max_wait_time)
+    tstar = max(now, base.pickup_deadline_s)
     total = 0.0
     @inbounds for t in eachindex(age_idx)
         o = Int(age_idx[t]); age = age_val[t]
@@ -948,7 +948,7 @@ function _capacitated_scan!(sc::CapacitatedScan, ctx, probe::JointRoutingAssignm
     end
     if !past_cutoff
         @inbounds for o in eachindex(bi.noncrit_origin_union_mask)
-            if now + index.travel_matrix[cur, o] <= base.max_wait_time + 1e-9
+            if now + index.travel_matrix[cur, o] <= base.pickup_deadline_s + 1e-9
                 for layer in bi.noncrit_origin_union_mask[o]
                     (layer in activated || layer in scratch) && continue
                     push!(scratch, layer)
@@ -956,13 +956,13 @@ function _capacitated_scan!(sc::CapacitatedScan, ctx, probe::JointRoutingAssignm
                 end
             end
             reach_o = now + bi.sp[cur, o]
-            reach_o <= base.max_wait_time + 1e-9 || continue
+            reach_o <= base.pickup_deadline_s + 1e-9 || continue
             for i in bi.crit_opps_by_origin_idx[o]
                 p = bi.opp_p[i]
                 p in cred && continue
                 q = bi.opp_q[i]
                 d = bi.sp[o, index.opp_dest_idx[i]]
-                horizon_end = max(horizon_end, base.max_wait_time + index.opp_ride_limit[i])
+                horizon_end = max(horizon_end, base.pickup_deadline_s + index.opp_ride_limit[i])
                 v = bi.opp_reward[i] - lam * q * d
                 v > 0 || continue
                 push!(sc.p, p); push!(sc.slot, 0); push!(sc.q, q); push!(sc.v, v); push!(sc.w, q * d)

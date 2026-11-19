@@ -203,7 +203,7 @@
         instance = generate_middle_zone_benchmark_instance("balanced", 1, 1, 1)
         data = create_middle_zone_station_selection_data(instance; max_walking_distance = 800.0)
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
-        formulation() = AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4)
+        formulation() = AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4)
 
         # `recover_integer_solution` is what makes the LP/IP split exist at all
         # (`cg_lp_objective_value` is only written on that path), and it is how Study 9
@@ -248,7 +248,7 @@
         # Built for the ONE-tier mode, so no macro layer exists on the model.
         br = build_model(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(pricing = CGPricingConfig(
                 mode = :relaxed_cluster, relaxed_cluster_count = 6,
             )),
@@ -268,7 +268,7 @@
         problem = StationSelectionProblem(data, 5; max_walking_distance = 800.0)
         br = build_model(
             problem,
-            AggregateODRouteJointRoutingAssignmentFormulation(max_stops = 4),
+            AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = Inf, max_stops = 4),
             CGSolver(pricing = CGPricingConfig(
                 mode = :relaxed_cluster_two_tier, relaxed_cluster_count = 6,
                 relaxed_cluster_macro_count = 3,

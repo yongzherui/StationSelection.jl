@@ -74,7 +74,7 @@ function _joint_routing_assignment_remaining_reward_bound(
     index::JointRoutingAssignmentSearchIndex,
     workspace::JointRoutingAssignmentBoundWorkspace,
 )::Float64
-    past_pickup_cutoff = label.time > pricing_data.max_wait_time + 1e-9
+    past_pickup_cutoff = label.time > pricing_data.pickup_deadline_s + 1e-9
     current_idx = index.node_index[label.current]
     activated = label.activated_reward_layers
     layer_weight = pricing_data.layer_weight
@@ -104,7 +104,7 @@ function _joint_routing_assignment_remaining_reward_bound(
         @inbounds for origin_idx in eachindex(index.origin_union_mask)
             isempty(index.origin_union_mask[origin_idx]) && continue
             label.time + index.travel_matrix[current_idx, origin_idx] <=
-                pricing_data.max_wait_time + 1e-9 || continue
+                pricing_data.pickup_deadline_s + 1e-9 || continue
             for layer in index.origin_union_mask[origin_idx]
                 (layer in activated || layer in workspace.layer_scratch) && continue
                 push!(workspace.layer_scratch, layer)

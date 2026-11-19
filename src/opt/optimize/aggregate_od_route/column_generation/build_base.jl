@@ -137,7 +137,7 @@ function _build_aggregate_od_route_base_cg_model(
     m[:aggregate_od_route_base_route_regularization_weight] = formulation.route_regularization_weight
     m[:aggregate_od_route_base_repositioning_time] = formulation.repositioning_time
     m[:aggregate_od_route_base_walk_cost_weight] = formulation.walk_cost_weight
-    m[:aggregate_od_route_base_max_wait_time] = formulation.max_wait_time
+    m[:aggregate_od_route_base_pickup_deadline_s] = formulation.pickup_deadline_s
     m[:aggregate_od_route_base_max_stops] = formulation.max_stops
     m[:aggregate_od_route_base_detour_factor] = formulation.detour_factor
     m[:aggregate_od_route_base_compensated_dominance] = pricing.compensated_dominance
@@ -220,7 +220,7 @@ function _aggregate_od_route_integer_recovery_build(
         route_regularization_weight=m[:aggregate_od_route_base_route_regularization_weight],
         walk_cost_weight=m[:aggregate_od_route_base_walk_cost_weight],
         repositioning_time=m[:aggregate_od_route_base_repositioning_time],
-        max_wait_time=m[:aggregate_od_route_base_max_wait_time],
+        pickup_deadline_s=m[:aggregate_od_route_base_pickup_deadline_s],
         detour_factor=m[:aggregate_od_route_base_detour_factor],
         max_stops=m[:aggregate_od_route_base_max_stops],
     )

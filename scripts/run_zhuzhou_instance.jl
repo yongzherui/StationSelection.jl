@@ -33,7 +33,7 @@ Environment variables (with defaults):
     CS_MIP_GAP             = 1e-4
     CS_MAX_WALKING_DISTANCE = 600    walking distance cap (seconds); set to "auto"
                                      to use the max pairwise walking time (can be large)
-    CS_MAX_WAIT_TIME       = 900     vehicle wait budget from depot (seconds)
+    CS_PICKUP_DEADLINE_S       = 900     pickup deadline (seconds)
     CS_DETOUR_FACTOR       = 2.0     allowed detour ratio over direct route time
     CS_MAX_STOPS           = ""      max stops per route; default = n_stations (uncapped)
     CS_ROUTE_REG_WEIGHT    = 1.0     μ: route travel-time penalty weight
@@ -69,7 +69,7 @@ if _RUN_AS_MAIN
     const MIP_GAP            = parse(Float64, get(ENV, "CS_MIP_GAP",            "1e-4"))
     const N_SCENARIOS        = parse(Int,     get(ENV, "CS_N_SCENARIOS",         "3"))
     const MAX_WALK_ENV       = get(ENV, "CS_MAX_WALKING_DISTANCE", "600")
-    const MAX_WAIT_TIME      = parse(Float64, get(ENV, "CS_MAX_WAIT_TIME",      "900"))
+    const PICKUP_DEADLINE_S      = parse(Float64, get(ENV, "CS_PICKUP_DEADLINE_S",      "900"))
     const DETOUR_FACTOR      = parse(Float64, get(ENV, "CS_DETOUR_FACTOR",      "2.0"))
     const MAX_STOPS_ENV      = get(ENV, "CS_MAX_STOPS", "")
     const ROUTE_REG_WEIGHT   = parse(Float64, get(ENV, "CS_ROUTE_REG_WEIGHT",   "1.0"))
@@ -109,7 +109,7 @@ function main()
     @printf("  Time limit       : %.0fs CG / %.0fs IP / %.0fs per pricing iter\n",
             TIME_LIMIT, IP_TIME_LIMIT, PRICING_TIME)
     @printf("  Detour factor    : %.2f\n", DETOUR_FACTOR)
-    @printf("  Max wait time    : %.1fs\n", MAX_WAIT_TIME)
+    @printf("  Max pickup time  : %.1fs\n", PICKUP_DEADLINE_S)
     println()
 
     data, meta = generate_zhuzhou_data(
@@ -132,7 +132,7 @@ function main()
         route_regularization_weight = ROUTE_REG_WEIGHT,
         repositioning_time          = REPOSITIONING_TIME,
         max_walking_distance        = max_walking_distance,
-        max_wait_time               = MAX_WAIT_TIME,
+        pickup_deadline_s               = PICKUP_DEADLINE_S,
         detour_factor                 = DETOUR_FACTOR,
         max_stops                   = max_stops,
         max_new_columns             = MAX_NEW_COLS,
@@ -150,7 +150,7 @@ function main()
             n_stations=meta.n_stations_actual, l=L, n_scenarios=meta.n_scenarios_actual,
             n_pairs_requested=N_PAIRS, n_pairs_actual=sum(meta.pairs_per_scenario),
             endpoint_overlap=ENDPOINT_OVERLAP, seed=SEED,
-            max_walking_distance=max_walking_distance, max_wait_time=MAX_WAIT_TIME,
+            max_walking_distance=max_walking_distance, pickup_deadline_s=PICKUP_DEADLINE_S,
             detour_factor=DETOUR_FACTOR, max_stops=max_stops,
             route_reg_weight=ROUTE_REG_WEIGHT, repositioning_time=REPOSITIONING_TIME,
         ),

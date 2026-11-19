@@ -17,27 +17,27 @@ const VARIANTS = [
     # column enumeration tractable so each one's direct-solve LP/IP pair is a genuine
     # global bound, not a truncated one (see run_benchmark.jl's "formulation" branch and
     # this study's README).
-    (comparison="formulation", variant="base", formulation="base", max_stops=4, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="formulation", variant="joint", formulation="joint", max_stops=4, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="max_stops", variant="max_stops_3", formulation="joint", max_stops=3, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="max_stops", variant="max_stops_5", formulation="joint", max_stops=5, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="max_stops", variant="max_stops_7", formulation="joint", max_stops=7, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="max_wait_time", variant="max_wait_time_600", formulation="joint", max_stops=10, max_wait_time=600.0, detour_factor=2.0),
-    (comparison="max_wait_time", variant="max_wait_time_900", formulation="joint", max_stops=10, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="max_wait_time", variant="max_wait_time_1200", formulation="joint", max_stops=10, max_wait_time=1200.0, detour_factor=2.0),
-    (comparison="detour_factor", variant="detour_factor_1_5", formulation="joint", max_stops=10, max_wait_time=900.0, detour_factor=1.5),
-    (comparison="detour_factor", variant="detour_factor_2_0", formulation="joint", max_stops=10, max_wait_time=900.0, detour_factor=2.0),
-    (comparison="detour_factor", variant="detour_factor_2_5", formulation="joint", max_stops=10, max_wait_time=900.0, detour_factor=2.5),
+    (comparison="formulation", variant="base", formulation="base", max_stops=4, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="formulation", variant="joint", formulation="joint", max_stops=4, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="max_stops", variant="max_stops_3", formulation="joint", max_stops=3, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="max_stops", variant="max_stops_5", formulation="joint", max_stops=5, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="max_stops", variant="max_stops_7", formulation="joint", max_stops=7, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="pickup_deadline_s", variant="pickup_deadline_s_600", formulation="joint", max_stops=10, pickup_deadline_s=600.0, detour_factor=2.0),
+    (comparison="pickup_deadline_s", variant="pickup_deadline_s_900", formulation="joint", max_stops=10, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="pickup_deadline_s", variant="pickup_deadline_s_1200", formulation="joint", max_stops=10, pickup_deadline_s=1200.0, detour_factor=2.0),
+    (comparison="detour_factor", variant="detour_factor_1_5", formulation="joint", max_stops=10, pickup_deadline_s=900.0, detour_factor=1.5),
+    (comparison="detour_factor", variant="detour_factor_2_0", formulation="joint", max_stops=10, pickup_deadline_s=900.0, detour_factor=2.0),
+    (comparison="detour_factor", variant="detour_factor_2_5", formulation="joint", max_stops=10, pickup_deadline_s=900.0, detour_factor=2.5),
 ]
 
 config_dir = isempty(ARGS) ? joinpath(@__DIR__, "config") : abspath(ARGS[1])
 mkpath(config_dir)
 header = join(("job_id", "instance_id", "comparison", "variant", "formulation",
     "n_stations", "n_pairs", "n_scenarios", "seed", "max_stops",
-    "max_wait_time", "detour_factor", "pricing_time_limit_sec"), '\t')
+    "pickup_deadline_s", "detour_factor", "pricing_time_limit_sec"), '\t')
 
 job_id = Ref(0)
-for comparison in ("formulation", "max_stops", "max_wait_time", "detour_factor")
+for comparison in ("formulation", "max_stops", "pickup_deadline_s", "detour_factor")
     specs = filter(spec -> spec.comparison == comparison, VARIANTS)
     outpath = joinpath(config_dir, "$(comparison)_jobs.tsv")
     open(outpath, "w") do io
@@ -47,7 +47,7 @@ for comparison in ("formulation", "max_stops", "max_wait_time", "detour_factor")
             instance_id = "zhuzhou_n$(N_STATIONS)_p$(N_PAIRS)_sc$(N_SCENARIOS)_seed$(seed)"
             println(io, join((job_id[], instance_id, spec.comparison, spec.variant,
                 spec.formulation, N_STATIONS, N_PAIRS, N_SCENARIOS, seed,
-                spec.max_stops, spec.max_wait_time, spec.detour_factor,
+                spec.max_stops, spec.pickup_deadline_s, spec.detour_factor,
                 PRICING_TIME_LIMIT_SEC), '\t'))
         end
     end

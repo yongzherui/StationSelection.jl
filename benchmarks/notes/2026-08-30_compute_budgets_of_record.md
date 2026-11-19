@@ -141,7 +141,7 @@ so a results directory always names the run that produced it. Headline numbers:
 
 | Study | Result |
 | --- | --- |
-| 1 | 110/110 certified. **Base's LP/IP gap averages 0.581; Joint's is 0.000** — the Joint formulation's relaxation is tight where Base's is not. Operating conditions (`max_stops`, `max_wait_time`, `detour_factor`) leave the gap at ~1e-17, i.e. zero. |
+| 1 | 110/110 certified. **Base's LP/IP gap averages 0.581; Joint's is 0.000** — the Joint formulation's relaxation is tight where Base's is not. Operating conditions (`max_stops`, `pickup_deadline_s`, `detour_factor`) leave the gap at ~1e-17, i.e. zero. |
 | 2 | `exact` beats `darp` on every paired cell: 4.1 s vs 83.6 s (n=10), 6.1 vs 57.0 (n=15), 59.9 vs 311.3 (n=20). `darp` certifies 7/6/3 of 10 pairs against `exact`'s 10/10/10. |
 | 3 | Compensated dominance's advantage **grows with size**: runtime ratio (plain ÷ compensated) 0.99 → 1.20 → **1.78** at n=10/15/20, with 10/10 pairs certified at every size and **0 LP-objective disagreements**. |
 | 6 | CG overtakes enumeration between n=15 and n=20: enum÷CG runtime 0.42 → 0.70 → **2.69**, while enumeration's pool explodes (3.3k → 20k → 72k columns) against CG's (0.8k → 2.9k → 5.3k). |

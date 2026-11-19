@@ -35,7 +35,7 @@ function create_joint_routing_assignment_darp_pricing_data(
     travel_cost::Dict{Tuple{Int, Int}, Float64},
     candidates::AbstractVector{PassengerAssignmentCandidate};
     route_regularization_weight::Float64,
-    max_wait_time::Float64,
+    pickup_deadline_s::Float64,
     repositioning_time::Float64=0.0,
     max_stops::Int=typemax(Int),
     tol::Float64=1e-9,
@@ -68,7 +68,7 @@ function create_joint_routing_assignment_darp_pricing_data(
 
     return JointRoutingAssignmentDarpPricingData(
         scenario, nodes, travel_cost, route_regularization_weight, repositioning_time,
-        max_wait_time, resolved_max_stops, bounded_max_stops,
+        pickup_deadline_s, resolved_max_stops, bounded_max_stops,
         n_passengers, passenger_weight, positive, candidate_index,
         candidates_by_origin, candidates_by_destination, candidates_by_passenger,
         capacity, Int[get(load, p, 1) for p in 1:n_passengers],
@@ -93,7 +93,7 @@ function _joint_routing_assignment_darp_board_options(
     pricing_data::JointRoutingAssignmentDarpPricingData,
 )::Dict{Int, Vector{Tuple{Int, Float64}}}
     options = Dict{Int, Vector{Tuple{Int, Float64}}}()
-    label_time <= pricing_data.max_wait_time + 1e-9 || return options
+    label_time <= pricing_data.pickup_deadline_s + 1e-9 || return options
     for idx in get(pricing_data.candidates_by_origin, node, Int[])
         c = pricing_data.candidates[idx]
         c.p in resolved && continue

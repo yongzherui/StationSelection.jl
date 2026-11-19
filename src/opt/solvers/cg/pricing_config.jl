@@ -17,7 +17,7 @@ sweep now varies one solver and reuses one formulation object, instead of rebuil
 "different" formulation per arm and having to argue that the arms are comparable.
 
 `AbstractFormulation` still owns everything that changes the model: the cost weights,
-`max_stops`, `detour_factor`, `max_wait_time`. `compensated_dominance` lives here because
+`max_stops`, `detour_factor`, `pickup_deadline_s`. `compensated_dominance` lives here because
 it changes only label-setting search, never the encoded model or route universe.
 
 ## Fields
@@ -120,6 +120,8 @@ struct CGPricingConfig
     relaxed_cluster_guide_routes::Int
     relaxed_cluster_macro_count::Union{Nothing, Int}
     relaxed_cluster_aligned_subset_max::Int
+    first_boarding::Symbol
+    max_columns_per_scenario::Int
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -130,8 +132,24 @@ struct CGPricingConfig
             relaxed_cluster_guide_routes::Int=5,
             relaxed_cluster_macro_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_aligned_subset_max::Int=15,
+            first_boarding::Symbol=:start_now,
+            max_columns_per_scenario::Int=0,
         )
         _cg_validate_pricing_mode(mode, "mode")
+        # `first_boarding` is read only by `mode = :exact_no_anticipation`
+        # (`label_setting/joint_routing_assignment/exact_no_anticipation/`): how the empty
+        # vehicle times its first stop. `:start_now` leaves at t = 0 and the first stop's
+        # riders' walk is not waited for; `:after_first_walker` waits (empty) for the first
+        # rider to arrive and leaves the moment that rider boards; `:after_last_walker` lets
+        # the riders it takes there gather and leaves when the last of them arrives.
+        first_boarding in (:start_now, :after_first_walker, :after_last_walker) || throw(ArgumentError(
+            "first_boarding must be :start_now, :after_first_walker or :after_last_walker, got $(repr(first_boarding))",
+        ))
+        # Partial pricing (2026-11-18): a scenario's label search stops once it holds this many improving, novel
+        # columns (0 = search every round to exhaustion, the old behaviour). Safe for optimality: a round that stops
+        # early has found columns, so CG continues; only a round that finds none can end the loop, and that round
+        # has searched to exhaustion (or to its time limit, which never certifies).
+        max_columns_per_scenario >= 0 || throw(ArgumentError("max_columns_per_scenario must be >= 0"))
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
         # `:relaxed_cluster` never reports its own exhaustion -- the only thing it can
         # exhaust is the relaxation, and that is a full-universe certificate that ends the
@@ -221,7 +239,8 @@ struct CGPricingConfig
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
             relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
-            relaxed_cluster_aligned_subset_max,
+            relaxed_cluster_aligned_subset_max, first_boarding,
+            max_columns_per_scenario,
         )
     end
 end
@@ -234,7 +253,7 @@ that formulation's `build_model` (`AggregateODRouteBaseFormulation` offers none 
 """
 const CG_PRICING_MODES = (
     :exact, :station_simple, :darp_modified, :darp, :relaxed_cluster,
-    :relaxed_cluster_two_tier, :exact_capacitated,
+    :relaxed_cluster_two_tier, :exact_capacitated, :exact_no_anticipation,
 )
 const CG_WARM_START_PRICING_MODES = (CG_PRICING_MODES..., :cluster_guide)
 

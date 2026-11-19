@@ -28,7 +28,7 @@ passenger's candidate origin reachable in time. Unlike every other pricer in
 this package there is no `station_age`-driven "is a live clock still useful"
 branch -- boarding is decided at the instant of arrival, not retroactively,
 so there is nothing to check reachability of except the raw
-`max_wait_time`/`label.time` comparison.
+`pickup_deadline_s`/`label.time` comparison.
 """
 function _joint_routing_assignment_darp_reachable_next_nodes(
     label::JointRoutingAssignmentDarpPricingLabel,
@@ -41,12 +41,12 @@ function _joint_routing_assignment_darp_reachable_next_nodes(
         push!(candidate_nodes, k)
     end
 
-    if label.time <= pricing_data.max_wait_time + 1e-9
+    if label.time <= pricing_data.pickup_deadline_s + 1e-9
         for (origin, idxs) in pricing_data.candidates_by_origin
             origin == label.current && continue
             any(idx -> !(pricing_data.candidates[idx].p in resolved), idxs) || continue
             arrival_time = label.time + _joint_routing_assignment_darp_travel(pricing_data, label.current, origin)
-            arrival_time <= pricing_data.max_wait_time + 1e-9 && push!(candidate_nodes, origin)
+            arrival_time <= pricing_data.pickup_deadline_s + 1e-9 && push!(candidate_nodes, origin)
         end
     end
 

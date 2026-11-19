@@ -69,7 +69,7 @@ function _route_covering_station_simple_candidate_next_nodes(
         # Not a dropoff -- is it worth visiting to open a fresh pickup clock
         # (reachable before the wait cutoff, and it's some uncertifiable
         # pair's origin)?
-        if !is_useful && label.time + travel_time <= pricing_data.max_wait_time + 1e-9
+        if !is_useful && label.time + travel_time <= pricing_data.pickup_deadline_s + 1e-9
             for pair in pricing_data.active_pairs
                 pair[1] == next_node || continue
                 pair[2] in label.visited && continue
@@ -125,7 +125,7 @@ function _extend_route_covering_station_simple_label(
         pair -> pair[1] == next_node && get(duals.sigma, pair, 0.0) > 1e-9,
         pricing_data.active_pairs,
     )
-    if opens_origin && arrival_time <= pricing_data.max_wait_time + 1e-9
+    if opens_origin && arrival_time <= pricing_data.pickup_deadline_s + 1e-9
         live[next_node] = 0.0
     end
     live = _route_covering_station_simple_prune_live_origins(live, next_node, visited, pricing_data, duals)

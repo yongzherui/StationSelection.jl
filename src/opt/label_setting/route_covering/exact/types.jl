@@ -15,7 +15,7 @@ service assumptions:
 
 - the route clock and every passenger's wait clock start at `t = 0`;
 - a visit to origin station `j` can pick up every relevant `(j,k)` passenger
-  when the visit's arrival time is at most `max_wait_time`;
+  when the visit's arrival time is at most `pickup_deadline_s`;
 - after that pickup, `(j,k)` is certified by a later visit to `k` when elapsed
   onboard time is at most `detour_factor * routing_cost(j,k)`; and
 - certifying one pair consumes no capacity and does not prevent the same route

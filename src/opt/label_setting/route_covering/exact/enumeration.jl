@@ -95,7 +95,7 @@ end
 
 """
     _enumerate_aggregate_od_route_raw_columns(mapping, data, route_regularization_weight,
-        repositioning_time, max_wait_time, detour_factor, max_stops_cap, max_routes,
+        repositioning_time, pickup_deadline_s, detour_factor, max_stops_cap, max_routes,
         time_limit_sec) -> Vector{AggregateODRouteColumn}
 
 The DFS itself, *before* `_deduplicate_aggregate_od_route_columns` collapses it to one
@@ -122,7 +122,7 @@ function _enumerate_aggregate_od_route_raw_columns(
         data::StationSelectionData,
         route_regularization_weight::Float64,
         repositioning_time::Float64,
-        max_wait_time::Float64,
+        pickup_deadline_s::Float64,
         detour_factor::Float64,
         max_stops_cap::Int,
         max_routes::Int,
@@ -141,7 +141,7 @@ function _enumerate_aggregate_od_route_raw_columns(
         active_pairs,
         route_regularization_weight,
         repositioning_time,
-        max_wait_time,
+        pickup_deadline_s,
         detour_factor,
         max_stops,
         max_stops_cap != typemax(Int),
@@ -187,7 +187,7 @@ function _enumerate_aggregate_od_route_raw_columns(
         end
         # The only other pruning this DFS does: stop extending once at the
         # stops cap. Everything else `_route_covering_candidate_next_nodes`
-        # offers (genuine physical feasibility -- wait time, ride limit) is
+        # offers (genuine physical feasibility -- pickup deadline, ride limit) is
         # followed unconditionally.
         label.route_length >= max_stops && return
         next_nodes = _route_covering_candidate_next_nodes(label, pricing_data, enumeration_duals)
@@ -214,7 +214,7 @@ end
 
 """
     _enumerate_aggregate_od_route_columns_core(mapping, data, route_regularization_weight,
-        repositioning_time, max_wait_time, detour_factor, max_stops_cap, max_routes,
+        repositioning_time, pickup_deadline_s, detour_factor, max_stops_cap, max_routes,
         time_limit_sec) -> Vector{AggregateODRouteColumn}
 
 Shared body behind both `enumerate_aggregate_od_route_columns` methods below -- the
@@ -229,14 +229,14 @@ function _enumerate_aggregate_od_route_columns_core(
         data::StationSelectionData,
         route_regularization_weight::Float64,
         repositioning_time::Float64,
-        max_wait_time::Float64,
+        pickup_deadline_s::Float64,
         detour_factor::Float64,
         max_stops_cap::Int,
         max_routes::Int,
         time_limit_sec::Float64,
     )::Vector{AggregateODRouteColumn}
     columns = _enumerate_aggregate_od_route_raw_columns(
-        mapping, data, route_regularization_weight, repositioning_time, max_wait_time,
+        mapping, data, route_regularization_weight, repositioning_time, pickup_deadline_s,
         detour_factor, max_stops_cap, max_routes, time_limit_sec,
     )
     return _deduplicate_aggregate_od_route_columns(columns)
@@ -265,7 +265,7 @@ function enumerate_aggregate_od_route_columns(
         mapping, data,
         formulation.route_regularization_weight,
         formulation.repositioning_time,
-        formulation.max_wait_time,
+        formulation.pickup_deadline_s,
         formulation.detour_factor,
         formulation.max_stops,
         max_routes, time_limit_sec,

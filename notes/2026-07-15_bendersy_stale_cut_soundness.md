@@ -72,7 +72,7 @@ longer reproduces the bug post-enumerator-fix): a k-medoid Zhuzhou cluster
 `../Data/real_world_test_cases/zhuzhou_kmedoid4_2025-05-05_16_20_top10_plus_c3top10_cap20/sample_09_2025-03-03_11_15_midday_low`
 (low demand density: 13 orders, 5 distinct OD pairs). `AggregateODRouteModel(5;
 assignment_policy=NearestOpenAggregateODAssignmentPolicy(style), max_walking_distance=500.0,
-route_regularization_weight=0.1, max_stops=3, max_wait_time=3600.0, detour_factor=2.0)`.
+route_regularization_weight=0.1, max_stops=3, pickup_deadline_s=3600.0, detour_factor=2.0)`.
 Reproduces identically under both `:gamma_chain` and `:big_m_nearest`.
 
 - DirectSolver / standalone CG / BendersXY: **179.712**, open `{21,40,158,196,202}`.

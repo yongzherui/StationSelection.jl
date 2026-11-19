@@ -164,7 +164,7 @@ below leads with the promotion count.
   - **Age rounding.** `age' = Delta*floor(age/Delta)`, applied at each extension.
     Younger clocks make `age + travel <= ride_limit` easier, so reward can only
     increase -- valid by the same argument as above. `label.time` must be floored
-    with it so the `<= max_wait_time` reset stays consistent and optimistic.
+    with it so the `<= pickup_deadline_s` reset stays consistent and optimistic.
   - The real prize is second-order: rounded ages are **integers**, so the age
     vector becomes hashable and can be folded into the dominance bucket
     signature. Buckets are currently keyed on `current` alone, so at 1.38M labels

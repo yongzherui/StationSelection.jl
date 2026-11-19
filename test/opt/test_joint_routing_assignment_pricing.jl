@@ -93,11 +93,11 @@
         travel = line_travel_cost(4)
         exact = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         relaxed = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, coarse;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         for route in ([1, 2], [1, 3], [1, 4], [1, 2, 4])
             _ra, _rt, relaxed_rc = StationSelection._joint_routing_assignment_column_from_route(route, relaxed)
@@ -114,7 +114,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
 
@@ -141,7 +141,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
 
@@ -161,7 +161,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
         label1 = only(extend_joint_routing_assignment_pricing_label(label0, 2, pricing_data))
@@ -177,7 +177,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
         label1 = only(extend_joint_routing_assignment_pricing_label(label0, 2, pricing_data))
@@ -198,7 +198,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
         running = Float64[]
@@ -214,7 +214,7 @@
         candidates = [PassengerAssignmentCandidate(1, 1, 3, 1.5, 10.0)]  # ride limit 1.5 < travel(1,3) = 2
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         label0 = only_at(initial_joint_routing_assignment_pricing_labels(pricing_data), 1)
         label1 = only(extend_joint_routing_assignment_pricing_label(label0, 2, pricing_data))
@@ -227,7 +227,7 @@
         candidates = [PassengerAssignmentCandidate(1, 2, 3, 100.0, 10.0)]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=0.5,
+            route_regularization_weight=1.0, pickup_deadline_s=0.5,
         )
         label0 = JointRoutingAssignmentPricingLabel(
             1, [1], 0.0, Dict(1 => 0.0), RewardLayerBitset(), 0.0, 0.0, 1,
@@ -249,7 +249,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3], travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0,
         )
         layer_low = pricing_data.assignment_layer_mask[(1, 1, 2)]   # {1}
         layer_high = pricing_data.assignment_layer_mask[(1, 1, 3)]  # {1, 2}
@@ -364,7 +364,7 @@
 
             pricing_data = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, candidates;
-                route_regularization_weight=0.1, max_wait_time=3.0,
+                route_regularization_weight=0.1, pickup_deadline_s=3.0,
             )
             isempty(pricing_data.opportunities) && continue
 
@@ -420,7 +420,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=1.0, max_wait_time=10.0, max_stops=3,
+            route_regularization_weight=1.0, pickup_deadline_s=10.0, max_stops=3,
         )
 
         function brute_force_best_reduced_cost()
@@ -456,9 +456,9 @@
     @testset "unbounded max_stops: terminates and matches a bounded-but-generous search" begin
         # The real target is no stop limit at all. This is finite even so: every
         # extension adds travel > 0 to `time` and to every live clock, no new clock
-        # is created past `max_wait_time`, and clocks are pruned once they cannot
+        # is created past `pickup_deadline_s`, and clocks are pruned once they cannot
         # certify -- so route length is implicitly capped by roughly
-        # (max_wait + max_ride_limit) / min_travel. This checks that it (a) halts,
+        # (pickup_deadline_s + max_ride_limit) / min_travel. This checks that it (a) halts,
         # and (b) finds the same optimum as a search whose explicit cap is set well
         # above that implicit bound.
         travel = line_travel_cost(4)
@@ -469,7 +469,7 @@
         ]
         mk(max_stops) = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=3.0,
+            route_regularization_weight=0.5, pickup_deadline_s=3.0,
             max_stops=max_stops,
         )
 
@@ -509,7 +509,7 @@
         ]
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, nodes, travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=20.0,
+            route_regularization_weight=0.5, pickup_deadline_s=20.0,
             max_stops=4,
         )
 
@@ -552,7 +552,7 @@
         reward_lookup = Dict((c.p, c.origin, c.destination) => c.reward for c in candidates)
         pricing_data = create_joint_routing_assignment_pricing_data(
             1, [1, 2, 3, 4], travel, candidates;
-            route_regularization_weight=0.5, max_wait_time=10.0, max_stops=4,
+            route_regularization_weight=0.5, pickup_deadline_s=10.0, max_stops=4,
         )
         columns, _exhausted, _stats = joint_routing_assignment_pricing_by_label_setting(
             pricing_data, JointRoutingAssignmentRouteColumn[];
@@ -615,7 +615,7 @@
             pd = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, cands;
                 route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
-                max_wait_time=Float64(rand(rng, 1:4)),
+                pickup_deadline_s=Float64(rand(rng, 1:4)),
                 max_stops=max_stops,
             )
             isempty(pd.opportunities) && continue
@@ -681,7 +681,7 @@
             pd = create_joint_routing_assignment_pricing_data(
                 1, nodes, travel, cands;
                 route_regularization_weight=Float64(rand(rng, [0.0, 0.5, 1.0])),
-                max_wait_time=Float64(rand(rng, 1:4)),
+                pickup_deadline_s=Float64(rand(rng, 1:4)),
                 max_stops=typemax(Int),
             )
             isempty(pd.opportunities) && continue

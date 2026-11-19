@@ -91,7 +91,7 @@ function build_model_for(n_stations::Int)
         walk_cost_weight            = WALK_WEIGHT,
         repositioning_time          = 20.0,
         max_walking_distance        = MAX_WALK,
-        max_wait_time               = 900.0,
+        pickup_deadline_s               = 900.0,
         detour_factor               = 2.0,
         max_stops                   = MAX_STOPS,
     )

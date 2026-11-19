@@ -10,7 +10,7 @@ const BENCHMARK_BASELINE = (
     route_regularization_weight=10.0,
     walk_cost_weight=0.1,
     repositioning_time=20.0,
-    max_wait_time=900.0,
+    pickup_deadline_s=900.0,
     detour_factor=2.0,
     max_stops=10,
 )

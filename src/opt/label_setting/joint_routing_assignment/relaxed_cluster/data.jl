@@ -256,7 +256,7 @@ function create_joint_routing_assignment_relaxed_cluster_pricing_data(
     travel_cost::Dict{Tuple{Int, Int}, Float64},
     candidates::AbstractVector{PassengerAssignmentCandidate};
     route_regularization_weight::Float64,
-    max_wait_time::Float64,
+    pickup_deadline_s::Float64,
     repositioning_time::Float64=0.0,
     max_stops::Int=typemax(Int),
     compensated_dominance::Bool=true,
@@ -305,7 +305,7 @@ function create_joint_routing_assignment_relaxed_cluster_pricing_data(
     inner = create_joint_routing_assignment_pricing_data(
         scenario, collect(1:n_nodes), cluster_travel, routed_candidates;
         route_regularization_weight=route_regularization_weight,
-        max_wait_time=max_wait_time,
+        pickup_deadline_s=pickup_deadline_s,
         repositioning_time=repositioning_time,
         max_stops=max_stops,
         compensated_dominance=compensated_dominance,
