@@ -120,6 +120,7 @@ struct CGPricingConfig
     relaxed_cluster_guide_routes::Int
     relaxed_cluster_macro_count::Union{Nothing, Int}
     relaxed_cluster_aligned_subset_max::Int
+    first_boarding::Symbol
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -130,8 +131,18 @@ struct CGPricingConfig
             relaxed_cluster_guide_routes::Int=5,
             relaxed_cluster_macro_count::Union{Nothing, Int}=nothing,
             relaxed_cluster_aligned_subset_max::Int=15,
+            first_boarding::Symbol=:start_now,
         )
         _cg_validate_pricing_mode(mode, "mode")
+        # `first_boarding` is read only by `mode = :exact_no_anticipation`
+        # (`label_setting/joint_routing_assignment/exact_no_anticipation/`): how the empty
+        # vehicle times its first stop. `:start_now` leaves at t = 0 and the first stop's
+        # riders' walk is not waited for; `:after_first_walker` waits (empty) for the first
+        # rider to arrive and leaves the moment that rider boards; `:after_last_walker` lets
+        # the riders it takes there gather and leaves when the last of them arrives.
+        first_boarding in (:start_now, :after_first_walker, :after_last_walker) || throw(ArgumentError(
+            "first_boarding must be :start_now, :after_first_walker or :after_last_walker, got $(repr(first_boarding))",
+        ))
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
         # `:relaxed_cluster` never reports its own exhaustion -- the only thing it can
         # exhaust is the relaxation, and that is a full-universe certificate that ends the
@@ -221,7 +232,7 @@ struct CGPricingConfig
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
             relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
-            relaxed_cluster_aligned_subset_max,
+            relaxed_cluster_aligned_subset_max, first_boarding,
         )
     end
 end
@@ -234,7 +245,7 @@ that formulation's `build_model` (`AggregateODRouteBaseFormulation` offers none 
 """
 const CG_PRICING_MODES = (
     :exact, :station_simple, :darp_modified, :darp, :relaxed_cluster,
-    :relaxed_cluster_two_tier, :exact_capacitated,
+    :relaxed_cluster_two_tier, :exact_capacitated, :exact_no_anticipation,
 )
 const CG_WARM_START_PRICING_MODES = (CG_PRICING_MODES..., :cluster_guide)
 

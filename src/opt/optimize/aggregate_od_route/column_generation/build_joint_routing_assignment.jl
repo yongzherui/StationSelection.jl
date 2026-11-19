@@ -135,9 +135,18 @@ function build_model(
 
     isnothing(solver.initial_columns) || _validate_joint_routing_assignment_initial_columns(
         data, mapping, formulation.detour_factor, solver.initial_columns)
+    # Under `:exact_no_anticipation` with `first_boarding = :after_first_walker` the vehicle
+    # leaves its first stop when the first rider boards, so a two-stop bundle may only carry
+    # riders who reach `j` together (`exact_no_anticipation/seeding.jl`).
+    seed_first_walker = solver.pricing.mode === :exact_no_anticipation &&
+        solver.pricing.first_boarding in (:after_first_walker, :after_last_walker)
     initial_columns = something(
         solver.initial_columns,
-        joint_routing_assignment_two_stop_seed_columns(data, mapping),
+        seed_first_walker ?
+            joint_routing_assignment_two_stop_seed_columns_first_walker(
+                data, mapping; pickup_deadline_s = formulation.pickup_deadline_s,
+                gather = solver.pricing.first_boarding === :after_last_walker) :
+            joint_routing_assignment_two_stop_seed_columns(data, mapping),
     )
     cap = formulation.vehicle_capacity
     if !isnothing(cap)
@@ -231,6 +240,7 @@ function _build_joint_routing_assignment_model(
     m[:joint_routing_assignment_vehicle_capacity] = cap
     m[:joint_routing_assignment_group_requests] = isnothing(cap) ? nothing :
         _joint_routing_assignment_group_requests(data, mapping)
+    m[:joint_routing_assignment_first_boarding] = pricing.first_boarding
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -426,5 +436,6 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
         relaxed_cluster_macro_count = macro_count,
         relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
+        first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol,
     )
 end

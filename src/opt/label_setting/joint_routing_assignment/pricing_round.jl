@@ -217,7 +217,7 @@ function _pricing_build_scenario_context(
         "relaxed-cluster round, driven by CGSolver via cg_certification_round, not by " *
         "_run_pricing_round",
     ))
-    pricing_mode in (:exact, :station_simple) || throw(ArgumentError(
+    pricing_mode in (:exact, :station_simple, :exact_no_anticipation) || throw(ArgumentError(
         "unknown joint_routing_assignment pricing_mode $(repr(pricing_mode)) -- " *
         "expected :exact, :station_simple, :darp_modified, :darp, :cluster_guide, " *
         ":relaxed_cluster, or :relaxed_cluster_two_tier",
@@ -241,6 +241,15 @@ function _pricing_build_scenario_context(
     # `_cg_optimality_scope`).
     if pricing_mode === :station_simple
         return JointRoutingAssignmentStationSimpleSearchContext(pricing_data), existing
+    end
+    # `:exact_no_anticipation` (`exact_no_anticipation/`): the same candidates and reward
+    # layers, searched under the simulator's walking/boarding timing rules.
+    if pricing_mode === :exact_no_anticipation
+        na_data = create_no_anticipation_pricing_data(
+            pricing_data, data, mapping, s, detour_factor,
+            m[:joint_routing_assignment_first_boarding]::Symbol,
+        )
+        return NoAnticipationSearchContext(na_data), existing
     end
     return JointRoutingAssignmentSearchContext(pricing_data), existing
 end
