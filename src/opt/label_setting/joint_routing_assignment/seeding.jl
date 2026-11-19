@@ -53,6 +53,7 @@ function joint_routing_assignment_two_stop_seed_columns(
     mapping::AggregateODRouteMap;
     next_column_id::Int=1,
     singletons_only::Bool=false,
+    max_seed_walk::Float64=Inf,
 )::Vector{JointRoutingAssignmentRouteColumn}
     by_route = Dict{Tuple{Int, Int, Int}, Vector{Tuple{Int, Int, Int}}}()
     for s in 1:n_scenarios(data)
@@ -63,6 +64,8 @@ function joint_routing_assignment_two_stop_seed_columns(
                 j, k = pair
                 tau = get_routing_cost(data, j, k)
                 isfinite(tau) || continue
+                # M4 (owner 2026-11-19): a lone rider's seed is valid only if they reach j by the pickup deadline
+                get_walking_cost(data, o, j) <= max_seed_walk + 1e-9 || continue
                 push!(get!(by_route, (s, j, k), Tuple{Int, Int, Int}[]), (p, j, k))
             end
         end

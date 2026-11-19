@@ -140,6 +140,8 @@ function build_model(
     # riders who reach `j` together (`exact_no_anticipation/seeding.jl`).
     seed_first_walker = solver.pricing.mode === :exact_no_anticipation &&
         solver.pricing.first_boarding in (:after_first_walker, :after_last_walker)
+    m4_seeds = solver.pricing.mode === :exact_no_anticipation &&
+               solver.pricing.first_boarding === :start_now_walk_limit
     initial_columns = something(
         solver.initial_columns,
         seed_first_walker ?
@@ -150,8 +152,9 @@ function build_model(
                 data, mapping;
                 # M4: a first-stop bundle may carry only riders within first_stop_walk_limit;
                 # seed singletons only (a lone rider's [j, k] is fine: the vehicle can wait for them).
-                singletons_only = solver.pricing.mode === :exact_no_anticipation &&
-                                  solver.pricing.first_boarding === :start_now_walk_limit),
+                singletons_only = m4_seeds,
+                # ... and only riders who reach j by the pickup deadline (owner 2026-11-19)
+                max_seed_walk = m4_seeds ? formulation.pickup_deadline_s : Inf),
     )
     cap = formulation.vehicle_capacity
     if !isnothing(cap)
