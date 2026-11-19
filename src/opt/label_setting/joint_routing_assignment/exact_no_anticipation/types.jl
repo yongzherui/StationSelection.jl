@@ -100,6 +100,10 @@ struct NoAnticipationPricingData
     p_layers::Dict{Int, RewardLayerBitset}
     starts::Vector{Tuple{Int, Float64}}         # M2/M3: distinct (first stop, t0 = some trigger's walk), t0 <= pickup deadline
     start_triggers::Vector{Vector{Int}}         # triggers (indices into `triggers`) whose walk is that start's t0
+    travel::Matrix{Float64}                     # dense drive times between the pricing nodes (Inf off the node set)
+    scratch_ev::Vector{Tuple{Float64, Int, Float64}}   # bound workspace (one search per pricing data, never shared)
+    scratch_w::Vector{Float64}                  # bound workspace, indexed by rider p
+    scratch_touched::Vector{Int}
 end
 
 "Riders arriving within this many seconds of the first rider board with them (M2)."

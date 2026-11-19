@@ -3,8 +3,12 @@
 
 const _NA_EMPTY = Int[]
 
-@inline _na_travel(pd::NoAnticipationPricingData, u::Int, v::Int) =
-    u == v ? 0.0 : _joint_routing_assignment_travel(pd.base, u, v)
+@inline function _na_travel(pd::NoAnticipationPricingData, u::Int, v::Int)
+    u == v && return 0.0
+    t = @inbounds pd.travel[u, v]
+    isfinite(t) || throw(ArgumentError("missing finite routing cost for station arc $((u, v))"))
+    return t
+end
 @inline _na_travel(base::JointRoutingAssignmentPricingData, u::Int, v::Int) =
     u == v ? 0.0 : _joint_routing_assignment_travel(base, u, v)
 
@@ -100,9 +104,16 @@ function create_no_anticipation_pricing_data(
         end
         push!(start_triggers[end], t)
     end
+    nmax = maximum(base.nodes; init = 0)
+    travel = fill(Inf, nmax, nmax)
+    for ((u, v), c) in base.travel_cost
+        (1 <= u <= nmax && 1 <= v <= nmax) && (travel[u, v] = c)
+    end
+    pmax = max(maximum((o.p for o in opps); init = 0), maximum((t.p for t in triggers); init = 0))
     return NoAnticipationPricingData(base, first_walker,
                                      first_boarding === :after_last_walker, opps, by_origin, by_destination,
-                                     sort!(collect(keys(by_origin))), triggers, p_layers, starts, start_triggers)
+                                     sort!(collect(keys(by_origin))), triggers, p_layers, starts, start_triggers,
+                                     travel, Tuple{Float64, Int, Float64}[], zeros(pmax), Int[])
 end
 
 "The pickup deadline (`pickup_deadline_s`), the same for every rider since all request at t = 0: no pickup clock opens later."
@@ -356,7 +367,7 @@ function _na_remaining_bound(label::NoAnticipationLabel, pd::NoAnticipationPrici
     base = pd.base
     T, t0, cur, root = label.time, label.start_time, label.current, label.route[1]
     act = label.activated_reward_layers
-    ev = Tuple{Float64, Int, Float64}[]               # (min remaining drive, rider, free weight)
+    ev = empty!(pd.scratch_ev)                         # (min remaining drive, rider, free weight)
     function add!(o, c)
         w = 0.0
         for l in o.layer_mask
@@ -403,13 +414,17 @@ function _na_remaining_bound(label::NoAnticipationLabel, pd::NoAnticipationPrici
     beta = NA_BOUND[] === :travel ? base.route_regularization_weight : 0.0
     sort!(ev; by = first)
     best = 0.0; total = 0.0
-    bestw = Dict{Int, Float64}()
+    bestw = pd.scratch_w; touched = empty!(pd.scratch_touched)
     for (c, p, w) in ev
-        prev = get(bestw, p, 0.0)
+        prev = bestw[p]
         if w > prev
+            prev == 0.0 && push!(touched, p)
             total += w - prev; bestw[p] = w
         end
         best = max(best, total - beta * max(c - NO_ANTICIPATION_TRI_TOL, 0.0))
+    end
+    for p in touched
+        bestw[p] = 0.0
     end
     return best
 end
