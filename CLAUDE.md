@@ -170,9 +170,3 @@ StationSelectionData
 
 Maps (`create_map`, `create_aggregate_od_route_map`) hold the index bookkeeping (station id <-> index, scenario
 <-> index, `Omega_s` / `Q_s` demand groups) used by `build_model` and the analysis helpers.
-
-## Removed
-
-The pre-split model hierarchy (`TwoStageSingleDetourModel`/TSD, `ZCorridorODModel`, `XCorridorODModel`,
-`TransportationModel`, `AlphaRouteModel`, `RouteFleetLimitModel`, …) and the two-argument
-`run_opt(model, data)` API no longer exist; old scripts and slides that use them predate the split.
