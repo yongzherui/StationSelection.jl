@@ -109,6 +109,41 @@ function joint_routing_assignment_pricing_candidates(
     return candidates
 end
 
+"""
+    joint_routing_assignment_trigger_candidates(data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, scenario)
+
+Every valid (group, j, k) pair with demand and its rho, WHATEVER ITS SIGN: the riders who may set an M2/M3 route's
+departure in `:exact_no_anticipation` (the trigger is carried and charged its rho even when it is not positive).
+Same rho as `joint_routing_assignment_pricing_candidates`, without its positivity filters.
+"""
+function joint_routing_assignment_trigger_candidates(
+    data::StationSelectionData,
+    mapping::AggregateODRouteMap,
+    alpha::Dict{Tuple{Int, Int}, Float64},
+    gamma_o::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+    gamma_d::Dict{Tuple{Tuple{Int, Int}, Int}, Float64},
+    walk_cost_weight::Float64,
+    detour_factor::Float64,
+    scenario::Int,
+)::Vector{PassengerAssignmentCandidate}
+    candidates = PassengerAssignmentCandidate[]
+    for (p, (o, d)) in enumerate(mapping.Omega_s[scenario])
+        demand = mapping.Q_s[scenario][p]
+        demand > 0 || continue
+        key2 = (scenario, p)
+        a = get(alpha, key2, 0.0)
+        for pair in get_valid_jk_pairs(mapping, o, d)
+            is_walk_only_pair(pair) && continue
+            j, k = pair
+            rho = a - get(gamma_o, (key2, j), 0.0) - get(gamma_d, (key2, k), 0.0) -
+                walk_cost_weight * demand * od_pair_walking_cost(data, o, d, pair)
+            ride_limit = joint_routing_assignment_ride_limit(data, mapping, detour_factor, o, d, j, k)
+            push!(candidates, PassengerAssignmentCandidate(p, j, k, ride_limit, rho))
+        end
+    end
+    return candidates
+end
+
 # ── formulation-level hooks (threading / column ids / scenario context / merge) ──
 _pricing_parallel_scenarios(::AggregateODRouteJointRoutingAssignmentFormulation) = true
 
@@ -245,9 +280,12 @@ function _pricing_build_scenario_context(
     # `:exact_no_anticipation` (`exact_no_anticipation/`): the same candidates and reward
     # layers, searched under the simulator's walking/boarding timing rules.
     if pricing_mode === :exact_no_anticipation
+        first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol
+        triggers = first_boarding === :start_now ? nothing : joint_routing_assignment_trigger_candidates(
+            data, mapping, alpha, gamma_o, gamma_d, walk_cost_weight, detour_factor, s,
+        )
         na_data = create_no_anticipation_pricing_data(
-            pricing_data, data, mapping, s, detour_factor,
-            m[:joint_routing_assignment_first_boarding]::Symbol,
+            pricing_data, data, mapping, s, detour_factor, first_boarding; trigger_candidates=triggers,
         )
         return NoAnticipationSearchContext(na_data), existing
     end

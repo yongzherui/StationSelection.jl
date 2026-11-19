@@ -23,6 +23,18 @@ Clock. Every rider of a scenario requests at t = 0 (the scenario's shared start,
     simulator lets an idle vehicle defer its departure until after a walker arrives). Riders
     who arrive earlier stand at the stop; G2 runs from the request, so that counts.
 
+Under M2/M3 every route starts on a TRIGGER: a rider pair (p, j1, k) whose walk sets t0 (the
+first walker under M2, the last under M3). The trigger must be carried -- dropped off at k with
+the first stop's clock -- and its reward counts whatever its sign (owner, 2026-11-19: whoever
+sets the start time is on board). A label starts from (first stop, t0) only; WHICH rider is the
+trigger is decided when the route is finished (owner's suggestion, 2026-11-19): the label keeps,
+per rider, the best trigger reward dropped off so far, and a finished route pays
+min over riders p of (p's credited reward - p's trigger reward), i.e. nothing when a rider with
+walk t0 is dropped off on their best pair. Every valid pair with demand is a possible trigger, not only
+the positive-reward ones: the best route can need a rider who is not worth carrying on their own
+to time the departure, and leaving those start times out made CG certify too early (set 183:
+a column at rc -152 was never generated). Other first-stop riders stay optional.
+
 After the first stop the vehicle never waits. A rider boards a later visit of `j` at time v
 only if they have walked there: walk(o, j) <= v. Every rider (first stop under M2, every
 later stop) meets G2 counted from the request: drop-off time T + walk(k, d) <=
@@ -54,9 +66,27 @@ struct NoAnticipationOpportunity
 end
 
 """
+A possible M2/M3 trigger: rider `p` boarding at the first stop `origin` and dropped off at `destination`. Their walk sets
+the departure (t0 = walk_in); they must be carried, and `reward` (the master's rho for the pair, ANY sign) counts in the
+route's reduced cost (owner, 2026-11-19: the rider who sets the start time is on board).
+"""
+struct NoAnticipationTrigger
+    p::Int
+    origin::Int
+    destination::Int
+    ride_cap::Float64
+    deadline::Float64
+    walk_in::Float64
+    reward::Float64
+end
+
+"""
 One scenario's pricing data: the `exact` pricer's (`base`: travel times, reward layers,
 weights, pickup_deadline_s, max_stops) plus the per-rider timing limits.
 `by_origin[j]` lists opportunity indices sorted by `walk_in` ascending.
+`triggers` (M2/M3 only) lists every rider pair that may set a route's departure, whatever its reward;
+`p_layers[p]` is the union of rider `p`'s reward layers (pre-activated on a label whose trigger is `p`, so
+`p` is not credited a second time).
 """
 struct NoAnticipationPricingData
     base::JointRoutingAssignmentPricingData
@@ -66,6 +96,10 @@ struct NoAnticipationPricingData
     by_origin::Dict{Int, Vector{Int}}
     by_destination::Dict{Int, Vector{Int}}
     origins::Vector{Int}
+    triggers::Vector{NoAnticipationTrigger}
+    p_layers::Dict{Int, RewardLayerBitset}
+    starts::Vector{Tuple{Int, Float64}}         # M2/M3: distinct (first stop, t0 = some trigger's walk), t0 <= pickup deadline
+    start_triggers::Vector{Vector{Int}}         # triggers (indices into `triggers`) whose walk is that start's t0
 end
 
 "Riders arriving within this many seconds of the first rider board with them (M2)."
@@ -88,6 +122,8 @@ struct NoAnticipationLabel
     tau::Float64
     reduced_cost::Float64
     route_length::Int
+    start::Int                  # M2/M3: index into pd.starts (0 under M1)
+    trig_r::Dict{Int, Float64}  # M2/M3: rider p => best reward among p's triggers of this start dropped off so far
 end
 
 struct NoAnticipationFilters
@@ -119,7 +155,7 @@ PricingLabelEntry(id::Int, label::NoAnticipationLabel, bs::NoAnticipationBitsets
     PricingLabelEntry(NoAnticipationFilters(label.reduced_cost, label.time, Int32(label.route_length)), id, label, bs)
 
 struct NoAnticipationSearchContext{D<:Function} <: AbstractPricingSearchContext{
-    NoAnticipationFilters, NoAnticipationLabel, NoAnticipationBitsets, Int, RewardLayerBitset,
+    NoAnticipationFilters, NoAnticipationLabel, NoAnticipationBitsets, Tuple{Int, UInt64}, Tuple{RewardLayerBitset, Int, Float64},
 }
     pricing_data::NoAnticipationPricingData
     dominates::D

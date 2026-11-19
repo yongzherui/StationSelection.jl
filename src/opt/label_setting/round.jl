@@ -362,10 +362,14 @@ function _pricing_accept_closure(ctx, scenario, best_pool_tau::Dict, scored::Dic
             # the best candidate kept for it so far -> keep it
             scored[candidate.signature] = (scenario=scenario, ctx=ctx, candidate...)
         end
-        return length(scored) >= n_candidates  # true = tell the search to stop early
+        return length(scored) >= min(n_candidates, _pricing_scenario_column_cap(ctx))  # true = stop early
     end
     return accept!
 end
+
+"""Per-scenario cap on improving columns before a round's search may stop early (default: none). Exactness is kept:
+CG converges only on a round that finds no column, and such a round never stops early."""
+_pricing_scenario_column_cap(::Any) = typemax(Int)
 
 # ── formulation-level hooks ─────────────────────────────────────────────────
 
