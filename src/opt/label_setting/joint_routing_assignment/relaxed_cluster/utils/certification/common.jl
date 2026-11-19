@@ -117,7 +117,7 @@ function _certification_station_search(
         inset = Set(station_set)
         trig = na.triggers === nothing ? nothing :
             [c for c in na.triggers if c.origin in inset && c.destination in inset]
-        napd = create_no_anticipation_pricing_data(pricing_data, na.data, na.mapping, s, na.detour_factor,
+        napd = create_no_anticipation_pricing_data(pricing_data, na.data, na.mapping, s, na.ride_time_limit_ratio,
                                                    na.first_boarding; trigger_candidates = trig)
         ctx = NoAnticipationSearchContext(napd)
     end

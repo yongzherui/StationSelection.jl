@@ -469,10 +469,10 @@ function _relaxed_cluster_scenario_pass(
     na = nothing
     if NA_RELAXED_CLUSTER[]
         fb = m[:joint_routing_assignment_first_boarding]::Symbol
-        det = Float64(m[:joint_routing_assignment_detour_factor])
+        det = Float64(m[:joint_routing_assignment_ride_time_limit_ratio])
         trig = fb === :start_now ? nothing : joint_routing_assignment_trigger_candidates(
             data, mapping, alpha, gamma_o, gamma_d, Float64(m[:joint_routing_assignment_walk_cost_weight]), det, s)
-        na = (data = data, mapping = mapping, detour_factor = det, first_boarding = fb, triggers = trig)
+        na = (data = data, mapping = mapping, ride_time_limit_ratio = det, first_boarding = fb, triggers = trig)
     end
     result = _relaxed_cluster_certify_scenario(
         m, s, candidates, _relaxed_cluster_scenario_clustering(m, s), solver;
