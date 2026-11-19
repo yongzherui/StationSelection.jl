@@ -102,9 +102,18 @@ function build_model(
 
     isnothing(solver.initial_columns) || _validate_joint_routing_assignment_initial_columns(
         data, mapping, formulation.detour_factor, solver.initial_columns)
+    # Under `:exact_no_anticipation` with `first_boarding = :after_first_walker` the vehicle
+    # leaves its first stop when the first rider boards, so a two-stop bundle may only carry
+    # riders who reach `j` together (`exact_no_anticipation/seeding.jl`).
+    seed_first_walker = solver.pricing.mode === :exact_no_anticipation &&
+        solver.pricing.first_boarding in (:after_first_walker, :after_last_walker)
     initial_columns = something(
         solver.initial_columns,
-        joint_routing_assignment_two_stop_seed_columns(data, mapping),
+        seed_first_walker ?
+            joint_routing_assignment_two_stop_seed_columns_first_walker(
+                data, mapping; max_pickup_time = solver.pricing.max_pickup_time,
+                gather = solver.pricing.first_boarding === :after_last_walker) :
+            joint_routing_assignment_two_stop_seed_columns(data, mapping),
     )
     return _build_joint_routing_assignment_model(
         data, mapping, problem.k, formulation;
@@ -169,6 +178,8 @@ function _build_joint_routing_assignment_model(
     # passes no config and lands on `:exact`, which is inert there: it enumerates its pool
     # up front and never prices.
     m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
+    m[:joint_routing_assignment_first_boarding] = pricing.first_boarding
+    m[:joint_routing_assignment_max_pickup_time] = pricing.max_pickup_time
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.

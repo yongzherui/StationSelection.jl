@@ -168,6 +168,9 @@ include("label_setting/joint_routing_assignment/darp/prune.jl")
 include("label_setting/joint_routing_assignment/darp/context.jl")
 include("label_setting/joint_routing_assignment/darp/hooks.jl")
 include("label_setting/joint_routing_assignment/darp/driver.jl")
+# exact_no_anticipation/: `exact` with the simulator's walking/boarding timing (2026-11-18).
+include("label_setting/joint_routing_assignment/exact_no_anticipation/types.jl")
+include("label_setting/joint_routing_assignment/exact_no_anticipation/search.jl")
 include("label_setting/joint_routing_assignment/seeding.jl")
 include("label_setting/joint_routing_assignment/pricing_round.jl")
 # relaxed_cluster/: NOT a fourth column-producing pricer -- a relaxation of the pricing
