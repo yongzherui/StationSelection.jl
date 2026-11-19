@@ -159,7 +159,7 @@ function _relaxed_cluster_certify_scenario(
     m::JuMP.Model, s::Int,
     candidates::AbstractVector{PassengerAssignmentCandidate},
     clustering::StationClustering, solver::CGSolver;
-    deadline::Float64, max_rounds::Int=RELAXED_CLUSTER_MAX_CUT_ROUNDS,
+    deadline::Float64, max_rounds::Int=RELAXED_CLUSTER_MAX_CUT_ROUNDS, na = nothing,
 )::RelaxedClusterNoGoodResult
     shared = _certification_shared_params(m)
     travel_cost = m[:joint_routing_assignment_travel_cost]
@@ -333,7 +333,7 @@ function _relaxed_cluster_certify_scenario(
         # relaxation pointed somewhere genuine, `Inf` means barren.
         search = _certification_station_search(
             s, subset, travel_cost, candidates, shared, existing_columns, harvested, solver;
-            time_limit=deadline - time(), reduced_cost_tol=tol,
+            time_limit=deadline - time(), reduced_cost_tol=tol, na=na,
         )
         # Out of budget before the search could start: nothing was learned about this
         # support, and reading that as barren would cut a support that may well hold an
@@ -466,9 +466,17 @@ function _relaxed_cluster_scenario_pass(
     # Nothing to price: vacuously certified for this scenario, and it harvests nothing.
     isempty(candidates) && return nothing
 
+    na = nothing
+    if NA_RELAXED_CLUSTER[]
+        fb = m[:joint_routing_assignment_first_boarding]::Symbol
+        det = Float64(m[:joint_routing_assignment_detour_factor])
+        trig = fb === :start_now ? nothing : joint_routing_assignment_trigger_candidates(
+            data, mapping, alpha, gamma_o, gamma_d, Float64(m[:joint_routing_assignment_walk_cost_weight]), det, s)
+        na = (data = data, mapping = mapping, detour_factor = det, first_boarding = fb, triggers = trig)
+    end
     result = _relaxed_cluster_certify_scenario(
         m, s, candidates, _relaxed_cluster_scenario_clustering(m, s), solver;
-        deadline=deadline,
+        deadline=deadline, na=na,
     )
     _record_relaxed_cluster_stat!(m, (
         scenario=s,

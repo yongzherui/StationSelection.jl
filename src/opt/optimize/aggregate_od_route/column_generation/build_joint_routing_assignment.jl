@@ -138,7 +138,8 @@ function build_model(
     # Under `:exact_no_anticipation` with `first_boarding = :after_first_walker` the vehicle
     # leaves its first stop when the first rider boards, so a two-stop bundle may only carry
     # riders who reach `j` together (`exact_no_anticipation/seeding.jl`).
-    seed_first_walker = solver.pricing.mode === :exact_no_anticipation &&
+    seed_first_walker = (solver.pricing.mode === :exact_no_anticipation ||
+                         (solver.pricing.mode === :relaxed_cluster && NA_RELAXED_CLUSTER[])) &&
         solver.pricing.first_boarding in (:after_first_walker, :after_last_walker)
     initial_columns = something(
         solver.initial_columns,

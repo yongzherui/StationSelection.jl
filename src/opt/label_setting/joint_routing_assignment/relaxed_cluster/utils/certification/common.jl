@@ -48,6 +48,17 @@ _certification_existing_columns(m::JuMP.Model, s::Int) =
     ]
 
 """
+`NA_RELAXED_CLUSTER[]` (experiment, 2026-11-19, branch exp/noant-wait-relax): run `:relaxed_cluster` for the
+`:exact_no_anticipation` model. The relaxed (cluster-graph, `:exact`-rules) search is unchanged: `:exact` credits every
+rider a no-anticipation route credits, on the same route at the same cost (a pickup within the deadline of the request
+is within it of the route start; the door-to-door deadline from the request implies `:exact`'s ride limit; the trigger
+penalty is >= 0), so it still lower-bounds the real minimum reduced cost. Only the station-subset search -- the one
+that harvests columns and proves supports barren -- switches to the no-anticipation pricer (`na` below), so every
+column and every cut is a no-anticipation one. `first_boarding` comes from `CGPricingConfig` as usual.
+"""
+const NA_RELAXED_CLUSTER = Ref(false)
+
+"""
     _certification_station_search(s, station_set, travel_cost, candidates, shared,
         existing_columns, harvested, solver; time_limit, reduced_cost_tol)
             -> (; outcome, rc, exhausted, elapsed_sec)
@@ -86,7 +97,7 @@ of this search is how both modes stay on the right side of it.
 function _certification_station_search(
     s::Int, station_set::Vector{Int}, travel_cost, candidates, shared::NamedTuple,
     existing_columns, harvested::Dict{Any, Any}, solver::CGSolver;
-    time_limit::Float64, reduced_cost_tol::Float64,
+    time_limit::Float64, reduced_cost_tol::Float64, na = nothing,
 )
     subset_candidates = _restrict_candidates_to_subset(candidates, station_set)
     isempty(subset_candidates) &&
@@ -99,7 +110,17 @@ function _certification_station_search(
     time_limit > 0 ||
         return (outcome=:no_time, rc=Inf, exhausted=false, elapsed_sec=0.0)
 
-    ctx = JointRoutingAssignmentSearchContext(pricing_data)
+    napd = nothing
+    if na === nothing
+        ctx = JointRoutingAssignmentSearchContext(pricing_data)
+    else
+        inset = Set(station_set)
+        trig = na.triggers === nothing ? nothing :
+            [c for c in na.triggers if c.origin in inset && c.destination in inset]
+        napd = create_no_anticipation_pricing_data(pricing_data, na.data, na.mapping, s, na.detour_factor,
+                                                   na.first_boarding; trigger_candidates = trig)
+        ctx = NoAnticipationSearchContext(napd)
+    end
     best_pool_tau = Dict{Any, Float64}()
     for column in existing_columns
         sig = _pricing_pool_signature(ctx, column)
@@ -114,7 +135,8 @@ function _certification_station_search(
     )
     return (
         outcome = :searched,
-        rc = isempty(labels) ? Inf : minimum(l.reduced_cost for l in labels),
+        rc = isempty(labels) ? Inf :
+            (napd === nothing ? minimum(l.reduced_cost for l in labels) : minimum(_na_label_value(l, napd) for l in labels)),
         exhausted = exhausted,
         elapsed_sec = time() - t0,
     )

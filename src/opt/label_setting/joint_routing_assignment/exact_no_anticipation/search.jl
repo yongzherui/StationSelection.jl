@@ -176,6 +176,35 @@ function _na_initial_labels(pd::NoAnticipationPricingData)::Vector{NoAnticipatio
     return labels
 end
 
+# ── EXPERIMENT (2026-11-19): relaxation with priced waiting ───────────────────
+"""
+`NA_RELAX[]` (experiment, exp/noant-wait-relax): price the RELAXATION instead of the real problem. The vehicle may
+wait at any later stop until a rider there has walked in, paying route_regularization_weight per second waited (the
+price of a second of driving); the trigger penalty is dropped (>= 0). Every real route is feasible in it at the same
+cost (no waiting), so its minimum reduced cost is a lower bound on the real one. Run with dominance OFF (the real
+dominance rules assume no waiting). Waits are encoded in the next-node id: node + 1000 * k = wait for the k-th
+distinct walk (> arrival) of an unpaid rider at that node.
+"""
+const NA_RELAX = Ref(false)
+const _NA_WAIT_CODE = 1000
+
+"Distinct walks (> arrival T) of unpaid riders at `j` that could still be delivered after waiting for them."
+function _na_wait_targets(label::NoAnticipationLabel, pd::NoAnticipationPricingData, j::Int, T::Float64)
+    out = Float64[]
+    act = label.activated_reward_layers
+    P = _na_pickup_deadline(pd)
+    for i in get(pd.by_origin, j, _NA_EMPTY)
+        o = pd.opps[i]
+        o.walk_in > T + NO_ANTICIPATION_EPS || continue
+        o.walk_in <= P + 1e-9 || break
+        _has_inactive_layer(o.layer_mask, act) || continue
+        d = _na_travel_lb(pd, j, o.destination)
+        (d <= o.ride_cap + 1e-9 && o.walk_in + d <= o.deadline + 1e-9) || continue
+        (isempty(out) || o.walk_in > out[end] + 1e-9) && push!(out, o.walk_in)
+    end
+    return out
+end
+
 # ── candidate next stops ──────────────────────────────────────────────────────
 # ── the deferred trigger (M2/M3) ─────────────────────────────────────────────
 "Weight of rider `p`'s layers in `layers` (= p's credited reward on a finished route)."
@@ -195,7 +224,7 @@ The trigger penalty of a label if its route ended now: min over riders p with a 
 route), (0.0, 0, 0.0) under M1.
 """
 function _na_trigger_penalty(label::NoAnticipationLabel, pd::NoAnticipationPricingData)
-    label.start == 0 && return (0.0, 0, 0.0)
+    (label.start == 0 || NA_RELAX[]) && return (0.0, 0, 0.0)
     best = (Inf, 0, 0.0)
     for p in sort!(collect(keys(label.trig_r)))
         r = label.trig_r[p]
@@ -211,7 +240,7 @@ _na_label_value(label::NoAnticipationLabel, pd::NoAnticipationPricingData) =
 
 "Could the route still drop off a trigger of its start that improves on what it has (from `cur`, root clock `ra`, at `T`)?"
 function _na_trigger_open(pd::NoAnticipationPricingData, start::Int, trig_r::Dict{Int, Float64}, ra::Float64, T::Float64, cur::Int)
-    (start == 0 || !isfinite(ra)) && return false
+    (start == 0 || !isfinite(ra) || NA_RELAX[]) && return false
     for t in pd.start_triggers[start]
         tr = pd.triggers[t]
         tr.destination == cur && continue                 # only a later visit could, and it would ride longer
@@ -227,7 +256,7 @@ function _na_candidate_next_nodes(label::NoAnticipationLabel, pd::NoAnticipation
     T, t0, cur, root = label.time, label.start_time, label.current, label.route[1]
     act = label.activated_reward_layers
     cand = Set{Int}()
-    if label.start != 0                                # triggers that could still improve; none and none yet: dead
+    if label.start != 0 && !NA_RELAX[]                 # triggers that could still improve; none and none yet: dead
         open = false
         if isfinite(label.root_age)
             for t in pd.start_triggers[label.start]
@@ -243,6 +272,16 @@ function _na_candidate_next_nodes(label::NoAnticipationLabel, pd::NoAnticipation
     end
     # pickups: a stop reached by the pickup deadline where some rider (unpaid layer) has arrived by then
     deadline = _na_pickup_deadline(pd)
+    if NA_RELAX[] && T <= deadline + 1e-9               # relaxation: also arrive and wait for a later walker
+        for j in pd.origins
+            j == cur && continue
+            arr = T + _na_travel(pd, cur, j)
+            arr <= deadline + 1e-9 || continue
+            for (k, _w) in enumerate(_na_wait_targets(label, pd, j, arr))
+                push!(cand, j + _NA_WAIT_CODE * k)
+            end
+        end
+    end
     if T <= deadline + 1e-9
         for j in pd.origins
             j == cur && continue
@@ -285,8 +324,9 @@ function _na_candidate_next_nodes(label::NoAnticipationLabel, pd::NoAnticipation
 end
 
 # ── extension ─────────────────────────────────────────────────────────────────
-function _na_extend(label::NoAnticipationLabel, next::Int, pd::NoAnticipationPricingData)::NoAnticipationLabel
+function _na_extend(label::NoAnticipationLabel, code::Int, pd::NoAnticipationPricingData)::NoAnticipationLabel
     base = pd.base
+    next = code % _NA_WAIT_CODE; kwait = code ÷ _NA_WAIT_CODE
     travel = _na_travel(pd, label.current, next)
     T = label.time + travel
     t0 = label.start_time
@@ -322,6 +362,14 @@ function _na_extend(label::NoAnticipationLabel, next::Int, pd::NoAnticipationPri
         end
     end
     layers = isempty(new_layers) ? label.activated_reward_layers : union(label.activated_reward_layers, new_layers)
+    # relaxation: drop off at arrival, then wait (priced) for the kwait-th later walker at `next`
+    wait = 0.0
+    if kwait > 0
+        W = _na_wait_targets(label, pd, next, T)[kwait]
+        wait = W - T
+        T = W
+        travel += wait                                   # clocks age, and the route pays, through the wait
+    end
     # age the clocks; a visit by the pickup deadline opens a fresh clock at `next`
     ages = Dict{Int, Float64}()
     for (j, a) in label.station_age
@@ -665,7 +713,7 @@ _pricing_label_priority(ctx::NoAnticipationSearchContext, label::NoAnticipationL
 # not a layer sum), so equal signatures mean equal reduced cost up to tau
 function _pricing_best_signature(ctx::NoAnticipationSearchContext, label::NoAnticipationLabel)
     isempty(label.activated_reward_layers) && return nothing
-    label.start == 0 && return (label.activated_reward_layers, 0, 0.0)
+    (label.start == 0 || NA_RELAX[]) && return (label.activated_reward_layers, 0, 0.0)
     pen, p, r = _na_trigger_penalty(label, ctx.pricing_data)
     isfinite(pen) || return nothing
     return (label.activated_reward_layers, p, r)
