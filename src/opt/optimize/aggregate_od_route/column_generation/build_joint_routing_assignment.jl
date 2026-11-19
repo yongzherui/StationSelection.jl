@@ -180,6 +180,8 @@ function _build_joint_routing_assignment_model(
     m[:joint_routing_assignment_pricing_mode] = something(pricing.mode, :exact)
     m[:joint_routing_assignment_first_boarding] = pricing.first_boarding
     m[:joint_routing_assignment_max_pickup_time] = pricing.max_pickup_time
+    m[:joint_routing_assignment_pickup_window] = pricing.pickup_window
+    m[:joint_routing_assignment_max_columns_per_scenario] = pricing.max_columns_per_scenario
     # Precomputed once here (not per pricing call): pricing needs a dense node list and a
     # full station-to-station routing-cost table, exactly what the discarded MasterData
     # cached -- caching them on `m` avoids re-deriving an O(n^2) table every CG iteration.
@@ -390,5 +392,9 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_guide_routes = Int(m[:joint_routing_assignment_relaxed_cluster_guide_routes]),
         relaxed_cluster_macro_count = macro_count,
         relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
+        first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol,
+        max_pickup_time = Float64(m[:joint_routing_assignment_max_pickup_time]),
+        pickup_window = m[:joint_routing_assignment_pickup_window]::Symbol,
+        max_columns_per_scenario = Int(get(m.obj_dict, :joint_routing_assignment_max_columns_per_scenario, 0)),
     )
 end

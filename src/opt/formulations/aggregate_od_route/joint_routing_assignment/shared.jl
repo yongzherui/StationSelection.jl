@@ -74,10 +74,11 @@ get_unserved_penalty(f) = hasproperty(f, :unserved_penalty) ? f.unserved_penalty
 """
     _validate_demand_weighting(mode::Symbol)
 
-`:count` (Q = requests per OD group and scenario) or `:unit` (Q = 1).
+`:count` (Q = requests per OD group and scenario), `:unit` (Q = 1), or `:request` (2026-11-18: one group per
+request row, Q = 1, carrying its request time for `:exact_no_anticipation`).
 """
 function _validate_demand_weighting(mode::Symbol)
-    mode in (:count, :unit) || throw(ArgumentError(
-        "demand_weighting must be :count or :unit, got :$mode"))
+    mode in (:count, :unit, :request) || throw(ArgumentError(
+        "demand_weighting must be :count, :unit or :request, got :$mode"))
     return mode
 end

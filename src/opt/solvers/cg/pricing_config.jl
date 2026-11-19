@@ -122,6 +122,8 @@ struct CGPricingConfig
     relaxed_cluster_aligned_subset_max::Int
     first_boarding::Symbol
     max_pickup_time::Float64
+    pickup_window::Symbol
+    max_columns_per_scenario::Int
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -134,6 +136,8 @@ struct CGPricingConfig
             relaxed_cluster_aligned_subset_max::Int=15,
             first_boarding::Symbol=:start_now,
             max_pickup_time::Real=900.0,
+            pickup_window::Symbol=:route,
+            max_columns_per_scenario::Int=0,
         )
         _cg_validate_pricing_mode(mode, "mode")
         # `first_boarding` is read only by `mode = :exact_no_anticipation`
@@ -148,6 +152,16 @@ struct CGPricingConfig
         # G1 for `:exact_no_anticipation`: a rider boards within `max_pickup_time` of the request
         # (the simulator's `max_pickup_time`, 900 s); read by no other pricer.
         max_pickup_time > 0 || throw(ArgumentError("max_pickup_time must be > 0, got $(max_pickup_time)"))
+        # `:exact_no_anticipation` only (2026-11-18): `:route` opens pickup clocks only within `max_wait_time` of the
+        # vehicle leaving its first stop (the original rule, every request at t = 0); `:rider` drops that route-level
+        # window and keeps each rider's own G1, board <= request + max_pickup_time (for real request times,
+        # `demand_weighting = :request`).
+        # Partial pricing (2026-11-18): a scenario's label search stops once it holds this many improving, novel
+        # columns (0 = search every round to exhaustion, the old behaviour). Safe for optimality: a round that stops
+        # early has found columns, so CG continues; only a round that finds none can end the loop, and that round
+        # has searched to exhaustion (or to its time limit, which never certifies).
+        max_columns_per_scenario >= 0 || throw(ArgumentError("max_columns_per_scenario must be >= 0"))
+        pickup_window in (:route, :rider) || throw(ArgumentError("pickup_window must be :route or :rider, got $(repr(pickup_window))"))
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
         # `:relaxed_cluster` never reports its own exhaustion -- the only thing it can
         # exhaust is the relaxation, and that is a full-universe certificate that ends the
@@ -237,7 +251,8 @@ struct CGPricingConfig
             mode, warm_start_mode, compensated_dominance,
             relaxed_cluster_count, relaxed_cluster_max_count,
             relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
-            relaxed_cluster_aligned_subset_max, first_boarding, Float64(max_pickup_time),
+            relaxed_cluster_aligned_subset_max, first_boarding, Float64(max_pickup_time), pickup_window,
+            max_columns_per_scenario,
         )
     end
 end

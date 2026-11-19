@@ -220,6 +220,7 @@ function _pricing_build_scenario_context(
             pricing_data, data, mapping, s, detour_factor,
             m[:joint_routing_assignment_first_boarding]::Symbol,
             Float64(m[:joint_routing_assignment_max_pickup_time]),
+            m[:joint_routing_assignment_pickup_window]::Symbol,
         )
         return NoAnticipationSearchContext(na_data), existing
     end
