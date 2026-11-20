@@ -60,6 +60,17 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
   assertion fires. LAR stays `:unit`; the Clustering maps keep true counts.
 - **Joint LAR `vehicle_capacity`** (`nothing` = uncapacitated): requests above capacity are dropped from the
   instance and every route keeps at most that many on board; priced by `:exact_capacitated`.
+- **Heuristic capacity for M3 (`JOINT_SPLIT_CAPACITY`, 2026-11-20) -- a HEURISTIC, not exact capacitated pricing.**
+  Only with `CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker)`. Set
+  `StationSelection.JOINT_SPLIT_CAPACITY[] = 18` (seats; 0 = off, the default) before `run_opt`, and give the requests
+  DataFrame a `:pax` column (passengers per request; 1 per request without it). Pricing is unchanged M3; every LP column
+  over capacity on some leg is also split (first-fit interval packing of its OD groups, groups never split, each piece
+  drives the induced stop subsequence and is checked against the M3 timing rules); the integer recovery keeps only
+  columns within capacity (a lone group over capacity allowed). What is exact: the final plan's routes are within
+  capacity and M3-feasible. What is heuristic: capacity-feasible routes other than these splits are never priced, and the
+  LP bound is the uncapacitated one. Counters in `JOINT_SPLIT_STATS`. Code and full description:
+  `src/opt/optimize/aggregate_od_route/column_generation/capacity_split.jl`. Study:
+  `experiments/2026-11-17_g2_time_blind` (`scripts/price_capsplit.jl`, `SPLIT_CAP=18`).
 
 ### Service limits on the selection side
 

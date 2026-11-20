@@ -1,7 +1,7 @@
 """
-Heuristic vehicle capacity for Joint LAR column generation under M3 (`:exact_no_anticipation`,
-`first_boarding = :after_last_walker`). Experiment branch exp/m3-capacity-split (2026-11-20, study
-experiments/2026-11-17_g2_time_blind); not exact capacitated pricing.
+HEURISTIC vehicle capacity for Joint LAR column generation under M3 (`:exact_no_anticipation`,
+`first_boarding = :after_last_walker`). Not exact capacitated pricing (that is `:exact_capacitated`). Added 2026-11-20
+(study experiments/2026-11-17_g2_time_blind); usage in the package CLAUDE.md.
 
 Off unless `JOINT_SPLIT_CAPACITY[] > 0` (seats per vehicle) when the master is built. Then:
 
