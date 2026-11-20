@@ -48,6 +48,9 @@ seven as the monolith, so a subproblem can equally be derived from a master (whi
 original monolith).
 """
 function _joint_routing_assignment_shared_fields(formulation)
+    # The master and subproblem group by OD pair only (`demand_groups = :rider` is column generation only).
+    _joint_getfield_or(formulation, :demand_groups, :od_pair) === :od_pair || throw(ArgumentError(
+        "demand_groups = :rider is supported by column generation only, not by Benders"))
     return (
         route_regularization_weight = formulation.route_regularization_weight,
         walk_cost_weight = formulation.walk_cost_weight,
@@ -62,10 +65,24 @@ end
 """
     _validate_demand_weighting(mode::Symbol)
 
-`:count` (Q = requests per OD group and scenario) or `:unit` (Q = 1).
+`:count` (Q = requests per demand group and scenario), `:unit` (Q = 1) or `:pax` (Q = passengers per
+demand group, the requests' `:pax` column summed; 1 per request without it).
 """
 function _validate_demand_weighting(mode::Symbol)
-    mode in (:count, :unit) || throw(ArgumentError(
-        "demand_weighting must be :count or :unit, got :$mode"))
+    mode in (:count, :unit, :pax) || throw(ArgumentError(
+        "demand_weighting must be :count, :unit or :pax, got :$mode"))
+    return mode
+end
+
+"""
+    _validate_demand_groups(mode::Symbol)
+
+`:od_pair` (one demand group per OD pair and scenario, the default) or `:rider` (one demand group per request).
+"""
+_joint_getfield_or(x, name::Symbol, default) = hasfield(typeof(x), name) ? getfield(x, name) : default
+
+function _validate_demand_groups(mode::Symbol)
+    mode in (:od_pair, :rider) || throw(ArgumentError(
+        "demand_groups must be :od_pair or :rider, got :$mode"))
     return mode
 end

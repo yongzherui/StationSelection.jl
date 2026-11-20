@@ -31,10 +31,14 @@ See `AggregateODRouteBaseFormulation`'s docstring for the shared subset:
 `route_regularization_weight`, `walk_cost_weight`, `repositioning_time`,
 `pickup_deadline_s`, `ride_time_limit_ratio`, and `max_stops`.
 
-`demand_weighting` (`:count`, the default since 2026-11-03, or `:unit`) sets the demand `Q`
-of each OD group `(s,p)`: `:count` is the number of requests on that OD pair in scenario `s`,
+`demand_weighting` (`:count`, the default since 2026-11-03, `:unit` or `:pax`) sets the demand `Q`
+of each demand group `(s,p)`: `:count` is the number of requests in the group,
 `:unit` collapses every group to 1 (the family's only behaviour from 2026-09-15 to
-2026-11-03). `Q` multiplies every walking term -- column cost, direct-walk cost, the
+2026-11-03), `:pax` is the group's passengers (the requests' `:pax` column; 2026-11-20).
+
+`demand_groups` (`:od_pair`, the default, or `:rider`; 2026-11-20) sets what a demand group is:
+all requests of one OD pair in a scenario (they ride one route together), or each request alone
+(riders of one OD pair may ride different routes; every rider still requests at the scenario start). `Q` multiplies every walking term -- column cost, direct-walk cost, the
 pricer's candidate reward and the Benders completions -- and nothing else: a route's travel
 is charged once whatever it carries (capacity is unlimited), and coverage stays `>= 1`.
 
@@ -90,6 +94,10 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
     # carry them), every route must keep at most `vehicle_capacity` on board on every arc,
     # and CG prices with `:exact_capacitated`. CGSolver only.
     vehicle_capacity::Union{Nothing, Int}
+    # How requests form demand groups (2026-11-20): `:od_pair` (default, all requests of one OD pair in a
+    # scenario are one group and ride one route) or `:rider` (each request is its own group, so riders of one
+    # OD pair may ride different routes). See "Demand groups" on `AggregateODRouteMap`.
+    demand_groups::Symbol
 
     function AggregateODRouteJointRoutingAssignmentFormulation(;
             route_regularization_weight::Number=1.0,
@@ -100,11 +108,13 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             max_stops::Union{Nothing, Int}=nothing,
             demand_weighting::Symbol=:count,
             vehicle_capacity::Union{Nothing, Integer}=nothing,
+            demand_groups::Symbol=:od_pair,
             detour_factor::Union{Number, Nothing}=nothing,   # old name of ride_time_limit_ratio
         )
         ride_time_limit_ratio = something(_renamed_kwarg(ride_time_limit_ratio, detour_factor,
                                                          :ride_time_limit_ratio, :detour_factor), 1.5)
         _validate_demand_weighting(demand_weighting)
+        _validate_demand_groups(demand_groups)
         isnothing(vehicle_capacity) || vehicle_capacity >= 1 || throw(ArgumentError(
             "vehicle_capacity must be nothing (unlimited) or >= 1, got $vehicle_capacity"))
         resolved_max_stops = _validate_aggregate_od_route_formulation_fields(
@@ -120,6 +130,7 @@ struct AggregateODRouteJointRoutingAssignmentFormulation <: AbstractFormulation
             resolved_max_stops,
             demand_weighting,
             isnothing(vehicle_capacity) ? nothing : Int(vehicle_capacity),
+            demand_groups,
         )
     end
 end

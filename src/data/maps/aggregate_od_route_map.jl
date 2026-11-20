@@ -51,13 +51,21 @@ of the raw `(s,o,d)` triple. `Q_s[s]::Vector{Int}` is dense and parallel to
 `Omega_s[s]`. `valid_jk_pairs` stays keyed by the raw
 `(o,d)` tuple -- station-pair feasibility depends on geography, not on `s`/`p`.
 
+# Demand groups (`_aggregate_od_route_demand_groups`, 2026-11-20)
+
+By default (`:od_pair`) a demand group is every request of one OD pair in scenario `s`; the whole
+group rides one route. The Joint formulation's `demand_groups = :rider` makes each request its own
+group, so `Omega_s[s]` repeats an `(o,d)` once per request and riders of one OD pair can ride different
+routes. `group_rows_s[s][p]` lists the request rows of group `p` either way. Nothing else changes:
+every request in a scenario is still taken to request at the scenario start.
+
 # Demand per OD group: `Q_s[s][p]` (`_aggregate_od_route_demand_weighting`)
 
-`Q_s[s][p]` is the number of requests on OD pair `p` in scenario `s` (`:count`) or 1
-(`:unit`). The Joint formulation chooses through its `demand_weighting` field, **default
+`Q_s[s][p]` is the number of requests in group `p` of scenario `s` (`:count`), 1
+(`:unit`), or the group's passengers (`:pax`, the requests' `:pax` column; Joint only, 2026-11-20). The Joint formulation chooses through its `demand_weighting` field, **default
 `:count` since 2026-11-03**; `AggregateODRouteBaseFormulation` and the feasibility
-formulation stay `:unit` (Base's own CG pricer was never made demand-aware). `pax_num` is
-not read: one request is one rider, as in the Clustering maps.
+formulation stay `:unit` (Base's own CG pricer was never made demand-aware). `pax_num` (the
+`:pax` column) is read only by `:pax`.
 
 History: from 2026-09-15 (`6000078`) to 2026-11-03 the whole family was `:unit`
 unconditionally. That retired a pricer/master drift (the master multiplied walking by `Q`,
@@ -78,6 +86,8 @@ mutable struct AggregateODRouteMap <: AbstractClusteringMap
     array_idx_to_scenario_label::Vector{String}
     Omega_s::Dict{Int, Vector{Tuple{Int, Int}}}
     Q_s::Dict{Int, Vector{Int}}
+    # Request rows (of `scenarios[s].requests`) in each demand group, parallel to `Omega_s[s]`.
+    group_rows_s::Dict{Int, Vector{Vector{Int}}}
     valid_jk_pairs::Dict{Tuple{Int, Int}, Vector{Tuple{Int, Int}}}
     active_jk_s::Dict{Int, Vector{Tuple{Int, Int}}}
     columns::Vector{AggregateODRouteColumn}
@@ -196,6 +206,38 @@ _aggregate_od_route_allow_walk_only(::AggregateODRouteBaseFormulation) = false
 _aggregate_od_route_allow_walk_only(::AggregateODRouteFeasibilityFormulation) = false
 
 """
+    _aggregate_od_route_demand_groups(formulation) -> Symbol
+
+`:od_pair` or `:rider` (see "Demand groups" on `AggregateODRouteMap`). Only the joint monolith has the
+field; every other formulation groups by OD pair.
+"""
+_aggregate_od_route_demand_groups(formulation) = :od_pair
+_aggregate_od_route_demand_groups(f::AggregateODRouteJointRoutingAssignmentFormulation) = f.demand_groups
+
+"""
+    _aggregate_od_route_demand_groups_of(scenario_data, demand_groups) -> Vector{Pair{Tuple{Int,Int}, Vector{Int}}}
+
+The scenario's demand groups as `(o, d) => request rows`, sorted by `(o, d)` (then by row under `:rider`).
+"""
+function _aggregate_od_route_demand_groups_of(scenario_data::ScenarioData, demand_groups::Symbol)
+    req = scenario_data.requests
+    _require_indexed_request_columns(req)
+    if demand_groups === :rider
+        return sort!([(Int(r.origin_idx), Int(r.dest_idx)) => [i] for (i, r) in enumerate(eachrow(req))];
+                     by = g -> (g[1], g[2][1]))
+    end
+    rows = Dict{Tuple{Int, Int}, Vector{Int}}()
+    for (i, r) in enumerate(eachrow(req))
+        push!(get!(rows, (Int(r.origin_idx), Int(r.dest_idx)), Int[]), i)
+    end
+    return sort!([od => rows[od] for od in keys(rows)]; by = first)
+end
+
+"Passengers per request row: the `:pax` column, or 1 per request without it."
+_aggregate_od_route_request_pax(scenario_data::ScenarioData) =
+    hasproperty(scenario_data.requests, :pax) ? Int.(scenario_data.requests.pax) : ones(Int, nrow(scenario_data.requests))
+
+"""
     _aggregate_od_route_demand_weighting(formulation) -> Symbol
 
 `:count` or `:unit`, the `Q_s` rule (see "Demand per OD group" on `AggregateODRouteMap`).
@@ -287,19 +329,24 @@ function create_aggregate_od_route_map(
 
     Omega_s = Dict{Int, Vector{Tuple{Int, Int}}}()
     Q_s = Dict{Int, Vector{Int}}()
+    group_rows_s = Dict{Int, Vector{Vector{Int}}}()
     demand_weighting = _aggregate_od_route_demand_weighting(formulation)
+    demand_groups = _aggregate_od_route_demand_groups(formulation)
     capacity = _aggregate_od_route_vehicle_capacity(formulation)
     all_od_pairs = Set{Tuple{Int, Int}}()
 
     for (s, scenario_data) in enumerate(data.scenarios)
-        od_count = compute_scenario_od_count(scenario_data)
+        groups = _aggregate_od_route_demand_groups_of(scenario_data, demand_groups)
         # With a vehicle capacity, a group of more requests than seats can ride no route: it
         # is dropped from the instance (owner's choice, 2026-11-14), not left uncoverable.
-        Omega_s[s] = sort!([od for od in keys(od_count) if isnothing(capacity) || od_count[od] <= capacity])
+        isnothing(capacity) || filter!(g -> length(g[2]) <= capacity, groups)
+        Omega_s[s] = first.(groups)
+        group_rows_s[s] = last.(groups)
         # See "Demand per OD group" on `AggregateODRouteMap`.
-        Q_s[s] = demand_weighting === :count ?
-            [od_count[od] for od in Omega_s[s]] :
-            ones(Int, length(Omega_s[s]))
+        pax = _aggregate_od_route_request_pax(scenario_data)
+        Q_s[s] = demand_weighting === :count ? length.(group_rows_s[s]) :
+                 demand_weighting === :pax ? [sum(pax[r] for r in rows) for rows in group_rows_s[s]] :
+                 ones(Int, length(Omega_s[s]))
         union!(all_od_pairs, Omega_s[s])
     end
 
@@ -325,6 +372,7 @@ function create_aggregate_od_route_map(
         array_idx_to_scenario_label,
         Omega_s,
         Q_s,
+        group_rows_s,
         valid_jk_pairs,
         active_jk_s,
         AggregateODRouteColumn[],

@@ -78,12 +78,7 @@ Requests per demand group, parallel to `mapping.Omega_s[s]`, whatever `demand_we
 says (`Q_s` is 1 under `:unit`): the seats a group takes in a capacitated vehicle.
 """
 function _joint_routing_assignment_group_requests(data::StationSelectionData, mapping::AggregateODRouteMap)
-    out = Dict{Int, Vector{Int}}()
-    for s in 1:n_scenarios(data)
-        od_count = compute_scenario_od_count(data.scenarios[s])
-        out[s] = [od_count[od] for od in mapping.Omega_s[s]]
-    end
-    return out
+    return Dict(s => length.(mapping.group_rows_s[s]) for s in 1:n_scenarios(data))
 end
 
 """

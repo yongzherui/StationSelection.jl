@@ -31,6 +31,12 @@
     m3(cap) = CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, vehicle_capacity = cap)
     solver(cap) = CGSolver(config = SolverOptions(silent = true), pricing = m3(cap), recover_integer_solution = true)
 
+    function chosen(res)
+        m = res.model
+        cols = m[:joint_routing_assignment_columns]
+        return [cols[id] for (id, v) in m[:joint_routing_assignment_theta] if value(v) > 0.5]
+    end
+
     @testset "config" begin
         @test m3(18).vehicle_capacity == 18
         @test isnothing(m3(nothing).vehicle_capacity)
@@ -68,11 +74,40 @@
         @test StationSelection._joint_split_m3_check(m, data, mapping, 1, route, items[[1]])[1]
     end
 
-    function chosen(res)
-        m = res.model
-        cols = m[:joint_routing_assignment_columns]
-        return [cols[id] for (id, v) in m[:joint_routing_assignment_theta] if value(v) > 0.5]
+    @testset "demand_groups = :rider, demand_weighting = :pax" begin
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = 900.0,
+                                                                                    demand_groups = :od)
+        @test_throws ArgumentError AggregateODRouteJointRoutingAssignmentFormulation(pickup_deadline_s = 900.0,
+                                                                                    demand_weighting = :riders)
+        riderf = AggregateODRouteJointRoutingAssignmentFormulation(
+            route_regularization_weight = 10.0, walk_cost_weight = 0.1, repositioning_time = 20.0,
+            pickup_deadline_s = 900.0, ride_time_limit_ratio = 2.0, max_stops = 10,
+            demand_groups = :rider, demand_weighting = :pax)
+        data, problem = problem_for(reqs)
+        mapping = build_model(problem, riderf, solver(18)).mapping
+        @test length(mapping.Omega_s[1]) == length(reqs)                      # one group per request
+        @test count(==((1, 4)), mapping.Omega_s[1]) == 4
+        @test sort(mapping.Q_s[1]) == sort([r[3] for r in reqs])               # Q = that request's passengers
+        @test sort(vcat(mapping.group_rows_s[1]...)) == collect(1:length(reqs))
+        # OD pair groups: same requests, one group per OD pair, Q = requests (:count) or passengers (:pax)
+        odm = build_model(problem, formulation, solver(18)).mapping
+        @test length(odm.Omega_s[1]) == 4 && odm.Q_s[1][findfirst(==((1, 4)), odm.Omega_s[1])] == 4
+        # One OD pair with 7 orders of 3 (21 passengers): grouped by OD pair it can only ride as one group of
+        # 21 (the heuristic lets a lone group exceed capacity); grouped by rider, every route is within 18.
+        reqs21 = vcat(fill((1, 4, 3), 7), fill((2, 4, 2), 2))
+        data21, problem21 = problem_for(reqs21)
+        byod = run_opt(problem21, formulation, solver(18))
+        byrider = run_opt(problem21, riderf, solver(18))
+        @test byrider.termination_status in (SOLVE_OPTIMAL, SOLVE_FEASIBLE)
+        load(res) = maximum(joint_split_column_max_load(c, joint_split_group_pax(data21, res.mapping)) for c in chosen(res))
+        @test load(byod) == 21
+        @test load(byrider) <= 18
+        st = byrider.metadata["cg_split_stats"]
+        @test get(st, "check_fail_priced", 0) == 0 && get(st, "check_fail_seed", 0) == 0
+        # Benders groups by OD pair only
+        @test_throws ArgumentError StationSelection._joint_routing_assignment_shared_fields(riderf)
     end
+
 
     @testset "end to end: plan within capacity, self-test clean" begin
         data, problem = problem_for(reqs)

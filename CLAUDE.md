@@ -60,6 +60,12 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
   assertion fires. LAR stays `:unit`; the Clustering maps keep true counts.
 - **Joint LAR `vehicle_capacity`** (`nothing` = uncapacitated): requests above capacity are dropped from the
   instance and every route keeps at most that many on board; priced by `:exact_capacitated`.
+- **Joint LAR `demand_groups` / `demand_weighting = :pax`** (2026-11-20): `demand_groups = :rider` makes every request
+  its own demand group (riders of one OD pair may ride different routes; all still request at the scenario start);
+  default `:od_pair` (all requests of an OD pair in a scenario ride one route). `demand_weighting = :pax` sets Q to
+  the group's passengers (the requests' `:pax` column). Owner's capacitated setting: `demand_groups = :rider,
+  demand_weighting = :pax` with the heuristic M3 `vehicle_capacity` below. Column generation only (Benders refuses
+  `:rider`). `mapping.group_rows_s[s][p]` lists each group's request rows.
 - **Heuristic capacity for M3 (`CGPricingConfig.vehicle_capacity`, 2026-11-20) -- a HEURISTIC, not exact capacitated
   pricing.** `CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, vehicle_capacity = 18)`
   (passengers per vehicle; `nothing` = off; any other mode is rejected). Not the formulation's `vehicle_capacity` above (exact, in requests); setting that with M3 is an error. Give the requests DataFrame a `:pax` column

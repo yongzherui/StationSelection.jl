@@ -57,14 +57,8 @@ Passengers per demand group, parallel to `mapping.Omega_s[s]` (sum of the reques
 function joint_split_group_pax(data::StationSelectionData, mapping::AggregateODRouteMap)
     out = Dict{Int, Vector{Int}}()
     for s in 1:n_scenarios(data)
-        req = data.scenarios[s].requests
-        haspax = hasproperty(req, :pax)
-        pax = Dict{Tuple{Int, Int}, Int}()
-        for row in eachrow(req)
-            od = (row.origin_idx, row.dest_idx)
-            pax[od] = get(pax, od, 0) + (haspax ? Int(row.pax) : 1)
-        end
-        out[s] = [pax[od] for od in mapping.Omega_s[s]]
+        pax = _aggregate_od_route_request_pax(data.scenarios[s])
+        out[s] = [sum(pax[r] for r in rows) for rows in mapping.group_rows_s[s]]
     end
     return out
 end
