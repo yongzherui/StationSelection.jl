@@ -108,9 +108,9 @@ function _cg_build_metadata(
         # left only on the model is invisible to exactly the runs that use recovery.
         "cg_relaxed_cluster_guide_stats" => copy(get(JuMP.object_dictionary(m),
             :relaxed_cluster_guide_stats, Any[])),
-        # Heuristic M3 capacity (`CGPricingConfig.split_capacity`; nothing = off). NOT copied: the
+        # Heuristic M3 capacity (`CGPricingConfig.vehicle_capacity`; nothing = off). NOT copied: the
         # integer recovery shares this Dict and adds its `mip_columns_*` counts after this point.
-        "cg_split_capacity" => get(JuMP.object_dictionary(m), :joint_split_capacity, nothing),
+        "cg_vehicle_capacity" => get(JuMP.object_dictionary(m), :joint_vehicle_capacity, nothing),
         "cg_split_stats" => get(JuMP.object_dictionary(m), :joint_split_stats, nothing),
     )
 end

@@ -1,4 +1,4 @@
-@testset "Joint M3: heuristic capacity by column splitting (split_capacity)" begin
+@testset "Joint M3: heuristic capacity by column splitting (vehicle_capacity)" begin
     using DataFrames
     using Dates
     using JuMP
@@ -28,16 +28,24 @@
     formulation = AggregateODRouteJointRoutingAssignmentFormulation(
         route_regularization_weight = 10.0, walk_cost_weight = 0.1, repositioning_time = 20.0,
         pickup_deadline_s = 900.0, ride_time_limit_ratio = 2.0, max_stops = 10)
-    m3(cap) = CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, split_capacity = cap)
+    m3(cap) = CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, vehicle_capacity = cap)
     solver(cap) = CGSolver(config = SolverOptions(silent = true), pricing = m3(cap), recover_integer_solution = true)
 
     @testset "config" begin
-        @test m3(18).split_capacity == 18
-        @test isnothing(m3(nothing).split_capacity)
+        @test m3(18).vehicle_capacity == 18
+        @test isnothing(m3(nothing).vehicle_capacity)
         @test_throws ArgumentError m3(0)
-        @test_throws ArgumentError CGPricingConfig(mode = :exact, split_capacity = 18)
+        @test_throws ArgumentError CGPricingConfig(mode = :exact, vehicle_capacity = 18)
         @test_throws ArgumentError CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :start_now,
-                                                   split_capacity = 18)
+                                                   vehicle_capacity = 18)
+    end
+
+    @testset "the formulation's exact vehicle_capacity cannot be combined with M3" begin
+        _, problem = problem_for(reqs)
+        capf = AggregateODRouteJointRoutingAssignmentFormulation(
+            route_regularization_weight = 10.0, walk_cost_weight = 0.1, repositioning_time = 20.0,
+            pickup_deadline_s = 900.0, ride_time_limit_ratio = 2.0, max_stops = 10, vehicle_capacity = 18)
+        @test_throws ArgumentError build_model(problem, capf, solver(nothing))
     end
 
     @testset "M3 check: a subsequence of a feasible route is not always feasible" begin
@@ -75,10 +83,10 @@
         pax = joint_split_group_pax(data, capd.mapping)
         # this instance pools past 18 when uncapacitated, so the split has work to do
         @test maximum(joint_split_column_max_load(c, pax) for c in chosen(free)) > 18
-        @test isnothing(free.metadata["cg_split_capacity"])
+        @test isnothing(free.metadata["cg_vehicle_capacity"])
         @test all(joint_split_column_max_load(c, pax) <= 18 for c in chosen(capd))
         st = capd.metadata["cg_split_stats"]
-        @test capd.metadata["cg_split_capacity"] == 18
+        @test capd.metadata["cg_vehicle_capacity"] == 18
         @test get(st, "check_fail_priced", 0) == 0 && get(st, "check_fail_seed", 0) == 0
         @test get(st, "over_capacity_columns", 0) > 0 && get(st, "split_ok", 0) > 0
         @test get(st, "mip_columns_dropped", 0) > 0        # recovery counts reach the metadata

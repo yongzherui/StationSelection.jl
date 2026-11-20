@@ -225,7 +225,7 @@ function _build_joint_routing_assignment_model(
     )
     m[:joint_routing_assignment_l] = l
     # heuristic M3 capacity by column splitting (capacity_split.jl); CGPricingConfig checks the mode
-    _joint_split_stash!(m, data, mapping, pricing.split_capacity)
+    _joint_split_stash!(m, data, mapping, pricing.vehicle_capacity)
     m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
     # The pricer is the SOLVER's choice (`CGSolver.pricing`, a `CGPricingConfig`), resolved
     # to a concrete symbol here and stashed so every later pricing call -- and
@@ -419,7 +419,7 @@ function _aggregate_od_route_integer_recovery_build(
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
     # heuristic M3 capacity: the MIP keeps only columns within capacity (or one group alone)
     if _joint_split_on(m)
-        pax = m[:joint_split_group_pax]; cap = Int(m[:joint_split_capacity])
+        pax = m[:joint_split_group_pax]; cap = Int(m[:joint_vehicle_capacity])
         n0 = length(initial_columns)
         initial_columns = [c for c in initial_columns if _joint_split_column_ok(c, pax, cap)]
         _joint_split_count!(m, "mip_columns_dropped", n0 - length(initial_columns))
@@ -464,6 +464,6 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
         first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol,
         first_stop_walk_limit = m[:joint_routing_assignment_first_stop_walk_limit]::Float64,
-        split_capacity = get(m.obj_dict, :joint_split_capacity, nothing),
+        vehicle_capacity = get(m.obj_dict, :joint_vehicle_capacity, nothing),
     )
 end

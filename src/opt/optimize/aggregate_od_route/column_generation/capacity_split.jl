@@ -5,7 +5,7 @@ HEURISTIC vehicle capacity for Joint LAR column generation under M3 (`:exact_no_
 `first_boarding = :after_last_walker`). Not exact capacitated pricing (that is `:exact_capacitated`). Added 2026-11-20
 (study experiments/2026-11-17_g2_time_blind); usage in the package CLAUDE.md.
 
-Off unless `CGPricingConfig(split_capacity = C)` (passengers per vehicle; `nothing` = off). `CGPricingConfig`
+Off unless `CGPricingConfig(vehicle_capacity = C)` (passengers per vehicle; `nothing` = off). `CGPricingConfig`
 accepts it only with `mode = :exact_no_anticipation, first_boarding = :after_last_walker`. Then:
 
 1. **Passengers, not orders.** A demand group's load is the sum of its requests' `:pax` column (1 per
@@ -47,7 +47,7 @@ vehicle may drive); everything else is wiring.
 _joint_split_count!(m::JuMP.Model, key::String, n::Int=1) =
     (d = m[:joint_split_stats]; d[key] = get(d, key, 0) + n; nothing)
 
-_joint_split_on(m::JuMP.Model) = !isnothing(get(m.obj_dict, :joint_split_capacity, nothing))
+_joint_split_on(m::JuMP.Model) = !isnothing(get(m.obj_dict, :joint_vehicle_capacity, nothing))
 
 """
     joint_split_group_pax(data, mapping) -> Dict{Int, Vector{Int}}
@@ -72,7 +72,7 @@ end
 "Stash the capacity (`nothing` = off), passengers per group and the counters on the master (every joint CG build)."
 function _joint_split_stash!(m::JuMP.Model, data::StationSelectionData, mapping::AggregateODRouteMap,
                              cap::Union{Nothing, Int})
-    m[:joint_split_capacity] = cap
+    m[:joint_vehicle_capacity] = cap
     m[:joint_split_group_pax] = isnothing(cap) ? nothing : joint_split_group_pax(data, mapping)
     m[:joint_split_stats] = Dict{String, Int}()
     return nothing
@@ -164,7 +164,7 @@ end
 The capacity split of an over-capacity column (file docstring, points 2-3). Empty when no packing passes.
 """
 function joint_split_column(m::JuMP.Model, data::StationSelectionData, mapping::AggregateODRouteMap, column)
-    cap = Int(m[:joint_split_capacity]); pax = m[:joint_split_group_pax]
+    cap = Int(m[:joint_vehicle_capacity]); pax = m[:joint_split_group_pax]
     rho = Float64(m[:joint_routing_assignment_repositioning_time])
     s = Int(column.metadata["scenario"]); route = column.route
     pos = column.metadata["assignment_positions"]
@@ -211,7 +211,7 @@ pieces added. No-op when the split is off or the master is the integer recovery.
 function _joint_split_pass!(m::JuMP.Model, data::StationSelectionData, mapping::AggregateODRouteMap, columns)
     _joint_split_on(m) || return 0
     Bool(m[:joint_routing_assignment_relax_integrality]) || return 0
-    cap = Int(m[:joint_split_capacity]); pax = m[:joint_split_group_pax]
+    cap = Int(m[:joint_vehicle_capacity]); pax = m[:joint_split_group_pax]
     added = 0
     for column in columns
         # self-test of the M3 check on every column entering the master (seeds and priced)

@@ -60,9 +60,9 @@ Project names in bold (see `../CLAUDE.md`, "Terminology").
   assertion fires. LAR stays `:unit`; the Clustering maps keep true counts.
 - **Joint LAR `vehicle_capacity`** (`nothing` = uncapacitated): requests above capacity are dropped from the
   instance and every route keeps at most that many on board; priced by `:exact_capacitated`.
-- **Heuristic capacity for M3 (`CGPricingConfig.split_capacity`, 2026-11-20) -- a HEURISTIC, not exact capacitated
-  pricing.** `CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, split_capacity = 18)`
-  (passengers per vehicle; `nothing` = off; any other mode is rejected). Give the requests DataFrame a `:pax` column
+- **Heuristic capacity for M3 (`CGPricingConfig.vehicle_capacity`, 2026-11-20) -- a HEURISTIC, not exact capacitated
+  pricing.** `CGPricingConfig(mode = :exact_no_anticipation, first_boarding = :after_last_walker, vehicle_capacity = 18)`
+  (passengers per vehicle; `nothing` = off; any other mode is rejected). Not the formulation's `vehicle_capacity` above (exact, in requests); setting that with M3 is an error. Give the requests DataFrame a `:pax` column
   (passengers per request; 1 per request without it). Pricing is unchanged M3; every LP column over capacity on some
   leg is also split (first-fit interval packing of its OD groups, groups never split, each piece drives the induced
   stop subsequence and is checked against the M3 timing rules); the integer recovery keeps only columns within
