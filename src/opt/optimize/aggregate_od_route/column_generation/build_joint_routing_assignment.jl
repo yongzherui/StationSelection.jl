@@ -224,6 +224,11 @@ function _build_joint_routing_assignment_model(
         m, data, formulation; relax_integrality = relax_integrality,
     )
     m[:joint_routing_assignment_l] = l
+    # exp/m3-capacity-split: capacity by column splitting (capacity_split.jl), M3 only
+    _joint_split_stash!(m, data, mapping)
+    if _joint_split_on(m) && !(pricing.mode === :exact_no_anticipation && pricing.first_boarding === :after_last_walker)
+        throw(ArgumentError("JOINT_SPLIT_CAPACITY needs pricing mode :exact_no_anticipation with first_boarding = :after_last_walker"))
+    end
     m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
     # The pricer is the SOLVER's choice (`CGSolver.pricing`, a `CGPricingConfig`), resolved
     # to a concrete symbol here and stashed so every later pricing call -- and
@@ -356,14 +361,18 @@ function _build_joint_routing_assignment_model(
     # patches the objective in place, none of which can target something that isn't built
     # yet.
     n_seeded = 0
+    seeded = Any[]
     for column in initial_columns
         _theta, action = add_joint_routing_assignment_column!(m, data, mapping, column)
-        action === :added && (n_seeded += 1)
+        action === :added && (n_seeded += 1; push!(seeded, column))
     end
+    # exp/m3-capacity-split: split the over-capacity seeds (LP master only; no-op when off)
+    n_split = _joint_split_pass!(m, data, mapping, seeded)
 
     extra_counts = Dict{String, Int}(
         "demand_groups" => sum(length(mapping.Omega_s[s]) for s in 1:n_scenarios(data); init = 0),
         "seed_columns_added" => n_seeded,
+        "split_columns_added" => n_split,
     )
     counts = ModelCounts(variable_counts, constraint_counts, extra_counts)
     return BuildResult(m, mapping, nothing, counts, Dict{String, Any}())
@@ -411,6 +420,14 @@ function _aggregate_od_route_integer_recovery_build(
         vehicle_capacity = m[:joint_routing_assignment_vehicle_capacity],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
+    # exp/m3-capacity-split: the MIP keeps only columns within capacity (or one group alone)
+    if _joint_split_on(m)
+        pax = m[:joint_split_group_pax]; cap = Int(m[:joint_split_capacity])
+        n0 = length(initial_columns)
+        initial_columns = [c for c in initial_columns if _joint_split_column_ok(c, pax, cap)]
+        _joint_split_count!("mip_columns_dropped", n0 - length(initial_columns))
+        _joint_split_count!("mip_columns_kept", length(initial_columns))
+    end
     return _build_joint_routing_assignment_model(
         data, mapping, l, formulation;
         relax_integrality = false,

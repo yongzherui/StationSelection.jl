@@ -238,6 +238,8 @@ include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certificat
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/partitions.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/loop.jl")
 include("label_setting/joint_routing_assignment/relaxed_cluster/utils/certification/two_tier/round.jl")
+# exp/m3-capacity-split (2026-11-20): heuristic vehicle capacity by splitting columns (M3 only)
+include("optimize/aggregate_od_route/column_generation/capacity_split.jl")
 include("optimize/aggregate_od_route/column_generation/build_joint_routing_assignment.jl")
 # AggregateODRouteJointRoutingAssignmentFormulation + DirectMIPSolver: same y/x_walk/theta
 # master CGSolver's build (above) solves, seeded with the exhaustive pool

@@ -121,9 +121,13 @@ function _aggregate_od_route_add_columns!(
 )::Int
     data = m[:joint_routing_assignment_data]
     added_count = 0
+    added = Any[]
     for column in columns
         _theta, action = add_joint_routing_assignment_column!(m, data, mapping, column)
-        action === :skipped || (added_count += 1)
+        action === :skipped || (added_count += 1; push!(added, column))
     end
+    # exp/m3-capacity-split: split over-capacity columns AFTER the batch (its ids were allocated up front);
+    # the count stays the priced columns', so the CG loop behaves as without the split
+    _joint_split_pass!(m, data, mapping, added)
     return added_count
 end
