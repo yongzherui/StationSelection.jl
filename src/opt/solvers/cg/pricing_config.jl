@@ -103,6 +103,15 @@ fit in the budget. 16 is the measured optimum at n=40; this default stays 15 onl
 nothing has re-measured the smaller instances. See
 `notes/2026-09-09_n40_certification_frontier_5_of_10.md`.
 
+`split_capacity` (default `nothing` = off) -- a HEURISTIC vehicle capacity in passengers for
+M3 (`mode = :exact_no_anticipation`, `first_boarding = :after_last_walker`; any other mode is
+rejected). Pricing stays M3's; over-capacity columns are split into capacity-feasible,
+M3-checked sub-routes and the integer recovery keeps only capacity-feasible columns. Passengers
+come from the requests' `:pax` column (1 per request without it). Unlike `vehicle_capacity`
+(formulation, exact, `:exact_capacitated`), it is a solver setting because it changes which
+columns the search produces and keeps, not the LP model. Counters in
+`metadata["cg_split_stats"]`. See `optimize/aggregate_od_route/column_generation/capacity_split.jl`.
+
 Two further switches used to live here -- a barren-support cache and active-cut cut
 management. **The switches are gone but the behaviours are not**: both run unconditionally
 in `:relaxed_cluster` now and cannot be disabled. They were dropped when the measured cut
@@ -122,6 +131,7 @@ struct CGPricingConfig
     relaxed_cluster_aligned_subset_max::Int
     first_boarding::Symbol
     first_stop_walk_limit::Float64
+    split_capacity::Union{Nothing, Int}
 
     function CGPricingConfig(;
             mode::Union{Nothing, Symbol}=nothing,
@@ -134,6 +144,7 @@ struct CGPricingConfig
             relaxed_cluster_aligned_subset_max::Int=15,
             first_boarding::Symbol=:start_now,
             first_stop_walk_limit::Real=Inf,
+            split_capacity::Union{Nothing, Integer}=nothing,
         )
         _cg_validate_pricing_mode(mode, "mode")
         # `first_boarding` is read only by `mode = :exact_no_anticipation`
@@ -158,6 +169,15 @@ struct CGPricingConfig
             isinf(first_stop_walk_limit) || throw(ArgumentError(
                 "first_stop_walk_limit is read only by first_boarding=:start_now_walk_limit, got " *
                 "$(first_stop_walk_limit) with first_boarding=$(repr(first_boarding))"))
+        end
+        # `split_capacity` (2026-11-20): the HEURISTIC M3 vehicle capacity, in passengers
+        # (`optimize/aggregate_od_route/column_generation/capacity_split.jl`). M3 only.
+        if !isnothing(split_capacity)
+            split_capacity >= 1 || throw(ArgumentError("split_capacity must be >= 1 (or nothing), got $(split_capacity)"))
+            (mode === :exact_no_anticipation && first_boarding === :after_last_walker) || throw(ArgumentError(
+                "split_capacity needs mode = :exact_no_anticipation with first_boarding = :after_last_walker " *
+                "(its timing check is M3's), got mode = $(repr(mode)), first_boarding = $(repr(first_boarding))"))
+            isnothing(warm_start_mode) || throw(ArgumentError("split_capacity is not supported with a warm_start_mode"))
         end
         _cg_validate_pricing_mode(warm_start_mode, "warm_start_mode")
         # `:relaxed_cluster` never reports its own exhaustion -- the only thing it can
@@ -249,6 +269,7 @@ struct CGPricingConfig
             relaxed_cluster_count, relaxed_cluster_max_count,
             relaxed_cluster_guide_routes, relaxed_cluster_macro_count,
             relaxed_cluster_aligned_subset_max, first_boarding, Float64(first_stop_walk_limit),
+            isnothing(split_capacity) ? nothing : Int(split_capacity),
         )
     end
 end

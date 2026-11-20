@@ -224,11 +224,8 @@ function _build_joint_routing_assignment_model(
         m, data, formulation; relax_integrality = relax_integrality,
     )
     m[:joint_routing_assignment_l] = l
-    # exp/m3-capacity-split: capacity by column splitting (capacity_split.jl), M3 only
-    _joint_split_stash!(m, data, mapping)
-    if _joint_split_on(m) && !(pricing.mode === :exact_no_anticipation && pricing.first_boarding === :after_last_walker)
-        throw(ArgumentError("JOINT_SPLIT_CAPACITY needs pricing mode :exact_no_anticipation with first_boarding = :after_last_walker"))
-    end
+    # heuristic M3 capacity by column splitting (capacity_split.jl); CGPricingConfig checks the mode
+    _joint_split_stash!(m, data, mapping, pricing.split_capacity)
     m[:joint_routing_assignment_compensated_dominance] = pricing.compensated_dominance
     # The pricer is the SOLVER's choice (`CGSolver.pricing`, a `CGPricingConfig`), resolved
     # to a concrete symbol here and stashed so every later pricing call -- and
@@ -366,7 +363,7 @@ function _build_joint_routing_assignment_model(
         _theta, action = add_joint_routing_assignment_column!(m, data, mapping, column)
         action === :added && (n_seeded += 1; push!(seeded, column))
     end
-    # exp/m3-capacity-split: split the over-capacity seeds (LP master only; no-op when off)
+    # heuristic M3 capacity: split the over-capacity seeds (LP master only; no-op when off)
     n_split = _joint_split_pass!(m, data, mapping, seeded)
 
     extra_counts = Dict{String, Int}(
@@ -420,20 +417,23 @@ function _aggregate_od_route_integer_recovery_build(
         vehicle_capacity = m[:joint_routing_assignment_vehicle_capacity],
     )
     initial_columns = collect(values(m[:joint_routing_assignment_columns]))
-    # exp/m3-capacity-split: the MIP keeps only columns within capacity (or one group alone)
+    # heuristic M3 capacity: the MIP keeps only columns within capacity (or one group alone)
     if _joint_split_on(m)
         pax = m[:joint_split_group_pax]; cap = Int(m[:joint_split_capacity])
         n0 = length(initial_columns)
         initial_columns = [c for c in initial_columns if _joint_split_column_ok(c, pax, cap)]
-        _joint_split_count!("mip_columns_dropped", n0 - length(initial_columns))
-        _joint_split_count!("mip_columns_kept", length(initial_columns))
+        _joint_split_count!(m, "mip_columns_dropped", n0 - length(initial_columns))
+        _joint_split_count!(m, "mip_columns_kept", length(initial_columns))
     end
-    return _build_joint_routing_assignment_model(
+    rebuilt = _build_joint_routing_assignment_model(
         data, mapping, l, formulation;
         relax_integrality = false,
         initial_columns = initial_columns,
         pricing = _joint_routing_assignment_rebuilt_pricing_config(m),
     )
+    # one counter Dict for the whole solve: metadata (read before recovery) holds this same object
+    _joint_split_on(m) && (rebuilt.model[:joint_split_stats] = m[:joint_split_stats])
+    return rebuilt
 end
 
 """
@@ -464,5 +464,6 @@ function _joint_routing_assignment_rebuilt_pricing_config(m::JuMP.Model)::CGPric
         relaxed_cluster_aligned_subset_max = Int(m[:joint_routing_assignment_aligned_subset_max]),
         first_boarding = m[:joint_routing_assignment_first_boarding]::Symbol,
         first_stop_walk_limit = m[:joint_routing_assignment_first_stop_walk_limit]::Float64,
+        split_capacity = get(m.obj_dict, :joint_split_capacity, nothing),
     )
 end

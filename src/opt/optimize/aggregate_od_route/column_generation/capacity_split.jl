@@ -1,9 +1,12 @@
+export joint_split_column_max_load, joint_split_group_pax
+
 """
 HEURISTIC vehicle capacity for Joint LAR column generation under M3 (`:exact_no_anticipation`,
 `first_boarding = :after_last_walker`). Not exact capacitated pricing (that is `:exact_capacitated`). Added 2026-11-20
 (study experiments/2026-11-17_g2_time_blind); usage in the package CLAUDE.md.
 
-Off unless `JOINT_SPLIT_CAPACITY[] > 0` (seats per vehicle) when the master is built. Then:
+Off unless `CGPricingConfig(split_capacity = C)` (passengers per vehicle; `nothing` = off). `CGPricingConfig`
+accepts it only with `mode = :exact_no_anticipation, first_boarding = :after_last_walker`. Then:
 
 1. **Passengers, not orders.** A demand group's load is the sum of its requests' `:pax` column (1 per
    request when the column is absent). Q (`demand_weighting = :count`) still counts orders in the
@@ -29,20 +32,29 @@ Off unless `JOINT_SPLIT_CAPACITY[] > 0` (seats per vehicle) when the master is b
    pricing and convergence) is M3's uncapacitated master plus the split columns; capacity-feasible
    routes the split does not produce are never considered.
 
-Counters per process in `JOINT_SPLIT_STATS`.
+Counters (one Dict per solve, on the model as `:joint_split_stats`, shared with the integer-recovery rebuild) are
+reported as `metadata["cg_split_stats"]`:
+  - `checked_seed`, `checked_priced`: columns entering the LP master; `check_fail_seed`, `check_fail_priced`: of
+    those, how many fail the M3 check on their own full route (a self-test: should be 0; nonzero = the check and the
+    pricer disagree);
+  - `over_capacity_columns`, `split_ok`, `split_failed`: columns over capacity and whether a packing passed;
+    `pieces` (added), `pieces_duplicate` (already in the pool at no greater drive time);
+  - `mip_columns_kept`, `mip_columns_dropped`: the integer recovery's pool after the capacity filter.
+
+Improving the heuristic: `joint_split_column` is the only place that decides the pieces (packing orders, what a
+vehicle may drive); everything else is wiring.
 """
-const JOINT_SPLIT_CAPACITY = Ref(0)
-const JOINT_SPLIT_STATS = Dict{String, Int}()
-const _JOINT_SPLIT_LOCK = ReentrantLock()
+_joint_split_count!(m::JuMP.Model, key::String, n::Int=1) =
+    (d = m[:joint_split_stats]; d[key] = get(d, key, 0) + n; nothing)
 
-_joint_split_count!(key, n=1) = lock(_JOINT_SPLIT_LOCK) do
-    JOINT_SPLIT_STATS[key] = get(JOINT_SPLIT_STATS, key, 0) + n
-end
+_joint_split_on(m::JuMP.Model) = !isnothing(get(m.obj_dict, :joint_split_capacity, nothing))
 
-_joint_split_on(m::JuMP.Model) = Int(get(m.obj_dict, :joint_split_capacity, 0)) > 0
+"""
+    joint_split_group_pax(data, mapping) -> Dict{Int, Vector{Int}}
 
-"Passengers per demand group, parallel to `mapping.Omega_s[s]` (sum of `:pax`, 1 per request without it)."
-function _joint_split_group_pax(data::StationSelectionData, mapping::AggregateODRouteMap)
+Passengers per demand group, parallel to `mapping.Omega_s[s]` (sum of the requests' `:pax`, 1 per request without it).
+"""
+function joint_split_group_pax(data::StationSelectionData, mapping::AggregateODRouteMap)
     out = Dict{Int, Vector{Int}}()
     for s in 1:n_scenarios(data)
         req = data.scenarios[s].requests
@@ -57,15 +69,21 @@ function _joint_split_group_pax(data::StationSelectionData, mapping::AggregateOD
     return out
 end
 
-"Stash the capacity and the passengers per group on the master (called by every joint build)."
-function _joint_split_stash!(m::JuMP.Model, data::StationSelectionData, mapping::AggregateODRouteMap)
-    cap = JOINT_SPLIT_CAPACITY[]
+"Stash the capacity (`nothing` = off), passengers per group and the counters on the master (every joint CG build)."
+function _joint_split_stash!(m::JuMP.Model, data::StationSelectionData, mapping::AggregateODRouteMap,
+                             cap::Union{Nothing, Int})
     m[:joint_split_capacity] = cap
-    m[:joint_split_group_pax] = cap > 0 ? _joint_split_group_pax(data, mapping) : nothing
+    m[:joint_split_group_pax] = isnothing(cap) ? nothing : joint_split_group_pax(data, mapping)
+    m[:joint_split_stats] = Dict{String, Int}()
     return nothing
 end
 
-"Most passengers on board on any leg of `column` (from its `assignment_positions`)."
+"""
+    joint_split_column_max_load(column, pax) -> Int
+
+Most passengers on board on any leg of `column` (from its `assignment_positions`). `pax[s][p]` = passengers of
+demand group `p` of scenario `s` (`joint_split_group_pax(data, mapping)`).
+"""
 function joint_split_column_max_load(column, pax::Dict{Int, Vector{Int}})::Int
     pos = column.metadata["assignment_positions"]
     s = Int(column.metadata["scenario"])
@@ -198,16 +216,16 @@ function _joint_split_pass!(m::JuMP.Model, data::StationSelectionData, mapping::
     for column in columns
         # self-test of the M3 check on every column entering the master (seeds and priced)
         kind = haskey(column.metadata, "seed") ? "seed" : "priced"
-        _joint_split_count!("checked_$kind")
-        joint_split_check_column(m, data, mapping, column) || _joint_split_count!("check_fail_$kind")
+        _joint_split_count!(m, "checked_$kind")
+        joint_split_check_column(m, data, mapping, column) || _joint_split_count!(m, "check_fail_$kind")
         length(column.assignments) > 1 || continue
         joint_split_column_max_load(column, pax) > cap || continue
-        _joint_split_count!("over_capacity_columns")
+        _joint_split_count!(m, "over_capacity_columns")
         pieces = joint_split_column(m, data, mapping, column)
         if isempty(pieces)
-            _joint_split_count!("split_failed"); continue
+            _joint_split_count!(m, "split_failed"); continue
         end
-        _joint_split_count!("split_ok"); _joint_split_count!("pieces", length(pieces))
+        _joint_split_count!(m, "split_ok"); _joint_split_count!(m, "pieces", length(pieces))
         s = Int(column.metadata["scenario"])
         for (stops, assignments, positions, t0, tau) in pieces
             id = maximum(keys(m[:joint_routing_assignment_columns]); init = 0) + 1
@@ -215,7 +233,7 @@ function _joint_split_pass!(m::JuMP.Model, data::StationSelectionData, mapping::
                 metadata = Dict{String, Any}("scenario" => s, "route" => Tuple(stops), "assignment_positions" => positions,
                                              "start_time" => t0, "split_from" => column.id))
             _theta, action = add_joint_routing_assignment_column!(m, data, mapping, piece)
-            action === :added ? (added += 1) : _joint_split_count!("pieces_duplicate")
+            action === :added ? (added += 1) : _joint_split_count!(m, "pieces_duplicate")
         end
     end
     return added
